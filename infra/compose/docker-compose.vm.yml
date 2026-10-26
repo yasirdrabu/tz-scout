@@ -1,5 +1,6 @@
 # Single VM stack. Secrets and settings come from /opt/scout/.env (see .env.example).
 # Run with --env-file so the passwords below resolve:
+# Set COMPOSE_PROFILES=tunnel (or public-ip) in /opt/scout/.env so a plain "up -d" starts the edge service.
 # Passwords must be URL-safe (they sit inside database URLs): generate with "openssl rand -hex 32".
 #   docker compose --env-file /opt/scout/.env -f docker-compose.vm.yml --profile tunnel up -d     (Cloudflare Tunnel)
 #   or: docker compose --env-file /opt/scout/.env -f docker-compose.vm.yml --profile public-ip up -d  (Caddy on 443)
@@ -117,8 +118,7 @@ services:
   # Run by hand: docker compose --env-file /opt/scout/.env -f docker-compose.vm.yml run --rm backup /backup.sh
   # Prove a restore: ... run --rm backup /restore-check.sh
   backup:
-    build:
-      context: ../backup
+    image: ghcr.io/yasirdrabu/tz-scout-backup:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       PGHOST: postgres

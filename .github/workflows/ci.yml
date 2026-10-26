@@ -6,7 +6,7 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/scout-rebuild' }}
 
 permissions:
   contents: read
@@ -79,6 +79,7 @@ jobs:
       - run: npm run build
 
   images:
+    needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -212,7 +213,6 @@ jobs:
       DATABASE_URL: postgres://scout_app:scout_app@localhost:5432/scout
       DATABASE_ADMIN_URL: postgres://scout_admin:scout_admin@localhost:5432/scout
       DATABASE_SUPERUSER_URL: postgres://postgres:postgres@localhost:5432/scout
-      NATS_URL: nats://localhost:4222
       SCOUT_FORCE_MOCK: "true"
     steps:
       - uses: actions/checkout@v4
@@ -229,15 +229,6 @@ jobs:
           sudo apt-get install -y postgresql-client-17
           /usr/lib/postgresql/17/bin/pg_dump --version
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
-      - name: Start NATS with JetStream
-        run: |
-          docker run -d --name nats -p 4222:4222 -p 8222:8222 nats:2.11-alpine -js -m 8222
-          for i in $(seq 1 30); do
-            curl -fsS http://localhost:8222/healthz >/dev/null && exit 0
-            sleep 1
-          done
-          docker logs nats
-          exit 1
       - run: npm ci
       - run: npx tsx src/entry/cli.ts migrate
       - run: npx tsx src/entry/cli.ts seed
