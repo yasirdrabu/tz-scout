@@ -41,30 +41,47 @@ export const boundariesConfig = {
 
 // Provider SDKs may be imported only by live adapters (INT-E5-S2-AC1).
 export const SDK_PACKAGES = ["@anthropic-ai/sdk", "@hubspot/api-client"];
-export const sdkImportConfigs = [
-  {
-    files: ["src/**/*.{ts,tsx}"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          paths: SDK_PACKAGES.map((name) => ({
-            name,
-            message: "Provider SDKs may only be imported from src/modules/*/adapters/*/live*. Call providers through gateway.call.",
-          })),
-          patterns: SDK_PACKAGES.map((name) => ({
-            group: [name + "/*"],
-            message: "Provider SDKs may only be imported from src/modules/*/adapters/*/live*.",
-          })),
-        },
-      ],
-    },
-  },
-  {
-    files: ["src/modules/*/adapters/*/live*", "src/modules/*/adapters/*/live*/**"],
-    rules: { "no-restricted-imports": "off" },
-  },
+
+// adminDb bypasses row level security. Only these files may import it; everything else goes
+// through withTenant. Tests (outside src/) may use it freely.
+export const ADMIN_DB_ALLOWED = [
+  "src/platform/**",
+  "src/modules/tenancy/services/**",
+  "src/modules/tenancy/auth.ts",
+  "src/modules/integrations/jobs.ts",
+  "src/entry/**",
 ];
+const LIVE_ADAPTERS = ["src/modules/*/adapters/*/live*", "src/modules/*/adapters/*/live*/**"];
+
+const sdkRestriction = {
+  paths: SDK_PACKAGES.map((name) => ({
+    name,
+    message: "Provider SDKs may only be imported from src/modules/*/adapters/*/live*. Call providers through gateway.call.",
+  })),
+  patterns: SDK_PACKAGES.map((name) => ({
+    group: [name + "/*"],
+    message: "Provider SDKs may only be imported from src/modules/*/adapters/*/live*.",
+  })),
+};
+const ADMIN_DB_MESSAGE =
+  "adminDb bypasses row level security. Use withTenant, or add this file to ADMIN_DB_ALLOWED in eslint.config.mjs with a reason.";
+const adminDbRestriction = {
+  paths: [{ name: "@/platform/db/client", importNames: ["adminDb"], message: ADMIN_DB_MESSAGE }],
+  patterns: [{ group: ["**/platform/db/client", "!@/platform/db/client"], importNames: ["adminDb"], message: ADMIN_DB_MESSAGE }],
+};
+const restrict = (...parts) => [
+  "error",
+  { paths: parts.flatMap((r) => r.paths), patterns: parts.flatMap((r) => r.patterns) },
+];
+
+// One no-restricted-imports rule per file set: in flat config a later setting replaces an earlier one.
+export const restrictedImportConfigs = [
+  { files: ["src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": restrict(sdkRestriction, adminDbRestriction) } },
+  { files: ADMIN_DB_ALLOWED, rules: { "no-restricted-imports": restrict(sdkRestriction) } },
+  { files: LIVE_ADAPTERS, rules: { "no-restricted-imports": restrict(adminDbRestriction) } },
+];
+/** Kept for the boundaries test. */
+export const sdkImportConfigs = restrictedImportConfigs;
 
 const config = [
   {
@@ -88,7 +105,7 @@ const config = [
     },
   },
   boundariesConfig,
-  ...sdkImportConfigs,
+  ...restrictedImportConfigs,
 ];
 
 export default config;
