@@ -25,6 +25,12 @@ decimals; pure math modules with unit tests.
 
 ## Repo layout
 
+> Layout decision (R0): one npm package. The Next.js app lives in `src/app` and the other process roles
+> in `src/entry` (`cli.ts`, `worker.ts`, `scheduler.ts`, `relay.ts`), instead of `apps/web`,
+> `apps/worker` and `apps/scheduler`. Next.js does not compile code outside its project folder without
+> experimental flags, and one package keeps one dependency tree. `packages/mcp-local` arrives in R1.
+> The tree below shows the original intent; read `apps/*` as `src/app` and `src/entry`.
+
 ```
 apps/
   web/                     Next.js app: pages, /v1 route handlers, /mcp, auth routes
