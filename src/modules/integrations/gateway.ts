@@ -248,6 +248,9 @@ export async function runCall<T>(
         errorMessage,
       });
       if (outcome === 'rate_limited') return;
+      // Only calls that reached the real service say anything about the connection's health:
+      // a sample-data success must not mark a never-tested credential as connected.
+      if (!useLive) return;
       // Skip the status change when the caller's open transaction holds the row: it would wait for us.
       const locked = await tx.execute(
         sql`select 1 from integrations.connection where tenant_id = ${ctx.tenantId} and id = ${conn.id} for update skip locked`,

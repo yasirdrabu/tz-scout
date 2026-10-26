@@ -80,34 +80,45 @@ describe('gateway.call', () => {
     expect((await connOf(t.tenantId)).status).toBe('not_set_up');
   });
 
-  it('three consecutive errors set failing; a later success clears it', async () => {
+  it('three consecutive live errors set failing; a later live success clears it', async () => {
     const t = await freshTenant();
+    await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'good-token-50' }));
+    await t.run((ctx) => testConnection(ctx, 'demo'));
+    await t.run((ctx) => setMode(ctx, 'demo', 'live'));
     const boom = (): Promise<never> => Promise.reject(Object.assign(new Error('Upstream broke'), { status: 502 }));
     for (let i = 0; i < 3; i++) {
       await expect(t.run((ctx) => gateway.call(ctx, 'demo', 'demo.thing.write', boom))).rejects.toThrow(
         'Upstream broke',
       );
-      expect((await connOf(t.tenantId)).status).toBe(i < 2 ? 'not_set_up' : 'failing');
+      expect((await connOf(t.tenantId)).status).toBe(i < 2 ? 'connected' : 'failing');
     }
     const c = await connOf(t.tenantId);
     expect(c.consecutiveFailures).toBe(3);
     expect(c.lastError).toBe('Upstream broke');
-    const rows = await logs(t.tenantId);
+    const rows = (await logs(t.tenantId)).filter((r) => r.operation === 'demo.thing.write');
     expect(rows).toHaveLength(3);
-    expect(
-      rows.every((r) => r.outcome === 'error' && r.operation === 'demo.thing.write' && r.statusCode === 502),
-    ).toBe(true);
+    expect(rows.every((r) => r.outcome === 'error' && r.statusCode === 502)).toBe(true);
     await t.run((ctx) => gateway.call(ctx, 'demo', 'demo.thing.read', async () => 1));
     const after = await connOf(t.tenantId);
-    expect(after.status).toBe('not_set_up'); // a success without a saved credential is not "connected"
+    expect(after.status).toBe('connected');
     expect(after.consecutiveFailures).toBe(0);
+    expect(after.lastError).toBeNull();
   });
 
-  it('a success with a saved credential sets connected', async () => {
+  it('calls on sample data never change the connection status or failure count', async () => {
     const t = await freshTenant();
-    await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'good-token-100' }));
+    await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'never-tested-100' }));
+    const before = await connOf(t.tenantId);
+    expect(before.status).not.toBe('connected');
     await t.run((ctx) => gateway.call(ctx, 'demo', 'demo.thing.read', async () => 1));
-    expect((await connOf(t.tenantId)).status).toBe('connected');
+    expect((await connOf(t.tenantId)).status).toBe(before.status); // a sample-data success is not "connected"
+    const boom = (): Promise<never> => Promise.reject(new Error('Mock broke'));
+    for (let i = 0; i < 3; i++) {
+      await expect(t.run((ctx) => gateway.call(ctx, 'demo', 'demo.thing.write', boom))).rejects.toThrow('Mock broke');
+    }
+    const after = await connOf(t.tenantId);
+    expect(after).toMatchObject({ status: before.status, consecutiveFailures: 0, lastError: before.lastError });
+    expect((await logs(t.tenantId)).map((r) => r.outcome)).toEqual(['ok', 'error', 'error', 'error']);
   });
 
   it('sees a credential saved earlier in the same open transaction', async () => {
