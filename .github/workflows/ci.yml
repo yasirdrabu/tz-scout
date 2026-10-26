@@ -1,0 +1,268 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NATS_SERVER_VERSION: v2.11.16
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_SUPERUSER_URL: postgres://postgres:postgres@localhost:5432/postgres
+      NATS_URL: nats://localhost:4222
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # Service containers cannot take a command, so JetStream NATS is started here.
+      - name: Start NATS with JetStream
+        run: |
+          docker run -d --name nats -p 4222:4222 -p 8222:8222 nats:2.11-alpine -js -m 8222
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8222/healthz >/dev/null && exit 0
+            sleep 1
+          done
+          docker logs nats
+          exit 1
+      # One relay test starts its own nats-server from .tools/nats-server/ (same layout as scripts/local-services.mjs).
+      - name: Download nats-server binary for tests
+        run: |
+          base="nats-server-${NATS_SERVER_VERSION}-linux-amd64"
+          mkdir -p .tools/nats-server
+          curl -fsSL -o "/tmp/${base}.tar.gz" "https://github.com/nats-io/nats-server/releases/download/${NATS_SERVER_VERSION}/${base}.tar.gz"
+          tar -xzf "/tmp/${base}.tar.gz" -C /tmp
+          cp "/tmp/${base}/nats-server" .tools/nats-server/nats-server
+          chmod +x .tools/nats-server/nats-server
+          .tools/nats-server/nats-server --version
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:unit
+      - run: npm run test:int
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+      - run: npm run build
+
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/scout-rebuild' || github.ref == 'refs/heads/main') }}
+      APP_IMAGE: ghcr.io/yasirdrabu/tz-scout
+      BACKUP_IMAGE: ghcr.io/yasirdrabu/tz-scout-backup
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: scout
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/Dockerfile
+          load: true
+          tags: scout:ci
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,scope=app,mode=max
+      - name: Build backup image
+        uses: docker/build-push-action@v6
+        with:
+          context: infra/backup
+          file: infra/backup/Dockerfile
+          load: true
+          tags: scout-backup:ci
+          cache-from: type=gha,scope=backup
+          cache-to: type=gha,scope=backup,mode=max
+      - name: Image size
+        run: |
+          bytes="$(docker image inspect scout:ci --format '{{.Size}}')"
+          backup_bytes="$(docker image inspect scout-backup:ci --format '{{.Size}}')"
+          mb=$((bytes / 1024 / 1024))
+          {
+            echo "### Image size"
+            echo ""
+            echo "App image: ${mb} MB"
+            echo "Backup image: $((backup_bytes / 1024 / 1024)) MB"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$bytes" -gt 1073741824 ]; then
+            echo "App image is larger than 1 GB (${mb} MB)" >&2
+            exit 1
+          fi
+      - name: Start NATS with JetStream
+        run: |
+          docker run -d --name nats -p 4222:4222 -p 8222:8222 nats:2.11-alpine -js -m 8222
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8222/healthz >/dev/null && exit 0
+            sleep 1
+          done
+          docker logs nats
+          exit 1
+      - name: Smoke test the app image
+        env:
+          SMOKE_ENV: >-
+            -e NODE_ENV=development -e SCOUT_ENV=development
+            -e DATABASE_URL=postgres://scout_app:scout_app@localhost:5432/scout
+            -e DATABASE_ADMIN_URL=postgres://scout_admin:scout_admin@localhost:5432/scout
+            -e DATABASE_SUPERUSER_URL=postgres://postgres:postgres@localhost:5432/scout
+            -e NATS_URL=nats://localhost:4222
+            -e AUTH_DEV_SIGNIN=true -e SCOUT_FORCE_MOCK=true
+            -e APP_PUBLIC_URL=http://localhost:4240
+        run: |
+          set -euo pipefail
+          docker run --rm --network host $SMOKE_ENV scout:ci migrate
+          docker run --rm --network host $SMOKE_ENV scout:ci seed
+          docker run -d --name web --network host $SMOKE_ENV scout:ci web
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:4240/readyz; then
+              echo
+              echo "readyz ok"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs web
+          echo "readyz did not become ok within 120 seconds" >&2
+          exit 1
+      - name: Log in to ghcr.io
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push images
+        if: env.PUSH == 'true'
+        run: |
+          docker tag scout:ci "${APP_IMAGE}:${GITHUB_SHA}"
+          docker tag scout-backup:ci "${BACKUP_IMAGE}:${GITHUB_SHA}"
+          docker push "${APP_IMAGE}:${GITHUB_SHA}"
+          docker push "${BACKUP_IMAGE}:${GITHUB_SHA}"
+          echo "Pushed ${APP_IMAGE}:${GITHUB_SHA} and ${BACKUP_IMAGE}:${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: scout
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NODE_ENV: development
+      SCOUT_ENV: development
+      DATABASE_URL: postgres://scout_app:scout_app@localhost:5432/scout
+      DATABASE_ADMIN_URL: postgres://scout_admin:scout_admin@localhost:5432/scout
+      DATABASE_SUPERUSER_URL: postgres://postgres:postgres@localhost:5432/scout
+      NATS_URL: nats://localhost:4222
+      SCOUT_FORCE_MOCK: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install PostgreSQL 17 client tools
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - name: Start NATS with JetStream
+        run: |
+          docker run -d --name nats -p 4222:4222 -p 8222:8222 nats:2.11-alpine -js -m 8222
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8222/healthz >/dev/null && exit 0
+            sleep 1
+          done
+          docker logs nats
+          exit 1
+      - run: npm ci
+      - run: npx tsx src/entry/cli.ts migrate
+      - run: npx tsx src/entry/cli.ts seed
+      - name: Backup and restore check
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: scout
+        run: bash infra/backup/ci-check.sh
+
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate laptop compose file
+        run: docker compose -f infra/compose/docker-compose.yml config --quiet
+      - name: Validate VM compose file for both profiles
+        run: |
+          envfile="$(mktemp)"
+          printf 'POSTGRES_PASSWORD=%s\nSCOUT_APP_DB_PASSWORD=%s\nSCOUT_ADMIN_DB_PASSWORD=%s\nIMAGE_TAG=ci\n' \
+            "$(openssl rand -hex 16)" "$(openssl rand -hex 16)" "$(openssl rand -hex 16)" > "$envfile"
+          for profile in tunnel public-ip; do
+            docker compose -f infra/compose/docker-compose.vm.yml --env-file "$envfile" --profile "$profile" config --quiet
+          done
+          rm -f "$envfile"
