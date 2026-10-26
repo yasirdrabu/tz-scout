@@ -4,6 +4,13 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Static checks first: syntax, and a guard against a call lost its argument.
+for f in backup.sh restore-check.sh ci-check.sh; do bash -n "$here/$f"; done
+if grep -n "to_regclass()" "$here/restore-check.sh"; then
+  echo "ci-check: restore-check.sh has to_regclass() with no argument" >&2
+  exit 1
+fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 export BACKUP_DIR="$work/backups"

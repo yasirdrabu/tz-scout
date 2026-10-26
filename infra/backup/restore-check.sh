@@ -47,16 +47,18 @@ tables="$(live -F '|' -c "
   where c.relkind in ('r','p') and n.nspname in ('platform','tenancy','integrations','ai')
   order by 2")"
 
-toc="$(pg_restore -l "$dump")"
+# Strip double quotes so mixed-case names compare as plain text.
+toc="$(pg_restore -l "$dump" | tr -d '"')"
 count=0
 skipped=0
 while IFS='|' read -r quoted name; do
   [ -n "$name" ] || continue
-  present="$(psql -X -v ON_ERROR_STOP=1 -At -d "$SCRATCH" -c "select to_regclass() is not null")"
+  # psql does not expand variables inside -c, so the query goes in on stdin.
+  present="$(psql -X -v ON_ERROR_STOP=1 -At -d "$SCRATCH" -v rel="$quoted" <<< "select to_regclass(:'rel') is not null")"
   if [ "$present" != "t" ]; then
     schema="${name%%.*}"
     rel="${name#*.}"
-    if grep -Eq "^[0-9]+; [0-9]+ [0-9]+ TABLE $schema $rel " <<< "$toc"; then
+    if grep -Fq " TABLE $schema $rel " <<< "$toc"; then
       echo "Restore check failed: $name is in the dump but missing from the restore" >&2
       exit 1
     fi
