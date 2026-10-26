@@ -17,6 +17,18 @@ boundaries) and tests pass, and `docs/CHANGELOG.md` has a note.
 Exit: a tenant, users and an API key exist; an event goes web → outbox → NATS → worker on a laptop and
 on the staging VM; dead jobs show in Admin; restoring a nightly backup works.
 
+R0 exit status (updated 2026-10-26):
+
+- [x] Tenant, users and an API key exist on a laptop; `/v1/me` returns the tenant (2026-10-26).
+- [x] Test event round trip web → outbox → NATS → worker on the laptop, about 140 ms (2026-10-26).
+- [x] A forced dead job shows in the dead jobs list (`listDeadJobs`, the data behind Admin, System) on the laptop (2026-10-26).
+- [x] Typecheck, lint, unit and integration tests, and end to end tests pass (2026-10-26).
+- [ ] Test event round trip on the staging VM. Pending: hosting is undecided.
+- [ ] Backup, then restore check, on staging. Scripts are written; they run for the first time in CI.
+- [ ] CI first run (needs a push).
+- [ ] Microsoft sign-in on staging as a member and as a non-member. Pending the staging VM.
+- [ ] OpenTofu for the VM (skipped until the hosting decision).
+
 ## R1 First slice (agent to CRM)
 
 | Module | Scope |

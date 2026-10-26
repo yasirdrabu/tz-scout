@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-10-26: Taazaa Scout R0 foundation
+
+The base the rest of Scout builds on. Everything runs on a laptop on mock services; nothing is deployed yet.
+
+**What was built**
+- **Platform plumbing**: events saved with the change that caused them, a relay that sends them to NATS, a worker with retries and dead jobs you can retry or discard, a scheduler, an audit log, and health pages.
+- **Tenancy and sign-in**: tenants, people, memberships, and roles with permissions and data limits. Microsoft sign-in, plus a developer sign-in for laptops only.
+- **API keys and `/v1/me`**: keys with scopes and data limits, shown once and revocable. `/v1/me` returns the tenant and what the key may do.
+- **Integrations core on mocks**: connection records, encrypted credentials, a test button and a call log. Test keys always use the mock services.
+- **AI runner with rules fallback**: prompts in versioned files, outputs checked, every run logged. If the model is off or fails, rules answer instead.
+- **Admin screens**: workspaces, system (test event, dead jobs, schedules), integrations, AI runs, audit and members.
+- **The `scout` command**: migrate, seed, worker, relay, scheduler, all-background and web.
+- **Container image and compose** for a laptop and for one VM, **nightly backups** with a restore check, and **CI** workflows (build, test, staging deploy).
+
+**Security hardening found in review**
+- Microsoft sign-in for other organisations is locked to an allowed list of tenant ids, and platform admins match only from the home tenant, so a stranger cannot claim someone's email.
+- API keys cannot be given more than the person creating them has, key lookup no longer reveals by timing whether a key prefix exists, and cookie-based writes need the same origin.
+- Credentials are bound to their connection when sealed, and secrets are scrubbed from error text and logs.
+- Test keys can never reach a live service.
+
+**Checked on the laptop (2026-10-26)**: seed and `/v1/me` return the Taazaa tenant; a test event completes the round trip in about 140 ms; a forced failing job lands in dead jobs; typecheck and lint are clean, and 80 unit, 199 integration and 9 end to end tests pass.
+
+**Still pending**
+- Hosting decision, then the OpenTofu setup for the VM (skipped for now).
+- First run of the CI workflows (needs a push), including the backup and restore job.
+- Staging steps: backup and restore on staging, Microsoft sign-in with a member and a non-member, the test event on staging.
+- Building and starting the container image and compose stacks on a machine with Docker (not possible on this laptop).
+
 ## 2026-10-23: Drag-and-drop import, ABM research sheets, practice buckets
 
 - **Drag and drop** on Buyers, Import: drop one or many files. Research sheets (one company per row with a dated signal, decision-makers, pilot, hook and the researcher's score) are recognised by their columns and imported straight away; plain lead lists go straight in when they have a website or work-email column, otherwise you're asked to confirm the columns. Parser in `src/lib/research.ts` reads all four research layouts, including "master" files that stack two.
