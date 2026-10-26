@@ -39,6 +39,7 @@ export const user = tenancy.table(
     lastTenantId: text('last_tenant_id'),
     lastSignInAt: timestamp('last_sign_in_at', { withTimezone: true }),
     entraObjectId: text('entra_object_id'),
+    entraTenantId: text('entra_tenant_id'), // Entra tenant (tid) of the pinned Microsoft identity
   },
   (t) => [uniqueIndex('user_entra_object_id_uq').on(t.entraObjectId)],
 );

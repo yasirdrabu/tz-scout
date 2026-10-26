@@ -14,7 +14,11 @@ export type Config = {
   authSecret: string;
   authDevSignin: boolean;
   forceMock: boolean;
-  azureAd?: { tenantId: string; clientId: string; clientSecret: string };
+  /**
+   * Microsoft Entra app. `tenantId` is Scout's home tenant (or common/organizations); people may be
+   * matched by email on first sign-in only when their token's tenant is in `allowedTenantIds`.
+   */
+  azureAd?: { tenantId: string; clientId: string; clientSecret: string; allowedTenantIds: string[] };
   publicUrl: string;
 };
 
@@ -38,6 +42,7 @@ const schema = z.object({
   AZURE_AD_TENANT_ID: z.string().min(1).optional(),
   AZURE_AD_CLIENT_ID: z.string().min(1).optional(),
   AZURE_AD_CLIENT_SECRET: z.string().min(1).optional(),
+  AZURE_AD_ALLOWED_TENANT_IDS: z.string().optional(),
   APP_PUBLIC_URL: z.string().min(1).optional(),
 });
 
@@ -49,6 +54,20 @@ function parseKey(name: string, value: string | undefined): Buffer | undefined {
     throw new Error(`${name} must be 32 bytes, base64`);
   }
   return buf;
+}
+
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Comma list of Entra tenant GUIDs; defaults to the home tenant when that is a GUID. */
+function allowedTenants(list: string | undefined, home: string): string[] {
+  if (list === undefined) return GUID.test(home.toLowerCase()) ? [home.toLowerCase()] : [];
+  const ids = list
+    .split(',')
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean);
+  const bad = ids.find((v) => !GUID.test(v));
+  if (bad) throw new Error('AZURE_AD_ALLOWED_TENANT_IDS must be a comma list of Entra tenant ids (GUIDs)');
+  return ids;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -75,7 +94,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
   const azureAd =
     e.AZURE_AD_TENANT_ID && e.AZURE_AD_CLIENT_ID && e.AZURE_AD_CLIENT_SECRET
-      ? { tenantId: e.AZURE_AD_TENANT_ID, clientId: e.AZURE_AD_CLIENT_ID, clientSecret: e.AZURE_AD_CLIENT_SECRET }
+      ? {
+          tenantId: e.AZURE_AD_TENANT_ID,
+          clientId: e.AZURE_AD_CLIENT_ID,
+          clientSecret: e.AZURE_AD_CLIENT_SECRET,
+          allowedTenantIds: allowedTenants(e.AZURE_AD_ALLOWED_TENANT_IDS, e.AZURE_AD_TENANT_ID),
+        }
       : undefined;
 
   return {

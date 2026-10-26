@@ -14,7 +14,7 @@ export { ROLES, type Role, type Member, type DataLimit } from './contracts/membe
 export { PERMISSIONS, ROLE_PERMISSIONS, isPermission, permissionsFor, type Permission } from './domain/permissions';
 export { DEFAULT_DATA_LIMIT, DataLimitSchema, defaultDataLimit, describeLimit } from './domain/data-limit';
 export { can, describeAccess, requirePermission, type Principal } from './contracts/principal';
-export { auth, type Auth } from './auth';
+export { AUTH_PATHS, SIGN_IN_FAILED, auth, authHandler, type Auth } from './auth';
 export {
   ACCOUNT_TURNED_OFF,
   NOT_SET_UP,
@@ -22,6 +22,7 @@ export {
   landingPathFor,
   signInEmailFor,
   type SignInIdentity,
+  type EntraPolicy,
   type SignInResult,
 } from './services/sign-in';
 export { SESSION_IDLE_MS, sessionPrincipal, setPrincipalCacheTtl } from './services/principal';

@@ -1,0 +1,1 @@
+ALTER TABLE "tenancy"."user" ADD COLUMN "entra_tenant_id" text;

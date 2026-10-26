@@ -40,7 +40,18 @@ describe('loadConfig', () => {
     expect(loadConfig({ AZURE_AD_TENANT_ID: 't', AZURE_AD_CLIENT_ID: 'c' }).azureAd).toBeUndefined();
     expect(
       loadConfig({ AZURE_AD_TENANT_ID: 't', AZURE_AD_CLIENT_ID: 'c', AZURE_AD_CLIENT_SECRET: 's' }).azureAd,
-    ).toEqual({ tenantId: 't', clientId: 'c', clientSecret: 's' });
+    ).toEqual({ tenantId: 't', clientId: 'c', clientSecret: 's', allowedTenantIds: [] });
+  });
+  it('allows email matching from the home tenant by default, or from AZURE_AD_ALLOWED_TENANT_IDS', () => {
+    const home = '11111111-2222-3333-4444-555555555555';
+    const other = 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE';
+    const base = { AZURE_AD_TENANT_ID: home, AZURE_AD_CLIENT_ID: 'c', AZURE_AD_CLIENT_SECRET: 's' };
+    expect(loadConfig(base).azureAd!.allowedTenantIds).toEqual([home]);
+    expect(loadConfig({ ...base, AZURE_AD_ALLOWED_TENANT_IDS: `${home}, ${other}` }).azureAd!.allowedTenantIds).toEqual([
+      home,
+      other.toLowerCase(),
+    ]);
+    expect(() => loadConfig({ ...base, AZURE_AD_ALLOWED_TENANT_IDS: 'common' })).toThrow(/GUIDs/);
   });
   it('accepts production config', () => {
     expect(loadConfig(prod).nodeEnv).toBe('production');

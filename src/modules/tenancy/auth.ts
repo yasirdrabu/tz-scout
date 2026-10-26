@@ -7,7 +7,17 @@ import { config, type Config } from '@/platform/config';
 import { adminDb } from '@/platform/db/client';
 import { newId, type IdPrefix } from '@/platform/ids';
 import { account, session, user, verification } from './db/schema';
-import { NOT_SET_UP, checkSignIn, completeSignIn, entraIdentityFits, signInEmailFor } from './services/sign-in';
+import { log } from '@/platform/log';
+import {
+  NOT_SET_UP,
+  checkSignIn,
+  completeSignIn,
+  entraIdentityFits,
+  pinEntraIdentity,
+  signInEmailFor,
+  tenantOfIdToken,
+  type EntraPolicy,
+} from './services/sign-in';
 
 /** Most a session lives, from sign-in. */
 export const SESSION_MAX_SECONDS = 7 * 24 * 3600;
@@ -15,6 +25,41 @@ export const SESSION_MAX_SECONDS = 7 * 24 * 3600;
 export const SESSION_UPDATE_AGE_SECONDS = 3600;
 
 const ID_PREFIX: Record<string, IdPrefix> = { user: 'usr', session: 'ses', account: 'oac', verification: 'vrf' };
+
+/** Paths better-auth serves over HTTP. Everything else (passwords, account management) is off. */
+export const AUTH_PATHS = ['/sign-in/social', '/callback/:id', '/sign-out', '/get-session'] as const;
+
+/** better-auth's other HTTP endpoints (1.7), listed so `disabledPaths` turns them off. */
+const DISABLED_PATHS = [
+  '/account-info',
+  '/change-email',
+  '/change-password',
+  '/delete-user',
+  '/delete-user/callback',
+  '/error',
+  '/get-access-token',
+  '/link-social',
+  '/list-accounts',
+  '/list-sessions',
+  '/ok',
+  '/refresh-token',
+  '/request-password-reset',
+  '/reset-password',
+  '/revoke-other-sessions',
+  '/revoke-session',
+  '/revoke-sessions',
+  '/send-verification-email',
+  '/sign-in/email',
+  '/sign-up/email',
+  '/unlink-account',
+  '/update-session',
+  '/update-user',
+  '/verify-email',
+  '/verify-password',
+];
+
+/** Shown when sign-in passed the gate but could not be recorded. */
+export const SIGN_IN_FAILED = 'We could not finish signing you in. Try again in a minute.';
 
 const refuse = (message: string) =>
   new APIError('FORBIDDEN', { code: message === NOT_SET_UP ? 'not_set_up' : 'account_turned_off', message });
@@ -43,11 +88,13 @@ const devSignInPlugin = {
 /** Builds a better-auth instance. `overrides` is for tests (a fake Microsoft app); the app uses `auth`. */
 export function createAuth(overrides: { azureAd?: Config['azureAd'] } = {}) {
   const azure = 'azureAd' in overrides ? overrides.azureAd : config.azureAd;
+  const policy: EntraPolicy = { homeTenantId: azure?.tenantId ?? '', allowedTenantIds: azure?.allowedTenantIds ?? [] };
   return betterAuth({
     appName: 'Scout',
     baseURL: config.publicUrl,
     basePath: '/api/auth',
     secret: config.authSecret,
+    disabledPaths: DISABLED_PATHS,
     database: drizzleAdapter(adminDb, {
       provider: 'pg',
       schema: { user, session, account, verification },
@@ -63,9 +110,9 @@ export function createAuth(overrides: { azureAd?: Config['azureAd'] } = {}) {
             disableDefaultScope: true,
             scope: ['openid', 'profile', 'email', 'User.Read'],
             disableProfilePhoto: true,
-            // Match on our user's email: found by Entra object id, then email, then UPN.
+            // Match on our user's email: pinned Entra identity first, then email or UPN from a trusted tenant.
             mapProfileToUser: async (profile) => {
-              const email = await signInEmailFor(profile as Record<string, unknown>);
+              const email = await signInEmailFor(profile as Record<string, unknown>, policy);
               return email ? { email } : {};
             },
           },
@@ -90,9 +137,11 @@ export function createAuth(overrides: { azureAd?: Config['azureAd'] } = {}) {
         lastTenantId: { type: 'string', input: false, required: false },
         lastSignInAt: { type: 'date', input: false, required: false },
         entraObjectId: { type: 'string', input: false, required: false },
+        entraTenantId: { type: 'string', input: false, required: false },
       },
     },
     advanced: {
+      useSecureCookies: config.nodeEnv === 'production',
       database: {
         generateId: ({ model }) => {
           const prefix = ID_PREFIX[model];
@@ -112,11 +161,20 @@ export function createAuth(overrides: { azureAd?: Config['azureAd'] } = {}) {
       },
       account: {
         create: {
-          // Once a person has signed in, their Entra object id is pinned: a different Microsoft
-          // identity that merely claims the same email (Entra email claims are not verified) is refused.
+          // A Microsoft identity links only to someone who may sign in, and only when it fits: the
+          // user's pinned identity, or a first link from a trusted Entra tenant (Entra email and UPN
+          // claims are not verified). Runs before the row exists, so a refused link leaves nothing.
           before: async (data) => {
             if (data.providerId !== 'microsoft') return;
-            if (!(await entraIdentityFits(data.userId, data.accountId))) throw refuse(NOT_SET_UP);
+            const gate = await checkSignIn({ userId: data.userId });
+            if (!gate.ok) throw refuse(gate.message);
+            const tid = tenantOfIdToken((data as { idToken?: string | null }).idToken);
+            if (!(await entraIdentityFits(data.userId, data.accountId, tid, policy))) throw refuse(NOT_SET_UP);
+          },
+          // Pin the person to this identity at link time.
+          after: async (created) => {
+            if (!created || created.providerId !== 'microsoft') return;
+            await pinEntraIdentity(created.userId, created.accountId, tenantOfIdToken(created.idToken));
           },
         },
       },
@@ -125,7 +183,12 @@ export function createAuth(overrides: { azureAd?: Config['azureAd'] } = {}) {
           before: async (data) => {
             const result = await checkSignIn({ userId: data.userId });
             if (!result.ok) throw refuse(result.message);
-            await completeSignIn(result.userId);
+            try {
+              await completeSignIn(result.userId);
+            } catch (e) {
+              log.error({ err: e, userId: result.userId }, 'could not record sign-in');
+              throw new APIError('SERVICE_UNAVAILABLE', { code: 'sign_in_failed', message: SIGN_IN_FAILED });
+            }
           },
         },
       },
@@ -143,3 +206,16 @@ const get = (): Auth => (instance ??= createAuth());
 export const auth: Auth = new Proxy({} as Auth, {
   get: (_t, prop) => Reflect.get(get(), prop),
 });
+
+const ALLOWED_PATH = /^\/api\/auth\/(?:sign-in\/social|sign-out|get-session|callback\/[^/]+)\/?$/;
+
+/**
+ * The `/api/auth/*` route handler: only the paths in `AUTH_PATHS` reach better-auth; anything else
+ * (including patterned paths `disabledPaths` cannot list, such as `/reset-password/:token`) is 404.
+ */
+export function authHandler(request: Request): Promise<Response> {
+  if (!ALLOWED_PATH.test(new URL(request.url).pathname)) {
+    return Promise.resolve(new Response('Not Found', { status: 404 }));
+  }
+  return auth.handler(request);
+}

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import { adminDb } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
@@ -70,44 +70,116 @@ export async function checkSignIn(identity: SignInIdentity): Promise<SignInResul
 /** Claims of a Microsoft id token that matter for matching. */
 export type MicrosoftProfile = {
   oid?: unknown;
+  tid?: unknown;
   email?: unknown;
   preferred_username?: unknown;
   upn?: unknown;
 };
 
-const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
-
 /**
- * The email better-auth should match the Microsoft profile on: the email of the user found by Entra
- * object id, email or UPN (in that order), else the lower-cased profile email or UPN.
+ * Which Entra tenants may be trusted for a first sign-in matched by email or UPN (Entra email and
+ * UPN claims are set by each tenant's admins, so they prove nothing on their own).
  */
-export async function signInEmailFor(profile: MicrosoftProfile): Promise<string | undefined> {
-  const identity: SignInIdentity = {
-    entraObjectId: str(profile.oid),
-    email: str(profile.email),
-    upn: str(profile.preferred_username) ?? str(profile.upn),
-  };
-  const u = await findUser(identity);
-  return u?.email ?? norm(identity.email) ?? norm(identity.upn);
+export type EntraPolicy = {
+  /** Scout's home Entra tenant: the only one platform admins may be matched from by email. */
+  homeTenantId: string;
+  /** Tenants whose people may be matched by email on their first sign-in. */
+  allowedTenantIds: string[];
+};
+
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+const lower = (v: string | undefined) => v?.toLowerCase();
+
+/** An address no user can have (`.invalid` is reserved), so better-auth matches nobody and refuses. */
+const noMatch = () => `no-match-${newId('cor').toLowerCase()}@sign-in.invalid`;
+
+/** True when a first, email-matched link from Entra tenant `tid` may be trusted for this user. */
+function mayLinkByEmail(u: { platformAdmin: boolean }, tid: string | undefined, policy: EntraPolicy): boolean {
+  if (!tid) return false;
+  if (u.platformAdmin) return tid === policy.homeTenantId.toLowerCase();
+  return policy.allowedTenantIds.map((t) => t.toLowerCase()).includes(tid);
 }
 
 /**
- * True when the Microsoft identity `entraObjectId` may be linked to `userId`: the user has no Entra
- * object id yet, or the same one, and no other user holds it.
+ * The email better-auth should match the Microsoft profile on.
+ * - A user pinned to this Entra object id (and tenant): that user's email.
+ * - Else a user found by email or UPN: their email, only when they are not pinned to another
+ *   Microsoft identity and the token's tenant passes `mayLinkByEmail`.
+ * - Else the lower-cased profile email or UPN (matches nobody; sign-in is refused).
+ * Refusals map to an address that matches nobody, so better-auth refuses with the not-set-up message.
  */
-export async function entraIdentityFits(userId: string, entraObjectId: string): Promise<boolean> {
-  const [u] = await adminDb.select({ oid: user.entraObjectId }).from(user).where(eq(user.id, userId));
-  if (!u || (u.oid !== null && u.oid !== entraObjectId)) return false;
+export async function signInEmailFor(profile: MicrosoftProfile, policy: EntraPolicy): Promise<string | undefined> {
+  const oid = str(profile.oid);
+  const tid = lower(str(profile.tid));
+  if (oid) {
+    const [pinned] = await adminDb
+      .select({ email: user.email, tid: user.entraTenantId })
+      .from(user)
+      .where(eq(user.entraObjectId, oid));
+    if (pinned) return pinned.tid === null || pinned.tid === tid ? pinned.email : noMatch();
+  }
+  const email = str(profile.email);
+  const upn = str(profile.preferred_username) ?? str(profile.upn);
+  const u = await findUser({ email, upn });
+  if (!u) return norm(email) ?? norm(upn);
+  const [pin] = await adminDb.select({ oid: user.entraObjectId }).from(user).where(eq(user.id, u.id));
+  if (pin?.oid) return noMatch(); // pinned to a different Microsoft identity
+  return mayLinkByEmail(u, tid, policy) ? u.email : noMatch();
+}
+
+/** The `tid` claim of an id token (already validated by better-auth), lower-cased. */
+export function tenantOfIdToken(idToken: string | null | undefined): string | undefined {
+  const payload = idToken?.split('.')[1];
+  if (!payload) return undefined;
+  try {
+    return lower(str((JSON.parse(Buffer.from(payload, 'base64url').toString()) as { tid?: unknown }).tid));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * True when the Microsoft identity (`entraObjectId`, Entra tenant `tid`) may be linked to `userId`.
+ * Pinned users accept only their own identity. Otherwise: no other user holds that object id, the
+ * user has no other Microsoft account link, and the tenant passes `mayLinkByEmail`.
+ */
+export async function entraIdentityFits(
+  userId: string,
+  entraObjectId: string,
+  tid: string | undefined,
+  policy: EntraPolicy,
+): Promise<boolean> {
+  const [u] = await adminDb
+    .select({ oid: user.entraObjectId, tid: user.entraTenantId, platformAdmin: user.platformAdmin })
+    .from(user)
+    .where(eq(user.id, userId));
+  if (!u) return false;
+  if (u.oid !== null) return u.oid === entraObjectId && (u.tid === null || u.tid === tid);
   const [other] = await adminDb
     .select({ id: user.id })
     .from(user)
     .where(and(eq(user.entraObjectId, entraObjectId), ne(user.id, userId)))
     .limit(1);
-  return !other;
+  if (other) return false;
+  const [link] = await adminDb
+    .select({ id: account.id })
+    .from(account)
+    .where(and(eq(account.userId, userId), eq(account.providerId, 'microsoft'), ne(account.accountId, entraObjectId)))
+    .limit(1);
+  if (link) return false;
+  return mayLinkByEmail(u, tid, policy);
+}
+
+/** Pins the user to the Microsoft identity just linked (only when not pinned yet). */
+export async function pinEntraIdentity(userId: string, entraObjectId: string, tid: string | undefined): Promise<void> {
+  await adminDb
+    .update(user)
+    .set({ entraObjectId, entraTenantId: tid ?? null, updatedAt: new Date() })
+    .where(and(eq(user.id, userId), isNull(user.entraObjectId)));
 }
 
 /**
- * After a passed gate: records the sign-in, keeps the Entra object id, and makes invited memberships
+ * After a passed gate: records the sign-in and makes invited memberships
  * active (TEN-E2-S1-AC3) with a `tenancy.member.activated` audit row in each tenant. No event: the
  * member was announced by `tenancy.member.added` at invite.
  */
@@ -116,22 +188,6 @@ export async function completeSignIn(userId: string): Promise<void> {
   const actor = { kind: 'user' as const, id: userId };
   await adminDb.transaction(async (tx) => {
     await tx.update(user).set({ lastSignInAt: new Date(), updatedAt: new Date() }).where(eq(user.id, userId));
-    // Keep the Microsoft object id so a later email change still matches this person.
-    await tx
-      .update(user)
-      .set({
-        entraObjectId: sql`(select ${account.accountId} from ${account} where ${account.userId} = ${userId}
-          and ${account.providerId} = 'microsoft' order by ${account.createdAt} limit 1)`,
-      })
-      .where(
-        and(
-          eq(user.id, userId),
-          isNull(user.entraObjectId),
-          sql`not exists (select 1 from ${user} u2 where u2.entra_object_id = (select ${account.accountId}
-            from ${account} where ${account.userId} = ${userId} and ${account.providerId} = 'microsoft'
-            order by ${account.createdAt} limit 1))`,
-        ),
-      );
     const activated = await tx
       .update(membership)
       .set({ status: 'active', updatedAt: new Date() })
