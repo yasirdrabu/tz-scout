@@ -85,7 +85,7 @@ export const apiKey = tenancy.table(
     id: text('id').primaryKey(), // key_
     tenantId: text('tenant_id').notNull(),
     name: text('name').notNull(),
-    prefix: text('prefix').notNull(), // first 12 characters, shown
+    prefix: text('prefix').notNull(), // env tag plus first 8 random characters, shown; unique
     secretHash: text('secret_hash').notNull(), // argon2id
     environment: text('environment').notNull(), // live | test
     scopes: text('scopes').array().notNull().default(sql`'{}'::text[]`),
@@ -101,7 +101,7 @@ export const apiKey = tenancy.table(
     lastUsedIp: text('last_used_ip'),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
   },
-  (t) => [index('api_key_prefix_idx').on(t.prefix), index('api_key_tenant_idx').on(t.tenantId)],
+  (t) => [uniqueIndex('api_key_prefix_idx').on(t.prefix), index('api_key_tenant_idx').on(t.tenantId)],
 );
 
 /** Better-auth session (platform-wide). `updated_at` is the last activity, bumped at most hourly. */

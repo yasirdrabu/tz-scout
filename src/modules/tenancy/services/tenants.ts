@@ -101,3 +101,13 @@ export async function createTenant(
     throw e;
   }
 }
+
+/** The id, slug and name of the context's tenant. */
+export async function tenantSummary(ctx: ModuleContext): Promise<{ id: string; slug: string; name: string }> {
+  const [t] = await ctx.tx
+    .select({ id: tenant.id, slug: tenant.slug, name: tenant.name })
+    .from(tenant)
+    .where(eq(tenant.id, ctx.tenantId));
+  if (!t) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That workspace was not found.' });
+  return t;
+}

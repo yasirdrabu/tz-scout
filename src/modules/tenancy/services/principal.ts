@@ -7,6 +7,8 @@ import type { Role } from '../contracts/members';
 import { DataLimitSchema, defaultDataLimit, type DataLimit } from '../domain/data-limit';
 import { PERMISSIONS, isPermission, permissionsFor } from '../domain/permissions';
 import { membership, session, tenant, user } from '../db/schema';
+import { landingPathFor } from './sign-in';
+import { authenticateKey, setKeyCacheTtl } from './api-keys';
 
 /** A session with no activity for this long is over (global constraint: 12 hours). */
 export const SESSION_IDLE_MS = 12 * 3600_000;
@@ -25,10 +27,11 @@ type Access = {
 let ttlMs = 60_000;
 const cache = new Map<string, { at: number; value: Access | null }>();
 
-/** Test hook: how long membership and disabled lookups are cached (at most 60 seconds). Clears the cache. */
+/** Test hook: how long membership, disabled and verified-key lookups are cached (at most 60 seconds). Clears the caches. */
 export function setPrincipalCacheTtl(ms: number): void {
   ttlMs = Math.min(Math.max(ms, 0), 60_000);
   cache.clear();
+  setKeyCacheTtl(ms);
 }
 
 async function loadAccess(userId: string, tenantSlug: string): Promise<Access | null> {
@@ -139,4 +142,33 @@ export async function sessionPrincipal(headers: Headers, tenantSlug: string): Pr
       .where(eq(session.id, found.session.id));
   }
   return principal;
+}
+
+function clientIp(req: Request): string | null {
+  const forwarded = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+  return forwarded || req.headers.get('x-real-ip') || null;
+}
+
+/**
+ * Who is calling. A bearer token is an API key: it gives a key principal, or null when invalid
+ * (throws 401 key-revoked or key-expired for a correct but unusable key). With no bearer token,
+ * the cookie session is used for tenantSlug; without a slug, the x-scout-tenant header, then the
+ * person's last used tenant.
+ */
+export async function resolvePrincipal(req: Request, tenantSlug?: string): Promise<Principal | null> {
+  const authorization = req.headers.get('authorization');
+  if (authorization !== null) {
+    const m = /^Bearer\s+(\S+)\s*$/i.exec(authorization);
+    if (!m) return null;
+    return authenticateKey(m[1]!, clientIp(req));
+  }
+  let slug = tenantSlug ?? req.headers.get('x-scout-tenant')?.trim();
+  if (!slug) {
+    const found = await auth.api.getSession({ headers: req.headers, query: { disableRefresh: true } });
+    if (!found) return null;
+    const path = await landingPathFor(found.user.id);
+    slug = /^\/t\/([^/]+)$/.exec(path)?.[1];
+    if (!slug) return null;
+  }
+  return sessionPrincipal(req.headers, slug);
 }

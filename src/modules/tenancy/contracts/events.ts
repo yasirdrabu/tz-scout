@@ -24,3 +24,23 @@ export const memberRoleChanged = defineEvent(
   1,
   z.object({ userId: z.string(), from: z.string(), to: z.string() }),
 );
+
+export const apiKeyCreated = defineEvent(
+  'tenancy.api_key.created',
+  1,
+  z.object({
+    keyId: z.string(),
+    name: z.string(),
+    prefix: z.string(),
+    environment: z.enum(['live', 'test']),
+    scopes: z.array(z.string()),
+    sourceId: z.string().nullable(),
+    createdBy: z.string(),
+  }),
+);
+
+export const apiKeyRevoked = defineEvent(
+  'tenancy.api_key.revoked',
+  1,
+  z.object({ keyId: z.string(), reason: z.string(), revokedBy: z.string() }),
+);

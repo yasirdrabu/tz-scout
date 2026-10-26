@@ -1,5 +1,5 @@
 // Public interface of the tenancy module. Other modules import only this file or `contracts/*`.
-export { createTenant, type CreateTenantInput } from './services/tenants';
+export { createTenant, tenantSummary, type CreateTenantInput } from './services/tenants';
 export {
   addMember,
   changeMember,
@@ -27,3 +27,6 @@ export {
 } from './services/sign-in';
 export { SESSION_IDLE_MS, sessionPrincipal, setPrincipalCacheTtl } from './services/principal';
 export { handleDevSignIn } from './services/dev-sign-in';
+export { createApiKey, createKeyFromCli, revokeApiKey, type CreateApiKeyInput } from './services/api-keys';
+export { resolvePrincipal } from './services/principal';
+export { registerSourceValidator, type SourceValidator } from './contracts/source-validator';
