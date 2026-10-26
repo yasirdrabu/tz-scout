@@ -135,10 +135,10 @@ describe('changeMember', () => {
   it('publishes role_changed and audits before and after (TEN-E1-S3-AC2)', async () => {
     const id = await inTenant(tenantId, owner, (ctx) => addMember(ctx, { email: 'chg@example.com', role: 'seller' }));
     await inTenant(tenantId, owner, (ctx) =>
-      changeMember(ctx, id, { role: 'leader', extraPermissions: ['people:read'], dataLimit: { practices: ['ai'] } }),
+      changeMember(ctx, id, { role: 'leader', extraPermissions: ['people:read'], dataLimit: { kind: 'practices', ids: ['prc_ai'] } }),
     );
     const [m] = await adminDb.select().from(membership).where(eq(membership.id, id));
-    expect(m).toMatchObject({ role: 'leader', extraPermissions: ['people:read'], dataLimit: { practices: ['ai'] } });
+    expect(m).toMatchObject({ role: 'leader', extraPermissions: ['people:read'], dataLimit: { kind: 'practices', ids: ['prc_ai'] } });
     const ev = (await events(tenantId, 'tenancy.member.role_changed')).map((e) => e.payload.data);
     expect(ev).toContainEqual({ userId: m!.userId, from: 'seller', to: 'leader' });
     const rows = await adminDb.select().from(auditLog).where(eq(auditLog.subjectId, id));
@@ -151,8 +151,36 @@ describe('changeMember', () => {
   it('does not publish role_changed when only the data limit changes', async () => {
     const id = await inTenant(tenantId, owner, (ctx) => addMember(ctx, { email: 'dl@example.com', role: 'seller' }));
     const before = (await events(tenantId, 'tenancy.member.role_changed')).length;
-    await inTenant(tenantId, owner, (ctx) => changeMember(ctx, id, { dataLimit: { practices: ['x'] } }));
+    await inTenant(tenantId, owner, (ctx) => changeMember(ctx, id, { dataLimit: { kind: 'practices', ids: ['prc_x'] } }));
     expect((await events(tenantId, 'tenancy.member.role_changed')).length).toBe(before);
+  });
+});
+
+describe('validation and permission filter', () => {
+  it('rejects unknown roles, permissions and malformed data limits with 400', async () => {
+    const id = await inTenant(tenantId, owner, (ctx) => addMember(ctx, { email: 'val@example.com', role: 'seller' }));
+    await expect(
+      inTenant(tenantId, owner, (ctx) => addMember(ctx, { email: 'v2@example.com', role: 'boss' as never })),
+    ).rejects.toMatchObject({ slug: 'invalid-role', status: 400 });
+    await expect(inTenant(tenantId, owner, (ctx) => changeMember(ctx, id, { role: 'boss' as never }))).rejects.toMatchObject({
+      slug: 'invalid-role',
+    });
+    await expect(
+      inTenant(tenantId, owner, (ctx) => changeMember(ctx, id, { extraPermissions: ['fly:high'] })),
+    ).rejects.toMatchObject({ slug: 'invalid-permission', status: 400 });
+    await expect(
+      inTenant(tenantId, owner, (ctx) => changeMember(ctx, id, { dataLimit: { kind: 'practices' } as never })),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('members() filters by effective permission, including extras', async () => {
+    const t = await newTenant();
+    const id = await inTenant(t.tenantId, t.owner.actor, (ctx) => addMember(ctx, { email: 'rev@example.com', role: 'seller' }));
+    const none = await inTenant(t.tenantId, t.owner.actor, (ctx) => members(ctx, { permission: 'review:act' }));
+    expect(none.map((m) => m.email)).not.toContain('rev@example.com');
+    await inTenant(t.tenantId, t.owner.actor, (ctx) => changeMember(ctx, id, { extraPermissions: ['review:act'] }));
+    const some = await inTenant(t.tenantId, t.owner.actor, (ctx) => members(ctx, { permission: 'review:act' }));
+    expect(some.map((m) => m.email)).toContain('rev@example.com');
   });
 });
 
@@ -209,8 +237,9 @@ describe('members and tenantsFor', () => {
     expect(all.find((m) => m.email === 'sel@example.com')).toMatchObject({
       role: 'seller',
       status: 'invited',
-      permissions: [],
     });
+    expect(all.find((m) => m.email === 'sel@example.com')!.permissions).toContain('assignments:respond');
+    expect(all.find((m) => m.email === 'sel@example.com')!.permissions).not.toContain('review:act');
     const sellers = await inTenant(t.tenantId, t.owner.actor, (ctx) => members(ctx, { roles: ['seller'] }));
     expect(sellers.map((m) => m.email)).toEqual(['sel@example.com']);
   });

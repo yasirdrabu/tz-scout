@@ -6,13 +6,26 @@ import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { memberAdded, memberRemoved, memberRoleChanged } from '../contracts/events';
-import { CRM_OWNER_TAKEN, type DataLimit, type Member, type Role } from '../contracts/members';
+import { ROLES, CRM_OWNER_TAKEN, type DataLimit, type Member, type Role } from '../contracts/members';
+import { DataLimitSchema } from '../domain/data-limit';
+import { isPermission, permissionsFor, type Permission } from '../domain/permissions';
 import { membership, tenant, user } from '../db/schema';
 
 const LAST_OWNER = 'A tenant needs at least one owner.';
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That member was not found.' });
 const lastOwner = () => new ScoutError({ slug: 'last-owner', status: 409, title: LAST_OWNER });
+const invalidRole = () => new ScoutError({ slug: 'invalid-role', status: 400, title: 'That role does not exist.' });
+const invalidPermission = () =>
+  new ScoutError({ slug: 'invalid-permission', status: 400, title: 'That permission does not exist.' });
 const crmTaken = () => new ScoutError({ slug: 'crm-owner-taken', status: 409, title: CRM_OWNER_TAKEN });
+
+function assertRole(role: unknown): asserts role is Role {
+  if (typeof role !== 'string' || !(ROLES as readonly string[]).includes(role)) throw invalidRole();
+}
+
+function assertPermissions(perms: unknown): asserts perms is Permission[] {
+  if (!Array.isArray(perms) || !perms.every(isPermission)) throw invalidPermission();
+}
 
 /** Serialises changes that must see each other: owner counts and CRM owner ids, per tenant. */
 async function lockTenant(ctx: ModuleContext, what: 'owners' | 'crm'): Promise<void> {
@@ -86,6 +99,7 @@ export async function addMember(
   ctx: ModuleContext,
   input: { email: string; role: Role; crmOwnerIds?: Record<string, string> },
 ): Promise<string> {
+  assertRole(input.role);
   const email = input.email.trim().toLowerCase();
   const crmIds = cleanCrmIds(input.crmOwnerIds ?? {});
   await lockTenant(ctx, 'crm');
@@ -168,6 +182,19 @@ export async function changeMember(
   membershipId: string,
   change: { role?: Role; extraPermissions?: string[]; dataLimit?: DataLimit | null },
 ): Promise<void> {
+  if (change.role !== undefined) assertRole(change.role);
+  if (change.extraPermissions !== undefined) assertPermissions(change.extraPermissions);
+  if (change.dataLimit !== undefined && change.dataLimit !== null) {
+    const parsed = DataLimitSchema.safeParse(change.dataLimit);
+    if (!parsed.success) {
+      throw new ScoutError({
+        slug: 'validation',
+        status: 400,
+        title: 'Check the data limit.',
+        errors: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+      });
+    }
+  }
   await lockTenant(ctx, 'owners');
   const m = await load(ctx, membershipId);
   if (change.role && change.role !== 'owner' && (await isLastActiveOwner(ctx, m))) throw lastOwner();
@@ -252,13 +279,12 @@ export async function userForCrmOwner(ctx: ModuleContext, crm: string, ownerId: 
 }
 
 /**
- * People in the tenant (invited and active). `roles` narrows by role.
- * TODO(Task 10): `permission` filters by effective permission and `permissions` is filled in;
- * until then `permission` is accepted and ignored and `permissions` is empty.
+ * People in the tenant (invited and active). `roles` narrows by role; `permission` keeps only people
+ * whose effective permissions (role defaults plus extras) include it.
  */
 export async function members(
   ctx: ModuleContext,
-  opts: { permission?: string; roles?: Role[] } = {},
+  opts: { permission?: Permission; roles?: Role[] } = {},
 ): Promise<Member[]> {
   const rows = await ctx.tx
     .select({
@@ -268,6 +294,7 @@ export async function members(
       email: user.email,
       role: membership.role,
       status: membership.status,
+      extra: membership.extraPermissions,
     })
     .from(membership)
     .innerJoin(user, eq(user.id, membership.userId))
@@ -279,7 +306,13 @@ export async function members(
       ),
     )
     .orderBy(asc(user.name), asc(user.email));
-  return rows.map((r) => ({ ...r, role: r.role as Role, status: r.status as Member['status'], permissions: [] }));
+  const out: Member[] = rows.map(({ extra, ...r }) => {
+    const role = r.role as Role;
+    const extras = (extra ?? []).filter(isPermission);
+    return { ...r, role, status: r.status as Member['status'], permissions: permissionsFor(role, extras, false) };
+  });
+  const wanted = opts.permission;
+  return wanted ? out.filter((m) => m.permissions.includes(wanted)) : out;
 }
 
 /** Tenants where the user has an active membership. Platform-wide lookup, so it uses `adminDb`. */

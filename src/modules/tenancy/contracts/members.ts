@@ -1,9 +1,12 @@
+import type { DataLimit } from '../domain/data-limit';
+import type { Permission } from '../domain/permissions';
+
 export const ROLES = ['owner', 'leader', 'seller', 'operator'] as const;
 export type Role = (typeof ROLES)[number];
 
 export type MembershipStatus = 'invited' | 'active' | 'removed';
 
-/** One person in a tenant. `permissions` is filled in by the roles module (Task 10). */
+/** One person in a tenant. `permissions` is the effective set: role defaults plus extras. */
 export type Member = {
   membershipId: string;
   userId: string;
@@ -11,10 +14,9 @@ export type Member = {
   email: string;
   role: Role;
   status: Exclude<MembershipStatus, 'removed'>;
-  permissions: string[];
+  permissions: Permission[];
 };
 
-/** Task 10 defines the shape; until then it is an opaque JSON object. */
-export type DataLimit = Record<string, unknown>;
+export type { DataLimit };
 
 export const CRM_OWNER_TAKEN = 'That CRM user is already linked to someone else.';
