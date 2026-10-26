@@ -1,5 +1,6 @@
 # Laptop stack. For local use only: dev sign-in is on and every integration is a mock.
 # Run: docker compose -f infra/compose/docker-compose.yml up --build
+# Ports are published on 127.0.0.1 only, so the stack is not reachable from other machines.
 x-scout: &scout
   image: scout:dev
   pull_policy: never # built by the migrate service: run "docker compose build" first
@@ -15,6 +16,9 @@ x-scout: &scout
     SCOUT_FORCE_MOCK: "true"
     APP_PUBLIC_URL: http://localhost:4240
     SCOUT_BIND_HOST: 0.0.0.0
+    # DEVELOPMENT ONLY, NOT FOR PRODUCTION: a fixed, public key so credential saving works on this
+    # laptop stack. Anything sealed with it is readable by anyone with this file. Never reuse it.
+    SCOUT_MASTER_KEY: c2NvdXQtbGFwdG9wLXN0YWNrLWRldi1vbmx5LWtleSE=
 x-after-migrate: &after-migrate
   postgres:
     condition: service_healthy
@@ -31,7 +35,7 @@ services:
       POSTGRES_PASSWORD: scout
       POSTGRES_DB: scout
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ../../src/platform/db/bootstrap.sql:/docker-entrypoint-initdb.d/10-bootstrap.sql:ro
@@ -45,8 +49,8 @@ services:
     image: nats:2.11-alpine
     command: ["-js", "-sd", "/data", "-m", "8222"]
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
     volumes:
       - natsdata:/data
     healthcheck:
@@ -58,8 +62,8 @@ services:
   mailpit:
     image: axllent/mailpit
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
 
   migrate:
     <<: *scout
@@ -77,7 +81,7 @@ services:
     <<: *scout
     command: ["web"]
     ports:
-      - "4240:4240"
+      - "127.0.0.1:4240:4240"
     depends_on: *after-migrate
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4240/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
