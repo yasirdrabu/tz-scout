@@ -9,6 +9,8 @@ export type Principal = {
   id: string;
   userId?: string;
   sourceId?: string;
+  /** Set for API keys. */
+  environment?: 'live' | 'test';
   permissions: Permission[];
   dataLimit: DataLimit;
   platformAdmin: boolean;

@@ -1,5 +1,6 @@
 import { resolvePrincipal, requirePermission, type Permission, type Principal } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
+import { config } from '@/platform/config';
 import { withTenant } from '@/platform/db/tenant';
 import { ScoutError, toProblem } from '@/platform/errors';
 import { newId } from '@/platform/ids';
@@ -23,7 +24,7 @@ export type V1Handler = (req: Request, principal: Principal, ctx: ModuleContext)
 
 function correlationFrom(req: Request): string {
   const sent = req.headers.get(CORRELATION)?.trim();
-  return sent && sent.length <= 128 ? sent : newId('cor');
+  return sent && /^[A-Za-z0-9._:-]{1,128}$/.test(sent) ? sent : newId('cor');
 }
 
 function problem(e: unknown, correlationId: string): Response {
@@ -33,8 +34,18 @@ function problem(e: unknown, correlationId: string): Response {
     headers: {
       'content-type': 'application/problem+json',
       [CORRELATION]: correlationId,
+      ...(status === 401 ? { 'www-authenticate': 'Bearer' } : {}),
     },
   });
+}
+
+/** Cookie-authenticated writes must come from our own pages and name the tenant (CSRF defence). */
+export function assertSameSite(req: Request): void {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
+  const origin = req.headers.get('origin');
+  if (!req.headers.get('x-scout-tenant') || !origin || origin !== new URL(config.publicUrl).origin) {
+    throw new ScoutError({ slug: 'csrf', status: 403, title: 'Request blocked' });
+  }
 }
 
 /**
@@ -54,6 +65,7 @@ export function v1Route(opts: { permission?: Permission }, handler: V1Handler): 
           title: 'Sign in or send a valid API key.',
         });
       }
+      if (req.headers.get('authorization') === null) assertSameSite(req);
       if (opts.permission) requirePermission(principal, opts.permission);
       const actor =
         principal.kind === 'user'

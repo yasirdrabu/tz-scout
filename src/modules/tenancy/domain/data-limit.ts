@@ -63,3 +63,19 @@ export function describeLimit(limit: DataLimit): string[] {
       ];
   }
 }
+
+/**
+ * True when everything `child` allows is also allowed by `parent`. Conservative: when the two
+ * limits cannot be compared with certainty (for example own accounts against a source), it is false.
+ */
+export function isWithin(child: DataLimit, parent: DataLimit): boolean {
+  if (parent.kind === 'all') return true;
+  if (child.kind === 'any_of') return child.limits.every((c) => isWithin(c, parent));
+  if (parent.kind === 'any_of') return parent.limits.some((p) => isWithin(child, p));
+  if (child.kind === 'all') return false;
+  if (child.kind === 'own_accounts' || child.kind === 'own_source') return child.kind === parent.kind;
+  if (child.kind === 'practices' || child.kind === 'sources') {
+    return parent.kind === child.kind && child.ids.every((id) => parent.ids.includes(id));
+  }
+  return false;
+}

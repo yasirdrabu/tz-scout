@@ -1,6 +1,13 @@
 import { eq, sql } from 'drizzle-orm';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import * as argon2 from '@node-rs/argon2';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@node-rs/argon2', async (orig) => {
+  const real = await orig<typeof import('@node-rs/argon2')>();
+  return { ...real, verify: vi.fn(real.verify) };
+});
 import {
+  SYSTEM_GRANTOR,
   createApiKey,
   createKeyFromCli,
   createTenant,
@@ -13,6 +20,9 @@ import { apiKey, membership, tenant } from '@/modules/tenancy/db/schema';
 import { adminDb } from '@/platform/db/client';
 import { auditLog } from '@/platform/db/schema';
 import { inTenant, seedUser, uniqueSlug } from './helpers';
+
+const mk = (ctx: Parameters<typeof createApiKey>[0], input: Parameters<typeof createApiKey>[1]) =>
+  createApiKey(ctx, input, SYSTEM_GRANTOR);
 
 let tenantId: string;
 let slug: string;
@@ -39,7 +49,7 @@ const req = (secret: string, extra: Record<string, string> = {}) =>
     headers: { authorization: `Bearer ${secret}`, ...extra },
   });
 const make = (scopes: string[] = ['members:read'], environment: 'live' | 'test' = 'live') =>
-  inTenant(tenantId, owner.actor, (ctx) => createApiKey(ctx, { name: 'k', environment, scopes: scopes as never }));
+  inTenant(tenantId, owner.actor, (ctx) => mk(ctx, { name: 'k', environment, scopes: scopes as never }));
 
 describe('createApiKey', () => {
   it('makes a secret of the agreed shape, stores prefix + hash only, and keeps the secret out of rows', async () => {
@@ -79,7 +89,7 @@ describe('createApiKey', () => {
       });
       await expect(
         inTenant(tenantId, owner.actor, (ctx) =>
-          createApiKey(ctx, {
+          mk(ctx, {
             name: 'k',
             environment: 'live',
             scopes: ['arrivals:write'],
@@ -88,7 +98,7 @@ describe('createApiKey', () => {
         ),
       ).rejects.toMatchObject({ slug: 'source-not-found' });
       const { secret } = await inTenant(tenantId, owner.actor, (ctx) =>
-        createApiKey(ctx, {
+        mk(ctx, {
           name: 'k',
           environment: 'live',
           scopes: ['arrivals:write'],
@@ -181,7 +191,7 @@ describe('resolvePrincipal with a key', () => {
       ownerEmail: o.email,
     });
     const { secret } = await inTenant(t.tenantId, o.actor, (ctx) =>
-      createApiKey(ctx, {
+      mk(ctx, {
         name: 'k',
         environment: 'live',
         scopes: ['members:read'],
@@ -215,7 +225,7 @@ describe('resolvePrincipal with a key', () => {
       ownerEmail: o.email,
     });
     const { secret } = await inTenant(t.tenantId, o.actor, (ctx) =>
-      createApiKey(ctx, {
+      mk(ctx, {
         name: 'k',
         environment: 'live',
         scopes: ['members:read'],
@@ -246,5 +256,52 @@ describe('createKeyFromCli', () => {
         test: false,
       }),
     ).rejects.toMatchObject({ slug: 'not-found' });
+  });
+});
+
+describe('hardening', () => {
+  it('runs a password check even for an unknown prefix (no timing oracle)', async () => {
+    const verify = vi.mocked(argon2.verify);
+    verify.mockClear();
+    expect(await resolvePrincipal(req('scout_live_' + 'Q'.repeat(32)))).toBeNull();
+    expect(verify).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses scopes the creator does not have', async () => {
+    const grantor = { permissions: ['members:read'] as never, dataLimit: { kind: 'all' as const } };
+    await expect(
+      inTenant(tenantId, owner.actor, (ctx) =>
+        createApiKey(ctx, { name: 'k', environment: 'live', scopes: ['status:read'] }, grantor),
+      ),
+    ).rejects.toMatchObject({ slug: 'scope-not-available', status: 403, detail: expect.stringContaining('status:read') });
+  });
+
+  it('refuses a data limit wider than the creator has', async () => {
+    const grantor = { permissions: ['members:read'] as never, dataLimit: { kind: 'sources' as const, ids: ['a', 'b'] } };
+    const attempt = (dataLimit: never) =>
+      inTenant(tenantId, owner.actor, (ctx) =>
+        createApiKey(ctx, { name: 'k', environment: 'live', scopes: ['members:read'], dataLimit }, grantor),
+      );
+    await expect(attempt({ kind: 'all' } as never)).rejects.toMatchObject({ slug: 'scope-not-available' });
+    await expect(attempt({ kind: 'sources', ids: ['a', 'z'] } as never)).rejects.toMatchObject({ slug: 'scope-not-available' });
+    await expect(attempt({ kind: 'own_accounts' } as never)).rejects.toMatchObject({ slug: 'scope-not-available' });
+    await expect(attempt({ kind: 'sources', ids: ['a'] } as never)).resolves.toHaveProperty('secret');
+  });
+
+  it('revoking drops the local cache entry at once', async () => {
+    const { id, secret } = await make();
+    setPrincipalCacheTtl(60_000);
+    expect(await resolvePrincipal(req(secret))).not.toBeNull();
+    await inTenant(tenantId, owner.actor, (ctx) => revokeApiKey(ctx, id, 'now'));
+    await expect(resolvePrincipal(req(secret))).rejects.toMatchObject({ slug: 'key-revoked' });
+  });
+
+  it('freezes the cached principal and reports the environment', async () => {
+    const { secret } = await make(['members:read'], 'test');
+    setPrincipalCacheTtl(60_000);
+    const p = (await resolvePrincipal(req(secret)))!;
+    expect(p.environment).toBe('test');
+    expect(Object.isFrozen(p)).toBe(true);
+    expect(Object.isFrozen(p.permissions)).toBe(true);
   });
 });

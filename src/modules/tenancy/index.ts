@@ -12,7 +12,7 @@ export {
 } from './services/members';
 export { ROLES, type Role, type Member, type DataLimit } from './contracts/members';
 export { PERMISSIONS, ROLE_PERMISSIONS, isPermission, permissionsFor, type Permission } from './domain/permissions';
-export { DEFAULT_DATA_LIMIT, DataLimitSchema, defaultDataLimit, describeLimit } from './domain/data-limit';
+export { DEFAULT_DATA_LIMIT, DataLimitSchema, defaultDataLimit, describeLimit, isWithin } from './domain/data-limit';
 export { can, describeAccess, requirePermission, type Principal } from './contracts/principal';
 export { AUTH_PATHS, SIGN_IN_FAILED, auth, authHandler, type Auth } from './auth';
 export {
@@ -27,6 +27,6 @@ export {
 } from './services/sign-in';
 export { SESSION_IDLE_MS, sessionPrincipal, setPrincipalCacheTtl } from './services/principal';
 export { handleDevSignIn } from './services/dev-sign-in';
-export { createApiKey, createKeyFromCli, revokeApiKey, type CreateApiKeyInput } from './services/api-keys';
+export { SYSTEM_GRANTOR, createApiKey, createKeyFromCli, revokeApiKey, type CreateApiKeyInput, type Grantor } from './services/api-keys';
 export { resolvePrincipal } from './services/principal';
 export { registerSourceValidator, type SourceValidator } from './contracts/source-validator';

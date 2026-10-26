@@ -11,4 +11,5 @@ export const GET = v1Route({}, async (_req, principal, ctx) => ({
   scopes: principal.permissions,
   dataLimit: principal.dataLimit,
   sourceId: principal.sourceId ?? null,
+  environment: principal.environment ?? null,
 }));

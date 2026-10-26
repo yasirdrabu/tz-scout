@@ -1,11 +1,14 @@
 import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as me } from '@/app/v1/me/route';
-import { v1Route } from '@/app/v1/_lib/v1-route';
-import { createApiKey, createTenant, revokeApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
+import { assertSameSite, v1Route } from '@/app/v1/_lib/v1-route';
+import { SYSTEM_GRANTOR, createApiKey, createTenant, revokeApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
 import { adminDb } from '@/platform/db/client';
 import { inTenant, seedUser, uniqueSlug } from '../tenancy/helpers';
+
+const mk = (ctx: Parameters<typeof createApiKey>[0], input: Parameters<typeof createApiKey>[1]) =>
+  createApiKey(ctx, input, SYSTEM_GRANTOR);
 
 let tenantId: string;
 let slug: string;
@@ -38,7 +41,7 @@ const call = (h: (r: Request) => Promise<Response>, secret?: string, headers: Re
   );
 const make = (scopes: string[]) =>
   inTenant(tenantId, owner.actor, (ctx) =>
-    createApiKey(ctx, {
+    mk(ctx, {
       name: 'k',
       environment: 'live',
       scopes: scopes as never,
@@ -58,6 +61,7 @@ describe('GET /v1/me', () => {
       scopes: ['members:read', 'status:read'],
       data_limit: { kind: 'own_source' },
       source_id: null,
+      environment: 'live',
     });
   });
 
@@ -119,5 +123,37 @@ describe('v1Route', () => {
     const res = await call(boom, secret);
     expect(res.status).toBe(500);
     expect((await res.json()).type).toMatch(/\/internal$/);
+  });
+});
+
+describe('hardening', () => {
+  it('401 carries WWW-Authenticate: Bearer', async () => {
+    expect((await call(me)).headers.get('www-authenticate')).toBe('Bearer');
+  });
+
+  it('reports the environment', async () => {
+    const { secret } = await make(['members:read']);
+    expect((await (await call(me, secret)).json()).environment).toBe('live');
+  });
+
+  it('replaces an odd client correlation id', async () => {
+    const { secret } = await make(['members:read']);
+    for (const bad of ['bad id with spaces', 'x'.repeat(129), 'a<b>']) {
+      expect((await call(me, secret, { 'x-correlation-id': bad })).headers.get('x-correlation-id')).toMatch(/^cor_/);
+    }
+  });
+
+  it('blocks cookie writes without our origin and a tenant header (CSRF)', () => {
+    const post = (h: Record<string, string>, method = 'POST') => new Request('http://x/v1/y', { method, headers: h });
+    const origin = 'http://localhost:4240';
+    expect(() => assertSameSite(post({}))).toThrow(expect.objectContaining({ slug: 'csrf', status: 403 }));
+    expect(() => assertSameSite(post({ origin, 'x-scout-tenant': 'a' }, 'GET'))).not.toThrow();
+    expect(() => assertSameSite(post({ 'x-scout-tenant': 'a' }))).toThrow(expect.objectContaining({ slug: 'csrf' }));
+    expect(() => assertSameSite(post({ origin }))).toThrow(expect.objectContaining({ slug: 'csrf' }));
+    expect(() => assertSameSite(post({ origin: 'https://evil.example', 'x-scout-tenant': 'a' }))).toThrow(
+      expect.objectContaining({ slug: 'csrf' }),
+    );
+    expect(() => assertSameSite(post({ origin, 'x-scout-tenant': 'a' }))).not.toThrow();
+    expect(() => assertSameSite(new Request('http://x/v1/y', { method: 'GET' }))).not.toThrow();
   });
 });

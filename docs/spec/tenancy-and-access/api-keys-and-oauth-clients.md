@@ -10,7 +10,7 @@ one noisy agent can't flood reps or spend credits.
 
 ## Rules
 
-- **API keys** look like `scout_live_<12 char prefix>_<32 char secret>` or `scout_test_…`. The full
+- **API keys** look like `scout_live_<32 random characters>` or `scout_test_…`. The shown prefix is the environment tag plus the first 8 random characters (for example `scout_live_Ab3dE9xQ`), unique across keys. The full
   key is shown once at creation. Only the prefix is stored readable; the secret is stored as an
   argon2id hash.
 - A key belongs to the tenant, not the person who made it. Fields: name, environment, scopes, data

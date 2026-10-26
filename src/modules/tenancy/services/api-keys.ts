@@ -12,8 +12,8 @@ import { log } from '@/platform/log';
 import { apiKeyCreated, apiKeyRevoked } from '../contracts/events';
 import type { Principal } from '../contracts/principal';
 import { sourceValidator } from '../contracts/source-validator';
-import { DataLimitSchema, defaultDataLimit, type DataLimit } from '../domain/data-limit';
-import { isPermission, type Permission } from '../domain/permissions';
+import { DataLimitSchema, defaultDataLimit, isWithin, type DataLimit } from '../domain/data-limit';
+import { PERMISSIONS, isPermission, type Permission } from '../domain/permissions';
 import { apiKey, tenant } from '../db/schema';
 
 export const NEEDS_SOURCE_LATER = 'Keys that send accounts need a source. Sources arrive in the next release.';
@@ -43,6 +43,12 @@ function randomBase62(n: number): string {
   return s;
 }
 
+/** What the creator may hand out: a key can never exceed it. */
+export type Grantor = { permissions: readonly Permission[]; dataLimit: DataLimit };
+
+/** For creation by the platform itself (the CLI). */
+export const SYSTEM_GRANTOR: Grantor = { permissions: PERMISSIONS, dataLimit: { kind: 'all' } };
+
 export type CreateApiKeyInput = {
   name: string;
   environment: 'live' | 'test';
@@ -59,6 +65,7 @@ export type CreateApiKeyInput = {
 export async function createApiKey(
   ctx: ModuleContext,
   input: CreateApiKeyInput,
+  grantor: Grantor,
 ): Promise<{ id: string; secret: string }> {
   const name = input.name.trim();
   if (!name) throw validation('validation', 'Give the key a name.');
@@ -69,11 +76,29 @@ export async function createApiKey(
     throw validation('validation', 'Environment must be live or test.');
   }
   const scopes = [...new Set(input.scopes)];
+  for (const s of scopes) {
+    if (!grantor.permissions.includes(s)) {
+      throw new ScoutError({
+        slug: 'scope-not-available',
+        status: 403,
+        title: 'Not available to you',
+        detail: `You can't give a key the \`${s}\` scope because you don't have it.`,
+      });
+    }
+  }
   let dataLimit: DataLimit | null = null;
   if (input.dataLimit) {
     const parsed = DataLimitSchema.safeParse(input.dataLimit);
     if (!parsed.success) throw validation('validation', 'Check the data limit.');
     dataLimit = parsed.data;
+    if (!isWithin(dataLimit, grantor.dataLimit)) {
+      throw new ScoutError({
+        slug: 'scope-not-available',
+        status: 403,
+        title: 'Not available to you',
+        detail: "You can't give a key access to more accounts than you can see yourself.",
+      });
+    }
   }
 
   if (scopes.includes('arrivals:write')) {
@@ -83,29 +108,42 @@ export async function createApiKey(
     if (!(await v.exists(ctx, input.sourceId))) throw validation('source-not-found', 'That source was not found.');
   }
 
-  const random = randomBase62(32);
   const head = `scout_${input.environment}_`;
-  const secret = head + random;
-  const prefix = head + random.slice(0, PREFIX_RANDOM);
-  const secretHash = await hash(secret); // argon2id by default
   const id = newId('key');
-
-  await ctx.tx.insert(apiKey).values({
-    id,
-    tenantId: ctx.tenantId,
-    name,
-    prefix,
-    secretHash,
-    environment: input.environment,
-    scopes,
-    dataLimit,
-    sourceId: input.sourceId ?? null,
-    rateLimitPerMinute: 600,
-    dailyArrivalCap: 500,
-    monthlyEnrichmentCreditCap: 0,
-    createdBy: ctx.actor.id,
-    expiresAt: input.expiresAt ?? null,
-  });
+  let secret = '';
+  let prefix = '';
+  for (let attempt = 0; ; attempt++) {
+    const random = randomBase62(32);
+    secret = head + random;
+    prefix = head + random.slice(0, PREFIX_RANDOM);
+    const secretHash = await hash(secret); // argon2id by default
+    try {
+      // A savepoint, so a prefix clash does not abort the caller's transaction.
+      await ctx.tx.transaction((sp) =>
+        sp.insert(apiKey).values({
+          id,
+          tenantId: ctx.tenantId,
+          name,
+          prefix,
+          secretHash,
+          environment: input.environment,
+          scopes,
+          dataLimit,
+          sourceId: input.sourceId ?? null,
+          rateLimitPerMinute: 600,
+          dailyArrivalCap: 500,
+          monthlyEnrichmentCreditCap: 0,
+          createdBy: ctx.actor.id,
+          expiresAt: input.expiresAt ?? null,
+        }),
+      );
+      break;
+    } catch (e) {
+      const err = e as { code?: string; cause?: { code?: string } };
+      if ((err.code ?? err.cause?.code) === '23505' && attempt === 0) continue;
+      throw e;
+    }
+  }
   await publish(
     ctx,
     apiKeyCreated,
@@ -140,7 +178,7 @@ export async function revokeApiKey(ctx: ModuleContext, id: string, reason: strin
     .update(apiKey)
     .set({ revokedAt: new Date() })
     .where(and(eq(apiKey.id, id), eq(apiKey.tenantId, ctx.tenantId), isNull(apiKey.revokedAt)))
-    .returning({ id: apiKey.id });
+    .returning({ id: apiKey.id, prefix: apiKey.prefix });
   if (rows.length === 0) {
     throw new ScoutError({
       slug: 'not-found',
@@ -148,6 +186,7 @@ export async function revokeApiKey(ctx: ModuleContext, id: string, reason: strin
       title: 'That key was not found.',
     });
   }
+  evictPrefix(rows[0]!.prefix);
   await publish(ctx, apiKeyRevoked, { keyId: id, reason, revokedBy: ctx.actor.id }, { type: 'api_key', id });
   await audit(ctx, {
     action: 'tenancy.api_key.revoked',
@@ -185,6 +224,7 @@ export async function createKeyFromCli(input: {
         tx,
       },
       { name: input.name, environment: input.test ? 'test' : 'live', scopes },
+      SYSTEM_GRANTOR,
     ),
   );
   return secret;
@@ -197,6 +237,13 @@ type Verified = { principal: Principal; expiresAt: number | null };
 let ttlMs = 60_000;
 const verified = new Map<string, { at: number; value: Verified }>();
 const touched = new Map<string, number>();
+let dummy: Promise<string> | null = null;
+const dummyHash = () => (dummy ??= hash('scout-dummy-secret-for-timing'));
+
+/** Drops this instance's cached entries for a key prefix (other instances expire within 60 seconds). */
+function evictPrefix(prefix: string): void {
+  for (const k of verified.keys()) if (k.startsWith(`${prefix}\u0000`)) verified.delete(k);
+}
 
 /** Test hook: how long verified keys are cached (at most 60 seconds). Clears the cache. */
 export function setKeyCacheTtl(ms: number): void {
@@ -253,7 +300,11 @@ export async function authenticateKey(token: string, ip: string | null): Promise
     .from(apiKey)
     .innerJoin(tenant, eq(tenant.id, apiKey.tenantId))
     .where(eq(apiKey.prefix, prefix));
-  if (!row) return null;
+  if (!row) {
+    // Same work as a real check, so an unknown prefix cannot be told apart by timing.
+    await verify(await dummyHash(), token);
+    return null;
+  }
   if (!(await verify(row.key.secretHash, token))) return null;
 
   const k = row.key;
@@ -271,11 +322,13 @@ export async function authenticateKey(token: string, ip: string | null): Promise
     kind: 'api_key',
     id: k.id,
     sourceId: k.sourceId ?? undefined,
-    permissions: k.scopes.filter(isPermission),
+    environment: k.environment === 'test' ? 'test' : 'live',
+    permissions: Object.freeze(k.scopes.filter(isPermission)) as Permission[],
     dataLimit: limit,
     platformAdmin: false,
     supportAccess: false,
   };
+  Object.freeze(principal);
   if (ttlMs > 0) {
     if (verified.size >= 10_000) verified.clear();
     verified.set(cacheKey, {
