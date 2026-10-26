@@ -1,6 +1,6 @@
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { scrubError } from '@/lib/scrub-error';
+import { scrubError } from '@/platform/scrub-error';
 import { platformAudit } from './audit';
 import { adminDb } from './db/client';
 import { deadJob, outbox } from './db/schema';

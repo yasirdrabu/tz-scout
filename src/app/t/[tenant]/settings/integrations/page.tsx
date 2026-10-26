@@ -3,6 +3,7 @@ import { ActionForm, SubmitButton } from '@/components/client';
 import { TenantShell } from '@/components/shell';
 import { Badge, Card, CardHeader, EmptyState, Field, Notice, PageHeader, Table, Td, Th, type Tone } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
+import { scrubError } from '@/platform/scrub-error';
 import {
   CREDENTIAL_KINDS,
   PROVIDERS,
@@ -29,7 +30,7 @@ const KIND_LABEL: Record<(typeof CREDENTIAL_KINDS)[number], string> = {
 function statusChip(c: ConnectionView): { tone: Tone; text: string } {
   switch (c.status) {
     case 'failing':
-      return { tone: 'bad', text: `Failing: ${c.lastError ?? 'the last call failed'}` };
+      return { tone: 'bad', text: `Failing: ${c.lastError ? scrubError(c.lastError) : 'the last call failed'}` };
     case 'connected':
       return { tone: 'good', text: 'Connected' };
     case 'disabled':

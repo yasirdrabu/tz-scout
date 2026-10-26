@@ -2,7 +2,7 @@ import { ActionForm, AutoRefresh, SubmitButton } from '@/components/client';
 import { AdminShell } from '@/components/shell';
 import { Badge, Card, CardHeader, EmptyState, Notice, PageHeader, Table, Td, Th } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
-import { scrubError } from '@/lib/scrub-error';
+import { scrubError } from '@/platform/scrub-error';
 import { listDeadJobs } from '@/platform/dead-jobs';
 import { systemHealth } from '@/platform/health';
 import { adminContext } from '@/server/page-context';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scrubError } from '@/lib/scrub-error';
+import { scrubError } from '@/platform/scrub-error';
 
 describe('scrubError', () => {
   it('removes credentials from connection strings', () => {
@@ -16,9 +16,13 @@ describe('scrubError', () => {
     expect(scrubError('bad key scout_live_ab12cd34EFGH56')).toBe('bad key [redacted key]');
   });
   it('removes long token-like runs but keeps ordinary words', () => {
-    const t = 'a'.repeat(40);
+    const t = 'a1'.repeat(20);
     expect(scrubError(`token ${t} rejected`)).toBe('token [redacted] rejected');
     expect(scrubError('The service did not answer')).toBe('The service did not answer');
+  });
+  it('keeps long words and paths without digits', () => {
+    const s = 'internationalization-and-localization-of/the/configuration';
+    expect(scrubError(s)).toBe(s);
   });
   it('truncates to 500 characters', () => {
     expect(scrubError('word '.repeat(300)).length).toBeLessThanOrEqual(500);
