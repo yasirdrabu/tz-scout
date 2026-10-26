@@ -20,6 +20,17 @@ The base the rest of Scout builds on. Everything runs on a laptop on mock servic
 - Credentials are bound to their connection when sealed, and secrets are scrubbed from error text and logs.
 - Test keys can never reach a live service.
 
+**Whole-branch review fixes (2026-10-26)**
+- "Run now" on the System page works for module jobs such as the credentials cleanup.
+- Idempotency keys are now isolated per tenant, and a test checks that every table with a tenant id forces row level security unless it is on a short platform-wide list.
+- Changes made by a platform admin under support access are marked in the audit log and show a "Support access" badge on the Audit page.
+- Calls on sample data no longer change a connection's status or failure count.
+- Worker, relay and scheduler logs scrub secrets and drop database query values.
+- The laptop compose stack listens on 127.0.0.1 only and has a development-only master key.
+- Only platform code, tenancy services, sign-in, the cleanup job and entry points may import the row level security bypass; lint enforces it.
+- The Profile and Members pages show permissions in plain words.
+- Browser tests allow for slow first compiles and warm the main pages first.
+
 **Checked on the laptop (2026-10-26)**: seed and `/v1/me` return the Taazaa tenant; a test event completes the round trip outbox → NATS → worker in about 140 ms, run through the same function the System page calls (the page click itself is covered by the admin browser test); a forced failing job lands in dead jobs; typecheck and lint are clean, and 80 unit, 199 integration and 9 end to end tests pass.
 
 **Still pending**
