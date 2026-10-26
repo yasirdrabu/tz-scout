@@ -1,0 +1,1 @@
+ALTER TABLE "platform"."audit_log" ADD COLUMN "support_access" boolean DEFAULT false NOT NULL;

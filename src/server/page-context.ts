@@ -6,6 +6,7 @@ import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import {
+  actorFor,
   can as canDo,
   listTenants,
   requirePermission,
@@ -70,7 +71,7 @@ export async function tenantAction<T>(
   requirePermission(principal, permission);
   return withTenant(principal.tenantId, (tx) =>
     fn(
-      { tenantId: principal.tenantId, actor: { kind: 'user', id: principal.id }, correlationId: newId('cor'), tx },
+      { tenantId: principal.tenantId, actor: actorFor(principal), correlationId: newId('cor'), tx },
       principal,
     ),
   );

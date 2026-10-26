@@ -2,9 +2,11 @@ import { sql } from 'drizzle-orm';
 import { bigserial, boolean, index, jsonb, integer, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
- * Platform schema. Platform tables are platform-wide and EXEMPT from row level security
+ * Platform schema. Most platform tables are platform-wide and EXEMPT from row level security
  * (no tenant policy): the relay and consumers read across tenants. `tenant_id` is still
- * stored so rows can be traced to a tenant.
+ * stored so rows can be traced to a tenant. Tables that hold tenant data (`audit_log`,
+ * `idempotency_key`) force the tenant_isolation policy; tests/integration/platform/rls-catalog
+ * keeps the exempt list.
  */
 export const platform = pgSchema('platform');
 
@@ -131,6 +133,8 @@ export const auditLog = platform.table(
     actorId: text('actor_id').notNull(),
     sourceId: text('source_id'),
     apiKeyId: text('api_key_id'),
+    /** True when a platform admin made the change under support access. */
+    supportAccess: boolean('support_access').notNull().default(false),
     action: text('action').notNull(),
     subjectType: text('subject_type'),
     subjectId: text('subject_id'),

@@ -1,4 +1,4 @@
-import { resolvePrincipal, requirePermission, type Permission, type Principal } from '@/modules/tenancy';
+import { actorFor, resolvePrincipal, requirePermission, type Permission, type Principal } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { config } from '@/platform/config';
 import { withTenant } from '@/platform/db/tenant';
@@ -67,14 +67,7 @@ export function v1Route(opts: { permission?: Permission }, handler: V1Handler): 
       }
       if (req.headers.get('authorization') === null) assertSameSite(req);
       if (opts.permission) requirePermission(principal, opts.permission);
-      const actor =
-        principal.kind === 'user'
-          ? ({ kind: 'user', id: principal.id } as const)
-          : ({
-              kind: 'agent',
-              id: principal.id,
-              sourceId: principal.sourceId,
-            } as const);
+      const actor = actorFor(principal);
       const result = await withTenant(principal.tenantId, (tx) =>
         handler(req, principal, {
           tenantId: principal.tenantId,

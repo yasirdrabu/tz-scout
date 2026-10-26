@@ -1,4 +1,5 @@
 import { ScoutError } from '@/platform/errors';
+import type { Actor } from '@/platform/events/envelope';
 import { describeLimit, type DataLimit } from '../domain/data-limit';
 import type { Permission } from '../domain/permissions';
 
@@ -16,6 +17,16 @@ export type Principal = {
   platformAdmin: boolean;
   supportAccess: boolean;
 };
+
+/**
+ * The audit and event actor for a principal. A platform admin acting under support access is
+ * marked, so every change they make is recorded as made under support access.
+ */
+export function actorFor(p: Principal): Actor {
+  const base: Actor =
+    p.kind === 'user' ? { kind: 'user', id: p.id } : { kind: 'agent', id: p.id, ...(p.sourceId ? { sourceId: p.sourceId } : {}) };
+  return p.supportAccess ? { ...base, supportAccess: true } : base;
+}
 
 export function can(p: Principal, perm: Permission): boolean {
   return p.platformAdmin || p.permissions.includes(perm);

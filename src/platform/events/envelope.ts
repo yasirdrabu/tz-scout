@@ -4,6 +4,8 @@ export const ActorSchema = z.object({
   kind: z.enum(['user', 'agent', 'system']),
   id: z.string().min(1),
   sourceId: z.string().optional(),
+  /** Set when a platform admin acts in a workspace under support access. Audit rows record it. */
+  supportAccess: z.boolean().optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 

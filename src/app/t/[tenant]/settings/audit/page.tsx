@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { TenantShell } from '@/components/shell';
-import { Card, CardHeader, EmptyState, Notice, PageHeader, Table, Td, Th, buttonClass } from '@/components/ui';
+import { Badge, Card, CardHeader, EmptyState, Notice, PageHeader, Table, Td, Th, buttonClass } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
 import { listAudit } from '@/platform/audit';
 import { withTenant } from '@/platform/db/tenant';
@@ -132,6 +132,11 @@ export default async function AuditPage({
                     <span className="font-mono">{r.actorId}</span>
                     {r.apiKeyId && <div className="text-ink-muted">via key {r.apiKeyId}</div>}
                     {r.sourceId && <div className="text-ink-muted">via source {r.sourceId}</div>}
+                    {r.supportAccess && (
+                      <div className="mt-1">
+                        <Badge tone="near">Support access</Badge>
+                      </div>
+                    )}
                   </Td>
                   <Td className="font-mono text-xs">{r.subjectType ? `${r.subjectType} ${r.subjectId ?? ''}` : ''}</Td>
                   <Td className="max-w-sm break-words font-mono text-2xs text-ink-soft">{summary(r.after ?? r.before)}</Td>
