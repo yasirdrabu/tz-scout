@@ -1,0 +1,922 @@
+// Client acquisition system. Every company-owned table carries companyId and every query is
+// scoped by it (see src/lib/db.ts). Money is integer cents; rates are decimals (0.05 = 5%).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  OPERATOR
+  SALES
+}
+
+enum OfferingStatus {
+  DRAFT
+  APPROVED
+  ARCHIVED
+}
+
+enum SegmentStatus {
+  PROPOSED
+  SHORTLISTED
+  ACTIVE
+  REJECTED
+}
+
+enum Origin {
+  AI
+  MANUAL
+}
+
+enum BatchStatus {
+  DRAFT
+  APPROVED
+  RUNNING
+  COMPLETE
+}
+
+enum StatementKind {
+  PROBLEM
+  OUTCOME
+}
+
+enum StatementDecision {
+  PENDING
+  KEEP
+  DROP
+  REWRITE
+  RETEST
+}
+
+enum LeadStatus {
+  NEW
+  VALIDATING
+  VALIDATED
+  NOT_QUALIFIED
+  REVIEW
+}
+
+enum CheckResult {
+  PASS
+  FAIL
+  UNKNOWN
+}
+
+enum MeetingType {
+  DISCOVERY
+  SALES
+}
+
+enum MeetingStatus {
+  BOOKED
+  HELD
+  NO_SHOW
+  REBOOKED
+  CANCELLED
+}
+
+enum TouchStatus {
+  SCHEDULED
+  SENT
+  SKIPPED
+}
+
+enum Channel {
+  EMAIL
+  SMS
+}
+
+// ---------- Tenancy and access ----------
+
+model Company {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  currency  String   @default("USD")
+  createdAt DateTime @default(now())
+
+  memberships     Membership[]
+  settings        Settings?
+  offerings       Offering[]
+  caseStudies     CaseStudy[]
+  segments        Segment[]
+  integrations    IntegrationConnection[]
+  aiRuns          AiRun[]
+  leads           Lead[]
+  meetings        Meeting[]
+  weeks           Week[]
+  auditLogs       AuditLog[]
+  offeringCases   OfferingCaseStudy[]
+  segmentFactors  SegmentFactor[]
+  batches         Batch[]
+  statements      Statement[]
+  results         StatementResult[]
+  scenarios       FunnelScenario[]
+  leadChecks      LeadCheck[]
+  touches         MeetingTouch[]
+  dealLinks       DealLink[]
+  weekMetrics     WeekMetric[]
+  diagnoses       Diagnosis[]
+  fixes           Fix[]
+  formSubmissions FormSubmission[]
+  accounts        Account[]
+  contacts        Contact[]
+  signals         Signal[]
+  accountMatches  AccountMatch[]
+  searches        ProspectSearch[]
+  sellers         Seller[]
+  callReviews     CallReview[]
+  proposals       Proposal[]
+  winAnalyses     WinAnalysis[]
+  handoffBatches  HandoffBatch[]
+  leadImports     LeadImport[]
+  buckets         Bucket[]
+}
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  name        String
+  isAdmin     Boolean      @default(false) // Taazaa admin: manages companies, users, integrations
+  createdAt   DateTime     @default(now())
+  memberships Membership[]
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  companyId String
+  userId    String
+  role      Role
+  createdAt DateTime @default(now())
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, userId])
+}
+
+model Settings {
+  id        String  @id @default(cuid())
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // Segment scoring weights by factor key. Must sum to 100.
+  weights           Json
+  maxActiveSegments Int  @default(3)
+  // Message test defaults: budgetCents, durationHours, targetCtr, targetCpcCents, minImpressions
+  testDefaults      Json
+  // Funnel defaults used when there is no history: cpmCents, rates by stage, dealValueCents, margin
+  funnelDefaults    Json
+  // Show-up sequence timing: reminderHours [24, 1], rebookDays [0, 3, 7]
+  sequence          Json
+  // Scorecard targets and minimum sample per metric key
+  scorecard         Json
+  // Buyers: fit/signal split, credit cap per pull, AI brief threshold
+  buyers            Json?
+  // Lead routing: round robin pointer
+  roundRobinIndex   Int  @default(0)
+  updatedAt         DateTime @updatedAt
+}
+
+model IntegrationConnection {
+  id         String    @id @default(cuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  provider   String // hubspot, meta, linkedin, googleAds, companyData, booking, messaging, anthropic
+  status     String    @default("not_connected") // connected | not_connected | error
+  note       String?
+  lastSyncAt DateTime?
+  config     Json?
+
+  @@unique([companyId, provider])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  data      Json?
+  createdAt DateTime @default(now())
+
+  @@index([companyId, entity, entityId])
+}
+
+model AiRun {
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  task          String // segments, statements, rewrite, offering-draft, lead-research, weekly-diagnosis
+  promptVersion String
+  model         String
+  mock          Boolean
+  inputHash     String
+  inputTokens   Int      @default(0)
+  outputTokens  Int      @default(0)
+  ok            Boolean
+  result        Json?
+  error         String?
+  durationMs    Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@index([companyId, task, createdAt])
+}
+
+// ---------- Module 1: Offer intake ----------
+
+model Offering {
+  id                 String         @id @default(cuid())
+  companyId          String
+  company            Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  slug               String
+  name               String
+  promise            String         @default("")
+  priceMinCents      Int?
+  priceMaxCents      Int?
+  grossMargin        Float? // decimal, 0.55 = 55%
+  dealSizeCents      Int?
+  salesCycleDays     Int?
+  targetTitles       String[]
+  companySizeMin     Int?
+  companySizeMax     Int?
+  revenueMinCents    BigInt?
+  revenueMaxCents    BigInt?
+  industries         String[]
+  regions            String[]
+  excludedDomains    String[]
+  excludedCategories String[]
+  proofPoints        String[]
+  timelineWindowDays Int            @default(180)
+  // The practice bucket this offer sells under (AI Transformation, AI Operating Platforms, ...).
+  bucketId           String?
+  bucket             Bucket?        @relation(fields: [bucketId], references: [id], onDelete: SetNull)
+  // Offer readiness: { score, band, factors: [{ key, label, group, points, max, reason, source, override }], fixes, at }
+  readiness          Json?
+  readinessAt        DateTime?
+  // Buying signals that suggest this offer, see src/lib/matching.ts
+  signalRules        Json?
+  status             OfferingStatus @default(DRAFT)
+  sourceUrl          String?
+  aiDraft            Json? // last AI draft, kept for comparison
+  approvedAt         DateTime?
+  approvedById       String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  caseStudies OfferingCaseStudy[]
+  segments    Segment[]
+  scenarios   FunnelScenario[]
+  leads       Lead[]
+  matches     AccountMatch[]
+  searches    ProspectSearch[]
+
+  @@unique([companyId, slug])
+}
+
+model CaseStudy {
+  id        String              @id @default(cuid())
+  companyId String
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title     String
+  client    String
+  industry  String
+  result    String
+  link      String?
+  createdAt DateTime            @default(now())
+  offerings OfferingCaseStudy[]
+  meetings  Meeting[]
+}
+
+model OfferingCaseStudy {
+  id          String    @id @default(cuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  offeringId  String
+  caseStudyId String
+  offering    Offering  @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  caseStudy   CaseStudy @relation(fields: [caseStudyId], references: [id], onDelete: Cascade)
+
+  @@unique([offeringId, caseStudyId])
+}
+
+// ---------- Module 2: Segment scoring ----------
+
+model Segment {
+  id             String        @id @default(cuid())
+  companyId      String
+  company        Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  offeringId     String
+  offering       Offering      @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  key            String // stable key so regeneration updates the same segment and keeps overrides
+  name           String
+  buyer          String
+  problem        String
+  industry       String?
+  status         SegmentStatus @default(PROPOSED)
+  origin         Origin        @default(AI)
+  audienceSize   Int?
+  searchVolume   Int?
+  cpcCents       Int?
+  caseStudyCount Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  factors    SegmentFactor[]
+  batches    Batch[]
+  statements Statement[]
+
+  @@unique([offeringId, key])
+}
+
+model SegmentFactor {
+  id            String    @id @default(cuid())
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  segmentId     String
+  segment       Segment   @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  factor        String // factor key, see src/lib/scoring.ts
+  value         Float // 0..10 as proposed by AI or data
+  reason        String
+  overrideValue Float?
+  overrideNote  String?
+  overriddenBy  String?
+  overriddenAt  DateTime?
+
+  @@unique([segmentId, factor])
+}
+
+// ---------- Module 3: Message tests ----------
+
+model Batch {
+  id             String      @id @default(cuid())
+  companyId      String
+  company        Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  segmentId      String
+  segment        Segment     @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  name           String
+  status         BatchStatus @default(DRAFT)
+  channel        String      @default("meta") // meta | linkedin
+  budgetCents    Int
+  durationHours  Int
+  targetCtr      Float
+  targetCpcCents Int
+  minImpressions Int         @default(1000)
+  launchedAt     DateTime?
+  endsAt         DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime    @default(now())
+  statements     Statement[]
+}
+
+model Statement {
+  id          String            @id @default(cuid())
+  companyId   String
+  company     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  batchId     String
+  batch       Batch             @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  segmentId   String
+  segment     Segment           @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  text        String
+  kind        StatementKind
+  decision    StatementDecision @default(PENDING)
+  inLibrary   Boolean           @default(false)
+  rewriteOfId String?
+  externalId  String? // ad set id on the channel
+  createdAt   DateTime          @default(now())
+  result      StatementResult?
+}
+
+model StatementResult {
+  id          String    @id @default(cuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  statementId String    @unique
+  statement   Statement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  impressions Int
+  clicks      Int
+  spendCents  Int
+  fetchedAt   DateTime  @default(now())
+}
+
+// ---------- Module 4: Funnel model ----------
+
+model FunnelScenario {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  offeringId String
+  offering   Offering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  name       String
+  inputs     Json // FunnelInputs, see src/lib/funnel.ts
+  createdBy  String?
+  createdAt  DateTime @default(now())
+}
+
+// ---------- Module 5: Lead validation ----------
+
+model FormSubmission {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  source     String // webhook | hubspot | manual
+  payload    Json
+  receivedAt DateTime @default(now())
+  leadId     String?  @unique
+  lead       Lead?    @relation(fields: [leadId], references: [id])
+}
+
+model Lead {
+  id               String     @id @default(cuid())
+  companyId        String
+  company          Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  offeringId       String?
+  offering         Offering?  @relation(fields: [offeringId], references: [id], onDelete: SetNull)
+  email            String
+  firstName        String
+  lastName         String
+  title            String?
+  companyName      String?
+  domain           String?
+  phone            String?
+  smsConsent       Boolean    @default(false)
+  timelineAnswer   String?
+  formAnswers      Json?
+  source           String     @default("inbound") // inbound (form) | outbound (from Buyers)
+  accountId        String?
+  contactId        String?    @unique
+  contact          Contact?   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  status           LeadStatus @default(NEW)
+  decisionReason   String?
+  researchNote     String?
+  ownerUserId      String?
+  hubspotContactId String?
+  submittedAt      DateTime   @default(now())
+  validatedAt      DateTime?
+  overrideStatus   LeadStatus?
+  overrideReason   String?
+  overrideById     String?
+  overrideAt       DateTime?
+
+  checks     LeadCheck[]
+  meetings   Meeting[]
+  touches    MeetingTouch[]
+  submission FormSubmission?
+  deals      DealLink[]
+
+  @@index([companyId, status])
+  @@index([companyId, submittedAt])
+}
+
+model LeadCheck {
+  id        String      @id @default(cuid())
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId    String
+  lead      Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  check     String // work_email, company_size, revenue, industry, role, timeline, not_existing
+  result    CheckResult
+  reason    String
+  evidence  Json?
+  createdAt DateTime    @default(now())
+
+  @@unique([leadId, check])
+}
+
+// ---------- Module 6: Show-up agent ----------
+
+model Meeting {
+  id               String        @id @default(cuid())
+  companyId        String
+  company          Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId           String
+  lead             Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type             MeetingType   @default(DISCOVERY)
+  status           MeetingStatus @default(BOOKED)
+  scheduledAt      DateTime
+  bookedAt         DateTime      @default(now())
+  heldAt           DateTime?
+  caseStudyId      String?
+  caseStudy        CaseStudy?    @relation(fields: [caseStudyId], references: [id], onDelete: SetNull)
+  hubspotMeetingId String?
+  rebookOfId       String?
+  touches          MeetingTouch[]
+
+  @@index([companyId, scheduledAt])
+}
+
+model MeetingTouch {
+  id        String      @id @default(cuid())
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId    String
+  lead      Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  meetingId String?
+  meeting   Meeting?    @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  kind      String // booking_link, confirmation, reminder_24h, reminder_1h, precall_note, rebook_1..3
+  channel   Channel     @default(EMAIL)
+  dueAt     DateTime
+  sentAt    DateTime?
+  status    TouchStatus @default(SCHEDULED)
+  subject   String?
+  body      String
+  createdAt DateTime    @default(now())
+
+  @@index([status, dueAt])
+}
+
+// HubSpot owns deal state. We cache stage and value for reporting only.
+model DealLink {
+  id            String    @id @default(cuid())
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId        String?
+  lead          Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  hubspotDealId String
+  stage         String
+  amountCents   Int
+  qualifiedAt   DateTime?
+  closedAt      DateTime?
+  isWon         Boolean   @default(false)
+  conversionSentAt DateTime?
+  syncedAt      DateTime  @default(now())
+
+  @@unique([companyId, hubspotDealId])
+}
+
+// ---------- Module 7: Weekly scorecard ----------
+
+model Week {
+  id        String       @id @default(cuid())
+  companyId String
+  company   Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  startDate DateTime // Monday 00:00 UTC
+  builtAt   DateTime?
+  metrics   WeekMetric[]
+  diagnosis Diagnosis?
+
+  @@unique([companyId, startDate])
+}
+
+// Raw weekly counts. Rates and costs are derived in src/lib/scorecard.ts.
+model WeekMetric {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  weekId    String
+  week      Week    @relation(fields: [weekId], references: [id], onDelete: Cascade)
+  key       String
+  value     Float
+
+  @@unique([weekId, key])
+}
+
+model Diagnosis {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  weekId      String   @unique
+  week        Week     @relation(fields: [weekId], references: [id], onDelete: Cascade)
+  bottleneck  String
+  cause       String
+  summary     String
+  aiRunId     String?
+  editedById  String?
+  editedAt    DateTime?
+  createdAt   DateTime @default(now())
+  fixes       Fix[]
+}
+
+model Fix {
+  id          String    @id @default(cuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  diagnosisId String
+  diagnosis   Diagnosis @relation(fields: [diagnosisId], references: [id], onDelete: Cascade)
+  text        String
+  ownerRole   String // Owner | Operator | Sales
+  done        Boolean   @default(false)
+  doneAt      DateTime?
+  doneById    String?
+  createdAt   DateTime  @default(now())
+}
+
+// ---------- Buyers: pull accounts, read signals, match to offers ----------
+
+enum AccountStatus {
+  NEW
+  WORKING
+  QUALIFIED
+  DISQUALIFIED
+  CUSTOMER
+}
+
+// A company we could sell to. Pulled from a prospect data source (Apollo first) or HubSpot.
+model Account {
+  id                String        @id @default(cuid())
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  domain            String
+  name              String
+  industry          String?
+  employees         Int?
+  revenueCents      BigInt?
+  city              String?
+  state             String?
+  country           String?
+  websiteUrl        String?
+  linkedinUrl       String?
+  description       String?
+  technologies      String[]
+  keywords          String[]
+  headcountGrowth6m Float? // decimal, 0.12 = 12% over six months
+  foundedYear       Int?
+  employeesRange    String? // as the source reports it, e.g. "501-1000"
+  revenueRange      String? // e.g. "75M-200M"
+  // Ruled out for every offer (software vendor, unit of a large public company). A person can override.
+  excludedReason    String?
+  excludedOverride  Boolean       @default(false)
+  source            String // apollo | vibe | hubspot | manual | mock
+  externalId        String? // id in the source system
+  hubspotCompanyId  String?
+  status            AccountStatus @default(NEW)
+  ownerUserId       String?
+  // Who follows up: a HubSpot owner on the team roster. Reps work the account in HubSpot.
+  sellerId          String?
+  seller            Seller?       @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+  callReviews       CallReview[]
+  proposals         Proposal[]
+  // What HubSpot already knows about this company (read-only check before assigning or pushing).
+  hubspotOwnerId    String? // owner on the HubSpot company record, if any
+  hubspotState      String? // new | in_crm | open_deal | customer
+  hubspotNote       String?
+  hubspotCheckedAt  DateTime?
+  pushedAt          DateTime?
+  pushedOwnerId     String? // the HubSpot owner we set on the last push; only that owner may be replaced
+  hubspotNoteId     String? // the context note we keep updated on each push
+  hubspotNoteHash   String? // fingerprint of that note as HubSpot stored it; a mismatch means someone edited it
+  hubspotTaskId     String?
+  hubspotSequenceTaskIds String[] @default([])
+  // Sent: once pushed, the account leaves the working queue and lives in its handoff batch.
+  batchId           String?
+  batch             HandoffBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  // Follow-through read from HubSpot after the push: { tasksDone, tasksTotal, overdue, emails, calls, meetings, deals, lastActivityAt, stage }
+  followUp          Json?
+  followUpAt        DateTime?
+  // Lead sheets this company came in on (LeadImport ids).
+  importIds         String[] @default([])
+  // Practice buckets it belongs to (Bucket slugs), and the research per bucket from imported ABM sheets:
+  // { [bucketSlug]: ResearchEntry } see src/lib/research.ts
+  buckets           String[] @default([])
+  research          Json?
+  // Denormalized best match for fast ranking; recomputed by src/server/buyers.ts
+  bestOfferingId    String?
+  bestTotal         Float?
+  bestFit           Float?
+  bestSignal        Float?
+  tier              String? // act_now | good_fit | watch | not_fit
+  enrichedAt        DateTime?
+  signalsAt         DateTime?
+  matchedAt         DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  contacts Contact[]
+  signals  Signal[]
+  matches  AccountMatch[]
+
+  @@unique([companyId, domain])
+  @@index([companyId, tier, bestTotal])
+}
+
+// A person at an account. Emails are only revealed on request because they cost credits.
+model Contact {
+  id               String   @id @default(cuid())
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  accountId        String
+  account          Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  firstName        String
+  lastName         String?
+  title            String?
+  seniority        String?
+  email            String?
+  emailStatus      String?
+  phone            String?
+  mobilePhone      String?
+  linkedinUrl      String?
+  source           String
+  externalId       String?
+  hubspotContactId String?
+  isPrimary        Boolean  @default(false)
+  importId         String? // the lead sheet this person came from
+  createdAt        DateTime @default(now())
+  lead             Lead?
+
+  @@unique([accountId, source, externalId])
+}
+
+// Something happening at an account that suggests it's in a buying window.
+model Signal {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  accountId  String
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type       String // hiring | tech | growth | funding | leadership | news | intent
+  title      String
+  detail     String?
+  url        String?
+  value      Float? // numeric signals, e.g. headcount growth 0.18
+  occurredAt DateTime
+  source     String
+  externalId String
+  createdAt  DateTime @default(now())
+
+  @@unique([accountId, source, externalId])
+  @@index([companyId, occurredAt])
+}
+
+// How well an account fits one offering, and why. One row per account per approved offering.
+model AccountMatch {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  accountId  String
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  offeringId String
+  offering   Offering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  segmentId  String?
+  fit        Float
+  signal     Float
+  total      Float
+  tier       String
+  reasons    Json // { fit: [{label, points, max, note}], signals: [{rule, points, signalIds}] , disqualified?: string }
+  whyNow     String?
+  angle      String?
+  opener     String?
+  contactTitle String?
+  aiRunId    String?
+  briefedAt  DateTime?
+  // Outbound follow-up after the opener: [{ step, day, subject, body }]
+  sequence      Json?
+  sequenceAt    DateTime?
+  // Discovery call plan for this account and offer
+  callPrep      Json?
+  callPrepAt    DateTime?
+  computedAt DateTime @default(now())
+
+  @@unique([accountId, offeringId])
+}
+
+// A saved pull: filters sent to the prospect data source, usually built from an offering's segment.
+model ProspectSearch {
+  id             String    @id @default(cuid())
+  companyId      String
+  company        Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name           String
+  provider       String    @default("apollo") // apollo | vibe
+  offeringId     String?
+  offering       Offering? @relation(fields: [offeringId], references: [id], onDelete: SetNull)
+  segmentId      String?
+  filters        Json // ProspectFilters, see src/integrations/prospects/types.ts
+  maxCompanies   Int       @default(25)
+  schedule       String    @default("off") // off | daily | weekly
+  status         String    @default("idle") // idle | running | done | error
+  lastRunAt      DateTime?
+  lastRunFound   Int?
+  lastRunNew     Int?
+  lastRunCredits Int?
+  error          String?
+  createdBy      String?
+  createdAt      DateTime  @default(now())
+}
+
+// The team roster for assigning accounts: HubSpot owners. Reps don't need to log in here; they work
+// assigned accounts in HubSpot. userId links a seller to an app login once team sign-in is on.
+model Seller {
+  id             String    @id @default(cuid())
+  companyId      String
+  company        Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name           String
+  email          String?
+  hubspotOwnerId String
+  active         Boolean   @default(true) // active in HubSpot
+  onTeam         Boolean   @default(false) // shows up when assigning accounts
+  userId         String?
+  accounts       Account[]
+  createdAt      DateTime  @default(now())
+
+  @@unique([companyId, hubspotOwnerId])
+}
+
+// A sales call, reviewed: the transcript or recap a rep pasted (or Fathom sent), scored against the
+// qualification checklist, with next steps. Written back to HubSpot as a note.
+model CallReview {
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  accountId     String
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  offeringId    String?
+  title         String
+  heldAt        DateTime
+  source        String   @default("pasted") // pasted | fathom
+  transcript    String
+  review        Json // CallReviewOutput, see src/ai/callReview.ts
+  aiRunId       String?
+  hubspotNoteId String?
+  createdBy     String?
+  createdAt     DateTime @default(now())
+}
+
+// A proposal drafted from the account, the offer and the call reviews.
+model Proposal {
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  accountId     String
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  offeringId    String?
+  title         String
+  body          Json // ProposalDraft sections, see src/ai/proposal.ts
+  status        String   @default("draft") // draft | sent
+  aiRunId       String?
+  hubspotNoteId String?
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// What our won clients actually bought: closed-won deals read from HubSpot and the patterns in them.
+model WinAnalysis {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  source    String   @default("hubspot") // hubspot | sample
+  dealCount Int
+  deals     Json // the won deals as read
+  findings  Json // WinFindings, see src/ai/winAnalysis.ts
+  aiRunId   String?
+  createdBy String?
+  createdAt DateTime @default(now())
+}
+
+// A handoff: the accounts pushed to reps together. Sent accounts leave the Buyers queue and live here.
+model HandoffBatch {
+  id        String    @id @default(cuid())
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  createdBy String?
+  createdAt DateTime  @default(now())
+  accounts  Account[]
+  // One handoff message per rep: [{ sellerId, seller, text }]
+  messages  Json?
+}
+
+// A lead sheet someone dropped in (CSV, Excel or Markdown): parsed rows, the column mapping, and what
+// the import did. Companies and people it creates or touches carry its id.
+model LeadImport {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  fileName  String
+  status    String   @default("mapping") // mapping | done | error
+  kind      String   @default("leads") // leads (people list) | research (ABM research sheet, one company per row)
+  bucketId  String?
+  headers   Json // string[]
+  rows      Json // string[][]
+  mapping   Json? // { field: columnIndex }
+  enrich    Boolean  @default(false)
+  stats     Json? // ImportStats, see src/server/leadImport.ts
+  error     String?
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// A practice line the company sells under. Offers belong to one; accounts can sit in several. Imported
+// research sheets are filed into a bucket by their file name or "agent" column.
+model Bucket {
+  id          String     @id @default(cuid())
+  companyId   String
+  company     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  slug        String
+  name        String
+  description String     @default("")
+  // Words that identify a sheet for this bucket (file name or agent column), e.g. ["transformation"]
+  keywords    String[]
+  sort        Int        @default(0)
+  offerings   Offering[]
+  createdAt   DateTime   @default(now())
+
+  @@unique([companyId, slug])
+}
