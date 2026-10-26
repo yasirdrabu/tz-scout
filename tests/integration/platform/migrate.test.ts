@@ -35,7 +35,7 @@ describe('migrateAll', () => {
   });
 
   it('applies a migration once and applies 0 on the second run', async () => {
-    const folders = { platform: '/nonexistent', tenancy: '/nonexistent', ai: probeMigrations() }; // isolate from real migrations
+    const folders = { platform: '/nonexistent', tenancy: '/nonexistent', integrations: '/nonexistent', ai: probeMigrations() }; // isolate from real migrations
     const count = async () => {
       const sql = postgres(db.adminUrl, { max: 1 });
       try {

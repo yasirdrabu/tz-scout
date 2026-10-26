@@ -4,3 +4,5 @@
 import '@/platform/dead-jobs';
 import '@/platform/diagnostics';
 import '@/modules/tenancy/contracts/events';
+import '@/modules/integrations/contracts/events';
+import '@/modules/integrations';

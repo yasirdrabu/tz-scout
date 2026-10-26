@@ -37,6 +37,33 @@ export const boundariesConfig = {
   },
 };
 
+// Provider SDKs may be imported only by live adapters (INT-E5-S2-AC1).
+export const SDK_PACKAGES = ["@anthropic-ai/sdk", "@hubspot/api-client"];
+export const sdkImportConfigs = [
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: SDK_PACKAGES.map((name) => ({
+            name,
+            message: "Provider SDKs may only be imported from src/modules/*/adapters/*/live*. Call providers through gateway.call.",
+          })),
+          patterns: SDK_PACKAGES.map((name) => ({
+            group: [name + "/*"],
+            message: "Provider SDKs may only be imported from src/modules/*/adapters/*/live*.",
+          })),
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/modules/*/adapters/*/live*", "src/modules/*/adapters/*/live*/**"],
+    rules: { "no-restricted-imports": "off" },
+  },
+];
+
 const config = [
   {
     ignores: [
@@ -59,6 +86,7 @@ const config = [
     },
   },
   boundariesConfig,
+  ...sdkImportConfigs,
 ];
 
 export default config;

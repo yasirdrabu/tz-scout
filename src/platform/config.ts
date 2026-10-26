@@ -11,6 +11,8 @@ export type Config = {
   natsUrl: string;
   masterKey?: Buffer;
   masterKeyPrevious?: Buffer;
+  /** Key version stamped on new credentials. The previous key is version - 1. */
+  masterKeyVersion: number;
   authSecret: string;
   authDevSignin: boolean;
   forceMock: boolean;
@@ -36,6 +38,7 @@ const schema = z.object({
   NATS_URL: z.string().min(1).optional(),
   SCOUT_MASTER_KEY: z.string().optional(),
   SCOUT_MASTER_KEY_PREVIOUS: z.string().optional(),
+  SCOUT_MASTER_KEY_VERSION: z.coerce.number().int().min(1).max(100000).default(1),
   AUTH_SECRET: z.string().min(1).optional(),
   AUTH_DEV_SIGNIN: bool,
   SCOUT_FORCE_MOCK: bool,
@@ -111,6 +114,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     natsUrl: e.NATS_URL ?? 'nats://localhost:4222',
     masterKey,
     masterKeyPrevious,
+    masterKeyVersion: e.SCOUT_MASTER_KEY_VERSION,
     authSecret: e.AUTH_SECRET ?? 'dev-only-insecure-auth-secret',
     authDevSignin: e.AUTH_DEV_SIGNIN,
     forceMock: e.SCOUT_FORCE_MOCK,

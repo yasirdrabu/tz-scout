@@ -1,0 +1,28 @@
+// Public interface of the integrations module. Other modules import only this file or `contracts/*`.
+export { gateway, RateLimitedError, redactSummary, type CallOpts } from './gateway';
+export {
+  CREDENTIAL_KINDS,
+  SAMPLE_ONLY,
+  TEST_FIRST,
+  connectionStatus,
+  listConnections,
+  saveCredential,
+  setDisabled,
+  setMode,
+  testConnection,
+  type ConnectionMode,
+  type ConnectionStatus,
+  type ConnectionView,
+  type CredentialKind,
+} from './services/connections';
+export {
+  PROVIDERS,
+  registerAdapter,
+  type Adapter,
+  type AdapterFactories,
+  type LiveCredentials,
+  type Provider,
+  type TestResult,
+} from './providers';
+export { MASTER_KEY_MISSING } from './services/vault';
+export { credentialsCleanupHandler, credentialsCleanupJob } from './jobs';
