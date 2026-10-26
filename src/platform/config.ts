@@ -46,7 +46,10 @@ function parseKey(name: string, value: string | undefined): Buffer | undefined {
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
-  const parsed = schema.safeParse(env);
+  // dotenv and Next load `KEY=` as an empty string; treat that as unset.
+  const cleaned: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(env)) cleaned[k] = v === '' ? undefined : v;
+  const parsed = schema.safeParse(cleaned);
   if (!parsed.success) {
     const msg = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     throw new Error(`Invalid configuration: ${msg}`);

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '@/platform/config';
 
@@ -43,5 +44,18 @@ describe('loadConfig', () => {
   });
   it('accepts production config', () => {
     expect(loadConfig(prod).nodeEnv).toBe('production');
+  });
+});
+
+describe('.env.example', () => {
+  it('loads without error when copied as is', () => {
+    const env: Record<string, string> = {};
+    for (const line of readFileSync('.env.example', 'utf8').split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      const i = t.indexOf('=');
+      env[t.slice(0, i)] = t.slice(i + 1);
+    }
+    expect(() => loadConfig(env)).not.toThrow();
   });
 });
