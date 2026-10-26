@@ -1,5 +1,6 @@
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { platformAudit } from './audit';
 import { adminDb } from './db/client';
 import { deadJob, outbox } from './db/schema';
 import { ScoutError } from './errors';
@@ -7,7 +8,6 @@ import { EnvelopeSchema, type Actor, type Envelope } from './events/envelope';
 import { publish } from './events/outbox';
 import { defineEvent } from './events/registry';
 import { newId } from './ids';
-import { log } from './log';
 import { eventSubject, jobSubject } from './nats/subjects';
 
 /** Published in the dead-letter transaction. Tenant = the failed envelope's tenant. */
@@ -29,20 +29,6 @@ export type DeadJobView = {
   attempts: number;
   deadAt: Date;
 };
-
-export type AuditEntry = {
-  action: string;
-  actor: Actor;
-  correlationId?: string;
-  tenantId: string;
-  target: { type: string; id: string };
-  detail: Record<string, unknown>;
-};
-
-// TODO(Task 8): replace with the platform `audit` writer, inside the same transaction.
-export function auditStub(entry: AuditEntry): void {
-  log.info({ audit: entry }, 'audit (stub until Task 8)');
-}
 
 const JOB_PREFIX = 'jobs.';
 
@@ -141,14 +127,16 @@ export async function retryDeadJob(adminCtx: AdminCtx, deadJobId: string): Promi
       sentId = original.id;
     }
     await tx.delete(deadJob).where(eq(deadJob.id, deadJobId));
-    auditStub({
-      action: 'platform.dead_job.retried',
-      actor: adminCtx.actor,
-      correlationId: adminCtx.correlationId,
-      tenantId: row.tenantId,
-      target: { type: 'dead_job', id: deadJobId },
-      detail: { name: row.consumerOrJob, attempts: row.attempts, sentId },
-    });
+    await platformAudit(
+      {
+        action: 'platform.dead_job.retried',
+        actor: adminCtx.actor,
+        correlationId: adminCtx.correlationId,
+        subject: { type: 'dead_job', id: deadJobId },
+        after: { tenantId: row.tenantId, name: row.consumerOrJob, attempts: row.attempts, sentId },
+      },
+      tx,
+    );
     return sentId;
   });
 }
@@ -158,13 +146,15 @@ export async function discardDeadJob(adminCtx: AdminCtx, deadJobId: string): Pro
   await adminDb.transaction(async (tx) => {
     const [row] = await tx.delete(deadJob).where(eq(deadJob.id, deadJobId)).returning();
     if (!row) throw notFound(deadJobId);
-    auditStub({
-      action: 'platform.dead_job.discarded',
-      actor: adminCtx.actor,
-      correlationId: adminCtx.correlationId,
-      tenantId: row.tenantId,
-      target: { type: 'dead_job', id: deadJobId },
-      detail: { name: row.consumerOrJob, attempts: row.attempts, lastError: row.lastError },
-    });
+    await platformAudit(
+      {
+        action: 'platform.dead_job.discarded',
+        actor: adminCtx.actor,
+        correlationId: adminCtx.correlationId,
+        subject: { type: 'dead_job', id: deadJobId },
+        after: { tenantId: row.tenantId, name: row.consumerOrJob, attempts: row.attempts, lastError: row.lastError },
+      },
+      tx,
+    );
   });
 }

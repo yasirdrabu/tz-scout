@@ -116,3 +116,33 @@ export const schedule = platform.table(
     index('schedule_due_idx').on(t.nextRunAt).where(sql`enabled`),
   ],
 );
+
+/**
+ * Who changed what. TENANT-SCOPED (row level security on, forced): module code writes and reads
+ * it as `scout_app` inside `withTenant`. Platform-wide rows use tenant `t_platform` and go
+ * through `adminDb`. Append only by convention: nothing updates or deletes these rows.
+ */
+export const auditLog = platform.table(
+  'audit_log',
+  {
+    id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    actorKind: text('actor_kind').notNull(),
+    actorId: text('actor_id').notNull(),
+    sourceId: text('source_id'),
+    apiKeyId: text('api_key_id'),
+    action: text('action').notNull(),
+    subjectType: text('subject_type'),
+    subjectId: text('subject_id'),
+    correlationId: text('correlation_id'),
+    ip: text('ip'),
+    before: jsonb('before'),
+    after: jsonb('after'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('audit_log_tenant_at_idx').on(t.tenantId, t.at.desc(), t.id.desc()),
+    index('audit_log_actor_idx').on(t.tenantId, t.actorId),
+    index('audit_log_subject_idx').on(t.tenantId, t.subjectId),
+  ],
+);

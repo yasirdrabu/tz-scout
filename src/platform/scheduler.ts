@@ -2,7 +2,8 @@ import { and, eq, lte } from 'drizzle-orm';
 import { CronExpressionParser } from 'cron-parser';
 import { adminDb } from './db/client';
 import { schedule } from './db/schema';
-import { auditStub, type AdminCtx } from './dead-jobs';
+import { platformAudit } from './audit';
+import type { AdminCtx } from './dead-jobs';
 import { ScoutError } from './errors';
 import type { ModuleContext } from './context';
 import { enqueueJob } from './events/outbox';
@@ -97,14 +98,16 @@ export async function upsertSchedule(adminCtx: AdminCtx, input: ScheduleInput, n
         nextRunAt,
       });
     }
-    auditStub({
-      action: 'platform.schedule.upserted',
-      actor: adminCtx.actor,
-      correlationId: adminCtx.correlationId,
-      tenantId: input.tenantId,
-      target: { type: 'schedule', id },
-      detail: { jobName: input.jobName, cron: input.cron, timezone: input.timezone },
-    });
+    await platformAudit(
+      {
+        action: 'platform.schedule.upserted',
+        actor: adminCtx.actor,
+        correlationId: adminCtx.correlationId,
+        subject: { type: 'schedule', id },
+        after: { tenantId: input.tenantId, jobName: input.jobName, cron: input.cron, timezone: input.timezone },
+      },
+      tx,
+    );
     return id;
   });
 }
@@ -118,14 +121,16 @@ async function setEnabled(adminCtx: AdminCtx, id: string, enabled: boolean, now 
       .update(schedule)
       .set(enabled ? { enabled, nextRunAt: nextRun(row.cron, row.timezone, now) } : { enabled })
       .where(eq(schedule.id, id));
-    auditStub({
-      action: enabled ? 'platform.schedule.resumed' : 'platform.schedule.paused',
-      actor: adminCtx.actor,
-      correlationId: adminCtx.correlationId,
-      tenantId: row.tenantId,
-      target: { type: 'schedule', id },
-      detail: { jobName: row.jobName },
-    });
+    await platformAudit(
+      {
+        action: enabled ? 'platform.schedule.resumed' : 'platform.schedule.paused',
+        actor: adminCtx.actor,
+        correlationId: adminCtx.correlationId,
+        subject: { type: 'schedule', id },
+        after: { tenantId: row.tenantId, jobName: row.jobName },
+      },
+      tx,
+    );
   });
 }
 
@@ -139,14 +144,16 @@ export async function runNow(adminCtx: AdminCtx, id: string): Promise<string> {
     const [row] = await tx.select().from(schedule).where(eq(schedule.id, id));
     if (!row) throw notFound(id);
     const jobId = await enqueueFor(tx, row, adminCtx.correlationId);
-    auditStub({
-      action: 'platform.schedule.run_now',
-      actor: adminCtx.actor,
-      correlationId: adminCtx.correlationId,
-      tenantId: row.tenantId,
-      target: { type: 'schedule', id },
-      detail: { jobName: row.jobName, jobId },
-    });
+    await platformAudit(
+      {
+        action: 'platform.schedule.run_now',
+        actor: adminCtx.actor,
+        correlationId: adminCtx.correlationId,
+        subject: { type: 'schedule', id },
+        after: { tenantId: row.tenantId, jobName: row.jobName, jobId },
+      },
+      tx,
+    );
     return jobId;
   });
 }
