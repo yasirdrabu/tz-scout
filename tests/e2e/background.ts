@@ -13,7 +13,10 @@ export async function startBackground(): Promise<Running> {
   });
   const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Worker and relay did not start within 60 seconds.')), 60_000);
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('Worker and relay did not start within 60 seconds.'));
+    }, 60_000);
     child.stdout.on('data', (d) => {
       if (String(d).includes('READY')) {
         clearTimeout(timer);

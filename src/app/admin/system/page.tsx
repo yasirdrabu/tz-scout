@@ -2,6 +2,7 @@ import { ActionForm, AutoRefresh, SubmitButton } from '@/components/client';
 import { AdminShell } from '@/components/shell';
 import { Badge, Card, CardHeader, EmptyState, Notice, PageHeader, Table, Td, Th } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
+import { scrubError } from '@/lib/scrub-error';
 import { listDeadJobs } from '@/platform/dead-jobs';
 import { systemHealth } from '@/platform/health';
 import { adminContext } from '@/server/page-context';
@@ -71,7 +72,7 @@ export default async function SystemPage() {
         {!health.consumersAvailable ? (
           <div className="p-4">
             <Notice tone="near" title="Message service unavailable">
-              Could not reach NATS, so consumer numbers are not shown. Everything else on this page is current.
+              Could not reach the message service, so consumer numbers are not shown. Everything else on this page is current.
             </Notice>
           </div>
         ) : health.consumers.length === 0 ? (
@@ -123,7 +124,7 @@ export default async function SystemPage() {
                 <tr key={d.id} data-testid={`dead-${d.id}`}>
                   <Td className="font-mono text-xs">{d.name}</Td>
                   <Td className="font-mono text-xs">{d.tenantId}</Td>
-                  <Td className="max-w-xs break-words text-xs">{d.lastError}</Td>
+                  <Td className="max-w-xs break-words text-xs">{scrubError(d.lastError)}</Td>
                   <Td numeric>{d.attempts}</Td>
                   <Td className="whitespace-nowrap text-xs">{formatDateTime(d.deadAt)}</Td>
                   <Td>

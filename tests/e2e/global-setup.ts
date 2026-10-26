@@ -14,7 +14,13 @@ const run = (arg: string) =>
  */
 export default async function globalSetup() {
   run('create');
-  const background = await startBackground();
+  let background: Awaited<ReturnType<typeof startBackground>>;
+  try {
+    background = await startBackground();
+  } catch (e) {
+    run('drop');
+    throw e;
+  }
   return async () => {
     await background.stop();
     run('drop');
