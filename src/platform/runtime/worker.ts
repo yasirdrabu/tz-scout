@@ -10,6 +10,8 @@ import { sql } from 'drizzle-orm';
 import { ZodError } from 'zod';
 import { config } from '../config';
 import type { ModuleContext } from '../context';
+import { adminDb } from '../db/client';
+import { guardTx } from '../db/guarded-tx';
 import { withTenant } from '../db/tenant';
 import { recordDeadJob } from '../dead-jobs';
 import { EnvelopeSchema, type Envelope } from '../events/envelope';
@@ -49,7 +51,11 @@ export type WorkerOptions = {
   maxInFlight?: number;
   /** How long a message waits on a processed_event row another delivery holds. Default 2000. */
   busyLockTimeoutMs?: number;
-  /** Delay before a message put back because it was busy comes again. Default 1000. */
+  /**
+   * Delay before a message put back because it was busy comes again. Default 1000, doubling
+   * with each busy delivery in a row, up to 30 seconds. Busy deliveries never ran the handler
+   * and do not count toward maxDeliver.
+   */
   busyRetryMs?: number;
   /** Called once every durable consumer exists and is being consumed. */
   onReady?: () => void;
@@ -77,6 +83,7 @@ type Sub = {
 };
 
 const ERROR_MAX = 4000;
+const BUSY_RETRY_CAP_MS = 30_000;
 
 /** Give up now: dead-letter without further retries. */
 class Permanent extends Error {}
@@ -209,10 +216,41 @@ function errorText(e: unknown): string {
   return text.slice(0, ERROR_MAX);
 }
 
+/** Handler runs recorded for an earlier delivery of this message (0 when none). */
+async function runsSoFar(s: Sub, eventId: string): Promise<number> {
+  const rows = await adminDb.execute(
+    sql`select run_attempts from platform.delivery_attempt where consumer_name = ${s.processedName} and event_id = ${eventId}`,
+  );
+  return (rows[0] as { run_attempts: number } | undefined)?.run_attempts ?? 0;
+}
+
+/** Counts one more handler run, outside the handler's transaction. Returns the new count. */
+async function countRun(s: Sub, eventId: string): Promise<number> {
+  const rows = await adminDb.execute(
+    sql`insert into platform.delivery_attempt (consumer_name, event_id, run_attempts) values (${s.processedName}, ${eventId}, 1)
+        on conflict (consumer_name, event_id) do update set run_attempts = platform.delivery_attempt.run_attempts + 1, updated_at = now()
+        returning run_attempts`,
+  );
+  return (rows[0] as { run_attempts: number }).run_attempts;
+}
+
+async function forgetRuns(s: Sub, eventId: string): Promise<void> {
+  await adminDb.execute(
+    sql`delete from platform.delivery_attempt where consumer_name = ${s.processedName} and event_id = ${eventId}`,
+  );
+}
+
 /**
  * Handles one delivery: dedupe, optional per-key lock, handler under a time limit, commit, ack.
- * Every wait is bounded, so a slow or stuck delivery holds its slot and connection for at most
- * busyLockTimeoutMs + the per-key wait + timeoutMs.
+ *
+ * - Every wait is bounded, so a slow or stuck delivery holds its slot and connection for at most
+ *   busyLockTimeoutMs + the per-key wait + timeoutMs.
+ * - The give-up budget counts handler runs (`platform.delivery_attempt`), not NATS deliveries:
+ *   a delivery put back as busy never ran and costs nothing. A first delivery that succeeds
+ *   writes nothing extra. A run is recorded when it fails, or when it starts on a redelivery
+ *   (so a run lost to a crash counts too; only a crash on the very first delivery goes uncounted).
+ * - The handler gets a guarded transaction that refuses every statement once its time is up or
+ *   the transaction has ended, so an abandoned handler cannot write through a pooled connection.
  */
 async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
   let envelope: Envelope;
@@ -225,9 +263,14 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
     return;
   }
   const deliveryCount = m.info.deliveryCount;
+  const redelivery = deliveryCount > 1;
   const lg = logFor(envelope).child({ consumer: s.processedName, eventId: envelope.id, deliveryCount });
   const setLocal = (name: string, value: string) => sql`select set_config(${name}, ${value}, true)`;
+  let runsBefore = 0;
+  let runs = 0; // handler runs including this one, once it starts
+  let timedOut: TimedOut | undefined;
   try {
+    if (redelivery) runsBefore = await runsSoFar(s, envelope.id);
     const outcome = await withTenant(envelope.tenantId, async (tx) => {
       // A delivery still running elsewhere holds this row uncommitted: do not wait on it for long.
       await tx.execute(setLocal('lock_timeout', `${rt.busyLockTimeoutMs}ms`));
@@ -238,13 +281,11 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
         ),
       );
       if (inserted.length === 0) return 'duplicate' as const;
-      if (deliveryCount > s.maxDeliver) {
-        throw new Permanent(`Gave up after ${deliveryCount - 1} deliveries: the last ones did not finish in time`);
-      }
       let data: unknown;
       try {
         data = s.parse(envelope.data);
       } catch (e) {
+        runs = runsBefore + 1;
         if (e instanceof ZodError) throw new Permanent(`Invalid data: ${errorText(e)}`);
         throw e;
       }
@@ -256,46 +297,82 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
         const key = `${s.processedName}:${s.orderedBy(typed)}`;
         await orBusy(tx.execute(sql`select pg_advisory_xact_lock(hashtext(${key}))`));
       }
+      // From here the handler runs: this counts toward maxDeliver.
+      if (redelivery) {
+        runs = await countRun(s, envelope.id);
+        if (runs > s.maxDeliver) {
+          runs -= 1;
+          throw new Permanent(`Gave up after ${runs} runs: the last one did not finish`);
+        }
+      } else runs = 1;
       // The handler's own statements are bounded by the same time limit as the handler.
       await tx.execute(setLocal('lock_timeout', '0'));
       await tx.execute(setLocal('statement_timeout', `${s.timeoutMs}ms`));
-      await withTimeout(
-        s.handle(typed, {
-          tenantId: envelope.tenantId,
-          actor: envelope.actor,
-          correlationId: envelope.correlationId,
-          causationId: envelope.id,
-          tx,
-        }),
-        s.timeoutMs,
-      );
+      const guarded = guardTx(tx);
+      try {
+        await withTimeout(
+          s.handle(typed, {
+            tenantId: envelope.tenantId,
+            actor: envelope.actor,
+            correlationId: envelope.correlationId,
+            causationId: envelope.id,
+            tx: guarded.tx,
+          }),
+          s.timeoutMs,
+        );
+      } catch (e) {
+        // Refuse every later statement: after the rollback this connection goes back to the
+        // pool and may serve another tenant. A statement already sent is bounded by
+        // statement_timeout and runs before the rollback (same connection, in order).
+        // We do not terminate the backend: postgres.js then hangs in end() or crashes on a
+        // null socket (reproduced with postgres 3.4.9).
+        guarded.close('The transaction ended: the handler ran past its time limit or failed');
+        if (e instanceof TimedOut) timedOut = e;
+        throw e;
+      }
+      guarded.close('The transaction has ended');
       return 'handled' as const;
     });
     if (rt.hooks?.beforeAck && (await rt.hooks.beforeAck({ name: s.processedName, envelope, deliveryCount, outcome })) === false) {
       return;
     }
     m.ack();
+    if (redelivery) await forgetRuns(s, envelope.id).catch(() => {});
     if (outcome === 'duplicate') lg.debug('worker: already processed, skipped');
-  } catch (e) {
+  } catch (caught) {
+    const e = timedOut ?? caught;
     if (e instanceof Busy) {
-      lg.info({ retryInMs: rt.busyRetryMs }, 'worker: another delivery holds this message or key, put back');
-      m.nak(rt.busyRetryMs);
+      const busyInARow = Math.max(0, deliveryCount - 1 - runsBefore);
+      const delay = Math.min(BUSY_RETRY_CAP_MS, rt.busyRetryMs * 2 ** Math.min(busyInARow, 20));
+      lg.info({ retryInMs: delay }, 'worker: another delivery holds this message or key, put back');
+      m.nak(delay);
       return;
     }
     const error = errorText(e);
-    if (deliveryCount < s.maxDeliver && !(e instanceof Permanent)) {
-      const delay = backoffFor(s.backoffMs, deliveryCount);
-      lg.warn({ err: error, retryInMs: delay }, 'worker: handler failed, will retry');
+    try {
+      // A failure before the handler started (database down) still uses up a run, so a broken
+      // message cannot loop forever.
+      if (runs === 0) runs = await countRun(s, envelope.id);
+      else if (!redelivery) await countRun(s, envelope.id);
+    } catch (e2) {
+      lg.error({ err: error, countErr: errorText(e2) }, 'worker: could not count the run, will retry');
+      m.nak(backoffFor(s.backoffMs, Math.max(1, runsBefore + 1)));
+      return;
+    }
+    if (runs < s.maxDeliver && !(e instanceof Permanent)) {
+      const delay = backoffFor(s.backoffMs, runs);
+      lg.warn({ err: error, retryInMs: delay, runs }, 'worker: handler failed, will retry');
       m.nak(delay);
       return;
     }
     try {
-      await recordDeadJob({ name: s.deadName, envelope, error, attempts: deliveryCount });
+      await recordDeadJob({ name: s.deadName, envelope, error, attempts: runs });
       m.term(error.slice(0, 200));
-      lg.error({ err: error }, 'worker: gave up, stored as a dead job');
+      await forgetRuns(s, envelope.id).catch(() => {});
+      lg.error({ err: error, runs }, 'worker: gave up, stored as a dead job');
     } catch (e2) {
       lg.error({ err: error, deadLetterErr: errorText(e2) }, 'worker: could not store dead job, will retry');
-      m.nak(backoffFor(s.backoffMs, deliveryCount));
+      m.nak(backoffFor(s.backoffMs, runs));
     }
   }
 }

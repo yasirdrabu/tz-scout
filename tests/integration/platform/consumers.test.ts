@@ -246,4 +246,48 @@ describe('consumers', () => {
       await w.stop();
     }
   });
+
+  it('lock contention alone never dead-letters: a hot key with more waiters than maxDeliver all run (N2)', async () => {
+    const ranFor: string[] = [];
+    const c = defineConsumer({
+      name: `test.hot_${newId('run').slice(4)}`,
+      event: ordered,
+      orderedBy: (e) => e.data.accountId,
+      maxDeliver: 2,
+      backoffMs: [50],
+      // Waiters give up on the key after timeoutMs + busyLockTimeoutMs = 600 ms, far less than
+      // the 16 x 150 ms the key is held in total, so most events are put back several times.
+      timeoutMs: 500,
+      handle: async (e) => {
+        await sleep(150);
+        ranFor.push(e.id);
+      },
+    });
+    created.push(c);
+    const seen: AckInfo[] = [];
+    const w = start({
+      consumers: [c],
+      busyLockTimeoutMs: 100,
+      busyRetryMs: 100,
+      hooks: { beforeAck: (i) => void seen.push(i) },
+    });
+    try {
+      await w.ready;
+      const t = newId('t');
+      const events = Array.from({ length: 16 }, () => envelopeOf('accounts.account.reordered', t, { accountId: 'hot' }));
+      for (const e of events) await deliver(e);
+      await waitFor(() => ranFor.length >= 16, 30000);
+      expect(new Set(ranFor)).toEqual(new Set(events.map((e) => e.id)));
+      // Some were put back more often than maxDeliver allows, yet none was given up on.
+      expect(Math.max(...seen.map((s) => s.deliveryCount))).toBeGreaterThan(2);
+      const dead = await adminDb.execute(sql`select count(*)::int as n from platform.dead_job where consumer_or_job = ${c.name}`);
+      expect((dead[0] as { n: number }).n).toBe(0);
+      const left = await adminDb.execute(
+        sql`select count(*)::int as n from platform.delivery_attempt where consumer_name = ${c.name}`,
+      );
+      expect((left[0] as { n: number }).n).toBe(0);
+    } finally {
+      await w.stop();
+    }
+  }, 40000);
 });

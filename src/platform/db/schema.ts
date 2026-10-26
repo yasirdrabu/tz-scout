@@ -75,3 +75,20 @@ export const pingResult = platform.table('ping_result', {
   sentAt: timestamp('sent_at', { withTimezone: true }).notNull(),
   handledAt: timestamp('handled_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Handler runs per message per consumer or job, kept outside the handler's transaction so a
+ * failed run still counts. Deliveries put back because they were busy (lock contention) do not
+ * run the handler and are not counted. Row deleted when the message is done. Platform-wide (RLS
+ * exempt), written through `adminDb` by the worker.
+ */
+export const deliveryAttempt = platform.table(
+  'delivery_attempt',
+  {
+    consumerName: text('consumer_name').notNull(),
+    eventId: text('event_id').notNull(),
+    runAttempts: integer('run_attempts').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.consumerName, t.eventId] })],
+);

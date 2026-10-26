@@ -17,7 +17,8 @@ import { ensureStreams } from '@/platform/nats/streams';
 import { runRelay } from '@/platform/relay';
 import { defineJobHandler, type JobHandlerDef } from '@/platform/runtime/jobs';
 import { startWorker } from '@/platform/runtime/worker';
-import { waitFor } from '../helpers/wait';
+import { TransactionClosedError } from '@/platform/db/guarded-tx';
+import { sleep, waitFor } from '../helpers/wait';
 
 const alwaysFails = defineJob('test.always_fails', z.object({ n: z.number() }), { maxDeliver: 3, backoffMs: [50, 50] });
 const flaky = defineJob('test.flaky', z.object({ n: z.number() }), { maxDeliver: 2, backoffMs: [50] });
@@ -27,6 +28,10 @@ const slow = defineJob('test.slow', z.object({ mode: z.enum(['hang', 'db', 'quic
   timeoutMs: 300,
 });
 const strict = defineJob('test.strict', z.object({ n: z.number() }), { maxDeliver: 5, backoffMs: [50] });
+const lateWriter = defineJob('test.late_writer', z.object({ mode: z.enum(['late', 'normal']), tag: z.string() }), {
+  maxDeliver: 1,
+  timeoutMs: 300,
+});
 const discardable = defineJob('test.discardable', z.object({ n: z.number() }), { maxDeliver: 1 });
 
 let nats: Nats;
@@ -39,6 +44,10 @@ beforeAll(async () => {
   // Leftovers from earlier runs of this file (the stream outlives the test database).
   await nats.jsm.streams.purge('SCOUT_JOBS', { filter: 'scout.*.jobs.test.>' });
   await nats.jsm.streams.purge('SCOUT_JOBS', { filter: 'scout.*.jobs.platform.ping' });
+  await adminDb.execute(
+    sql`create table if not exists platform.t6_probe (tag text not null, tenant_setting text, source_tenant text not null)`,
+  );
+  await adminDb.execute(sql`grant select, insert on platform.t6_probe to scout_app`);
   relayAc = new AbortController();
   relayDone = runRelay({ signal: relayAc.signal });
 });
@@ -46,6 +55,7 @@ afterAll(async () => {
   relayAc.abort();
   await relayDone;
   await nats.nc.drain();
+  await adminDb.execute(sql`drop table if exists platform.t6_probe`);
   await closeDbs();
 });
 
@@ -287,4 +297,61 @@ describe('jobs', () => {
     );
     expect((alerts[0] as { n: number }).n).toBe(1);
   });
+
+  it('a handler abandoned after its time limit cannot write through ctx.tx, in any tenant (N1)', async () => {
+    let lateErr: unknown;
+    let lateDone = false;
+    const insertProbe = (ctx: ModuleContext, tag: string) =>
+      ctx.tx.execute(
+        sql`insert into platform.t6_probe (tag, tenant_setting, source_tenant)
+            values (${tag}, current_setting('app.tenant_id', true), ${ctx.tenantId})`,
+      );
+    const h = defineJobHandler(lateWriter, async (e, ctx) => {
+      if (e.data.mode === 'normal') {
+        await sleep(50);
+        await insertProbe(ctx, e.data.tag);
+        return;
+      }
+      await sleep(600); // twice the limit, no database work (a slow outside call)
+      try {
+        await insertProbe(ctx, e.data.tag);
+      } catch (err) {
+        lateErr = err;
+      } finally {
+        lateDone = true;
+      }
+    });
+    const w = start([h], { concurrency: 4 });
+    try {
+      await w.ready;
+      const a = newId('t');
+      const b = newId('t');
+      const lateTag = `late_${a}`;
+      await withTenant(a, (tx) => enqueueJob(ctxOf(a, tx), lateWriter, { mode: 'late', tag: lateTag }));
+      // Other tenants' messages keep using the pool while the abandoned handler sleeps.
+      for (let i = 0; i < 10; i++) {
+        await withTenant(b, (tx) => enqueueJob(ctxOf(b, tx), lateWriter, { mode: 'normal', tag: `normal_${b}_${i}` }));
+        await sleep(80);
+      }
+      await waitFor(() => lateDone, 5000);
+      // Drizzle wraps it: Failed query ... (cause: TransactionClosedError).
+      expect((lateErr as Error).cause).toBeInstanceOf(TransactionClosedError);
+      await waitFor(async () => {
+        const n = await adminDb.execute(sql`select count(*)::int as n from platform.t6_probe where source_tenant = ${b}`);
+        return (n[0] as { n: number }).n === 10;
+      }, 5000);
+      const rows = (await adminDb.execute(
+        sql`select tag, tenant_setting, source_tenant from platform.t6_probe where source_tenant in (${a}, ${b})`,
+      )) as unknown as { tag: string; tenant_setting: string | null; source_tenant: string }[];
+      expect(rows.find((r) => r.tag === lateTag)).toBeUndefined();
+      for (const r of rows) expect(r.tenant_setting).toBe(r.source_tenant);
+      const all = (await adminDb.execute(
+        sql`select tag from platform.t6_probe where tag = ${lateTag}`,
+      )) as unknown as unknown[];
+      expect(all).toHaveLength(0);
+      expect(await deadRowsFor(a)).toHaveLength(1);
+    } finally {
+      await w.stop();
+    }
+  }, 20000);
 });
