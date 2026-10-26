@@ -203,15 +203,14 @@ export async function runTask<I, O>(
   }
   const input = parsedInput.data;
   const hash = inputHash(input);
-  const reusable = (mode: AiMode) =>
-    opts.fresh ? undefined : findReusable(ctx, task.name, task.promptVersion, hash, mode, mode === 'rules' ? null : model);
-  const reuse = (row: AiRunRow): RunResult<O> => ({ output: row.output as O, runId: row.id, mode: row.mode as AiMode });
-
   const [setting] = await ctx.tx
     .select()
     .from(aiSetting)
     .where(and(eq(aiSetting.tenantId, ctx.tenantId), eq(aiSetting.task, task.name)));
   const model = setting?.model ?? task.model;
+  const reusable = (mode: AiMode) =>
+    opts.fresh ? undefined : findReusable(ctx, task.name, task.promptVersion, hash, mode, mode === 'rules' ? null : model);
+  const reuse = (row: AiRunRow): RunResult<O> => ({ output: row.output as O, runId: row.id, mode: row.mode as AiMode });
   const costCap = setting?.maxCostCentsPerRun ?? task.maxCostCents;
   const user = task.buildUser(input);
 
