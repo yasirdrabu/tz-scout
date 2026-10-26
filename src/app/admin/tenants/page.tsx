@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { ActionForm, SignOutButton, SubmitButton } from '@/components/client';
+import { ActionForm, SubmitButton } from '@/components/client';
+import { AdminShell } from '@/components/shell';
 import { Badge, Card, CardHeader, Field, PageHeader, Table, Td, Th } from '@/components/ui';
 import { listTenants } from '@/modules/tenancy';
 import { adminContext } from '@/server/page-context';
@@ -12,18 +13,7 @@ export default async function AdminTenantsPage() {
   const admin = await adminContext();
   const tenants = await listTenants();
   return (
-    <main className="mx-auto max-w-6xl px-4 py-6">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <span className="flex h-6 w-6 items-center justify-center rounded bg-accent text-xs font-bold text-white">S</span>
-          Scout
-          <Badge tone="near">Support access</Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-ink-muted">{admin.email}</span>
-          <SignOutButton />
-        </div>
-      </div>
+    <AdminShell user={admin} current="tenants">
       <PageHeader title="Workspaces" description="Every workspace on this Scout. Only platform admins see this page." />
       <Card className="mb-6">
         <CardHeader title={`Workspaces (${tenants.length})`} />
@@ -79,6 +69,6 @@ export default async function AdminTenantsPage() {
           </div>
         </ActionForm>
       </Card>
-    </main>
+    </AdminShell>
   );
 }

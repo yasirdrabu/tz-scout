@@ -1,7 +1,11 @@
 import { sql } from 'drizzle-orm';
 import { connect, type NatsConnection } from '@nats-io/transport-node';
 import { config } from '@/platform/config';
-import { appDb } from '@/platform/db/client';
+import { jetstreamManager } from '@nats-io/jetstream';
+import { adminDb, appDb } from '@/platform/db/client';
+import { deadJob, schedule } from '@/platform/db/schema';
+import { STREAMS } from '@/platform/nats/streams';
+import { relayLagMs } from '@/platform/relay';
 
 const TIMEOUT_MS = 2000;
 
@@ -52,4 +56,79 @@ export async function readyResponse(opts: { natsUrl?: string } = {}): Promise<Re
     status: r.ok ? 200 : 503,
     headers: { 'cache-control': 'no-store' },
   });
+}
+
+export type ScheduleView = {
+  id: string;
+  tenantId: string;
+  jobName: string;
+  cron: string;
+  timezone: string;
+  enabled: boolean;
+  nextRunAt: Date;
+  lastRunAt: Date | null;
+};
+
+export type ConsumerHealth = { name: string; pending: number; ackPending: number };
+
+export type SystemHealth = {
+  relayLagMs: number;
+  consumers: ConsumerHealth[];
+  /** False when NATS did not answer: `consumers` is then empty. */
+  consumersAvailable: boolean;
+  deadJobs: number;
+  schedules: ScheduleView[];
+};
+
+async function consumerNumbers(url: string): Promise<ConsumerHealth[]> {
+  const nc = await Promise.race([natsFor(url), timeout(TIMEOUT_MS)]);
+  const jsm = await Promise.race([jetstreamManager(nc, { timeout: TIMEOUT_MS }), timeout(TIMEOUT_MS)]);
+  const out: ConsumerHealth[] = [];
+  const read = async () => {
+    for (const s of STREAMS) {
+      try {
+        for await (const c of jsm.consumers.list(s.name)) {
+          out.push({ name: c.name, pending: c.num_pending, ackPending: c.num_ack_pending });
+        }
+      } catch (e) {
+        // A stream that does not exist yet has no consumers.
+        if (!/not found/i.test(String((e as Error).message))) throw e;
+      }
+    }
+  };
+  await Promise.race([read(), timeout(TIMEOUT_MS * 2)]);
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * What the System page shows: relay lag, queue numbers per consumer, dead jobs and schedules. When NATS
+ * does not answer, the database parts still come back and `consumersAvailable` is false.
+ */
+export async function systemHealth(opts: { natsUrl?: string } = {}): Promise<SystemHealth> {
+  const url = opts.natsUrl ?? config.natsUrl;
+  const [lag, dead, schedules, consumers] = await Promise.all([
+    relayLagMs(),
+    adminDb.select({ n: sql<number>`count(*)::int` }).from(deadJob),
+    adminDb.select().from(schedule).orderBy(schedule.jobName, schedule.tenantId),
+    consumerNumbers(url).then(
+      (c) => ({ ok: true as const, c }),
+      () => ({ ok: false as const, c: [] as ConsumerHealth[] }),
+    ),
+  ]);
+  return {
+    relayLagMs: lag,
+    consumers: consumers.c,
+    consumersAvailable: consumers.ok,
+    deadJobs: dead[0]?.n ?? 0,
+    schedules: schedules.map((s) => ({
+      id: s.id,
+      tenantId: s.tenantId,
+      jobName: s.jobName,
+      cron: s.cron,
+      timezone: s.timezone,
+      enabled: s.enabled,
+      nextRunAt: s.nextRunAt,
+      lastRunAt: s.lastRunAt,
+    })),
+  };
 }

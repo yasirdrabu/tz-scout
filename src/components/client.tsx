@@ -148,3 +148,13 @@ export function MicrosoftSignIn() {
     </button>
   );
 }
+
+/** Re-reads the server data of the page every `everyMs` (30 seconds by default). Renders nothing. */
+export function AutoRefresh({ everyMs = 30_000 }: { everyMs?: number }) {
+  const router = useRouter();
+  useEffect(() => {
+    const t = setInterval(() => router.refresh(), everyMs);
+    return () => clearInterval(t);
+  }, [router, everyMs]);
+  return null;
+}

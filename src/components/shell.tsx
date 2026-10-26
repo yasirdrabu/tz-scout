@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SignOutButton } from './client';
+import type { SessionUser } from '@/modules/tenancy';
 import { Badge, cx } from './ui';
 import type { PageContext } from '@/server/page-context';
 
@@ -10,6 +11,9 @@ export function TenantShell({ ctx, current, children }: { ctx: PageContext; curr
   const nav = [
     { key: 'home', href: base, label: 'Home', show: true },
     { key: 'members', href: `${base}/settings/members`, label: 'Members', show: ctx.can('members:read') },
+    { key: 'integrations', href: `${base}/settings/integrations`, label: 'Integrations', show: ctx.can('integrations:manage') },
+    { key: 'ai', href: `${base}/settings/ai`, label: 'AI runs', show: ctx.can('settings:manage') },
+    { key: 'audit', href: `${base}/settings/audit`, label: 'Audit', show: ctx.can('audit:read') },
     { key: 'profile', href: `${base}/profile`, label: 'Profile', show: true },
   ].filter((n) => n.show);
   return (
@@ -62,6 +66,46 @@ export function TenantShell({ ctx, current, children }: { ctx: PageContext; curr
               </Link>
             )}
             <span className="text-xs text-ink-muted">{ctx.user.email}</span>
+            <SignOutButton />
+          </div>
+        </div>
+      </header>
+      <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+    </div>
+  );
+}
+
+/** Top bar for platform admin pages. */
+export function AdminShell({ user, current, children }: { user: SessionUser; current: 'tenants' | 'system'; children: ReactNode }) {
+  const nav = [
+    { key: 'tenants', href: '/admin/tenants', label: 'Workspaces' },
+    { key: 'system', href: '/admin/system', label: 'System' },
+  ];
+  return (
+    <div className="min-h-screen">
+      <header className="border-b border-line bg-surface">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <span className="flex h-6 w-6 items-center justify-center rounded bg-accent text-xs font-bold text-white">S</span>
+            Scout
+            <Badge tone="near">Support access</Badge>
+          </div>
+          <nav className="flex flex-1 items-center gap-1" aria-label="Main">
+            {nav.map((n) => (
+              <Link
+                key={n.key}
+                href={n.href}
+                className={cx(
+                  'rounded px-2.5 py-1 text-sm',
+                  n.key === current ? 'bg-accent-soft font-medium text-accent-ink' : 'text-ink-muted hover:bg-sunken hover:text-ink',
+                )}
+              >
+                {n.label}
+              </Link>
+            ))}
+          </nav>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-ink-muted">{user.email}</span>
             <SignOutButton />
           </div>
         </div>

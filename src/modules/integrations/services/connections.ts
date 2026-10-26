@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import { config } from '@/platform/config';
 import type { ModuleContext } from '@/platform/context';
@@ -26,6 +26,7 @@ export type ConnectionView = {
   lastTestResult?: TestResult;
   lastError?: string;
   callsToday: number;
+  lastCallAt?: Date;
 };
 
 export const TEST_FIRST = 'Test the connection before switching it to live.';
@@ -58,6 +59,12 @@ export async function listConnections(ctx: ModuleContext): Promise<ConnectionVie
     .from(callLog)
     .where(and(eq(callLog.tenantId, ctx.tenantId), gte(callLog.at, sql`date_trunc('day', now())`)))
     .groupBy(callLog.provider);
+  const lasts = await ctx.tx
+    .select({ provider: callLog.provider, at: sql<string>`max(${callLog.at})` })
+    .from(callLog)
+    .where(eq(callLog.tenantId, ctx.tenantId))
+    .groupBy(callLog.provider);
+  const lastBy = new Map(lasts.map((l) => [l.provider, new Date(l.at)]));
   const hintById = new Map(hints.map((h) => [h.id, h.hint]));
   const callsBy = new Map(today.map((t) => [t.provider, t.n]));
 
@@ -71,6 +78,8 @@ export async function listConnections(ctx: ModuleContext): Promise<ConnectionVie
       callsToday: callsBy.get(p.key) ?? 0,
     };
     const hint = row?.credentialId ? hintById.get(row.credentialId) : undefined;
+    const lastCallAt = lastBy.get(p.key);
+    if (lastCallAt) view.lastCallAt = lastCallAt;
     if (hint) view.hint = hint;
     if (row?.lastTestedAt) view.lastTestedAt = row.lastTestedAt;
     if (row?.lastTestResult) view.lastTestResult = row.lastTestResult as TestResult;
@@ -288,4 +297,33 @@ export async function connectionStatus(
     status: (row?.status as ConnectionStatus | undefined) ?? 'not_set_up',
     ...(row?.lastError ? { lastError: row.lastError } : {}),
   };
+}
+
+export type CallView = {
+  id: string;
+  at: Date;
+  operation: string;
+  outcome: string;
+  statusCode: number | null;
+  durationMs: number;
+  errorMessage: string | null;
+};
+
+/** The newest calls to one provider, newest first (at most 200). */
+export async function recentCalls(ctx: ModuleContext, provider: string, limit = 50): Promise<CallView[]> {
+  requireProvider(provider);
+  return ctx.tx
+    .select({
+      id: callLog.id,
+      at: callLog.at,
+      operation: callLog.operation,
+      outcome: callLog.outcome,
+      statusCode: callLog.statusCode,
+      durationMs: callLog.durationMs,
+      errorMessage: callLog.errorMessage,
+    })
+    .from(callLog)
+    .where(and(eq(callLog.tenantId, ctx.tenantId), eq(callLog.provider, provider)))
+    .orderBy(desc(callLog.at), desc(callLog.id))
+    .limit(Math.min(Math.max(limit, 1), 200));
 }

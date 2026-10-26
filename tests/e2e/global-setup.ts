@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { startBackground } from './background';
 import { e2eEnv } from './env';
 
 const run = (arg: string) =>
@@ -7,10 +8,15 @@ const run = (arg: string) =>
     env: { ...process.env, ...e2eEnv },
   });
 
-/** Creates a fresh `scout_e2e` database, migrates it and seeds it. Dropped when the run ends. */
+/**
+ * Creates a fresh `scout_e2e` database, migrates it and seeds it, then starts the worker and relay
+ * against it. Everything is stopped and the database dropped when the run ends.
+ */
 export default async function globalSetup() {
   run('create');
+  const background = await startBackground();
   return async () => {
+    await background.stop();
     run('drop');
   };
 }

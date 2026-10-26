@@ -22,5 +22,6 @@ export const e2eEnv: Record<string, string> = {
   AUTH_DEV_SIGNIN: 'true',
   SCOUT_FORCE_MOCK: 'true',
   APP_PUBLIC_URL: `http://localhost:${E2E_PORT}`,
+  SCOUT_MASTER_KEY: Buffer.alloc(32, 7).toString('base64'),
   AUTH_SECRET: 'e2e-only-secret-not-for-use-anywhere-else',
 };
