@@ -32,6 +32,7 @@ const lateWriter = defineJob('test.late_writer', z.object({ mode: z.enum(['late'
   maxDeliver: 1,
   timeoutMs: 300,
 });
+const envProbe = defineJob('test.env_probe', z.object({ n: z.number() }), { maxDeliver: 1 });
 const discardable = defineJob('test.discardable', z.object({ n: z.number() }), { maxDeliver: 1 });
 
 let nats: Nats;
@@ -354,4 +355,25 @@ describe('jobs', () => {
       await w.stop();
     }
   }, 20000);
+
+  it('puts the environment of the enqueuing context back on the handler context', async () => {
+    const seen = new Map<number, string | undefined>();
+    const h = defineJobHandler(envProbe, async (e, ctx) => {
+      seen.set(e.data.n, ctx.environment);
+    });
+    const w = start([h]);
+    try {
+      await w.ready;
+      const t = newId('t');
+      await withTenant(t, async (tx) => {
+        await enqueueJob({ ...ctxOf(t, tx), environment: 'test' }, envProbe, { n: 1 });
+        await enqueueJob(ctxOf(t, tx), envProbe, { n: 2 });
+      });
+      await waitFor(() => seen.size === 2, 10000);
+      expect(seen.get(1)).toBe('test');
+      expect(seen.get(2)).toBeUndefined();
+    } finally {
+      await w.stop();
+    }
+  });
 });

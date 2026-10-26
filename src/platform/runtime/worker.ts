@@ -27,13 +27,13 @@ import {
   type JobHandlerDef,
 } from './jobs';
 
-/** What happened to a message just before it is acked. */
 /** Half the pool at most (see `maxInFlight`), at least 1. */
 export function inFlightCap(requested?: number): number {
   const half = Math.max(1, Math.floor(config.databasePoolMax / 2));
   return Math.max(1, Math.min(requested ?? half, half));
 }
 
+/** What happened to a message just before it is acked. */
 export type AckInfo = {
   /** `processed_event` consumer name: the consumer name, or `jobs.<job name>`. */
   name: string;
@@ -324,6 +324,7 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
             actor: envelope.actor,
             correlationId: envelope.correlationId,
             causationId: envelope.id,
+            ...(envelope.environment ? { environment: envelope.environment } : {}),
             tx: guarded.tx,
           }),
           s.timeoutMs,

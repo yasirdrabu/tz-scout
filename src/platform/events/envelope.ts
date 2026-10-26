@@ -16,6 +16,8 @@ export const EnvelopeSchema = z.object({
   actor: ActorSchema,
   correlationId: z.string().min(1),
   causationId: z.string().optional(),
+  /** Set when a test API key started the work; handlers then only get mock adapters. */
+  environment: z.enum(['live', 'test']).optional(),
   subject: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(),
   data: z.unknown(),
 });

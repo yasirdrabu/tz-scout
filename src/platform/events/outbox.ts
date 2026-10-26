@@ -22,6 +22,7 @@ export async function publish<D>(
     actor: ctx.actor,
     correlationId: ctx.correlationId,
     ...(ctx.causationId ? { causationId: ctx.causationId } : {}),
+    ...(ctx.environment ? { environment: ctx.environment } : {}),
     ...(subject ? { subject } : {}),
     data: parsed,
   };
@@ -48,6 +49,7 @@ export async function enqueueJob<D>(ctx: ModuleContext, def: JobDef<D>, data: D)
     actor: ctx.actor,
     correlationId: ctx.correlationId,
     ...(ctx.causationId ? { causationId: ctx.causationId } : {}),
+    ...(ctx.environment ? { environment: ctx.environment } : {}),
     data: parsed,
   };
   await ctx.tx.insert(outbox).values({

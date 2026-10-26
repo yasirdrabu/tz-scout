@@ -95,7 +95,10 @@ async function prepare(ctx: ModuleContext, provider: string, wantCredential: boo
   if (!conn) {
     // Create the row in its own transaction so it is committed: the call log update below runs in
     // another transaction and could not see a row that only the caller's open transaction holds.
-    await withTenant(ctx.tenantId, (tx) => ensureConnection(tx, ctx.tenantId, provider, ctx.actor.id));
+    await withTenant(ctx.tenantId, async (tx) => {
+      await tx.execute(sql`select set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`);
+      await ensureConnection(tx, ctx.tenantId, provider, ctx.actor.id);
+    });
     conn = await findConnection(ctx.tx, ctx.tenantId, provider);
   }
   if (!conn) throw new Error('connection row missing');

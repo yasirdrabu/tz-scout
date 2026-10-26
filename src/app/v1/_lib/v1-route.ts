@@ -81,6 +81,7 @@ export function v1Route(opts: { permission?: Permission }, handler: V1Handler): 
           actor,
           correlationId,
           tx,
+          ...(principal.environment ? { environment: principal.environment } : {}),
         }),
       );
       if (result instanceof Response) {
