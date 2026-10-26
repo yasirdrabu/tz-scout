@@ -8,7 +8,9 @@
 # The user must be able to create databases and read every row (the superuser, in practice).
 #
 # Rule per table (live count L, restored count R):
-#   fail when the table is missing from the restore
+#   skip (print "skipped (not in dump)") when the dump TOC does not list the table, e.g. it was
+#     created by a migration after the dump
+#   fail when the TOC lists the table but the restore lacks it
 #   fail when R > L             (the dump cannot hold more rows than the live database)
 #   fail when R = 0 and L > 0   (data lost from the dump)
 #   pass otherwise, so L >= R is allowed: the live database grows after the dump
@@ -45,14 +47,25 @@ tables="$(live -F '|' -c "
   where c.relkind in ('r','p') and n.nspname in ('platform','tenancy','integrations','ai')
   order by 2")"
 
+toc="$(pg_restore -l "$dump")"
 count=0
+skipped=0
 while IFS='|' read -r quoted name; do
   [ -n "$name" ] || continue
-  l="$(live -c "select count(*) from $quoted")"
-  if ! r="$(psql -X -v ON_ERROR_STOP=1 -At -d "$SCRATCH" -c "select count(*) from $quoted" 2>/dev/null)"; then
-    echo "Restore check failed: $name is missing from the restore" >&2
-    exit 1
+  present="$(psql -X -v ON_ERROR_STOP=1 -At -d "$SCRATCH" -c "select to_regclass() is not null")"
+  if [ "$present" != "t" ]; then
+    schema="${name%%.*}"
+    rel="${name#*.}"
+    if grep -Eq "^[0-9]+; [0-9]+ [0-9]+ TABLE $schema $rel " <<< "$toc"; then
+      echo "Restore check failed: $name is in the dump but missing from the restore" >&2
+      exit 1
+    fi
+    echo "skipped (not in dump): $name"
+    skipped=$((skipped + 1))
+    continue
   fi
+  l="$(live -c "select count(*) from $quoted")"
+  r="$(psql -X -v ON_ERROR_STOP=1 -At -d "$SCRATCH" -c "select count(*) from $quoted")"
   if [ "$r" -gt "$l" ]; then
     echo "Restore check failed: $name has $r rows in the restore but only $l live" >&2
     exit 1
@@ -64,8 +77,8 @@ while IFS='|' read -r quoted name; do
   count=$((count + 1))
 done <<< "$tables"
 
-if [ "$count" -eq 0 ]; then
+if [ "$((count))" -eq 0 ]; then
   echo "Restore check failed: no tables found in the live database" >&2
   exit 1
 fi
-echo "Restore check passed: $count tables"
+echo "Restore check passed: $count tables, $skipped skipped"

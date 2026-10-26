@@ -11,17 +11,18 @@ ARG RCLONE_SHA256_ARM64=c6e9d4cf9c88b279f6ad80cd5675daebc068e404890fa7e191412c1b
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl unzip; \
-    case "$TARGETARCH" in \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$arch" in \
       amd64) sc_sha="$SUPERCRONIC_SHA256_AMD64"; rc_sha="$RCLONE_SHA256_AMD64" ;; \
       arm64) sc_sha="$SUPERCRONIC_SHA256_ARM64"; rc_sha="$RCLONE_SHA256_ARM64" ;; \
-      *) echo "unsupported arch: $TARGETARCH" >&2; exit 1 ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
     curl -fsSL -o /usr/local/bin/supercronic \
-      "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${TARGETARCH}"; \
+      "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${arch}"; \
     echo "${sc_sha}  /usr/local/bin/supercronic" | sha256sum -c -; \
     chmod 0755 /usr/local/bin/supercronic; \
     curl -fsSL -o /tmp/rclone.zip \
-      "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${TARGETARCH}.zip"; \
+      "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${arch}.zip"; \
     echo "${rc_sha}  /tmp/rclone.zip" | sha256sum -c -; \
     unzip -j /tmp/rclone.zip '*/rclone' -d /usr/local/bin; \
     chmod 0755 /usr/local/bin/rclone; \

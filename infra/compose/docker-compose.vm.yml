@@ -130,6 +130,7 @@ services:
       BACKUP_REMOTE: ${BACKUP_REMOTE:-}
       # rclone remote named r2, configured from the environment (Cloudflare R2 or any S3 bucket).
       RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
       RCLONE_CONFIG_R2_PROVIDER: ${BACKUP_S3_PROVIDER:-Cloudflare}
       RCLONE_CONFIG_R2_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
       RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}

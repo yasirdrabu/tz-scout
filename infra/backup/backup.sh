@@ -25,8 +25,9 @@ if [ -n "${BACKUP_REMOTE:-}" ]; then
 fi
 
 find "$BACKUP_DIR" -maxdepth 1 -name 'scout-*.dump' -mtime "+$((RETENTION_DAYS - 1))" -print -delete
+find "$BACKUP_DIR" -maxdepth 1 -name 'scout-*.dump.partial' -mtime +0 -print -delete
 
 if [ -n "${BACKUP_REMOTE:-}" ]; then
-  rclone delete "$BACKUP_REMOTE" --min-age "${RETENTION_DAYS}d" --include 'scout-*.dump'
+  rclone delete "$BACKUP_REMOTE" --min-age "${RETENTION_DAYS}d" --include '/scout-*.dump'
 fi
 echo "backup: done"

@@ -25,6 +25,17 @@ case "$out" in
   *) echo "ci-check: expected 'Restore check passed'" >&2; exit 1 ;;
 esac
 
+# A table created after the dump must be skipped, not fail the check.
+trap 'psql -X -q -c "drop table if exists platform.ci_extra" >/dev/null 2>&1 || true; rm -rf "$work"' EXIT
+psql -X -q -c "create table platform.ci_extra as select 1 as id"
+out="$(bash "$here/restore-check.sh")"
+echo "$out"
+case "$out" in
+  *"Restore check passed"*"1 skipped"*) ;;
+  *) echo "ci-check: expected pass with 1 skipped for a table created after the dump" >&2; exit 1 ;;
+esac
+psql -X -q -c "drop table platform.ci_extra"
+
 bad="$work/truncated.dump"
 pg_dump -Fc --exclude-table-data tenancy.membership -f "$bad"
 set +e
