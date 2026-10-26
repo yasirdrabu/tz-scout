@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "dead_job_envelope_uq" ON "platform"."dead_job" USING btree ("consumer_or_job",("envelope"->>'id'));

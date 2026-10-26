@@ -1,4 +1,4 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { adminDb } from './db/client';
 import { deadJob, outbox } from './db/schema';
@@ -48,29 +48,31 @@ const JOB_PREFIX = 'jobs.';
 
 /**
  * Stores a message that failed on its last delivery and publishes `platform.job.dead`, in one
- * transaction. Does nothing when the same envelope is already dead for this consumer or job
- * (a dead-letter that committed but whose `term()` was lost).
+ * transaction. Returns false and publishes nothing when the same envelope is already dead for
+ * this consumer or job (unique index `dead_job_envelope_uq`): a dead-letter whose `term()` was
+ * lost, or two workers giving up on the same message at once.
  */
 export async function recordDeadJob(input: {
   name: string;
   envelope: Envelope;
   error: string;
   attempts: number;
-}): Promise<void> {
+}): Promise<boolean> {
   const { name, envelope, error, attempts } = input;
-  await adminDb.transaction(async (tx) => {
-    const existing = await tx.execute(
-      sql`select 1 from platform.dead_job where consumer_or_job = ${name} and envelope->>'id' = ${envelope.id} limit 1`,
-    );
-    if (existing.length > 0) return;
-    await tx.insert(deadJob).values({
-      id: newId('dead'),
-      tenantId: envelope.tenantId,
-      consumerOrJob: name,
-      envelope,
-      lastError: error,
-      attempts,
-    });
+  return adminDb.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(deadJob)
+      .values({
+        id: newId('dead'),
+        tenantId: envelope.tenantId,
+        consumerOrJob: name,
+        envelope,
+        lastError: error,
+        attempts,
+      })
+      .onConflictDoNothing()
+      .returning({ id: deadJob.id });
+    if (inserted.length === 0) return false;
     await publish(
       {
         tenantId: envelope.tenantId,
@@ -82,6 +84,7 @@ export async function recordDeadJob(input: {
       jobDead,
       { jobType: name, error, attempts },
     );
+    return true;
   });
 }
 

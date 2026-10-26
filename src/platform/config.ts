@@ -6,6 +6,8 @@ export type Config = {
   databaseAdminUrl: string;
   /** Superuser connection; only for creating roles and test databases. Optional in production. */
   databaseSuperuserUrl: string;
+  /** Connections in the appDb pool. The worker caps messages in flight below this. */
+  databasePoolMax: number;
   natsUrl: string;
   masterKey?: Buffer;
   masterKeyPrevious?: Buffer;
@@ -26,6 +28,7 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1).optional(),
   DATABASE_ADMIN_URL: z.string().min(1).optional(),
   DATABASE_SUPERUSER_URL: z.string().min(1).optional(),
+  DATABASE_POOL_MAX: z.coerce.number().int().min(2).max(500).default(20),
   NATS_URL: z.string().min(1).optional(),
   SCOUT_MASTER_KEY: z.string().optional(),
   SCOUT_MASTER_KEY_PREVIOUS: z.string().optional(),
@@ -80,6 +83,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     databaseUrl: e.DATABASE_URL ?? 'postgres://scout_app:scout_app@localhost:5432/scout',
     databaseAdminUrl: e.DATABASE_ADMIN_URL ?? 'postgres://scout_admin:scout_admin@localhost:5432/scout',
     databaseSuperuserUrl: e.DATABASE_SUPERUSER_URL ?? 'postgres://postgres:postgres@localhost:5432/postgres',
+    databasePoolMax: e.DATABASE_POOL_MAX,
     natsUrl: e.NATS_URL ?? 'nats://localhost:4222',
     masterKey,
     masterKeyPrevious,

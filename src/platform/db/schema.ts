@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigserial, index, jsonb, integer, pgSchema, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
+import { bigserial, index, jsonb, integer, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Platform schema. Platform tables are platform-wide and EXEMPT from row level security
@@ -61,7 +61,11 @@ export const deadJob = platform.table(
     attempts: integer('attempts').notNull(),
     deadAt: timestamp('dead_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('dead_job_dead_at_idx').on(t.deadAt)],
+  (t) => [
+    index('dead_job_dead_at_idx').on(t.deadAt),
+    // One dead row per message per consumer or job, even when two workers dead-letter it at once.
+    uniqueIndex('dead_job_envelope_uq').on(t.consumerOrJob, sql`(${t.envelope}->>'id')`),
+  ],
 );
 
 /** Round trips of the `platform.ping` diagnostic job. Platform-wide (RLS exempt). Id = the job id. */

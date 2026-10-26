@@ -4,10 +4,12 @@ import { z } from 'zod';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { withTenant } from '@/platform/db/tenant';
-import { discardDeadJob, listDeadJobs, retryDeadJob } from '@/platform/dead-jobs';
+import { discardDeadJob, listDeadJobs, recordDeadJob, retryDeadJob } from '@/platform/dead-jobs';
 import { pingHandler, pingResult, sendPing } from '@/platform/diagnostics';
 import type { Envelope } from '@/platform/events/envelope';
 import { enqueueJob } from '@/platform/events/outbox';
+import { outbox } from '@/platform/db/schema';
+import { jobSubject } from '@/platform/nats/subjects';
 import { defineJob } from '@/platform/events/registry';
 import { newId } from '@/platform/ids';
 import { connectNats, type Nats } from '@/platform/nats/connection';
@@ -19,6 +21,12 @@ import { waitFor } from '../helpers/wait';
 
 const alwaysFails = defineJob('test.always_fails', z.object({ n: z.number() }), { maxDeliver: 3, backoffMs: [50, 50] });
 const flaky = defineJob('test.flaky', z.object({ n: z.number() }), { maxDeliver: 2, backoffMs: [50] });
+const slow = defineJob('test.slow', z.object({ mode: z.enum(['hang', 'db', 'quick']) }), {
+  maxDeliver: 2,
+  backoffMs: [50],
+  timeoutMs: 300,
+});
+const strict = defineJob('test.strict', z.object({ n: z.number() }), { maxDeliver: 5, backoffMs: [50] });
 const discardable = defineJob('test.discardable', z.object({ n: z.number() }), { maxDeliver: 1 });
 
 let nats: Nats;
@@ -48,11 +56,11 @@ const ctxOf = (tenantId: string, tx: ModuleContext['tx'], correlationId = newId(
   tx,
 });
 
-function start(jobs: JobHandlerDef[]) {
+function start(jobs: JobHandlerDef[], extra: { concurrency?: number } = {}) {
   const ac = new AbortController();
   let ready!: () => void;
   const readyP = new Promise<void>((r) => (ready = r));
-  const done = startWorker({ jobs, signal: ac.signal, onReady: ready });
+  const done = startWorker({ jobs, signal: ac.signal, onReady: ready, ...extra });
   return {
     ready: readyP,
     stop: async () => {
@@ -178,5 +186,105 @@ describe('jobs', () => {
     } finally {
       await w.stop();
     }
+  });
+
+  it('a handler that runs past its time limit is stopped, retried and dead-lettered, without wedging (Important 1)', async () => {
+    const quickDone: string[] = [];
+    const h = defineJobHandler(slow, async (e, ctx) => {
+      if (e.data.mode === 'hang') await new Promise(() => {}); // never settles
+      if (e.data.mode === 'db') await ctx.tx.execute(sql`select pg_sleep(30)`);
+      quickDone.push(e.id);
+    });
+    const w = start([h], { concurrency: 1 });
+    try {
+      await w.ready;
+      const t = newId('t');
+      const startedAt = Date.now();
+      await withTenant(t, async (tx) => {
+        await enqueueJob(ctxOf(t, tx), slow, { mode: 'hang' });
+        await enqueueJob(ctxOf(t, tx), slow, { mode: 'db' });
+        for (let i = 0; i < 3; i++) await enqueueJob(ctxOf(t, tx), slow, { mode: 'quick' });
+      });
+      // One slot: the quick jobs only finish if the stuck ones give the slot back.
+      await waitFor(async () => quickDone.length === 3 && (await deadRowsFor(t)).length === 2, 10000);
+      expect(Date.now() - startedAt).toBeLessThan(8000);
+      const dead = await deadRowsFor(t);
+      for (const row of dead) {
+        expect(row.attempts).toBe(2);
+        expect(row.last_error).toMatch(/did not finish within 300 ms|statement timeout/);
+      }
+      // Nothing was committed for the stuck runs, and the pool still serves queries at once.
+      const processed = await adminDb.execute(
+        sql`select count(*)::int as n from platform.processed_event where consumer_name = 'jobs.test.slow' and event_id in (${sql.join(
+          dead.map((d) => sql`${d.envelope.id}`),
+          sql`, `,
+        )})`,
+      );
+      expect((processed[0] as { n: number }).n).toBe(0);
+      const t0 = Date.now();
+      await withTenant(t, (tx) => tx.execute(sql`select 1`));
+      expect(Date.now() - t0).toBeLessThan(500);
+    } finally {
+      await w.stop();
+    }
+  }, 20000);
+
+  it('invalid job data is dead-lettered at once, not retried (Minor 4)', async () => {
+    let runs = 0;
+    const h = defineJobHandler(strict, async () => {
+      runs++;
+    });
+    const w = start([h]);
+    try {
+      await w.ready;
+      const t = newId('t');
+      const id = newId('job');
+      await adminDb.insert(outbox).values({
+        id,
+        tenantId: t,
+        kind: 'job',
+        natsSubject: jobSubject(t, strict.name),
+        payload: {
+          id,
+          type: 'jobs.test.strict',
+          schemaVersion: 1,
+          tenantId: t,
+          occurredAt: new Date().toISOString(),
+          actor: { kind: 'system', id: 'system' },
+          correlationId: newId('cor'),
+          data: { n: 'not a number' },
+        },
+      });
+      await waitFor(async () => (await deadRowsFor(t)).length === 1, 5000);
+      const [row] = await deadRowsFor(t);
+      expect(row?.attempts).toBe(1);
+      expect(row?.last_error).toContain('Invalid data');
+      expect(runs).toBe(0);
+    } finally {
+      await w.stop();
+    }
+  });
+
+  it('two workers giving up on the same message at once store one dead job and one alert (Important 2)', async () => {
+    const t = newId('t');
+    const envelope: Envelope = {
+      id: newId('job'),
+      type: 'jobs.test.always_fails',
+      schemaVersion: 1,
+      tenantId: t,
+      occurredAt: new Date().toISOString(),
+      actor: { kind: 'system', id: 'system' },
+      correlationId: newId('cor'),
+      data: { n: 1 },
+    };
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => recordDeadJob({ name: 'test.always_fails', envelope, error: 'boom', attempts: 3 })),
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(await deadRowsFor(t)).toHaveLength(1);
+    const alerts = await adminDb.execute(
+      sql`select count(*)::int as n from platform.outbox where tenant_id = ${t} and payload->>'type' = 'platform.job.dead'`,
+    );
+    expect((alerts[0] as { n: number }).n).toBe(1);
   });
 });

@@ -7,7 +7,11 @@ export type ConsumerDef<D = unknown> = {
   /** Stable name. Stored in `platform.processed_event`; changing it means every event is new again. */
   name: string;
   event: EventDef<D>;
-  /** Events with the same key never run at the same time (advisory lock in the consumer transaction). */
+  /**
+   * Events with the same key never run at the same time (advisory lock in the consumer
+   * transaction). This is mutual exclusion, not ordering: two events for one key may run in
+   * either order, and a retried event runs after later ones.
+   */
   // Method syntax on purpose: a ConsumerDef<X> must fit in a ConsumerDef[] list.
   orderedBy?(e: Envelope<D>): string;
   handle(e: Envelope<D>, ctx: ModuleContext): Promise<void>;

@@ -29,6 +29,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   for (const c of created) await nats.jsm.consumers.delete('SCOUT_EVENTS', durableName(c)).catch(() => {});
+  await adminDb.execute(sql`drop table if exists platform.t6_counter`);
   await nats.nc.drain();
   await closeDbs();
 });
@@ -192,6 +193,56 @@ describe('consumers', () => {
       await waitFor(() => got !== undefined);
       expect(got).toEqual({ tenantId: e.tenantId, correlationId: e.correlationId, causationId: e.id });
     } finally {
+      await w.stop();
+    }
+  });
+
+  it('a delivery whose row another run still holds is put back, not left waiting (Important 1)', async () => {
+    const c = counterConsumer(`test.busy_${newId('run').slice(4)}`);
+    const seen: AckInfo[] = [];
+    const w = start({
+      consumers: [c],
+      concurrency: 1,
+      busyLockTimeoutMs: 200,
+      busyRetryMs: 300,
+      hooks: { beforeAck: (i) => void seen.push(i) },
+    });
+    const t = newId('t');
+    const held = envelopeOf('accounts.account.touched', t, { accountId: 'held' });
+    const other = envelopeOf('accounts.account.touched', t, { accountId: 'other' });
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const isLocked = new Promise<void>((r) => (locked = r));
+    // Another "run" of the same message: holds the processed_event row uncommitted.
+    const holder = adminDb
+      .transaction(async (tx) => {
+        await tx.execute(
+          sql`insert into platform.processed_event (consumer_name, event_id) values (${c.name}, ${held.id})`,
+        );
+        locked();
+        await released;
+        throw new Error('rollback');
+      })
+      .catch(() => {});
+    try {
+      await w.ready;
+      await isLocked;
+      await deliver(held);
+      await sleep(100);
+      await deliver(other);
+      // With one slot, "other" only runs if "held" gave its slot back instead of waiting.
+      await waitFor(() => seen.some((s) => s.envelope.id === other.id), 3000);
+      expect(seen.some((s) => s.envelope.id === held.id)).toBe(false);
+      release();
+      await holder;
+      await waitFor(() => seen.some((s) => s.envelope.id === held.id), 5000);
+      expect(seen.find((s) => s.envelope.id === held.id)?.outcome).toBe('handled');
+      expect(await counter(`${t}:held`)).toBe(1);
+      expect(await counter(`${t}:other`)).toBe(1);
+    } finally {
+      release();
+      await holder;
       await w.stop();
     }
   });

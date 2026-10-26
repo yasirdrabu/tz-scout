@@ -21,7 +21,9 @@ function lazy(connect: () => Db): Db {
  * Runtime connection as `scout_app`. Subject to row level security: tenant data is
  * only visible inside `withTenant`.
  */
-export const appDb: Db = lazy(() => drizzle(postgres(config.databaseUrl, { onnotice: () => {} })));
+export const appDb: Db = lazy(() =>
+  drizzle(postgres(config.databaseUrl, { max: config.databasePoolMax, onnotice: () => {} })),
+);
 
 /**
  * Connection as `scout_admin` (bypasses row level security). For migrations,
