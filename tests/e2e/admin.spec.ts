@@ -26,6 +26,16 @@ test('platform admin retries a dead job and sends a test event', async ({ page }
   await expect(page.getByText(/Round trip: \d+ ms/)).toBeVisible({ timeout: 15_000 });
 });
 
+test('platform admin runs the seeded credentials cleanup schedule now', async ({ page }) => {
+  await signInAs(page, 'yasir@taazaa.com');
+  await page.goto('/admin/system');
+  const row = page.locator('[data-testid^="schedule-"]').filter({ hasText: 'integrations.credentials.cleanup' });
+  await expect(row).toHaveCount(1);
+  await row.getByRole('button', { name: 'Run now' }).click();
+  await expect(row.getByRole('status')).toHaveText('Started.');
+  await expect(row.getByRole('alert')).toHaveCount(0);
+});
+
 test('integrations lists every provider on sample data and saves a credential', async ({ page }) => {
   await signInAs(page, 'zach.wiant@taazaa.com');
   await page.goto('/t/taazaa/settings/integrations');

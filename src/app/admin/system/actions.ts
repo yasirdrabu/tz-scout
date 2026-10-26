@@ -1,5 +1,7 @@
 'use server';
 
+// Loads every module's job and event definitions into this process, so "Run now" can find module jobs.
+import '@/entry/registry';
 import { discardDeadJob, retryDeadJob, type AdminCtx } from '@/platform/dead-jobs';
 import { withTenant } from '@/platform/db/tenant';
 import { pingResult, sendPing } from '@/platform/diagnostics';
