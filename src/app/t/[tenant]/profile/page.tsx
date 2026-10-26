@@ -2,7 +2,7 @@ import { TenantShell } from '@/components/shell';
 import { Badge, Card, CardHeader, PageHeader } from '@/components/ui';
 import { withTenant } from '@/platform/db/tenant';
 import { newId } from '@/platform/ids';
-import { describeAccess, members } from '@/modules/tenancy';
+import { describeAccess, members, permissionLabel } from '@/modules/tenancy';
 import { pageContext } from '@/server/page-context';
 
 export const dynamic = 'force-dynamic';
@@ -55,7 +55,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ tenant
             {principal.permissions.map((p) => (
               <li key={p}>
                 <Badge>
-                  <span className="font-mono">{p}</span>
+                  <span title={p}>{permissionLabel(p)}</span>
                 </Badge>
               </li>
             ))}

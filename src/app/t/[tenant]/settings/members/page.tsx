@@ -9,6 +9,7 @@ import {
   ROLE_PERMISSIONS,
   memberAccess,
   members,
+  permissionLabel,
   type Member,
   type MemberAccess,
 } from '@/modules/tenancy';
@@ -65,7 +66,7 @@ function EditMember({ tenant, m, access }: { tenant: string; m: Member; access: 
             {PERMISSIONS.filter((p) => !roleSet.has(p)).map((p) => (
               <label key={p} className="flex items-center gap-2">
                 <input type="checkbox" name="extra" value={p} defaultChecked={extras.has(p)} />
-                <span className="font-mono">{p}</span>
+                <span title={p}>{permissionLabel(p)}</span>
               </label>
             ))}
           </div>

@@ -12,6 +12,7 @@ export {
 } from './services/members';
 export { ROLES, type Role, type Member, type DataLimit } from './contracts/members';
 export { PERMISSIONS, ROLE_PERMISSIONS, isPermission, permissionsFor, type Permission } from './domain/permissions';
+export { PERMISSION_LABELS, permissionLabel } from './domain/permission-labels';
 export { DEFAULT_DATA_LIMIT, DataLimitSchema, defaultDataLimit, describeLimit, isWithin } from './domain/data-limit';
 export { actorFor, can, describeAccess, requirePermission, type Principal } from './contracts/principal';
 export { AUTH_PATHS, SIGN_IN_FAILED, auth, authHandler, type Auth } from './auth';
