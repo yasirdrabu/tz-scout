@@ -257,3 +257,60 @@ describe('helpers', () => {
     expect(AI_LABEL).toEqual({ live: 'Written by Claude', rules: 'Assembled from rules', mock: 'Sample output' });
   });
 });
+
+describe('runTask fix round 1', () => {
+  it('falls back to rules when live has a credential but no live adapter is registered', async () => {
+    const t = await freshTenant();
+    registerAdapter('anthropic', { mock: () => anthropicMock });
+    await t.run((ctx) => saveCredential(ctx, 'anthropic', { kind: 'api_key', value: 'sk-ant-test-key-123456' }));
+    await adminDb.update(connection).set({ mode: 'live' }).where(eq(connection.tenantId, t.tenantId));
+    const r = await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject }));
+    expect(r).toMatchObject({ mode: 'rules', output: { echoed: 'hi' } });
+  });
+
+  it('logs units and cost on the call log, counting both attempts', async () => {
+    const t = await freshTenant();
+    fakeLive([{ bad: 1 }, { echoed: 'ok' }]);
+    await goLive(t);
+    await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject }));
+    const [row] = (await adminDb.execute(
+      sql`select units, cost_cents, unit from integrations.call_log where tenant_id = ${t.tenantId} and provider = 'anthropic' and operation = 'messages.echo_test'`,
+    )) as unknown as { units: number; cost_cents: number; unit: string }[];
+    expect(row).toMatchObject({ units: 300, unit: 'tokens' });
+    expect(row!.cost_cents).toBeGreaterThan(0);
+  });
+
+  it('gives distinct reasons when there are no rules', async () => {
+    const t = await freshTenant();
+    fakeLive([{ echoed: 'hi' }]);
+    await goLive(t);
+    const pricey = defineTask({ ...noRules, name: 'p_no_rules', model: 'claude-opus-5-5', maxTokens: 100_000, maxCostCents: 5 });
+    const err = (await t.run((ctx) => runTask(ctx, pricey, { text: 'hi' }, { subject })).catch((e) => e)) as { detail: string };
+    expect(err.detail).toBe('This would cost more than the limit set for this task.');
+    // The refusal row is kept even though the caller rolled back.
+    expect((await runsOf(t.tenantId)).map((x) => x.status)).toEqual(['refused_by_cap']);
+    await adminDb.execute(sql`insert into ai.ai_setting (tenant_id, task, enabled) values (${t.tenantId}, 'echo_no_rules', false)`);
+    const off = (await t.run((ctx) => runTask(ctx, noRules, { text: 'hi' }, { subject })).catch((e) => e)) as { detail: string };
+    expect(off.detail).toBe('This task is turned off in Settings.');
+  });
+
+  it('does not reuse a run made with another model', async () => {
+    const t = await freshTenant();
+    const complete = fakeLive([{ echoed: 'hi' }]);
+    await goLive(t);
+    await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject }));
+    await adminDb.execute(sql`insert into ai.ai_setting (tenant_id, task, model) values (${t.tenantId}, 'echo_test', 'claude-sonnet-5-5')`);
+    await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject }));
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it('hides upstream text in ai_failed and hashes dates and bigints', async () => {
+    const t = await freshTenant();
+    fakeLive([{ echoed: 'hi' }]).mockRejectedValue(new Error('secret upstream text'));
+    await goLive(t);
+    const err = (await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject })).catch((e) => e)) as { detail: string };
+    expect(err.detail).toBe("Claude didn't return a usable answer. Try again.");
+    expect((await runsOf(t.tenantId))[0]!.error).toBe('secret upstream text');
+    expect(canonicalJson({ d: new Date('2026-01-01T00:00:00Z'), n: 5n })).toBe('{"d":"2026-01-01T00:00:00.000Z","n":"5"}');
+  });
+});

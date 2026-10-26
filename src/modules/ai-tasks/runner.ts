@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { connectionStatus, gateway } from '@/modules/integrations';
 import { config } from '@/platform/config';
@@ -48,6 +48,8 @@ export type RunResult<O> = { output: O; runId: string; mode: AiMode };
 /** JSON with object keys sorted at every depth, so equal inputs always hash equal. */
 export function canonicalJson(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
+  if (v instanceof Date) return JSON.stringify(v.toISOString());
+  if (typeof v === 'bigint') return JSON.stringify(v.toString());
   if (v && typeof v === 'object') {
     const o = v as Record<string, unknown>;
     return `{${Object.keys(o)
@@ -116,7 +118,14 @@ async function record<I, O>(
   return id;
 }
 
-async function findReusable(ctx: ModuleContext, taskName: string, promptVersion: string, hash: string, mode: AiMode) {
+async function findReusable(
+  ctx: ModuleContext,
+  taskName: string,
+  promptVersion: string,
+  hash: string,
+  mode: AiMode,
+  model: string | null,
+) {
   const [row] = await ctx.tx
     .select()
     .from(aiRun)
@@ -128,6 +137,7 @@ async function findReusable(ctx: ModuleContext, taskName: string, promptVersion:
         eq(aiRun.inputHash, hash),
         eq(aiRun.status, 'ok'),
         eq(aiRun.mode, mode),
+        model === null ? isNull(aiRun.model) : eq(aiRun.model, model),
         gte(aiRun.createdAt, new Date(Date.now() - REUSE_WINDOW_MS)),
       ),
     )
@@ -163,7 +173,13 @@ async function completeValidated<O>(
   return { ok: false, errors, usage };
 }
 
-const unavailable = () => new ScoutError({ slug: 'ai_unavailable', status: 409, title: NO_KEY, detail: NO_KEY });
+const UNAVAILABLE_DETAIL = {
+  no_key: NO_KEY,
+  cap: 'This would cost more than the limit set for this task.',
+  off: 'This task is turned off in Settings.',
+} as const;
+const unavailable = (why: keyof typeof UNAVAILABLE_DETAIL) =>
+  new ScoutError({ slug: 'ai_unavailable', status: 409, title: NO_KEY, detail: UNAVAILABLE_DETAIL[why] });
 const noUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costCents: 0 };
 
 /**
@@ -188,7 +204,7 @@ export async function runTask<I, O>(
   const input = parsedInput.data;
   const hash = inputHash(input);
   const reusable = (mode: AiMode) =>
-    opts.fresh ? undefined : findReusable(ctx, task.name, task.promptVersion, hash, mode);
+    opts.fresh ? undefined : findReusable(ctx, task.name, task.promptVersion, hash, mode, mode === 'rules' ? null : model);
   const reuse = (row: AiRunRow): RunResult<O> => ({ output: row.output as O, runId: row.id, mode: row.mode as AiMode });
 
   const [setting] = await ctx.tx
@@ -197,7 +213,6 @@ export async function runTask<I, O>(
     .where(and(eq(aiSetting.tenantId, ctx.tenantId), eq(aiSetting.task, task.name)));
   const model = setting?.model ?? task.model;
   const costCap = setting?.maxCostCentsPerRun ?? task.maxCostCents;
-  const jsonSchema = z.toJSONSchema(task.output, { io: 'output' });
   const user = task.buildUser(input);
 
   // 1. Which mode would run?
@@ -217,6 +232,7 @@ export async function runTask<I, O>(
 
   // 2. A call that could cost more than the limit is refused before it is made.
   let capRefused = false;
+  const noRules = !task.rules || opts.allowRules === false;
   if (tentative === 'live' && costCap !== undefined) {
     const worst = worstCaseCents(model, Math.ceil((task.system.length + user.length) / 4), task.maxTokens);
     if (worst > costCap) {
@@ -230,7 +246,7 @@ export async function runTask<I, O>(
         error: `Could cost up to ${worst} cents; the limit is ${costCap}.`,
         durationMs: 0,
         ...noUsage,
-      });
+      }, noRules);
     }
   }
 
@@ -239,10 +255,15 @@ export async function runTask<I, O>(
     const mode = tentative;
     const started = performance.now();
     let entered = false;
-    const callOpts: { module: string; unit: string; requestSummary: unknown; units?: number; costCents?: number } = {
+    const callOpts = {
       module: 'ai-tasks',
       unit: 'tokens',
       requestSummary: { task: task.name, promptVersion: task.promptVersion, model },
+      // Both attempts' tokens are counted. Cost is only logged for live calls.
+      measure: (a: Attempt) => ({
+        units: a.usage.inputTokens + a.usage.outputTokens + a.usage.cacheReadTokens,
+        costCents: mode === 'live' ? costCents(model, a.usage) : 0,
+      }),
     };
     try {
       const attempt = await gateway.call(
@@ -259,15 +280,12 @@ export async function runTask<I, O>(
               system: task.system,
               user,
               maxTokens: task.maxTokens,
-              jsonSchema,
+              jsonSchema: z.toJSONSchema(task.output, { io: 'output' }),
               cacheSystem: true,
               ...(mockOutput !== undefined ? { mockOutput } : {}),
             },
             task.output,
           );
-          // The gateway reads these after this function returns, when it writes the call log.
-          callOpts.units = a.usage.inputTokens + a.usage.outputTokens + a.usage.cacheReadTokens;
-          callOpts.costCents = mode === 'live' ? costCents(model, a.usage) : 0;
           return a;
         },
         callOpts,
@@ -336,14 +354,14 @@ export async function runTask<I, O>(
           slug: 'ai_failed',
           status: 502,
           title: `The ${task.name} task failed.`,
-          detail: message.slice(0, 200),
+          detail: "Claude didn't return a usable answer. Try again.",
         });
       }
     }
   }
 
   // 4. Rules, or a clear message.
-  if (!task.rules || opts.allowRules === false) throw unavailable();
+  if (!task.rules || opts.allowRules === false) throw unavailable(capRefused ? 'cap' : setting?.enabled === false ? 'off' : 'no_key');
   const hit = await reusable('rules');
   if (hit) return reuse(hit);
   const started = performance.now();

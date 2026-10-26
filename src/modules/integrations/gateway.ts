@@ -25,6 +25,8 @@ export type CallOpts = {
   unit?: string;
   costCents?: number;
   apiKeyId?: string;
+  /** Called with the result after a successful call; its units and cost are logged (use when they are only known afterwards). */
+  measure?: (result: never) => { units?: number; costCents?: number };
   /** Module making the call, for the call log. */
   module?: string;
   /** Non-secret facts about the request. Secrets, emails and phone numbers are dropped before it is stored. */
@@ -182,6 +184,7 @@ export async function runCall<T>(
   let thrown: unknown;
   let result!: T;
   let scrub = makeScrub(undefined);
+  let measured: { units?: number; costCents?: number } = {};
   try {
     let adapter: Adapter;
     if (useLive && cred && factories.live) {
@@ -203,6 +206,11 @@ export async function runCall<T>(
       });
     } else adapter = factories.mock();
     result = await fn(adapter, { scrub });
+    try {
+      measured = (opts.measure as ((r: T) => typeof measured) | undefined)?.(result) ?? {};
+    } catch {
+      measured = {};
+    }
   } catch (e) {
     outcome = e instanceof RateLimitedError || statusCodeOf(e) === 429 ? 'rate_limited' : 'error';
     errorMessage = trim(scrub(e instanceof Error ? e.message : String(e)));
@@ -234,9 +242,9 @@ export async function runCall<T>(
         statusCode,
         outcome,
         durationMs,
-        units: outcome === 'ok' ? (opts.units ?? null) : null,
+        units: outcome === 'ok' ? (measured.units ?? opts.units ?? null) : null,
         unit: outcome === 'ok' ? (opts.unit ?? null) : null,
-        costCents: outcome === 'ok' ? (opts.costCents ?? null) : null,
+        costCents: outcome === 'ok' ? (measured.costCents ?? opts.costCents ?? null) : null,
         errorMessage,
       });
       if (outcome === 'rate_limited') return;
