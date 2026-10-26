@@ -45,3 +45,29 @@ export const idempotencyKey = platform.table(
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.key] })],
 );
+
+/**
+ * Jobs and consumer messages that failed on their last delivery. Platform-wide (RLS exempt):
+ * read and written only through `adminDb` by the worker and platform admins.
+ */
+export const deadJob = platform.table(
+  'dead_job',
+  {
+    id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    consumerOrJob: text('consumer_or_job').notNull(),
+    envelope: jsonb('envelope').notNull(),
+    lastError: text('last_error').notNull(),
+    attempts: integer('attempts').notNull(),
+    deadAt: timestamp('dead_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('dead_job_dead_at_idx').on(t.deadAt)],
+);
+
+/** Round trips of the `platform.ping` diagnostic job. Platform-wide (RLS exempt). Id = the job id. */
+export const pingResult = platform.table('ping_result', {
+  id: text('id').primaryKey(),
+  tenantId: text('tenant_id').notNull(),
+  sentAt: timestamp('sent_at', { withTimezone: true }).notNull(),
+  handledAt: timestamp('handled_at', { withTimezone: true }).notNull().defaultNow(),
+});

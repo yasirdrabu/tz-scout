@@ -8,6 +8,13 @@
       "when": 1793029632639,
       "tag": "0000_platform_events",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793030575253,
+      "tag": "0001_platform_jobs",
+      "breakpoints": true
     }
   ]
 }
