@@ -21,6 +21,8 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@nats-io/jetstream": "^3.4.0",
+    "@nats-io/transport-node": "^3.4.0",
     "drizzle-orm": "^0.45.4",
     "next": "^15.5.28",
     "pino": "^10.4.0",

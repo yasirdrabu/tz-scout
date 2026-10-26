@@ -11,7 +11,8 @@ function lazy(connect: () => Db): Db {
     get: (_t, prop) => {
       const target = get();
       const value = Reflect.get(target, prop, target);
-      return typeof value === 'function' ? value.bind(target) : value;
+      // $client is the postgres.js Sql function; it carries .end, so it must not be bound.
+      return typeof value === 'function' && prop !== '$client' ? value.bind(target) : value;
     },
   });
 }

@@ -1,13 +1,9 @@
 import type { ModuleContext } from '../context';
 import { outbox } from '../db/schema';
 import { newId } from '../ids';
+import { eventSubject, jobSubject } from '../nats/subjects';
 import type { Envelope } from './envelope';
 import type { EventDef, JobDef } from './registry';
-
-/** Pure. Task 5 moves this into src/platform/nats/subjects.ts. */
-export function subjectFor(tenantId: string, kind: 'event' | 'job', typeOrName: string): string {
-  return kind === 'job' ? `scout.${tenantId}.jobs.${typeOrName}` : `scout.${tenantId}.${typeOrName}`;
-}
 
 /** Validates `data` and inserts the event into the outbox inside `ctx.tx`. */
 export async function publish<D>(
@@ -33,7 +29,7 @@ export async function publish<D>(
     id: envelope.id,
     tenantId: ctx.tenantId,
     kind: 'event',
-    natsSubject: subjectFor(ctx.tenantId, 'event', def.type),
+    natsSubject: eventSubject(ctx.tenantId, def.type),
     payload: envelope,
   });
   return envelope;
@@ -58,7 +54,7 @@ export async function enqueueJob<D>(ctx: ModuleContext, def: JobDef<D>, data: D)
     id,
     tenantId: ctx.tenantId,
     kind: 'job',
-    natsSubject: subjectFor(ctx.tenantId, 'job', def.name),
+    natsSubject: jobSubject(ctx.tenantId, def.name),
     payload: envelope,
   });
   return id;
