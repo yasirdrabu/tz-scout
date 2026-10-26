@@ -1,0 +1,92 @@
+# SCO: Scoring and matching
+
+Module code SCO · Schema `scoring` · Releases R1 to R3
+
+## Purpose
+
+Turn what Scout knows about an account into numbers a person can act on and explain: how well it fits
+each approved offer, how strong its reason to buy now is, how much it could be worth, and where it
+should sit in the queue. Pick the best offer. Explain every point.
+
+Scores rank and explain. They never push anything to a CRM, never assign, never change a review
+status. People decide (D6).
+
+## What it owns
+
+| Table | Key fields | Notes |
+|---|---|---|
+| `scoring_profile` | `tenant_id`, `fit_weight` (0.55), `intent_weight` (0.45), `fit_parts` (json: maxes per part), `half_life_days` (45), `max_signal_age_days` (365), `tier_thresholds` (json), `warm_intro_cap` (20), `trust_modifier_max` (5), `trust_neutral` (0.6), `research_floor_days` (180), `version`, `updated_by`, `updated_at` | One row per tenant. Every change bumps `version` and publishes `scoring.rules.changed`. |
+| `offer_match` | `id`, `tenant_id`, `account_id`, `offer_id`, `fit`, `intent`, `match_total`, `tier`, `fit_parts` (json), `rule_hits` (json), `disqualified_reason`, `profile_version`, `computed_at` | One row per account per approved offer. Replaced on each scoring. |
+| `account_score` | `account_id` (pk with tenant), `best_offer_id`, `practice_id`, `fit`, `intent`, `match_total`, `warm_points`, `warm_introducer_id`, `trust`, `trust_modifier`, `priority`, `tier`, `tier_reason` (`computed` or `research_floor` or `warm_intro_floor`), `revenue_potential_cents`, `revenue_band` (`low`, `medium`, `high`), `explanation` (json, see explain-score.md), `inputs_hash`, `profile_version`, `computed_at` | Current score for the account. The one every other module reads. |
+| `score_change` | `id`, `tenant_id`, `account_id`, `from_priority`, `to_priority`, `from_tier`, `to_tier`, `from_offer_id`, `to_offer_id`, `cause` (`new_signal`, `new_fact`, `rules_changed`, `offer_changed`, `trust_changed`, `warm_intro`, `manual_rescore`), `cause_event_id`, `at` | History, so "why did this move" has an answer. Kept 2 years. |
+
+Signal rules are owned by Offers and practices (they are per offer). Warm-intro points and source trust
+are owned by Sources and intake. Scoring reads them through those modules' public interfaces.
+
+## Depends on
+
+| Module | Calls (synchronous) |
+|---|---|
+| Accounts | `getAccountForScoring(accountId)`: facts (industry, employees, revenue, country, technologies, headcount growth), people with titles and buying roles, signals, research tier and date, exclusion |
+| Offers and practices | `listApprovedOffers(practiceId?)` with fit criteria and signal rules; `medianWonDealCents(practiceId)` |
+| Sources and intake | `getWarmIntro(accountId)` (introducer and points), `getTrust(sourceIds[])` |
+
+## Epics
+
+| Epic | File | Release |
+|---|---|---|
+| SCO-E1 Fit and intent scoring | [fit-and-intent-scoring.md](fit-and-intent-scoring.md) | R1 |
+| SCO-E2 Priority, warm intros, trust and revenue potential | [priority-warm-intros-and-trust.md](priority-warm-intros-and-trust.md) | R1 (revenue potential R2) |
+| SCO-E3 Tiers and best offer | [tiers-and-best-offer.md](tiers-and-best-offer.md) | R1 |
+| SCO-E4 Explain a score | [explain-score.md](explain-score.md) | R1 |
+| SCO-E5 Rescoring and tenant weights | [rescoring-and-weights.md](rescoring-and-weights.md) | R1 (weights editor R2) |
+
+## Events published
+
+| Event | Data |
+|---|---|
+| `scoring.account.scored` | `accountId`, `priority`, `fit`, `intent`, `tier`, `previousTier` (null on first), `bestOfferId`, `previousBestOfferId`, `practiceId`, `revenueBand`, `cause`, `profileVersion` |
+| `scoring.rules.changed` | `profileVersion`, `changed` (list of field names), `changedBy` |
+
+`scoring.account.scored` is published only when priority, tier or best offer changed, or on the first
+score, so a rescore that changes nothing is quiet.
+
+## Events consumed
+
+| Event | Does | Ordered by account |
+|---|---|---|
+| `intake.arrival.resolved` | score the account | yes |
+| `accounts.account.created` / `.updated` / `.merged` | rescore (merged: score survivor, delete loser's rows) | yes |
+| `accounts.fact.recorded`, `accounts.signal.recorded`, `accounts.person.added`, `accounts.person.updated` | rescore that account | yes |
+| `accounts.conflict.resolved` | rescore that account | yes |
+| `offers.offer.approved` / `.archived` / `.changed` | enqueue rescore for accounts in that offer's practice | no |
+| `scoring.rules.changed` | enqueue rescore for every account in the tenant | no |
+| `intake.source.trust_changed` | enqueue rescore for accounts with an arrival from that source | no |
+
+Rescoring of many accounts runs as `scout.<tenant>.jobs.rescore.accounts` jobs, 500 account
+ids per message.
+
+## API endpoints
+
+JSON field names are snake_case (data-conventions.md).
+
+| Method and path | Scope | Does |
+|---|---|---|
+| `GET /v1/accounts/{id}/score` | `accounts:read` | Priority, fit, intent, tier, best offer, factor breakdown and reasons |
+| `GET /v1/accounts/{id}/matches` | `accounts:read` | Every offer match for the account |
+| `GET /v1/accounts/{id}/score/history` | `accounts:read` | Score changes with causes |
+| `GET /v1/scoring/profile`, `PUT /v1/scoring/profile` | `scoring:manage` | Read or update weights and thresholds; PUT returns 202, rescoring runs in the background |
+| `POST /v1/rescore` | `scoring:manage` | Rescore the tenant or a filter (practice, source); 202 with job id |
+
+## MCP tools
+
+| Tool | Does |
+|---|---|
+| `explain_score` | Input `account_id`, optional `offer_id` (default best offer). Output shape fixed in `mcp/agent-tools.md`: `offer`, `priority`, `fit`, `intent`, `tier`, `factors[]` (`name`, `points`, `max`, `reason`), `warm_intro_points`, `would_raise[]`. Mapping in explain-score.md. |
+
+## Open questions
+
+- Should a seller be able to mark a score "wrong" with a reason, as training data for weights? Not in
+  this version; captured via retros in Playbooks.
+- Per-practice scoring profiles (different fit weights per practice) are not in scope; one profile
+  per tenant. Revisit when Tobi's practices differ from Taazaa's.
