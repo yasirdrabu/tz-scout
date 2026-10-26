@@ -1,0 +1,124 @@
+# Single VM stack. Secrets and settings come from /opt/scout/.env (see .env.example).
+# Run: docker compose -f docker-compose.vm.yml --profile tunnel up -d     (Cloudflare Tunnel)
+#  or: docker compose -f docker-compose.vm.yml --profile public-ip up -d  (Caddy on 443)
+x-scout: &scout
+  image: ghcr.io/yasirdrabu/tz-scout:${IMAGE_TAG:-latest}
+  restart: unless-stopped
+  env_file:
+    - path: /opt/scout/.env
+      required: false # the app refuses to start in production without its secrets
+  environment: &scout-env
+    NODE_ENV: production
+    DATABASE_URL: postgres://scout_app:${POSTGRES_APP_PASSWORD:-scout_app}@postgres:5432/scout
+    DATABASE_ADMIN_URL: postgres://scout_admin:${POSTGRES_ADMIN_PASSWORD:-scout_admin}@postgres:5432/scout
+    NATS_URL: nats://nats:4222
+    SCOUT_BIND_HOST: 0.0.0.0
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scout
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scout}
+      POSTGRES_DB: scout
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scout -d scout"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  nats:
+    image: nats:2.11-alpine
+    restart: unless-stopped
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    volumes:
+      - natsdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    <<: *scout
+    restart: "no"
+    command: ["migrate"]
+    environment:
+      <<: *scout-env
+      # Creates the scout_app and scout_admin roles on first run. Passwords come from the same .env.
+      DATABASE_SUPERUSER_URL: postgres://scout:${POSTGRES_PASSWORD:-scout}@postgres:5432/postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    <<: *scout
+    command: ["web"]
+    ports:
+      - "127.0.0.1:4240:4240"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4240/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # Worker, scheduler and relay in one process. Run exactly one of these.
+  background:
+    <<: *scout
+    command: ["all-background"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  caddy:
+    profiles: ["public-ip"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - web
+
+  cloudflared:
+    profiles: ["tunnel"]
+    image: cloudflare/cloudflared:2025.9.1
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - web
+
+  # Task 19 fills this in: nightly pg_dump to object storage, 14 days kept.
+  backup:
+    image: postgres:17
+    restart: unless-stopped
+    entrypoint: ["sh", "-c", "echo 'backup: not configured yet' && sleep infinity"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  natsdata:
+  caddydata:
+  caddyconfig:

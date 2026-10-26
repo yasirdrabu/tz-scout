@@ -1,3 +1,29 @@
+# Laptop stack. For local use only: dev sign-in is on and every integration is a mock.
+# Run: docker compose -f infra/compose/docker-compose.yml up --build
+x-scout: &scout
+  image: scout:dev
+  build:
+    context: ../..
+    dockerfile: infra/docker/Dockerfile
+  environment: &scout-env
+    # Development mode, because production refuses the dev sign-in. Never expose this stack.
+    NODE_ENV: development
+    DATABASE_URL: postgres://scout_app:scout_app@postgres:5432/scout
+    DATABASE_ADMIN_URL: postgres://scout_admin:scout_admin@postgres:5432/scout
+    DATABASE_SUPERUSER_URL: postgres://scout:scout@postgres:5432/postgres
+    NATS_URL: nats://nats:4222
+    AUTH_DEV_SIGNIN: "true"
+    SCOUT_FORCE_MOCK: "true"
+    APP_PUBLIC_URL: http://localhost:4240
+    SCOUT_BIND_HOST: 0.0.0.0
+x-after-migrate: &after-migrate
+  postgres:
+    condition: service_healthy
+  nats:
+    condition: service_healthy
+  migrate:
+    condition: service_completed_successfully
+
 services:
   postgres:
     image: postgres:17
@@ -35,6 +61,41 @@ services:
     ports:
       - "1025:1025"
       - "8025:8025"
+
+  migrate:
+    <<: *scout
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    <<: *scout
+    command: ["web"]
+    ports:
+      - "4240:4240"
+    depends_on: *after-migrate
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4240/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    <<: *scout
+    command: ["worker"]
+    depends_on: *after-migrate
+
+  scheduler:
+    <<: *scout
+    command: ["scheduler"]
+    depends_on: *after-migrate
+
+  relay:
+    <<: *scout
+    command: ["relay"]
+    depends_on: *after-migrate
 
 volumes:
   pgdata:

@@ -7,6 +7,7 @@
     "dev": "next dev -p 4240",
     "build": "next build && npm run build:server",
     "build:server": "tsup",
+    "postbuild": "node scripts/copy-standalone-assets.mjs",
     "start": "next start -p 4240",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

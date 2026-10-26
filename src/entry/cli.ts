@@ -73,7 +73,7 @@ function web(): Promise<number> {
   }
   const child = spawn(process.execPath, [server], {
     stdio: 'inherit',
-    env: { ...process.env, PORT: process.env.PORT ?? '4240', HOSTNAME: process.env.HOSTNAME ?? '0.0.0.0' },
+    env: { ...process.env, PORT: process.env.PORT ?? '4240', HOSTNAME: process.env.SCOUT_BIND_HOST ?? '0.0.0.0' },
   });
   for (const s of ['SIGINT', 'SIGTERM'] as const) process.on(s, () => child.kill(s));
   return new Promise((resolve) => child.on('exit', (code) => resolve(code ?? 0)));
