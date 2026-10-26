@@ -3,3 +3,4 @@
 // the files that call defineEvent or defineJob here.
 import '@/platform/dead-jobs';
 import '@/platform/diagnostics';
+import '@/modules/tenancy/contracts/events';

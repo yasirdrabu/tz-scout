@@ -8,6 +8,7 @@ module adds an event or tool.
 
 | Event type | Owner | Meaning | Main consumers |
 |---|---|---|---|
+| `tenancy.tenant.created` | TEN | A platform admin created a tenant; data `tenantId`, `slug`, `createdBy` | every module that seeds tenant defaults |
 | `tenancy.api_key.created` / `.revoked` | TEN | A key was issued or revoked | INT (usage), audit |
 | `tenancy.member.added` / `.removed` | TEN | A person joined or left a tenant | REV (seller lists) |
 | `tenancy.member.role_changed` | TEN | Role or permissions changed | REV, audit |
