@@ -30,3 +30,8 @@ export { handleDevSignIn } from './services/dev-sign-in';
 export { SYSTEM_GRANTOR, createApiKey, createKeyFromCli, revokeApiKey, type CreateApiKeyInput, type Grantor } from './services/api-keys';
 export { resolvePrincipal } from './services/principal';
 export { registerSourceValidator, type SourceValidator } from './contracts/source-validator';
+export { listTenants, ensurePlatformAdmin, userIdForEmail, type TenantRow } from './services/tenants';
+export { memberAccess, type MemberAccess } from './services/members';
+export { devSignInUsers, type DevSignInUser } from './services/dev-sign-in';
+export { sessionUser, type SessionUser } from './services/principal';
+export { completeSignIn } from './services/sign-in';

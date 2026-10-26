@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import { platformAudit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb } from '@/platform/db/client';
@@ -110,4 +110,41 @@ export async function tenantSummary(ctx: ModuleContext): Promise<{ id: string; s
     .where(eq(tenant.id, ctx.tenantId));
   if (!t) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That workspace was not found.' });
   return t;
+}
+
+export type TenantRow = { id: string; slug: string; name: string; currency: string; timezone: string; status: string };
+
+/** Every tenant, newest last. Platform-wide, so it uses `adminDb`; callers must be platform admins. */
+export async function listTenants(): Promise<TenantRow[]> {
+  return adminDb
+    .select({
+      id: tenant.id,
+      slug: tenant.slug,
+      name: tenant.name,
+      currency: tenant.currency,
+      timezone: tenant.timezone,
+      status: tenant.status,
+    })
+    .from(tenant)
+    .orderBy(asc(tenant.name));
+}
+
+/** Makes (or finds) a platform admin by email. For seeding local data. Returns the user id. */
+export async function ensurePlatformAdmin(email: string): Promise<string> {
+  const e = email.trim().toLowerCase();
+  await adminDb
+    .insert(user)
+    .values({ id: newId('usr'), name: e.split('@')[0] ?? e, email: e, platformAdmin: true })
+    .onConflictDoUpdate({ target: user.email, set: { platformAdmin: true } });
+  const [u] = await adminDb.select({ id: user.id }).from(user).where(eq(user.email, e));
+  return u!.id;
+}
+
+/** The user id for an email, or null. */
+export async function userIdForEmail(email: string): Promise<string | null> {
+  const [u] = await adminDb
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.email, email.trim().toLowerCase()));
+  return u?.id ?? null;
 }

@@ -172,3 +172,20 @@ export async function resolvePrincipal(req: Request, tenantSlug?: string): Promi
   }
   return sessionPrincipal(req.headers, slug);
 }
+
+export type SessionUser = { userId: string; name: string; email: string; platformAdmin: boolean };
+
+/** The signed-in person regardless of tenant (same idle and age rules), or null. */
+export async function sessionUser(headers: Headers): Promise<SessionUser | null> {
+  const found = await auth.api.getSession({ headers, query: { disableRefresh: true } });
+  if (!found) return null;
+  const now = Date.now();
+  if (now - new Date(found.session.updatedAt).getTime() > SESSION_IDLE_MS) return null;
+  if (now - new Date(found.session.createdAt).getTime() > SESSION_MAX_SECONDS * 1000) return null;
+  const [u] = await adminDb
+    .select({ id: user.id, name: user.name, email: user.email, platformAdmin: user.platformAdmin, disabledAt: user.disabledAt })
+    .from(user)
+    .where(eq(user.id, found.user.id));
+  if (!u || u.disabledAt) return null;
+  return { userId: u.id, name: u.name, email: u.email, platformAdmin: u.platformAdmin };
+}

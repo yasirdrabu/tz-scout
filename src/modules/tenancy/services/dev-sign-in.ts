@@ -1,3 +1,6 @@
+import { asc, isNull } from 'drizzle-orm';
+import { adminDb } from '@/platform/db/client';
+import { user } from '../db/schema';
 import { isAPIError } from 'better-auth/api';
 import { PROBLEM_BASE, type ProblemJson } from '@/platform/errors';
 import { auth } from '../auth';
@@ -38,4 +41,15 @@ export async function handleDevSignIn(request: Request, opts: { enabled: boolean
     }
     throw e;
   }
+}
+
+export type DevSignInUser = { id: string; name: string; email: string; platformAdmin: boolean };
+
+/** People the developer picker offers. Only call when AUTH_DEV_SIGNIN is on. */
+export async function devSignInUsers(): Promise<DevSignInUser[]> {
+  return adminDb
+    .select({ id: user.id, name: user.name, email: user.email, platformAdmin: user.platformAdmin })
+    .from(user)
+    .where(isNull(user.disabledAt))
+    .orderBy(asc(user.email));
 }

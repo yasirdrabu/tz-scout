@@ -335,3 +335,33 @@ export async function tenantsFor(userId: string): Promise<{ id: string; slug: st
     )
     .orderBy(asc(tenant.name));
 }
+
+export type MemberAccess = {
+  crmOwnerIds: Record<string, string>;
+  extraPermissions: Permission[];
+  /** null means the role's default limit. */
+  dataLimit: DataLimit | null;
+};
+
+/** CRM owner ids, extra permissions and data limit per membership id, for the members screen. */
+export async function memberAccess(ctx: ModuleContext): Promise<Record<string, MemberAccess>> {
+  const rows = await ctx.tx
+    .select({
+      id: membership.id,
+      crm: membership.crmOwnerIds,
+      extra: membership.extraPermissions,
+      dataLimit: membership.dataLimit,
+    })
+    .from(membership)
+    .where(and(eq(membership.tenantId, ctx.tenantId), inArray(membership.status, ['invited', 'active'])));
+  const out: Record<string, MemberAccess> = {};
+  for (const r of rows) {
+    const parsed = r.dataLimit === null ? null : DataLimitSchema.safeParse(r.dataLimit);
+    out[r.id] = {
+      crmOwnerIds: (r.crm ?? {}) as Record<string, string>,
+      extraPermissions: (r.extra ?? []).filter(isPermission),
+      dataLimit: parsed && parsed.success ? parsed.data : null,
+    };
+  }
+  return out;
+}
