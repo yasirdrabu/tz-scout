@@ -1,13 +1,12 @@
 # Retiring spec v1
 
-`docs/SPEC.md` (v1) and `docs/BUILD_PLAN.md` stay in the repo as history. They are no longer the spec of
-record. When this spec is accepted, add one line at the top of each:
+`docs/SPEC.md` (v1) and `docs/BUILD_PLAN.md` stay in the repo as history, each marked "Superseded by
+`docs/spec/`". They are no longer the spec of record.
 
-> Superseded by `docs/spec/` (Taazaa Scout spec v2). Kept as history.
-
-`CLAUDE.md` should point to `docs/spec/README.md` instead of `docs/SPEC.md` and `docs/BUILD_PLAN.md`,
-and its stack line should match `architecture/stack-and-layout.md` (Drizzle, NATS, better-auth). That
-edit is part of R0.
+`CLAUDE.md` now holds general working guidelines only. Project rules that used to live there are in
+this spec: stack in `architecture/stack-and-layout.md`, design and copy in
+`architecture/design-and-copy.md`, tenancy and adapter rules in `architecture/data-conventions.md`
+and `integrations/`.
 
 ## Where each v1 module went
 

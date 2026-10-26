@@ -1,3 +1,5 @@
+> Superseded by `docs/spec/` (Taazaa Scout spec v2). Kept as history.
+
 # Spec: Client Acquisition System
 
 ## Goal

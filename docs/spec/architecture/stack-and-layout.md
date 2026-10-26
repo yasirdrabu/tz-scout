@@ -15,7 +15,7 @@
 | API docs | OpenAPI 3.1 generated from Zod schemas | Served at `/v1/openapi.json`, rendered at `/developers` |
 | MCP | Official MCP TypeScript SDK | Streamable HTTP at `/mcp`; local stdio package `@taazaa/scout-mcp` |
 | AI | Anthropic SDK through the AI tasks module | Versioned prompts, Zod-checked output, every call logged |
-| UI | Tailwind, the existing token set (warm neutrals, plum accent) | Design rules in `CLAUDE.md` |
+| UI | Tailwind, the existing token set (warm neutrals, plum accent) | Design rules in [design-and-copy.md](design-and-copy.md) |
 | Tests | Vitest (unit, integration against real Postgres and NATS), Playwright (e2e) | Testcontainers or compose services in CI |
 | Logs, traces | pino JSON logs, OpenTelemetry traces | Trace id carried through events |
 

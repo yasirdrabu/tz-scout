@@ -140,7 +140,8 @@ Also: [migration-and-rollout/](migration-and-rollout/index.md) (moving today's d
   Given / When / Then where it helps.
 - Each epic says its release (R0 to R4, see below).
 - Specs describe behaviour and contracts, not Node specifics, so a module can be rebuilt in .NET.
-- UI copy rules from `CLAUDE.md` still apply: plain words, no acronyms in the UI, no em dashes.
+- Design and copy rules are in [architecture/design-and-copy.md](architecture/design-and-copy.md):
+  plain words, no acronyms in the UI, no em dashes, status colours only for meaning.
 
 ## Releases
 
