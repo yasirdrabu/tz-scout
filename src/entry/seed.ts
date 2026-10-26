@@ -1,7 +1,9 @@
+import './registry';
 import { config } from '@/platform/config';
 import { withTenant } from '@/platform/db/tenant';
 import type { ModuleContext } from '@/platform/context';
 import { newId } from '@/platform/ids';
+import { upsertSchedule } from '@/platform/scheduler';
 import {
   SYSTEM_GRANTOR,
   addMember,
@@ -11,10 +13,13 @@ import {
   ensurePlatformAdmin,
   listTenants,
   members,
+  revokeActiveKeysNamed,
   userIdForEmail,
 } from '@/modules/tenancy';
 
 const ADMIN_EMAIL = 'yasir@taazaa.com';
+const PLATFORM_TENANT = 't_platform';
+const DEV_KEY_NAME = 'Local development key';
 
 const TENANTS = [
   {
@@ -42,7 +47,7 @@ const TENANTS = [
 
 /**
  * Local development data: one platform admin, two tenants, a few people and a dev API key. Safe to
- * run again. Schedules are seeded elsewhere. Returns a fresh key for `taazaa` on each run, because
+ * run again. Also schedules the hourly credential cleanup. Returns a fresh key for `taazaa` on each run, because
  * a key's secret is only shown once.
  */
 export async function seed(): Promise<{ devApiKey: string }> {
@@ -84,12 +89,26 @@ export async function seed(): Promise<{ devApiKey: string }> {
     if (t.slug === 'taazaa') taazaaId = row.id;
   }
 
-  const { secret } = await withTenant(taazaaId, (tx) =>
-    createApiKey(
-      { tenantId: taazaaId, actor, correlationId: newId('cor'), tx },
-      { name: 'Local development key', environment: 'test', scopes: ['status:read', 'members:read'] },
-      SYSTEM_GRANTOR,
-    ),
+  await upsertSchedule(
+    { actor },
+    {
+      tenantId: PLATFORM_TENANT,
+      jobName: 'integrations.credentials.cleanup',
+      cron: '0 * * * *',
+      timezone: 'UTC',
+      payload: {},
+    },
   );
+
+  // A rerun replaces the dev key instead of piling up live ones.
+  const { secret } = await withTenant(taazaaId, async (tx) => {
+    const ctx: ModuleContext = { tenantId: taazaaId, actor, correlationId: newId('cor'), tx };
+    await revokeActiveKeysNamed(ctx, DEV_KEY_NAME, 'Replaced by a newer development key');
+    return createApiKey(
+      ctx,
+      { name: DEV_KEY_NAME, environment: 'test', scopes: ['status:read', 'members:read'] },
+      SYSTEM_GRANTOR,
+    );
+  });
   return { devApiKey: secret };
 }

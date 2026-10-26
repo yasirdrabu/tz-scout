@@ -5,7 +5,8 @@
   "description": "Taazaa Scout",
   "scripts": {
     "dev": "next dev -p 4240",
-    "build": "next build",
+    "build": "next build && npm run build:server",
+    "build:server": "tsup",
     "start": "next start -p 4240",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -13,7 +14,7 @@
     "test:int": "vitest run --project integration --passWithNoTests",
     "test": "npm run test:unit && npm run test:int",
     "e2e": "playwright test",
-    "db:migrate": "tsx src/entry/cli.ts db migrate",
+    "db:migrate": "tsx src/entry/cli.ts migrate",
     "scout": "tsx src/entry/cli.ts",
     "services:local": "node scripts/local-services.mjs"
   },
@@ -53,6 +54,7 @@
     "eslint-plugin-boundaries": "^5.4.0",
     "postcss": "^8.5.31",
     "tailwindcss": "^3.4.19",
+    "tsup": "^9.0.0",
     "tsx": "^4.23.15",
     "typescript": "~5.9",
     "vitest": "^3.2.7"

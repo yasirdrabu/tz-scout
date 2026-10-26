@@ -195,6 +195,16 @@ export async function revokeApiKey(ctx: ModuleContext, id: string, reason: strin
   });
 }
 
+/** Revokes every active key with this name in the context's tenant. Returns how many were revoked. */
+export async function revokeActiveKeysNamed(ctx: ModuleContext, name: string, reason: string): Promise<number> {
+  const rows = await ctx.tx
+    .select({ id: apiKey.id })
+    .from(apiKey)
+    .where(and(eq(apiKey.tenantId, ctx.tenantId), eq(apiKey.name, name), isNull(apiKey.revokedAt)));
+  for (const r of rows) await revokeApiKey(ctx, r.id, reason);
+  return rows.length;
+}
+
 /**
  * For the CLI (`scout keys:create --tenant <slug> --name <n> --scopes a,b [--test]`, wired in the
  * CLI task). Returns the secret; the caller prints it once.
