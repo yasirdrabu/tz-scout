@@ -1,7 +1,9 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { audit, listAudit, platformAudit, redact } from '@/platform/audit';
 import { adminDb } from '@/platform/db/client';
+import { discardDeadJob, retryDeadJob } from '@/platform/dead-jobs';
+import { deadJob } from '@/platform/db/schema';
 import { auditLog } from '@/platform/db/schema';
 import { withTenant } from '@/platform/db/tenant';
 import type { ModuleContext } from '@/platform/context';
@@ -91,5 +93,127 @@ describe('audit log', () => {
     });
     const [row] = await adminDb.select().from(auditLog).where(eq(auditLog.subjectId, id));
     expect(row!.tenantId).toBe('t_platform');
+  });
+
+  it('pages through rows that share one transaction timestamp without dropping any', async () => {
+    const tenant = `t_${newId('t')}`;
+    await withTenant(tenant, async (tx) => {
+      for (let i = 0; i < 7; i++) await audit(ctxFor(tenant, alice, tx), { action: `x.same_tx_${i}` });
+    });
+    for (const limit of [1, 2, 3]) {
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await withTenant(tenant, (tx) => listAudit({ tenantId: tenant, tx }, { limit, cursor }));
+        seen.push(...page.rows.map((r) => r.id));
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      expect(seen).toHaveLength(7);
+      expect(new Set(seen).size).toBe(7);
+    }
+  });
+
+  it('rejects a malformed cursor with a 400', async () => {
+    const tenant = `t_${newId('t')}`;
+    for (const cursor of ['not-a-cursor', Buffer.from('[1,2]').toString('base64url')]) {
+      await expect(withTenant(tenant, (tx) => listAudit({ tenantId: tenant, tx }, { cursor }))).rejects.toMatchObject({
+        slug: 'invalid-cursor',
+        status: 400,
+      });
+    }
+  });
+
+  it('does not crash on cycles, errors, bigints or dates', () => {
+    const loop: Record<string, unknown> = { a: 1 };
+    loop.self = loop;
+    const out = redact({ loop, err: new Error('bad'), big: 10n, when: new Date('2026-01-01T00:00:00Z') }) as Record<
+      string,
+      unknown
+    >;
+    expect(out.loop).toEqual({ a: 1, self: '[circular]' });
+    expect(out.err).toEqual({ name: 'Error', message: 'bad' });
+    expect(out.big).toBe('10');
+    expect(out.when).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('filters by api key, source, subject and time range', async () => {
+    const tenant = `t_${newId('t')}`;
+    const agent: Actor = { kind: 'agent', id: 'agt_1', sourceId: 'src_9' };
+    await withTenant(tenant, async (tx) => {
+      await audit(ctxFor(tenant, agent, tx), {
+        action: 'x.k',
+        apiKeyId: 'key_1',
+        subject: { type: 'thing', id: 'th_k' },
+      });
+      await audit(ctxFor(tenant, alice, tx), { action: 'x.plain', subject: { type: 'thing', id: 'th_p' } });
+    });
+    const q = (f: Parameters<typeof listAudit>[1]) =>
+      withTenant(tenant, (tx) => listAudit({ tenantId: tenant, tx }, f)).then((r) => r.rows.map((x) => x.action));
+    expect(await q({ apiKeyId: 'key_1' })).toEqual(['x.k']);
+    expect(await q({ sourceId: 'src_9' })).toEqual(['x.k']);
+    expect(await q({ subjectId: 'th_p' })).toEqual(['x.plain']);
+    expect(await q({ from: new Date(Date.now() + 60_000) })).toEqual([]);
+    expect(await q({ to: new Date(Date.now() - 3_600_000) })).toEqual([]);
+    expect(await q({ from: new Date(Date.now() - 3_600_000), to: new Date(Date.now() + 60_000) })).toHaveLength(2);
+  });
+
+  it('records dead-job retry and discard under t_platform with the subject id', async () => {
+    const tenant = `t_${newId('t')}`;
+    const admin = { actor: { kind: 'user', id: 'usr_admin' } as const, correlationId: newId('cor') };
+    const dead = async () => {
+      const id = newId('dead');
+      const evtId = newId('evt');
+      await adminDb.insert(deadJob).values({
+        id,
+        tenantId: tenant,
+        consumerOrJob: 'audit.test',
+        envelope: {
+          id: evtId,
+          type: 'platform.thing.happened',
+          schemaVersion: 1,
+          tenantId: tenant,
+          occurredAt: new Date().toISOString(),
+          actor: { kind: 'system', id: 'system' },
+          correlationId: newId('cor'),
+          data: {},
+        },
+        lastError: 'x',
+        attempts: 3,
+      });
+      return id;
+    };
+    const a = await dead();
+    const b = await dead();
+    await retryDeadJob(admin, a);
+    await discardDeadJob(admin, b);
+    for (const [id, action] of [
+      [a, 'platform.dead_job.retried'],
+      [b, 'platform.dead_job.discarded'],
+    ] as const) {
+      const [row] = await adminDb.select().from(auditLog).where(eq(auditLog.subjectId, id));
+      expect(row).toMatchObject({ tenantId: 't_platform', action, actorId: 'usr_admin', subjectType: 'dead_job' });
+      expect(row!.correlationId).toBe(admin.correlationId);
+      expect((row!.after as { tenantId: string }).tenantId).toBe(tenant);
+    }
+  });
+
+  it('platformAudit with a rolled-back transaction leaves no row', async () => {
+    const id = newId('job');
+    await expect(
+      adminDb.transaction(async (tx) => {
+        await platformAudit({ action: 'platform.rolled_back', actor: alice, subject: { type: 'job', id } }, tx);
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+    expect(await adminDb.select().from(auditLog).where(eq(auditLog.subjectId, id))).toHaveLength(0);
+  });
+
+  it('the app role cannot update or delete audit rows', async () => {
+    const tenant = `t_${newId('t')}`;
+    await withTenant(tenant, (tx) => audit(ctxFor(tenant, alice, tx), { action: 'x.keep' }));
+    await expect(
+      withTenant(tenant, (tx) => tx.execute(sql`update platform.audit_log set action = 'y'`)),
+    ).rejects.toThrow();
+    await expect(withTenant(tenant, (tx) => tx.execute(sql`delete from platform.audit_log`))).rejects.toThrow();
   });
 });

@@ -21,3 +21,6 @@ CREATE INDEX "audit_log_subject_idx" ON "platform"."audit_log" USING btree ("ten
 ALTER TABLE "platform"."audit_log" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "platform"."audit_log" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
 CREATE POLICY tenant_isolation ON "platform"."audit_log" USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+--> statement-breakpoint
+REVOKE UPDATE, DELETE ON "platform"."audit_log" FROM scout_app;

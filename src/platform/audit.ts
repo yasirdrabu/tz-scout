@@ -1,9 +1,10 @@
-import { and, desc, eq, gte, lt, lte, or, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, lte, or, sql, type SQL } from 'drizzle-orm';
 import { adminDb } from './db/client';
 import { auditLog } from './db/schema';
 import type { Tx } from './db/tenant';
 import type { ModuleContext } from './context';
 import type { Actor } from './events/envelope';
+import { ScoutError } from './errors';
 import { newId } from './ids';
 
 export const PLATFORM_TENANT = 't_platform';
@@ -20,17 +21,24 @@ export type AuditEntry = {
   apiKeyId?: string;
 };
 
-/** Copy of `value` with the value of every sensitive-looking key replaced, at any depth. */
-export function redact(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redact);
-  if (value instanceof Date) return value;
+/** Copy of `value` with the value of every sensitive-looking key replaced, at any depth. Never throws. */
+export function redact(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
+  if (typeof value === 'bigint') return value.toString();
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  if (value instanceof Error) return { name: value.name, message: value.message };
   if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
-        k,
-        SENSITIVE.test(k) ? '[redacted]' : redact(v),
-      ]),
-    );
+    if (seen.has(value)) return '[circular]';
+    seen.add(value);
+    const out = Array.isArray(value)
+      ? value.map((v) => redact(v, seen))
+      : Object.fromEntries(
+          Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+            k,
+            SENSITIVE.test(k) ? '[redacted]' : redact(v, seen),
+          ]),
+        );
+    seen.delete(value);
+    return out;
   }
   return value;
 }
@@ -82,11 +90,18 @@ export type AuditFilter = {
   limit?: number;
 };
 
-const encodeCursor = (at: Date, id: string) =>
-  Buffer.from(JSON.stringify([at.toISOString(), id])).toString('base64url');
-function decodeCursor(cursor: string): [Date, string] {
-  const [at, id] = JSON.parse(Buffer.from(cursor, 'base64url').toString()) as [string, string];
-  return [new Date(at), id];
+/** The cursor carries `at` as Postgres text, so microseconds survive (JS Dates keep only milliseconds). */
+const encodeCursor = (atText: string, id: string) => Buffer.from(JSON.stringify([atText, id])).toString('base64url');
+function decodeCursor(cursor: string): [string, string] {
+  try {
+    const v: unknown = JSON.parse(Buffer.from(cursor, 'base64url').toString());
+    if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && typeof v[1] === 'string') {
+      if (!Number.isNaN(Date.parse(v[0]))) return [v[0], v[1]];
+    }
+  } catch {
+    // fall through
+  }
+  throw new ScoutError({ slug: 'invalid-cursor', status: 400, title: 'Invalid cursor' });
 }
 
 /** Audit rows of the caller's tenant, newest first. */
@@ -104,18 +119,23 @@ export async function listAudit(
   if (f.to) conds.push(lte(auditLog.at, f.to));
   if (f.cursor) {
     const [at, id] = decodeCursor(f.cursor);
-    conds.push(or(lt(auditLog.at, at), and(eq(auditLog.at, at), lt(auditLog.id, id))));
+    conds.push(
+      or(
+        sql`${auditLog.at} < ${at}::timestamptz`,
+        and(sql`${auditLog.at} = ${at}::timestamptz`, sql`${auditLog.id} < ${id}`),
+      ),
+    );
   }
-  const rows = await ctx.tx
-    .select()
+  const fetched = await ctx.tx
+    .select({ row: auditLog, atText: sql<string>`${auditLog.at}::text` })
     .from(auditLog)
     .where(and(...conds))
     .orderBy(desc(auditLog.at), desc(auditLog.id))
     .limit(limit + 1);
-  const page = rows.slice(0, limit);
+  const page = fetched.slice(0, limit);
   const last = page[page.length - 1];
   return {
-    rows: page,
-    nextCursor: rows.length > limit && last ? encodeCursor(last.at, last.id) : null,
+    rows: page.map((p) => p.row),
+    nextCursor: fetched.length > limit && last ? encodeCursor(last.atText, last.row.id) : null,
   };
 }
