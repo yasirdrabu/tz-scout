@@ -14,6 +14,7 @@ import { adminDb } from '../db/client';
 import { guardTx } from '../db/guarded-tx';
 import { withTenant } from '../db/tenant';
 import { recordDeadJob } from '../dead-jobs';
+import { errorText } from '../scrub-error';
 import { EnvelopeSchema, type Envelope } from '../events/envelope';
 import { log, logFor } from '../log';
 import { connectNats, type Nats } from '../nats/connection';
@@ -90,7 +91,6 @@ type Sub = {
   handle: (e: Envelope, ctx: ModuleContext) => Promise<void>;
 };
 
-const ERROR_MAX = 4000;
 const BUSY_RETRY_CAP_MS = 30_000;
 
 /** Give up now: dead-letter without further retries. */
@@ -216,13 +216,6 @@ async function ensureConsumer(jsm: JetStreamManager, s: Sub): Promise<void> {
   }
 }
 
-function errorText(e: unknown): string {
-  if (!(e instanceof Error)) return String(e).slice(0, ERROR_MAX);
-  let text = `${e.name === 'Error' ? '' : e.name + ': '}${e.message}`;
-  // Drizzle wraps database errors; the cause carries the reason (for example a statement timeout).
-  if (e.cause instanceof Error) text += ` (${e.cause.message})`;
-  return text.slice(0, ERROR_MAX);
-}
 
 /** Handler runs recorded for an earlier delivery of this message (0 when none). */
 async function runsSoFar(s: Sub, eventId: string): Promise<number> {

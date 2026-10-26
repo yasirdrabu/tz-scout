@@ -3,6 +3,7 @@ import postgres from 'postgres';
 import { config } from '@/platform/config';
 import { adminDb } from '@/platform/db/client';
 import { log } from '@/platform/log';
+import { errorText } from '@/platform/scrub-error';
 import { connectNats, type Nats } from '@/platform/nats/connection';
 import { ensureStreams } from '@/platform/nats/streams';
 
@@ -43,7 +44,7 @@ export async function runRelay(opts: RelayOptions): Promise<void> {
     try {
       await relayWhileLocked(opts);
     } catch (e) {
-      log.warn({ err: (e as Error).message }, 'relay: stopped unexpectedly, restarting');
+      log.warn({ err: errorText(e) }, 'relay: stopped unexpectedly, restarting');
     }
     if (!opts.signal.aborted) {
       log.warn('relay: lost the lock, going back to waiting for it');
@@ -97,7 +98,7 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
           break;
         }
       } catch (e) {
-        log.warn({ err: (e as Error).message }, 'relay: could not ask for the lock');
+        log.warn({ err: errorText(e) }, 'relay: could not ask for the lock');
       }
       await sleep(LOCK_RETRY_MS, signal);
     }
@@ -152,7 +153,7 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
         }
         if (failure) throw failure;
       } catch (e) {
-        log.warn({ err: (e as Error).message }, 'relay: publish failed, retrying');
+        log.warn({ err: errorText(e) }, 'relay: publish failed, retrying');
         streamsReady = false;
         await sleep(ERROR_RETRY_MS, signal);
         continue;

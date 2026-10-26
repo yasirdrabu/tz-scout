@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { scrubError } from '@/platform/scrub-error';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
+import { errorText, scrubError } from '@/platform/scrub-error';
 
 describe('scrubError', () => {
   it('removes credentials from connection strings', () => {
@@ -26,5 +27,27 @@ describe('scrubError', () => {
   });
   it('truncates to 500 characters', () => {
     expect(scrubError('word '.repeat(300)).length).toBeLessThanOrEqual(500);
+  });
+});
+
+describe('errorText', () => {
+  it('drops the params tail of a Drizzle failed-query error, including in the cause', () => {
+    const cause = new Error('Failed query: select 1 where email = $1\nparams: jane@acme.com');
+    const e = new DrizzleQueryError('insert into x values ($1, $2)', ['jane@acme.com', '555-0100'], cause);
+    const text = errorText(e);
+    expect(text).toContain('Failed query: insert into x values ($1, $2)');
+    expect(text).not.toContain('params');
+    expect(text).not.toContain('jane@acme.com');
+    expect(text).not.toContain('555-0100');
+  });
+  it('scrubs secrets from the message and cause', () => {
+    const e = new Error('connect postgres://scout_app:hunter2@db:5432/scout', {
+      cause: new Error('Authorization: Bearer abc.def-123'),
+    });
+    expect(errorText(e)).toBe('connect postgres://[redacted]@db:5432/scout (Authorization: Bearer [redacted])');
+  });
+  it('names non-generic errors and handles values that are not errors', () => {
+    expect(errorText(new TypeError('bad'))).toBe('TypeError: bad');
+    expect(errorText('plain scout_live_ab12cd34EFGH56')).toBe('plain [redacted key]');
   });
 });

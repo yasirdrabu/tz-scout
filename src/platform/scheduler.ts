@@ -10,6 +10,7 @@ import { enqueueJob } from './events/outbox';
 import { jobDef } from './events/registry';
 import { newId } from './ids';
 import { log as rootLog } from './log';
+import { errorText } from './scrub-error';
 
 const log = rootLog.child({ role: 'scheduler' });
 
@@ -182,7 +183,7 @@ export async function schedulerTick(now: Date): Promise<number> {
         });
         published++;
       } catch (e) {
-        logOnce(row, (e as Error).message);
+        logOnce(row, errorText(e));
       }
     }
     return published;
@@ -197,7 +198,7 @@ export async function runScheduler(opts: { signal: AbortSignal; everyMs?: number
       const n = await schedulerTick(new Date());
       if (n > 0) log.info({ published: n }, 'scheduler tick');
     } catch (e) {
-      log.error({ err: (e as Error).message }, 'scheduler tick failed');
+      log.error({ err: errorText(e) }, 'scheduler tick failed');
     }
     await new Promise<void>((resolve) => {
       const done = () => {
