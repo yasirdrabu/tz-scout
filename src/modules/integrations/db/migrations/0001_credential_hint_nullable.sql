@@ -1,0 +1,1 @@
+ALTER TABLE "integrations"."credential" ALTER COLUMN "hint" DROP NOT NULL;

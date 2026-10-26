@@ -6,8 +6,8 @@ import { newId } from '@/platform/ids';
 import { log } from '@/platform/log';
 import { config } from '@/platform/config';
 import { callLog, connection, credential } from './db/schema';
-import { adapterFactories, isKnownProvider, providerName, type Adapter, type LiveCredentials } from './providers';
-import { openValue } from './services/vault';
+import { adapterFactories, isKnownProvider, providerName, type Adapter } from './providers';
+import { credentialAad, openValue } from './services/vault';
 
 /** Throw this from a call to log it as `rate_limited` (not counted as a failure). */
 export class RateLimitedError extends Error {
@@ -29,8 +29,6 @@ export type CallOpts = {
   module?: string;
   /** Non-secret facts about the request. Secrets, emails and phone numbers are dropped before it is stored. */
   requestSummary?: unknown;
-  /** Test API keys always get the mock adapter. */
-  principal?: { environment?: string };
 };
 
 const REDACT_KEY = /secret|token|password|key|authorization|email|phone/i;
@@ -59,6 +57,16 @@ const LOCK_TIMEOUT = '5s';
 
 type ConnectionRow = typeof connection.$inferSelect;
 
+async function findConnection(tx: Tx, tenantId: string, provider: string): Promise<ConnectionRow | undefined> {
+  const [row] = await tx
+    .select()
+    .from(connection)
+    .where(and(eq(connection.tenantId, tenantId), eq(connection.provider, provider)))
+    .orderBy(asc(connection.createdAt), asc(connection.id))
+    .limit(1);
+  return row;
+}
+
 /** One connection per provider here (the earliest). Creates the default row when none exists. */
 export async function ensureConnection(
   tx: Tx,
@@ -79,31 +87,32 @@ export async function ensureConnection(
   return row!;
 }
 
-type Prepared = { conn: ConnectionRow; creds?: LiveCredentials };
+type Prepared = { conn: ConnectionRow; cred?: typeof credential.$inferSelect };
 
-async function prepare(ctx: ModuleContext, provider: string, wantLive: boolean): Promise<Prepared> {
-  return withTenant(ctx.tenantId, async (tx) => {
-    await tx.execute(sql`select set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`);
-    const conn = await ensureConnection(tx, ctx.tenantId, provider, ctx.actor.id);
-    if (conn.status === 'disabled') {
-      throw new ScoutError({
-        slug: 'connection_disabled',
-        status: 409,
-        title: `${providerName(provider)} is turned off.`,
-        detail: 'Turn the connection back on in Settings, Integrations.',
-      });
-    }
-    if (!wantLive || !conn.credentialId) return { conn };
-    const [cred] = await tx
-      .select()
-      .from(credential)
-      .where(and(eq(credential.tenantId, ctx.tenantId), eq(credential.id, conn.credentialId)));
-    if (!cred) return { conn };
-    return {
-      conn,
-      creds: { kind: cred.kind, value: openValue(cred), settings: (conn.settings ?? {}) as Record<string, unknown> },
-    };
-  });
+/** Reads through the caller's transaction, so a credential saved earlier in it is visible. */
+async function prepare(ctx: ModuleContext, provider: string, wantCredential: boolean): Promise<Prepared> {
+  let conn = await findConnection(ctx.tx, ctx.tenantId, provider);
+  if (!conn) {
+    // Create the row in its own transaction so it is committed: the call log update below runs in
+    // another transaction and could not see a row that only the caller's open transaction holds.
+    await withTenant(ctx.tenantId, (tx) => ensureConnection(tx, ctx.tenantId, provider, ctx.actor.id));
+    conn = await findConnection(ctx.tx, ctx.tenantId, provider);
+  }
+  if (!conn) throw new Error('connection row missing');
+  if (conn.status === 'disabled') {
+    throw new ScoutError({
+      slug: 'connection_disabled',
+      status: 409,
+      title: `${providerName(provider)} is turned off.`,
+      detail: 'Turn the connection back on in Settings, Integrations.',
+    });
+  }
+  if (!wantCredential || !conn.credentialId) return { conn };
+  const [cred] = await ctx.tx
+    .select()
+    .from(credential)
+    .where(and(eq(credential.tenantId, ctx.tenantId), eq(credential.id, conn.credentialId)));
+  return cred ? { conn, cred } : { conn };
 }
 
 const trim = (s: string) => (s.length > MAX_ERROR ? s.slice(0, MAX_ERROR) : s);
@@ -113,6 +122,14 @@ const statusCodeOf = (e: unknown): number | null => {
   return typeof v === 'number' ? v : null;
 };
 
+/** Removes the credential value, and each whitespace-separated part of it (e.g. after "Bearer"), from text. */
+export function makeScrub(value: string | undefined): (text: string) => string {
+  const parts = value ? [value, ...value.split(/\s+/)].filter((p) => p.length >= 4) : [];
+  parts.sort((x, y) => y.length - x.length);
+  return (text) => parts.reduce((t, part) => t.split(part).join('[removed]'), text);
+}
+
+export type CallHelpers = { scrub: (text: string) => string };
 type Mode = 'normal' | 'test';
 
 /**
@@ -120,12 +137,14 @@ type Mode = 'normal' | 'test';
  * written in their own transaction, so a failed call is logged even if the caller rolls back.
  * `mode: 'test'` (used by testConnection only) tries the live adapter whenever a credential exists,
  * so a connection can be tested before it is switched to live.
+ * The credential is decrypted only when the live adapter will be used, and its value is removed from
+ * every error message before it is logged, stored or rethrown.
  */
 export async function runCall<T>(
   ctx: ModuleContext,
   provider: string,
   operation: string,
-  fn: (adapter: Adapter) => Promise<T>,
+  fn: (adapter: Adapter, helpers: CallHelpers) => Promise<T>,
   opts: CallOpts = {},
   mode: Mode = 'normal',
 ): Promise<T> {
@@ -140,23 +159,18 @@ export async function runCall<T>(
       title: `${providerName(provider)} is not available yet.`,
     });
   }
-  const mockOnly = config.forceMock || opts.principal?.environment === 'test';
-  const { conn, creds } = await prepare(ctx, provider, !mockOnly && !!factories.live);
+  const mockOnly = config.forceMock || ctx.environment === 'test';
+  const { conn, cred } = await prepare(ctx, provider, !mockOnly && !!factories.live);
 
-  let adapter: Adapter;
-  if (mockOnly) adapter = factories.mock();
-  else if (mode === 'test') adapter = creds && factories.live ? factories.live(creds) : factories.mock();
-  else if (conn.mode === 'live') {
-    if (!creds || !factories.live) {
-      throw new ScoutError({
-        slug: 'connection_not_ready',
-        status: 409,
-        title: `${providerName(provider)} is set to live but is not ready.`,
-        detail: 'Save a credential and test the connection.',
-      });
-    }
-    adapter = factories.live(creds);
-  } else adapter = factories.mock();
+  if (!mockOnly && mode === 'normal' && conn.mode === 'live' && (!cred || !factories.live)) {
+    throw new ScoutError({
+      slug: 'connection_not_ready',
+      status: 409,
+      title: `${providerName(provider)} is set to live but is not ready.`,
+      detail: 'Save a credential and test the connection.',
+    });
+  }
+  const useLive = !mockOnly && !!factories.live && !!cred && (mode === 'test' || conn.mode === 'live');
 
   const started = performance.now();
   let outcome: 'ok' | 'error' | 'rate_limited' = 'ok';
@@ -164,13 +178,39 @@ export async function runCall<T>(
   let statusCode: number | null = null;
   let thrown: unknown;
   let result!: T;
+  let scrub = makeScrub(undefined);
   try {
-    result = await fn(adapter);
+    let adapter: Adapter;
+    if (useLive && cred && factories.live) {
+      let value: string;
+      try {
+        value = openValue(cred, credentialAad(cred.tenantId, cred.connectionId, cred.id));
+      } catch {
+        throw new ScoutError({
+          slug: 'credential_unreadable',
+          status: 409,
+          title: "The saved key can't be read. Enter it again.",
+        });
+      }
+      scrub = makeScrub(value);
+      adapter = factories.live({
+        kind: cred.kind,
+        value,
+        settings: (conn.settings ?? {}) as Record<string, unknown>,
+      });
+    } else adapter = factories.mock();
+    result = await fn(adapter, { scrub });
   } catch (e) {
-    thrown = e;
     outcome = e instanceof RateLimitedError || statusCodeOf(e) === 429 ? 'rate_limited' : 'error';
-    errorMessage = trim(e instanceof Error ? e.message : String(e));
+    errorMessage = trim(scrub(e instanceof Error ? e.message : String(e)));
     statusCode = outcome === 'rate_limited' ? 429 : statusCodeOf(e);
+    if (e instanceof Error) {
+      if (e.message !== scrub(e.message)) {
+        if (e.stack) e.stack = scrub(e.stack);
+        e.message = scrub(e.message);
+      }
+      thrown = e;
+    } else thrown = new Error(errorMessage);
   }
   const durationMs = Math.round(performance.now() - started);
 
@@ -196,6 +236,12 @@ export async function runCall<T>(
         costCents: outcome === 'ok' ? (opts.costCents ?? null) : null,
         errorMessage,
       });
+      if (outcome === 'rate_limited') return;
+      // Skip the status change when the caller's open transaction holds the row: it would wait for us.
+      const locked = await tx.execute(
+        sql`select 1 from integrations.connection where tenant_id = ${ctx.tenantId} and id = ${conn.id} for update skip locked`,
+      );
+      if (locked.length === 0) return;
       const where = and(eq(connection.tenantId, ctx.tenantId), eq(connection.id, conn.id));
       if (outcome === 'ok') {
         await tx
@@ -203,11 +249,11 @@ export async function runCall<T>(
           .set({
             consecutiveFailures: 0,
             lastError: null,
-            status: sql`case when ${connection.status} = 'disabled' then 'disabled' else 'connected' end`,
+            status: sql`case when ${connection.status} = 'disabled' then 'disabled' when ${connection.credentialId} is not null then 'connected' else 'not_set_up' end`,
             updatedAt: sql`now()`,
           })
           .where(where);
-      } else if (outcome === 'error') {
+      } else {
         await tx
           .update(connection)
           .set({
@@ -231,7 +277,8 @@ export async function runCall<T>(
 export const gateway = {
   /**
    * The only way code outside this module reaches an outside service. Refuses disabled connections
-   * (`connection_disabled`), picks the mock or live adapter, times the call and logs it.
+   * (`connection_disabled`), picks the mock or live adapter, times the call and logs it. Test API keys
+   * (`ctx.environment === 'test'`) and SCOUT_FORCE_MOCK always get the mock.
    */
   call<T>(
     ctx: ModuleContext,

@@ -38,6 +38,9 @@ beforeAll(() => {
   cfg.forceMock = false;
 });
 
+const runCleanup = (t: Awaited<ReturnType<typeof freshTenant>>) =>
+  t.run((ctx) => credentialsCleanupHandler.handle({ data: {} } as never, ctx));
+
 describe('listConnections', () => {
   it('returns all 15 providers as mock and not set up for a fresh tenant, without demo', async () => {
     const t = await freshTenant();
@@ -60,6 +63,14 @@ describe('saveCredential', () => {
     expect(rows[0]!.hint).toBe('1234');
   });
 
+  it('keeps no hint for short values', async () => {
+    const t = await freshTenant();
+    const r = await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'short-1234' }));
+    expect(r.hint).toBeNull();
+    const [row] = await adminDb.select().from(credential).where(eq(credential.tenantId, t.tenantId));
+    expect(row!.hint).toBeNull();
+  });
+
   it('shows the hint in the list', async () => {
     const t = await freshTenant();
     await t.run((ctx) => saveCredential(ctx, 'hubspot', { kind: 'private_app_token', value: 'pat-xyz-4f2a' }));
@@ -69,24 +80,40 @@ describe('saveCredential', () => {
 
   it('keeps the old credential, then the cleanup job deletes it after an hour', async () => {
     const t = await freshTenant();
-    await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'first-0001' }));
-    await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'second-0002' }));
+    await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'first-key-0001' }));
+    await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'second-key-0002' }));
     let rows = await adminDb.select().from(credential).where(eq(credential.tenantId, t.tenantId));
     expect(rows).toHaveLength(2);
     expect(rows.filter((r) => r.replacedAt)).toHaveLength(1);
     const [conn] = await adminDb.select().from(connection).where(eq(connection.tenantId, t.tenantId));
     expect(rows.find((r) => r.id === conn!.credentialId)!.hint).toBe('0002');
 
-    await t.run((ctx) => credentialsCleanupHandler.handle({ data: {} } as never, ctx));
+    await runCleanup(t);
     expect(await adminDb.select().from(credential).where(eq(credential.tenantId, t.tenantId))).toHaveLength(2);
 
     await adminDb.execute(
       sql`update integrations.credential set replaced_at = now() - interval '2 hours' where tenant_id = ${t.tenantId} and replaced_at is not null`,
     );
-    await t.run((ctx) => credentialsCleanupHandler.handle({ data: {} } as never, ctx));
+    await runCleanup(t);
     rows = await adminDb.select().from(credential).where(eq(credential.tenantId, t.tenantId));
     expect(rows).toHaveLength(1);
     expect(rows[0]!.hint).toBe('0002');
+  });
+
+  it('cleanup removes old replaced credentials in every tenant, whichever tenant runs it', async () => {
+    const a = await freshTenant();
+    const b = await freshTenant();
+    for (const t of [a, b]) {
+      await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'first-key-0001' }));
+      await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'second-key-0002' }));
+      await adminDb.execute(
+        sql`update integrations.credential set replaced_at = now() - interval '2 hours' where tenant_id = ${t.tenantId} and replaced_at is not null`,
+      );
+    }
+    await runCleanup(a);
+    for (const t of [a, b]) {
+      expect(await adminDb.select().from(credential).where(eq(credential.tenantId, t.tenantId))).toHaveLength(1);
+    }
   });
 
   it('refuses with a clear error when there is no master key', async () => {
@@ -150,6 +177,12 @@ describe('setMode', () => {
     await expect(t.run((ctx) => setMode(ctx, 'demo', 'live'))).rejects.toThrow('Test the connection before');
     const [conn] = await adminDb.select().from(connection).where(eq(connection.tenantId, t.tenantId));
     expect(conn!.status).toBe('failing');
+  });
+
+  it('refuses live for a provider with no live adapter', async () => {
+    const t = await freshTenant();
+    await t.run((ctx) => saveCredential(ctx, 'hubspot', { kind: 'private_app_token', value: 'pat-abc-12345678' }));
+    await expect(t.run((ctx) => setMode(ctx, 'hubspot', 'live'))).rejects.toThrow("This service can't run live yet.");
   });
 
   it('with SCOUT_FORCE_MOCK it says the environment uses sample data only', async () => {

@@ -2,6 +2,8 @@
 export { gateway, RateLimitedError, redactSummary, type CallOpts } from './gateway';
 export {
   CREDENTIAL_KINDS,
+  HINT_MIN_LENGTH,
+  NOT_LIVE_YET,
   SAMPLE_ONLY,
   TEST_FIRST,
   connectionStatus,

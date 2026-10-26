@@ -8,8 +8,8 @@ import { newId } from '@/platform/ids';
 import { connectionChanged, connectionTested } from '../contracts/events';
 import { callLog, connection, credential } from '../db/schema';
 import { ensureConnection, runCall } from '../gateway';
-import { PROVIDERS, isKnownProvider, type TestResult } from '../providers';
-import { sealValue } from './vault';
+import { PROVIDERS, adapterFactories, isKnownProvider, type TestResult } from '../providers';
+import { credentialAad, sealValue } from './vault';
 
 export type ConnectionMode = 'mock' | 'live';
 export type ConnectionStatus = 'not_set_up' | 'connected' | 'failing' | 'disabled';
@@ -30,6 +30,9 @@ export type ConnectionView = {
 
 export const TEST_FIRST = 'Test the connection before switching it to live.';
 export const SAMPLE_ONLY = 'This environment uses sample data only.';
+export const NOT_LIVE_YET = "This service can't run live yet.";
+/** Values shorter than this keep no hint: the last 4 characters would be too much of the key. */
+export const HINT_MIN_LENGTH = 12;
 const TEST_VALID_MS = 10 * 60_000;
 const TEST_TIMEOUT_MS = 10_000;
 
@@ -85,7 +88,7 @@ export async function saveCredential(
   ctx: ModuleContext,
   provider: string,
   input: { kind: CredentialKind; value: string; expiresAt?: Date },
-): Promise<{ hint: string }> {
+): Promise<{ hint: string | null }> {
   requireProvider(provider);
   const value = input.value.trim();
   if (!value) {
@@ -94,10 +97,11 @@ export async function saveCredential(
   if (!CREDENTIAL_KINDS.includes(input.kind)) {
     throw new ScoutError({ slug: 'validation', status: 400, title: 'Unknown credential type.' });
   }
-  const sealed = sealValue(value); // throws master-key-missing before anything is written
   const conn = await ensureConnection(ctx.tx, ctx.tenantId, provider, ctx.actor.id);
   const id = newId('cred');
-  const hint = value.slice(-4);
+  // Bound to tenant, connection and credential ids; throws master-key-missing before anything is stored.
+  const sealed = sealValue(value, credentialAad(ctx.tenantId, conn.id, id));
+  const hint = value.length >= HINT_MIN_LENGTH ? value.slice(-4) : null;
   await ctx.tx.insert(credential).values({
     id,
     tenantId: ctx.tenantId,
@@ -156,7 +160,7 @@ export async function testConnection(ctx: ModuleContext, provider: string): Prom
       ctx,
       provider,
       `${provider}.test`,
-      async (adapter) => {
+      async (adapter, { scrub }) => {
         let timer: NodeJS.Timeout | undefined;
         const timeout = new Promise<never>((_, reject) => {
           timer = setTimeout(
@@ -165,7 +169,12 @@ export async function testConnection(ctx: ModuleContext, provider: string): Prom
           );
         });
         try {
-          const r = await Promise.race([adapter.test(), timeout]);
+          const raw = await Promise.race([adapter.test(), timeout]);
+          const r: TestResult = {
+            ...raw,
+            message: scrub(raw.message),
+            ...(raw.missingPermissions ? { missingPermissions: raw.missingPermissions.map(scrub) } : {}),
+          };
           if (!r.ok) throw new TestFailed(r);
           return r;
         } finally {
@@ -183,7 +192,7 @@ export async function testConnection(ctx: ModuleContext, provider: string): Prom
   const durationMs = Math.round(performance.now() - started);
 
   const conn = await ensureConnection(ctx.tx, ctx.tenantId, provider, ctx.actor.id);
-  const status: ConnectionStatus = result.ok ? 'connected' : 'failing';
+  const status: ConnectionStatus = !result.ok ? 'failing' : conn.credentialId ? 'connected' : 'not_set_up';
   await ctx.tx
     .update(connection)
     .set({
@@ -208,6 +217,9 @@ export async function setMode(ctx: ModuleContext, provider: string, mode: Connec
   requireProvider(provider);
   if (mode === 'live') {
     if (config.forceMock) throw new ScoutError({ slug: 'sample-data-only', status: 409, title: SAMPLE_ONLY });
+    if (!adapterFactories(provider)?.live) {
+      throw new ScoutError({ slug: 'live-unavailable', status: 409, title: NOT_LIVE_YET });
+    }
   }
   const conn = await ensureConnection(ctx.tx, ctx.tenantId, provider, ctx.actor.id);
   if (mode === 'live') {

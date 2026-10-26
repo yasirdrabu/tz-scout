@@ -14,14 +14,18 @@ export function keyring(): Map<number, Buffer> {
   return keys;
 }
 
-export function sealValue(value: string): Sealed {
+/** What binds a sealed value to its row: the tenant, connection and credential ids. */
+export const credentialAad = (tenantId: string, connectionId: string, credentialId: string): string =>
+  [tenantId, connectionId, credentialId].join('|');
+
+export function sealValue(value: string, aad: string): Sealed {
   if (!config.masterKey) throw missing();
-  return encryptSecret(value, config.masterKey, config.masterKeyVersion);
+  return encryptSecret(value, config.masterKey, config.masterKeyVersion, aad);
 }
 
 type SealedRow = { ciphertext: string; iv: string; authTag: string; wrappedDataKey: string; keyVersion: number };
 
-export function openValue(row: SealedRow): string {
+export function openValue(row: SealedRow, aad: string): string {
   const keys = keyring();
   if (keys.size === 0) throw missing();
   return decryptSecret(
@@ -33,5 +37,6 @@ export function openValue(row: SealedRow): string {
       keyVersion: row.keyVersion,
     },
     keys,
+    aad,
   );
 }

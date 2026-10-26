@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/platform/config', async (orig) => {
@@ -77,10 +77,10 @@ describe('gateway.call', () => {
       requestSummary: { count: 2, nested: { recordId: 'r1' } },
     });
     expect(rows[0]!.durationMs).toBeGreaterThanOrEqual(0);
-    expect((await connOf(t.tenantId)).status).toBe('connected');
+    expect((await connOf(t.tenantId)).status).toBe('not_set_up');
   });
 
-  it('three consecutive errors set failing; a success sets connected again', async () => {
+  it('three consecutive errors set failing; a later success clears it', async () => {
     const t = await freshTenant();
     const boom = (): Promise<never> => Promise.reject(Object.assign(new Error('Upstream broke'), { status: 502 }));
     for (let i = 0; i < 3; i++) {
@@ -99,8 +99,61 @@ describe('gateway.call', () => {
     ).toBe(true);
     await t.run((ctx) => gateway.call(ctx, 'demo', 'demo.thing.read', async () => 1));
     const after = await connOf(t.tenantId);
-    expect(after.status).toBe('connected');
+    expect(after.status).toBe('not_set_up'); // a success without a saved credential is not "connected"
     expect(after.consecutiveFailures).toBe(0);
+  });
+
+  it('a success with a saved credential sets connected', async () => {
+    const t = await freshTenant();
+    await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'good-token-100' }));
+    await t.run((ctx) => gateway.call(ctx, 'demo', 'demo.thing.read', async () => 1));
+    expect((await connOf(t.tenantId)).status).toBe('connected');
+  });
+
+  it('sees a credential saved earlier in the same open transaction', async () => {
+    const t = await freshTenant();
+    const message = await t.run(async (ctx) => {
+      await saveCredential(ctx, 'demo', { kind: 'api_key', value: 'good-token-200' });
+      return (await testConnection(ctx, 'demo')).message;
+    });
+    expect(message).toBe('Connected to the demo service.');
+  });
+
+  it('removes the credential value from errors everywhere it is stored or rethrown', async () => {
+    const t = await freshTenant();
+    const value = 'Bearer sk-live-SECRET-12345';
+    await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value }));
+    await t.run((ctx) => testConnection(ctx, 'demo'));
+    await t.run((ctx) => setMode(ctx, 'demo', 'live'));
+    const err = await t
+      .run((ctx) =>
+        gateway.call(ctx, 'demo', 'demo.thing.read', async () => {
+          throw new Error('bad token ' + value + ' for sk-live-SECRET-12345');
+        }),
+      )
+      .catch((e) => e as Error);
+    expect(err.message).not.toContain('SECRET');
+    expect(err.stack).not.toContain('SECRET');
+    const rows = await logs(t.tenantId);
+    expect(JSON.stringify(rows)).not.toContain('SECRET');
+    expect(JSON.stringify(await connOf(t.tenantId))).not.toContain('SECRET');
+  });
+
+  it('turns an unreadable credential into credential_unreadable and logs it', async () => {
+    const t = await freshTenant();
+    await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'good-token-300' }));
+    await t.run((ctx) => testConnection(ctx, 'demo'));
+    await t.run((ctx) => setMode(ctx, 'demo', 'live'));
+    await adminDb.execute(sql`update integrations.credential set ciphertext = 'AAAA' where tenant_id = ${t.tenantId}`);
+    await expect(t.run((ctx) => gateway.call(ctx, 'demo', 'demo.thing.read', async () => 1))).rejects.toMatchObject({
+      slug: 'credential_unreadable',
+    });
+    const rows = await logs(t.tenantId);
+    expect(rows.filter((r) => r.outcome === 'error')).toHaveLength(1);
+    // A test key never touches the credential, so it still works on the mock.
+    await expect(
+      t.run((ctx) => gateway.call({ ...ctx, environment: 'test' }, 'demo', 'demo.thing.read', async () => 1)),
+    ).resolves.toBe(1);
   });
 
   it('logs rate limits as rate_limited without counting a failure', async () => {
@@ -133,13 +186,13 @@ describe('gateway.call', () => {
     const t = await freshTenant();
     await t.run((ctx) => saveCredential(ctx, 'demo', { kind: 'api_key', value: 'good-token-9' }));
     await t.run((ctx) => testConnection(ctx, 'demo'));
-    const which = (ctx: Parameters<typeof gateway.call>[0], opts?: Parameters<typeof gateway.call>[4]) =>
-      gateway.call(ctx, 'demo', 'demo.who', async (a: Adapter) => (await a.test()).message, opts);
+    const which = (ctx: Parameters<typeof gateway.call>[0]) =>
+      gateway.call(ctx, 'demo', 'demo.who', async (a: Adapter) => (await a.test()).message);
 
     expect(await t.run((ctx) => which(ctx))).toBe('Sample data is working.');
     await t.run((ctx) => setMode(ctx, 'demo', 'live'));
     expect(await t.run((ctx) => which(ctx))).toBe('Connected to the demo service.');
-    expect(await t.run((ctx) => which(ctx, { principal: { environment: 'test' } }))).toBe('Sample data is working.');
+    expect(await t.run((ctx) => which({ ...ctx, environment: 'test' }))).toBe('Sample data is working.');
     cfg.forceMock = true;
     try {
       expect(await t.run((ctx) => which(ctx))).toBe('Sample data is working.');

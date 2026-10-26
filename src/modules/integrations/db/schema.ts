@@ -41,7 +41,7 @@ export const credential = integrations.table(
     authTag: text('auth_tag').notNull(),
     wrappedDataKey: text('wrapped_data_key').notNull(),
     keyVersion: integer('key_version').notNull(),
-    hint: text('hint').notNull(), // last 4 characters
+    hint: text('hint'), // last 4 characters; null for short values
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     rotatedAt: timestamp('rotated_at', { withTimezone: true }),
     /** Set when a newer credential replaced this one; the cleanup job deletes it an hour later. */

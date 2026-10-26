@@ -8,4 +8,6 @@ export type ModuleContext = {
   correlationId: string;
   causationId?: string;
   tx: Tx;
+  /** Set when the caller authenticated with an API key. Test keys only ever get mock adapters. */
+  environment?: 'live' | 'test';
 };

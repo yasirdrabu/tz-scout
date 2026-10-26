@@ -28,6 +28,12 @@ import {
 } from './jobs';
 
 /** What happened to a message just before it is acked. */
+/** Half the pool at most (see `maxInFlight`), at least 1. */
+export function inFlightCap(requested?: number): number {
+  const half = Math.max(1, Math.floor(config.databasePoolMax / 2));
+  return Math.max(1, Math.min(requested ?? half, half));
+}
+
 export type AckInfo = {
   /** `processed_event` consumer name: the consumer name, or `jobs.<job name>`. */
   name: string;
@@ -46,7 +52,9 @@ export type WorkerOptions = {
   concurrency?: number;
   /**
    * Messages handled at once across the whole worker. Each holds one appDb connection, so the
-   * default is DATABASE_POOL_MAX minus 2 (headroom for other queries in the process).
+   * default, and the most allowed, is half of DATABASE_POOL_MAX: a handler can hold its transaction
+   * connection while it needs a second one (the integrations gateway writes its call log in its own
+   * transaction), so more than half in flight could leave every connection waiting on another.
    */
   maxInFlight?: number;
   /** How long a message waits on a processed_event row another delivery holds. Default 2000. */
@@ -449,7 +457,7 @@ export async function startWorker(opts: WorkerOptions): Promise<void> {
     for (const s of subs) await ensureConsumer(nats.jsm, s);
     const rt: Runtime = {
       hooks: opts.hooks,
-      slots: new Semaphore(Math.max(1, opts.maxInFlight ?? config.databasePoolMax - 2)),
+      slots: new Semaphore(inFlightCap(opts.maxInFlight)),
       busyLockTimeoutMs: opts.busyLockTimeoutMs ?? 2000,
       busyRetryMs: opts.busyRetryMs ?? 1000,
     };
