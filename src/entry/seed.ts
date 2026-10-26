@@ -51,7 +51,7 @@ const TENANTS = [
  * a key's secret is only shown once.
  */
 export async function seed(): Promise<{ devApiKey: string }> {
-  if (config.nodeEnv === 'production') throw new Error('Seed data is for local use only.');
+  if (config.isProduction) throw new Error('Seed data is for local use only.');
 
   const adminId = await ensurePlatformAdmin(ADMIN_EMAIL);
   const actor = { kind: 'user' as const, id: adminId };

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/platform/config', () => ({ config: { nodeEnv: 'production' } }));
+vi.mock('@/platform/config', () => ({ config: { isProduction: true } }));
 
 describe('seed', () => {
   it('refuses to run in production', async () => {

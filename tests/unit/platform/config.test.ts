@@ -70,3 +70,20 @@ describe('.env.example', () => {
     expect(() => loadConfig(env)).not.toThrow();
   });
 });
+
+describe('SCOUT_ENV', () => {
+  it('lets a production NODE_ENV run as development (Next standalone forces NODE_ENV=production)', () => {
+    const c = loadConfig({ NODE_ENV: 'production', SCOUT_ENV: 'development', AUTH_DEV_SIGNIN: 'true' });
+    expect(c.isProduction).toBe(false);
+    expect(c.authDevSignin).toBe(true);
+  });
+  it('applies production rules when SCOUT_ENV=production', () => {
+    expect(() => loadConfig({ ...prod, SCOUT_ENV: 'production', AUTH_DEV_SIGNIN: 'true' })).toThrow(
+      'AUTH_DEV_SIGNIN must be false in production',
+    );
+  });
+  it('falls back to NODE_ENV', () => {
+    expect(loadConfig(prod).isProduction).toBe(true);
+    expect(loadConfig({}).isProduction).toBe(false);
+  });
+});

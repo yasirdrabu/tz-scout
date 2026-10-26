@@ -24,7 +24,7 @@ Long-running roles (stop with SIGTERM or SIGINT)
 
 One-shot commands
   migrate             Bootstrap (when DATABASE_SUPERUSER_URL is set), then apply migrations
-  seed                Local development data (refuses NODE_ENV=production)
+  seed                Local development data (refuses production)
   keys:create         --tenant <slug> --name <name> --scopes a,b [--test]
   tenants:create      --slug <s> --name <n> --currency <USD> --timezone <zone> --owner-email <email>
                       Operator command: run it on the server. It acts as a system platform admin.

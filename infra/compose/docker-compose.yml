@@ -2,15 +2,14 @@
 # Run: docker compose -f infra/compose/docker-compose.yml up --build
 x-scout: &scout
   image: scout:dev
-  build:
-    context: ../..
-    dockerfile: infra/docker/Dockerfile
+  pull_policy: never # built by the migrate service: run "docker compose build" first
   environment: &scout-env
     # Development mode, because production refuses the dev sign-in. Never expose this stack.
     NODE_ENV: development
+    SCOUT_ENV: development
     DATABASE_URL: postgres://scout_app:scout_app@postgres:5432/scout
     DATABASE_ADMIN_URL: postgres://scout_admin:scout_admin@postgres:5432/scout
-    DATABASE_SUPERUSER_URL: postgres://scout:scout@postgres:5432/postgres
+    DATABASE_SUPERUSER_URL: postgres://scout:scout@postgres:5432/scout
     NATS_URL: nats://nats:4222
     AUTH_DEV_SIGNIN: "true"
     SCOUT_FORCE_MOCK: "true"
@@ -37,7 +36,7 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ../../src/platform/db/bootstrap.sql:/docker-entrypoint-initdb.d/10-bootstrap.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U scout -d scout"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U scout -d scout"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -64,6 +63,10 @@ services:
 
   migrate:
     <<: *scout
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    pull_policy: build
     command: ["migrate"]
     restart: "no"
     depends_on:

@@ -141,7 +141,7 @@ export function createAuth(overrides: { azureAd?: Config['azureAd'] } = {}) {
       },
     },
     advanced: {
-      useSecureCookies: config.nodeEnv === 'production',
+      useSecureCookies: config.isProduction,
       database: {
         generateId: ({ model }) => {
           const prefix = ID_PREFIX[model];

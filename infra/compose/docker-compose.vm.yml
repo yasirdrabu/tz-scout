@@ -1,6 +1,8 @@
 # Single VM stack. Secrets and settings come from /opt/scout/.env (see .env.example).
-# Run: docker compose -f docker-compose.vm.yml --profile tunnel up -d     (Cloudflare Tunnel)
-#  or: docker compose -f docker-compose.vm.yml --profile public-ip up -d  (Caddy on 443)
+# Run with --env-file so the passwords below resolve:
+# Passwords must be URL-safe (they sit inside database URLs): generate with "openssl rand -hex 32".
+#   docker compose --env-file /opt/scout/.env -f docker-compose.vm.yml --profile tunnel up -d     (Cloudflare Tunnel)
+#   or: docker compose --env-file /opt/scout/.env -f docker-compose.vm.yml --profile public-ip up -d  (Caddy on 443)
 x-scout: &scout
   image: ghcr.io/yasirdrabu/tz-scout:${IMAGE_TAG:-latest}
   restart: unless-stopped
@@ -9,8 +11,9 @@ x-scout: &scout
       required: false # the app refuses to start in production without its secrets
   environment: &scout-env
     NODE_ENV: production
-    DATABASE_URL: postgres://scout_app:${POSTGRES_APP_PASSWORD:-scout_app}@postgres:5432/scout
-    DATABASE_ADMIN_URL: postgres://scout_admin:${POSTGRES_ADMIN_PASSWORD:-scout_admin}@postgres:5432/scout
+    SCOUT_ENV: production
+    DATABASE_URL: postgres://scout_app:${SCOUT_APP_DB_PASSWORD:?set in /opt/scout/.env}@postgres:5432/scout
+    DATABASE_ADMIN_URL: postgres://scout_admin:${SCOUT_ADMIN_DB_PASSWORD:?set in /opt/scout/.env}@postgres:5432/scout
     NATS_URL: nats://nats:4222
     SCOUT_BIND_HOST: 0.0.0.0
 
@@ -20,12 +23,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: scout
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scout}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in /opt/scout/.env}
       POSTGRES_DB: scout
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U scout -d scout"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U scout -d scout"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -48,8 +51,10 @@ services:
     command: ["migrate"]
     environment:
       <<: *scout-env
-      # Creates the scout_app and scout_admin roles on first run. Passwords come from the same .env.
-      DATABASE_SUPERUSER_URL: postgres://scout:${POSTGRES_PASSWORD:-scout}@postgres:5432/postgres
+      # Creates the scout_app and scout_admin roles on first run and sets their passwords.
+      SCOUT_APP_DB_PASSWORD: ${SCOUT_APP_DB_PASSWORD:?set in /opt/scout/.env}
+      SCOUT_ADMIN_DB_PASSWORD: ${SCOUT_ADMIN_DB_PASSWORD:?set in /opt/scout/.env}
+      DATABASE_SUPERUSER_URL: postgres://scout:${POSTGRES_PASSWORD:?set in /opt/scout/.env}@postgres:5432/scout
     depends_on:
       postgres:
         condition: service_healthy

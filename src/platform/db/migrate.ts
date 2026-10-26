@@ -28,6 +28,15 @@ export async function bootstrapDatabase(superuserUrl: string = config.databaseSu
   const sql = postgres(superuserUrl, { max: 1, onnotice: () => {} });
   try {
     await sql.unsafe(readFileSync(bootstrapSqlPath(), 'utf8'));
+    // Passwords are quoted server-side with format(%L); never concatenated in JS.
+    for (const [role, password] of [
+      ['scout_app', config.appDbPassword],
+      ['scout_admin', config.adminDbPassword],
+    ] as const) {
+      if (!password) continue;
+      const [row] = await sql<{ q: string }[]>`select format('alter role %I password %L', ${role}::text, ${password}::text) as q`;
+      await sql.unsafe(row!.q);
+    }
   } finally {
     await sql.end();
   }

@@ -19,22 +19,22 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=4240
 WORKDIR /app
+RUN mkdir -p /app && chown node:node /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=prod-deps /app/node_modules ./node_modules
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/.next/standalone ./.next/standalone
-COPY --from=build /app/.next/static ./.next/standalone/.next/static
-COPY --from=build /app/public ./.next/standalone/public
+COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/package.json ./package.json
+COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/.next/standalone ./.next/standalone
+COPY --from=build --chown=node:node /app/.next/static ./.next/standalone/.next/static
+COPY --from=build --chown=node:node /app/public ./.next/standalone/public
 # Everything "migrate" reads, at the same relative paths it uses from the working directory.
-COPY --from=build /app/src/platform/db/bootstrap.sql ./src/platform/db/bootstrap.sql
-COPY --from=build /app/src/platform/db/migrations ./src/platform/db/migrations
-COPY --from=build /app/src/modules/tenancy/db/migrations ./src/modules/tenancy/db/migrations
-COPY --from=build /app/src/modules/integrations/db/migrations ./src/modules/integrations/db/migrations
-COPY --from=build /app/src/modules/ai-tasks/db/migrations ./src/modules/ai-tasks/db/migrations
-COPY infra/docker/entrypoint.sh ./entrypoint.sh
-RUN chmod +x ./entrypoint.sh && chown -R node:node /app
+COPY --from=build --chown=node:node /app/src/platform/db/bootstrap.sql ./src/platform/db/bootstrap.sql
+COPY --from=build --chown=node:node /app/src/platform/db/migrations ./src/platform/db/migrations
+COPY --from=build --chown=node:node /app/src/modules/tenancy/db/migrations ./src/modules/tenancy/db/migrations
+COPY --from=build --chown=node:node /app/src/modules/integrations/db/migrations ./src/modules/integrations/db/migrations
+COPY --from=build --chown=node:node /app/src/modules/ai-tasks/db/migrations ./src/modules/ai-tasks/db/migrations
+COPY --chown=node:node --chmod=755 infra/docker/entrypoint.sh ./entrypoint.sh
 USER node
 EXPOSE 4240
 ENTRYPOINT ["/app/entrypoint.sh"]

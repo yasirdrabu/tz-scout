@@ -2,6 +2,11 @@ import { z } from 'zod';
 
 export type Config = {
   nodeEnv: 'development' | 'test' | 'production';
+  /** True when SCOUT_ENV (or, if unset, NODE_ENV) is production. Use this, not nodeEnv, for production behaviour. */
+  isProduction: boolean;
+  /** When set, `scout migrate` sets the scout_app / scout_admin role passwords to these. */
+  appDbPassword?: string;
+  adminDbPassword?: string;
   databaseUrl: string;
   databaseAdminUrl: string;
   /** Superuser connection; only for creating roles and test databases. Optional in production. */
@@ -31,6 +36,9 @@ const bool = z
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  SCOUT_ENV: z.enum(['development', 'test', 'production']).optional(),
+  SCOUT_APP_DB_PASSWORD: z.string().min(1).optional(),
+  SCOUT_ADMIN_DB_PASSWORD: z.string().min(1).optional(),
   DATABASE_URL: z.string().min(1).optional(),
   DATABASE_ADMIN_URL: z.string().min(1).optional(),
   DATABASE_SUPERUSER_URL: z.string().min(1).optional(),
@@ -84,7 +92,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
   const e = parsed.data;
 
-  if (e.NODE_ENV === 'production') {
+  // SCOUT_ENV wins over NODE_ENV: Next's standalone server forces NODE_ENV=production.
+  const effectiveEnv = e.SCOUT_ENV ?? e.NODE_ENV;
+  const isProduction = effectiveEnv === 'production';
+  if (isProduction) {
     if (e.AUTH_DEV_SIGNIN) throw new Error('AUTH_DEV_SIGNIN must be false in production');
     if (!e.SCOUT_MASTER_KEY) throw new Error('SCOUT_MASTER_KEY is required in production');
     for (const k of ['DATABASE_URL', 'DATABASE_ADMIN_URL', 'NATS_URL', 'AUTH_SECRET', 'APP_PUBLIC_URL'] as const) {
@@ -107,6 +118,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
   return {
     nodeEnv: e.NODE_ENV,
+    isProduction,
+    appDbPassword: e.SCOUT_APP_DB_PASSWORD,
+    adminDbPassword: e.SCOUT_ADMIN_DB_PASSWORD,
     databaseUrl: e.DATABASE_URL ?? 'postgres://scout_app:scout_app@localhost:5432/scout',
     databaseAdminUrl: e.DATABASE_ADMIN_URL ?? 'postgres://scout_admin:scout_admin@localhost:5432/scout',
     databaseSuperuserUrl: e.DATABASE_SUPERUSER_URL ?? 'postgres://postgres:postgres@localhost:5432/postgres',
