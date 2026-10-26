@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigserial, index, jsonb, integer, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigserial, boolean, index, jsonb, integer, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Platform schema. Platform tables are platform-wide and EXEMPT from row level security
@@ -91,4 +91,28 @@ export const deliveryAttempt = platform.table(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.consumerName, t.eventId] })],
+);
+
+/**
+ * Cron schedules that publish jobs through the outbox. Platform-wide (RLS exempt): the scheduler
+ * reads across tenants through `adminDb`. `tenant_id` is `t_platform` for platform-level jobs.
+ */
+export const schedule = platform.table(
+  'schedule',
+  {
+    id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull(),
+    jobName: text('job_name').notNull(),
+    cron: text('cron').notNull(),
+    timezone: text('timezone').notNull().default('UTC'),
+    payload: jsonb('payload').notNull().default({}),
+    enabled: boolean('enabled').notNull().default(true),
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }).notNull(),
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('schedule_tenant_job_uq').on(t.tenantId, t.jobName),
+    index('schedule_due_idx').on(t.nextRunAt).where(sql`enabled`),
+  ],
 );

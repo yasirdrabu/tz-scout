@@ -29,6 +29,13 @@
       "when": 1793031821672,
       "tag": "0003_delivery_attempt",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793032615138,
+      "tag": "0004_scheduler",
+      "breakpoints": true
     }
   ]
 }

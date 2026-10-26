@@ -30,17 +30,17 @@ export type DeadJobView = {
   deadAt: Date;
 };
 
-type AuditEntry = {
-  action: 'platform.dead_job.retried' | 'platform.dead_job.discarded';
+export type AuditEntry = {
+  action: string;
   actor: Actor;
   correlationId?: string;
   tenantId: string;
-  target: { type: 'dead_job'; id: string };
+  target: { type: string; id: string };
   detail: Record<string, unknown>;
 };
 
 // TODO(Task 8): replace with the platform `audit` writer, inside the same transaction.
-function auditStub(entry: AuditEntry): void {
+export function auditStub(entry: AuditEntry): void {
   log.info({ audit: entry }, 'audit (stub until Task 8)');
 }
 
