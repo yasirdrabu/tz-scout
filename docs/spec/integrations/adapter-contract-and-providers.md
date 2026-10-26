@@ -29,7 +29,7 @@ Carried from v1 and still binding: every outside service sits behind an interfac
 |---|---|---|---|---|
 | HubSpot | `hubspot` | crm-sync | Private app token + portal id; optional `webhook_client_secret` (kind `client_secret`) for hand-configured webhook signatures (D28) | R1 |
 | Apollo | `apollo` | enrichment, sources-and-intake (pulls) | API key | R1 |
-| Vibe Prospecting | `vibe` | enrichment | API key (or file export import until an API exists) | R1 |
+| Vibe Prospecting | `vibe` | enrichment, sources-and-intake (pulls) | API key (D34) | R1 |
 | Claude (Anthropic) | `anthropic` | ai-tasks | API key | R1 |
 | Microsoft Entra ID | `microsoft` | tenancy-and-access | Client id, secret, tenant id (platform-level for sign-in) | R0 |
 | Email sending | `email` | platform (notifications), campaigns | SMTP or provider API key | R1 |

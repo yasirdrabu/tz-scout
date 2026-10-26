@@ -190,3 +190,4 @@ Also: [migration-and-rollout/](migration-and-rollout/index.md) (moving today's d
 | D31 | v1's `lead_research` AI task is dropped (the brief's overview covers it). The v1 form webhook alias stays live until every live form uses a per-form token, not until a fixed release. | Spec's call |
 | D32 | CRM read-back is in R1: activity polled every 15 minutes and deals hourly, publishing `crm.activity.observed` and `crm.deal.changed`; implied acceptance and stages to Won work from R1. Analytics views stay R3. | Yasir |
 | D33 | Apollo saved searches and scheduled pulls are in R1; person-requested enrichment with approval stays R2. | Yasir |
+| D34 | Scout calls Vibe Prospecting directly in R1, like Apollo: API key per tenant, saved searches, scheduled pulls, credit caps. The adapter reuses v1's Vibe mapping (`vibe.ts`, `vibeExport.ts`); v1 only imported exports bought in the Vibe connector in Claude. Vibe file import stays as a backup. | Yasir |

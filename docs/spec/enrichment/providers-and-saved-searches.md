@@ -5,8 +5,8 @@ Status: Draft · Release: R1
 ## Why
 
 Today Apollo is the main way to find new companies and the people at them, Vibe runs through Claude
-outside Scout, and the company website is a free source Claude can read. Each sits behind an adapter
-with mock and live versions. Saved searches (today's "Pulls") run on a schedule and feed intake.
+outside Scout, and the company website is a free source Claude can read. In Scout, Apollo and Vibe are
+both called directly (D34). Each sits behind an adapter with mock and live versions. Saved searches (today's "Pulls") run on a schedule and feed intake.
 
 ## Rules
 
@@ -15,7 +15,7 @@ with mock and live versions. Saved searches (today's "Pulls") run on a schedule 
 | Provider key | Operations | Credentials | Notes |
 |---|---|---|---|
 | `apollo` | company search, company enrich, people search, email reveal, job postings, news | API key per tenant (INT) | Today's `apollo.ts` behaviour; emails only revealed on request |
-| `vibe` | none in Scout | none | Import only: Vibe exports come in through SRC file import with the Vibe layout; the batch carries `reported_cost` |
+| `vibe` | company search, company enrich, people search, email reveal, business events (signals) | API key per tenant (INT) | Called directly like Apollo (D34). v1 reached Vibe only through the Vibe connector in Claude plus `scripts/import-vibe.mts`; the live adapter calls Vibe's (Explorium's) API instead and keeps v1's pure mapping from `src/integrations/prospects/vibe.ts` (company shape, NAICS to industry, range midpoints, intent topic labels, events to signals, exclusions) and `vibeExport.ts` (people, seniority). Exact endpoints confirmed when the adapter is built. Vibe exports still import through SRC file import with the Vibe layout, with `reported_cost` on the batch |
 | `website` | website read | none (uses the AI connection) | Fetches the home page and up to 4 linked pages (about, services, industries, contact); 30-second limit; respects robots.txt |
 | `mock` | all | none | Seeded sample companies and people |
 
@@ -45,6 +45,9 @@ As a developer, I want every provider behind the same interface with mock and li
 Scout runs end to end without keys.
 - ENR-E2-S1-AC1 Apollo adapter tests against stubbed Apollo responses (today's `apollo.test.ts`
   fixtures) pass through the new interface.
+- ENR-E2-S1-AC4 The Vibe adapter, tested against stubbed Vibe responses, returns companies, people and
+  business events as `arrival.v1` items with `creditsUsed`, and a saved search can pick `vibe` as its
+  provider. v1's `vibe.test.ts` and `vibeExport.test.ts` cases pass through the carried-over mapping.
 - ENR-E2-S1-AC2 The website reader returns description, industry guess, size clues and technologies as
   facts with the page URL; with the Claude connection mode = mock it returns rule-based extraction labelled
   "Read by rules".
