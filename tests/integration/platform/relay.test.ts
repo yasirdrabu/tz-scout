@@ -161,6 +161,41 @@ describe('relay', () => {
     }
   }, 30000);
 
+  it('hands over when the active relay loses its lock connection, with no loss or duplicates', async () => {
+    await clear();
+    const t = newId('t');
+    const got: Got[] = [];
+    const stopListen = await listen(js, t, got);
+    const a = startRelay();
+    try {
+      await waitFor(async () => (await lockCount()) === 1);
+      const b = startRelay();
+      try {
+        for (let i = 0; i < 10; i++) await emit(t, i);
+        await waitFor(() => got.length >= 10);
+        // Kill the backend that holds the lock (the active relay's lock session).
+        await adminDb.execute(
+          sql`select pg_terminate_backend(pid) from pg_locks where locktype = 'advisory' and granted and objid = hashtext('scout_relay')::oid`,
+        );
+        // The standby takes over (within its 2 second retry) while events keep coming.
+        for (let i = 10; i < 40; i++) {
+          await emit(t, i);
+          await sleep(100);
+        }
+        await waitFor(() => got.length >= 40, 15000);
+        await sleep(500);
+        expect(await lockCount()).toBe(1);
+        expect(got.map((g) => g.n)).toEqual(Array.from({ length: 40 }, (_, i) => i));
+        expect(new Set(got.map((g) => g.id)).size).toBe(40);
+      } finally {
+        await b.stop();
+      }
+    } finally {
+      await a.stop();
+      await stopListen();
+    }
+  }, 40000);
+
   it('does not add stream messages when sent rows are replayed (dedupe by msgID)', async () => {
     await clear();
     const t = newId('t');

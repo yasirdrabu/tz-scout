@@ -7,8 +7,11 @@ describe('subjects', () => {
   });
   it('rejects reserved tokens and unknown modules', () => {
     expect(() => eventSubject('t_A', 'jobs.x.y')).toThrow(/reserved/);
-    expect(() => eventSubject('t_A', 'webhooks.deliver')).toThrow(/reserved/);
+    expect(() => eventSubject('t_A', 'webhooks.x.y')).toThrow(/reserved/);
     expect(() => eventSubject('t_A', 'nope.x.y')).toThrow(/module schema/);
+  });
+  it('requires schema, entity and verb', () => {
+    expect(() => eventSubject('t_A', 'tenancy.member')).toThrow(/must be/);
   });
   it('rejects wildcards and spaces', () => {
     expect(() => eventSubject('t_*', 'tenancy.member.added')).toThrow();

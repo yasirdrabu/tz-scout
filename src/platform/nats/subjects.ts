@@ -31,6 +31,9 @@ function check(label: string, value: string): void {
 export function eventSubject(tenantId: string, type: string): string {
   check('tenant id', tenantId);
   check('event type', type);
+  if (type.split('.').length < 3) {
+    throw new Error('Event type "' + type + '" must be <schema>.<entity>.<verb>');
+  }
   const first = type.split('.')[0] as string;
   if ((RESERVED_TOKENS as readonly string[]).includes(first)) {
     throw new Error(`Event type "${type}" uses the reserved token "${first}"`);

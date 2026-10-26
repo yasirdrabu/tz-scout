@@ -39,10 +39,45 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * Runs until `signal` aborts.
  */
 export async function runRelay(opts: RelayOptions): Promise<void> {
+  while (!opts.signal.aborted) {
+    try {
+      await relayWhileLocked(opts);
+    } catch (e) {
+      log.warn({ err: (e as Error).message }, 'relay: stopped unexpectedly, restarting');
+    }
+    if (!opts.signal.aborted) {
+      log.warn('relay: lost the lock, going back to waiting for it');
+      await sleep(ERROR_RETRY_MS, opts.signal);
+    }
+  }
+}
+
+/** Holds the lock and relays until aborted or until the lock is lost (then returns). */
+async function relayWhileLocked(opts: RelayOptions): Promise<void> {
   const { signal, batchSize = 100, idleMs = 200, natsUrl } = opts;
-  const lockSql = postgres(config.databaseAdminUrl, { max: 1, onnotice: () => {} });
-  let nats: Nats | undefined;
+  let lost = false;
   let wake: (() => void) | undefined;
+  // The lock is tied to this one session, so it must never be recycled: no max_lifetime, no idle_timeout.
+  const lockSql = postgres(config.databaseAdminUrl, {
+    max: 1,
+    max_lifetime: 0, // 0 disables the timer
+    idle_timeout: 0,
+    onnotice: () => {},
+    onclose: () => {
+      lost = true;
+      wake?.();
+    },
+  });
+  const holdsLock = async (): Promise<boolean> => {
+    if (lost) return false;
+    try {
+      const rows = await lockSql`select 1 from pg_locks where locktype = 'advisory' and granted and objid = hashtext('scout_relay')::oid and pid = pg_backend_pid()`;
+      return rows.length > 0 && !lost;
+    } catch {
+      return false;
+    }
+  };
+  let nats: Nats | undefined;
   let unlisten: (() => Promise<void>) | undefined;
   let pendingWake = false;
   const poke = () => {
@@ -55,8 +90,15 @@ export async function runRelay(opts: RelayOptions): Promise<void> {
   try {
     // 1. Single active relay: hold the advisory lock on this session.
     while (!signal.aborted) {
-      const [r] = await lockSql`select pg_try_advisory_lock(hashtext('scout_relay')) as ok`;
-      if (r?.ok) break;
+      try {
+        const [r] = await lockSql`select pg_try_advisory_lock(hashtext('scout_relay')) as ok`;
+        if (r?.ok) {
+          lost = false;
+          break;
+        }
+      } catch (e) {
+        log.warn({ err: (e as Error).message }, 'relay: could not ask for the lock');
+      }
       await sleep(LOCK_RETRY_MS, signal);
     }
     if (signal.aborted) return;
@@ -80,6 +122,7 @@ export async function runRelay(opts: RelayOptions): Promise<void> {
     let streamsReady = false;
 
     while (!signal.aborted) {
+      if (!(await holdsLock())) return;
       let sentAny = false;
       let full = false;
       try {
@@ -94,7 +137,7 @@ export async function runRelay(opts: RelayOptions): Promise<void> {
         const sent: string[] = [];
         let failure: unknown;
         for (const row of rows) {
-          if (signal.aborted) break;
+          if (signal.aborted || lost) break;
           try {
             await nats.js.publish(row.nats_subject, JSON.stringify(row.payload), { msgID: row.id });
             sent.push(row.id);

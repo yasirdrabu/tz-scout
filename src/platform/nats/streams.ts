@@ -1,6 +1,8 @@
 import { RetentionPolicy, StorageType, type JetStreamManager, type StreamConfig } from '@nats-io/jetstream';
 import { MODULE_SCHEMAS } from './subjects';
 
+// Relay retries re-send the same msgID; they must stay inside this window to be deduplicated.
+const DUPLICATE_WINDOW_NS = 2 * 60 * 1_000_000_000;
 const DAY_NS = 24 * 60 * 60 * 1_000_000_000;
 
 type StreamSpec = Partial<StreamConfig> & { name: string; subjects: string[] };
@@ -12,12 +14,14 @@ export const STREAMS: StreamSpec[] = [
     retention: RetentionPolicy.Limits,
     storage: StorageType.File,
     max_age: 90 * DAY_NS,
+    duplicate_window: DUPLICATE_WINDOW_NS,
   },
   {
     name: 'SCOUT_JOBS',
     subjects: ['scout.*.jobs.>'],
     retention: RetentionPolicy.Workqueue,
     storage: StorageType.File,
+    duplicate_window: DUPLICATE_WINDOW_NS,
   },
   {
     name: 'SCOUT_WEBHOOKS',
