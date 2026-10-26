@@ -46,8 +46,11 @@ export async function createTenant(
   const correlationId = newId('cor');
   try {
     return await adminDb.transaction(async (tx) => {
-      const [admin] = await tx.select({ isAdmin: user.platformAdmin }).from(user).where(eq(user.id, actor.id));
-      if (!admin?.isAdmin) {
+      const [admin] = await tx
+        .select({ isAdmin: user.platformAdmin, disabledAt: user.disabledAt })
+        .from(user)
+        .where(eq(user.id, actor.id));
+      if (!admin?.isAdmin || admin.disabledAt) {
         throw new ScoutError({ slug: 'forbidden', status: 403, title: 'Only platform admins can create tenants.' });
       }
       const [taken] = await tx.select({ id: tenant.id }).from(tenant).where(eq(tenant.slug, slug));

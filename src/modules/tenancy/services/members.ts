@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb } from '@/platform/db/client';
@@ -315,12 +315,23 @@ export async function members(
   return wanted ? out.filter((m) => m.permissions.includes(wanted)) : out;
 }
 
-/** Tenants where the user has an active membership. Platform-wide lookup, so it uses `adminDb`. */
+/**
+ * Active tenants where the user has an active membership; nothing for a disabled user. Platform-wide
+ * lookup, so it uses `adminDb`.
+ */
 export async function tenantsFor(userId: string): Promise<{ id: string; slug: string; name: string }[]> {
   return adminDb
     .select({ id: tenant.id, slug: tenant.slug, name: tenant.name })
     .from(membership)
     .innerJoin(tenant, eq(tenant.id, membership.tenantId))
-    .where(and(eq(membership.userId, userId), eq(membership.status, 'active')))
+    .innerJoin(user, eq(user.id, membership.userId))
+    .where(
+      and(
+        eq(membership.userId, userId),
+        eq(membership.status, 'active'),
+        eq(tenant.status, 'active'),
+        isNull(user.disabledAt),
+      ),
+    )
     .orderBy(asc(tenant.name));
 }

@@ -5,8 +5,8 @@ import { boolean, index, integer, jsonb, pgSchema, text, timestamp, uniqueIndex 
  * Tenancy schema.
  *
  * Platform-wide tables, EXEMPT from row level security (no tenant policy; people and tenants span
- * tenants): `tenant` (written through `adminDb`) and `user`. Better-auth tables (session, account,
- * verification) join them in Task 11 and are exempt too.
+ * tenants): `tenant` (written through `adminDb`), `user`, and the better-auth tables `session`,
+ * `account` and `verification` (read and written by better-auth through `adminDb`).
  *
  * Tenant tables (`membership`, `invite`, `api_key`) carry `tenant_id` and have row level security
  * enabled and forced with the standard `tenant_isolation` policy (added by hand in the migration).
@@ -24,20 +24,24 @@ export const tenant = tenancy.table('tenant', {
 });
 
 /** One person, identified by email. Column names `name`, `email`, `email_verified`, `image` follow better-auth. */
-export const user = tenancy.table('user', {
-  id: text('id').primaryKey(), // usr_
-  name: text('name').notNull(),
-  email: text('email').notNull().unique(), // lower case
-  emailVerified: boolean('email_verified').notNull().default(false),
-  image: text('image'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  platformAdmin: boolean('platform_admin').notNull().default(false),
-  disabledAt: timestamp('disabled_at', { withTimezone: true }),
-  lastTenantId: text('last_tenant_id'),
-  lastSignInAt: timestamp('last_sign_in_at', { withTimezone: true }),
-  entraObjectId: text('entra_object_id'),
-});
+export const user = tenancy.table(
+  'user',
+  {
+    id: text('id').primaryKey(), // usr_
+    name: text('name').notNull(),
+    email: text('email').notNull().unique(), // lower case
+    emailVerified: boolean('email_verified').notNull().default(false),
+    image: text('image'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    platformAdmin: boolean('platform_admin').notNull().default(false),
+    disabledAt: timestamp('disabled_at', { withTimezone: true }),
+    lastTenantId: text('last_tenant_id'),
+    lastSignInAt: timestamp('last_sign_in_at', { withTimezone: true }),
+    entraObjectId: text('entra_object_id'),
+  },
+  (t) => [uniqueIndex('user_entra_object_id_uq').on(t.entraObjectId)],
+);
 
 export const membership = tenancy.table(
   'membership',
@@ -97,4 +101,59 @@ export const apiKey = tenancy.table(
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
   },
   (t) => [index('api_key_prefix_idx').on(t.prefix), index('api_key_tenant_idx').on(t.tenantId)],
+);
+
+/** Better-auth session (platform-wide). `updated_at` is the last activity, bumped at most hourly. */
+export const session = tenancy.table(
+  'session',
+  {
+    id: text('id').primaryKey(), // ses_
+    token: text('token').notNull().unique(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('session_user_idx').on(t.userId)],
+);
+
+/** Better-auth sign-in account link (platform-wide). For Microsoft, `account_id` is the Entra object id. */
+export const account = tenancy.table(
+  'account',
+  {
+    id: text('id').primaryKey(), // oac_
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    idToken: text('id_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true }),
+    scope: text('scope'),
+    password: text('password'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('account_provider_account_uq').on(t.providerId, t.accountId), index('account_user_idx').on(t.userId)],
+);
+
+/** Better-auth verification values, such as OAuth state (platform-wide). */
+export const verification = tenancy.table(
+  'verification',
+  {
+    id: text('id').primaryKey(), // vrf_
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('verification_identifier_idx').on(t.identifier)],
 );

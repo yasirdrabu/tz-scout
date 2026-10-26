@@ -8,6 +8,13 @@
       "when": 1793033545274,
       "tag": "0000_tenants_and_memberships",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793034634656,
+      "tag": "0001_better_auth",
+      "breakpoints": true
     }
   ]
 }
