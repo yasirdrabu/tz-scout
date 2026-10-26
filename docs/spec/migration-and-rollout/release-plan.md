@@ -20,8 +20,8 @@ on the staging VM; dead jobs show in Admin; restoring a nightly backup works.
 R0 exit status (updated 2026-10-26):
 
 - [x] Tenant, users and an API key exist on a laptop; `/v1/me` returns the tenant (2026-10-26).
-- [x] Test event round trip web → outbox → NATS → worker on the laptop, about 140 ms (2026-10-26).
-- [x] A forced dead job shows in the dead jobs list (`listDeadJobs`, the data behind Admin, System) on the laptop (2026-10-26).
+- [x] Test event round trip outbox → NATS → worker on the laptop through the same function the System page calls (the page click itself is covered by the admin browser test), about 140 ms (2026-10-26).
+- [x] A forced dead job shows in the dead jobs list (`listDeadJobs`; the System page itself is covered by the admin browser test) on the laptop (2026-10-26).
 - [x] Typecheck, lint, unit and integration tests, and end to end tests pass (2026-10-26).
 - [ ] Test event round trip on the staging VM. Pending: hosting is undecided.
 - [ ] Backup, then restore check, on staging. Scripts are written; they run for the first time in CI.

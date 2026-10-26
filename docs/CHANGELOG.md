@@ -12,7 +12,7 @@ The base the rest of Scout builds on. Everything runs on a laptop on mock servic
 - **AI runner with rules fallback**: prompts in versioned files, outputs checked, every run logged. If the model is off or fails, rules answer instead.
 - **Admin screens**: workspaces, system (test event, dead jobs, schedules), integrations, AI runs, audit and members.
 - **The `scout` command**: migrate, seed, worker, relay, scheduler, all-background and web.
-- **Container image and compose** for a laptop and for one VM, **nightly backups** with a restore check, and **CI** workflows (build, test, staging deploy).
+- **Container image and compose** for a laptop and for one VM, **backup and restore-check scripts** (not yet run; first run in CI), and **CI** workflows (build, test, staging deploy).
 
 **Security hardening found in review**
 - Microsoft sign-in for other organisations is locked to an allowed list of tenant ids, and platform admins match only from the home tenant, so a stranger cannot claim someone's email.
@@ -20,7 +20,7 @@ The base the rest of Scout builds on. Everything runs on a laptop on mock servic
 - Credentials are bound to their connection when sealed, and secrets are scrubbed from error text and logs.
 - Test keys can never reach a live service.
 
-**Checked on the laptop (2026-10-26)**: seed and `/v1/me` return the Taazaa tenant; a test event completes the round trip in about 140 ms; a forced failing job lands in dead jobs; typecheck and lint are clean, and 80 unit, 199 integration and 9 end to end tests pass.
+**Checked on the laptop (2026-10-26)**: seed and `/v1/me` return the Taazaa tenant; a test event completes the round trip outbox → NATS → worker in about 140 ms, run through the same function the System page calls (the page click itself is covered by the admin browser test); a forced failing job lands in dead jobs; typecheck and lint are clean, and 80 unit, 199 integration and 9 end to end tests pass.
 
 **Still pending**
 - Hosting decision, then the OpenTofu setup for the VM (skipped for now).
