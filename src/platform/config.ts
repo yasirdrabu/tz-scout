@@ -4,6 +4,8 @@ export type Config = {
   nodeEnv: 'development' | 'test' | 'production';
   databaseUrl: string;
   databaseAdminUrl: string;
+  /** Superuser connection; only for creating roles and test databases. Optional in production. */
+  databaseSuperuserUrl: string;
   natsUrl: string;
   masterKey?: Buffer;
   masterKeyPrevious?: Buffer;
@@ -23,6 +25,7 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().min(1).optional(),
   DATABASE_ADMIN_URL: z.string().min(1).optional(),
+  DATABASE_SUPERUSER_URL: z.string().min(1).optional(),
   NATS_URL: z.string().min(1).optional(),
   SCOUT_MASTER_KEY: z.string().optional(),
   SCOUT_MASTER_KEY_PREVIOUS: z.string().optional(),
@@ -76,6 +79,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     nodeEnv: e.NODE_ENV,
     databaseUrl: e.DATABASE_URL ?? 'postgres://scout_app:scout_app@localhost:5432/scout',
     databaseAdminUrl: e.DATABASE_ADMIN_URL ?? 'postgres://scout_admin:scout_admin@localhost:5432/scout',
+    databaseSuperuserUrl: e.DATABASE_SUPERUSER_URL ?? 'postgres://postgres:postgres@localhost:5432/postgres',
     natsUrl: e.NATS_URL ?? 'nats://localhost:4222',
     masterKey,
     masterKeyPrevious,

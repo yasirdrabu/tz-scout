@@ -13,3 +13,4 @@ dist/
 reference/v1/node_modules/
 tsconfig.tsbuildinfo
 next-env.d.ts
+.tools/
