@@ -1,109 +1,82 @@
-# Client Acquisition System
+# Taazaa Scout
 
-Taazaa's internal tool for taking an offering from "who should we sell to" to "what did a won client
-cost". Phase 1 runs on Taazaa's own pipeline; later it becomes a multi-client product.
+Scout takes accounts from agents, vendors and people, scores and matches them to Taazaa's offers, lets
+a leader review and assign them, and hands them to the CRM with context. It is multi-tenant from day one:
+Taazaa is the first tenant.
 
-Spec: `docs/SPEC.md`. Build plan: `docs/BUILD_PLAN.md`. Code map and conventions: `docs/ARCHITECTURE.md`.
-What changed per milestone: `docs/CHANGELOG.md`.
+This branch holds the R0 foundation: platform plumbing (outbox, relay, NATS, worker, scheduler, dead
+jobs), tenancy and sign-in, API keys with `/v1/me`, integrations on mock adapters, the AI task runner and
+admin screens. Specs are in `docs/spec/` (start at `docs/spec/README.md`); release scope is in
+`docs/spec/migration-and-rollout/release-plan.md`; changes are in `docs/CHANGELOG.md`.
 
-## Run it
+## Run it on a laptop
+
+Needs Node 22 or later.
 
 ```bash
 npm install
-npm run dev
+cp .env.example .env        # then fill SCOUT_MASTER_KEY and AUTH_SECRET (see below)
+npm run services:local      # Postgres 17 and NATS, no Docker. Leave it running.
+npm run scout -- migrate
+npm run scout -- seed       # prints a development API key for the taazaa tenant
+npm run scout -- all-background   # worker, relay and scheduler (second terminal)
+npm run dev                 # http://localhost:4240 (third terminal)
 ```
 
-`npm run dev` starts a local Postgres (embedded, port 5440, data in `.pgdata/`), syncs the schema,
-seeds on first run, and serves the app on http://localhost:4240. No Docker, no admin rights.
+With Docker instead of `services:local`: `docker compose -f infra/compose/docker-compose.yml up -d`.
 
-Sign in with the dev sign-in and pick a seeded user:
+Check it: `curl -H "Authorization: Bearer <key from seed>" http://localhost:4240/v1/me` returns the tenant.
+Sign in with the developer sign-in form (needs `AUTH_DEV_SIGNIN=true`, never in production). In Admin,
+System, "Send test event" shows the round trip through the outbox, NATS and the worker.
 
-| User | Role |
-|---|---|
-| zach.wiant@taazaa.com | Admin, Owner of Taazaa |
-| operator@taazaa.test | Operator |
-| sdr@taazaa.test, ae@taazaa.test | Sales (round robin lead owners) |
-| owner@northwind.test | Owner of Northwind Sample Co (proves company isolation) |
+Generate the secrets with `openssl rand -base64 32` (master key) and `openssl rand -hex 32` (auth secret).
+Set `SCOUT_FORCE_MOCK=true` to keep every outside service on its mock.
 
-Reseed any time: `npm run dev -- --seed` or `npm run db:seed` (with Postgres running: `npm run db`).
+## Tests and checks
 
-## What's real and what's sample data
+```bash
+npm run typecheck
+npm run lint
+npm test          # unit and integration (needs the local services running)
+npm run e2e       # Playwright; starts its own server on 4240 and a throwaway database
+```
 
-Everything runs end to end on **mock adapters** with seeded data: HubSpot, Meta, LinkedIn, Google Ads,
-company data, booking, email and SMS, and Claude. Each one sits behind an interface in
-`src/integrations/<name>/` and switches to live with `INTEGRATION_<NAME>=live` plus credentials (see
-`.env.example`). Claude goes live with `INTEGRATION_ANTHROPIC=live` and `ANTHROPIC_API_KEY`; every
-call, mock or live, is logged to the `AiRun` table and visible in Admin.
+## Build
 
-The seed is Taazaa's six productized offerings (from the Sep 10 marketing handoff) with their locked
-or working prices, the six verified case studies, and ten weeks of synthetic pipeline history. Margins,
-conversion rates and targets are placeholders until the Phase 0 manual round replaces them.
+```bash
+npm run build     # Next.js standalone build plus dist/cli.js
+node dist/cli.js <migrate | seed | worker | relay | scheduler | all-background | web>
+```
 
-## Turning on real buyers (Apollo)
+The container image (`infra/docker/`) runs the same CLI; the role is picked by the command.
 
-1. In `.env`, set `APOLLO_API_KEY` to your Apollo API key (a master key, so people search works) and
-   `INTEGRATION_PROSPECTS="live"`.
-2. Optional: `APOLLO_MAX_CREDITS_PER_RUN` (default 150) caps what one pull may spend. A pull of 25
-   companies uses about 52 credits (search, enrichment, job postings, news). People search is free;
-   revealing an email costs a credit and only happens when someone clicks it or starts outreach.
-3. Restart `npm run dev`, open **Pulls**, use "Clear sample companies", then run a pull.
+## Deploy
 
-For real briefs, also set `INTEGRATION_ANTHROPIC="live"` and `ANTHROPIC_API_KEY`.
+Design and runbook: `docs/spec/architecture/deployment-and-iac.md`. The single VM stack is
+`infra/compose/docker-compose.vm.yml` with Caddy or a Cloudflare Tunnel in front. Hosting is not decided
+yet, so nothing is deployed.
 
-## Real data only (since 2026-10-15)
+Notes for the VM:
 
-The dev database now holds only real records: Taazaa, Zach, the six offerings, six case studies,
-and companies pulled from Apollo. All integrations are set to live; anything without credentials
-says "not connected" instead of inventing numbers. The sample data was removed after a full copy
-was kept as the Postgres database `acq_backup_20261015_sample`. `npm run db:seed:sample` WIPES the
-database and reloads sample data; only use it on a separate demo copy. The browser specs
-`smoke`, `flows` and `buyers` expect sample data; `real-empty` checks every page on real data.
+- Run every compose command with `--env-file /opt/scout/.env`, not just `up`. The file holds the passwords
+  the compose file requires.
+- Set `COMPOSE_PROFILES=tunnel` (Cloudflare Tunnel) or `public-ip` (Caddy on a public address) in that file
+  so a plain `up -d` starts the edge service.
+- `POSTGRES_PASSWORD`, `SCOUT_APP_DB_PASSWORD` and `SCOUT_ADMIN_DB_PASSWORD` end up inside database URLs, so
+  they must be URL-safe. Use `openssl rand -hex 32` for each.
+- Set `SCOUT_ENV=production`. Next's standalone server forces `NODE_ENV=production`, so Scout's own
+  production rules (no dev sign-in, secure cookies, required secrets) follow `SCOUT_ENV` first, then
+  `NODE_ENV`. A laptop leaves it empty.
+- `AZURE_AD_ALLOWED_TENANT_IDS` lists the Microsoft tenant ids whose people may be matched by email the
+  first time they sign in. It defaults to `AZURE_AD_TENANT_ID`. A client's people cannot sign in until
+  their tenant id is added.
+- `.env.example` lists every variable.
 
-## Pulling buyers from Vibe Prospecting (while Apollo is out of credits)
+## Code map
 
-Vibe runs through the Vibe connector in Claude (Vu's account, Vibe credits), not from the app yet.
+`src/platform` (outbox, relay, worker, scheduler, audit), `src/modules/*` (tenancy, integrations, ai),
+`src/app` (Next.js screens and `/v1`), `src/entry` (the `scout` CLI and seed). Modules talk through their
+public interface; lint enforces the boundaries.
 
-1. In Claude, build the pull with free previews (`fetch-entities`, `enrich-business`,
-   `fetch-businesses-events`), get a cost estimate, and export only after an explicit OK.
-2. Load the export with `get-dataset` (`load_into: "context"`, free for exported data) and save the
-   result as `data/vibe/<date>-<offering-slug>.json`. The offering slug links the pull to an offer.
-3. Check the mapping without writing: `node --env-file=.env --import tsx scripts/import-vibe.mts taazaa --dry data/vibe/<file>.json`
-4. Import, with the credits Vibe charged: `node --env-file=.env --import tsx scripts/import-vibe.mts taazaa data/vibe/<file>.json:75`
-   Without an Anthropic key, prefix `INTEGRATION_ANTHROPIC=mock` so briefs are assembled from rules
-   (the app labels them that way).
-
-People (emails) at those accounts: fetch prospects in Claude filtered to the accounts' Vibe business
-ids, enrich with emails, quote the cost, export on an OK, save the `get-dataset` page as JSON, then
-`node --env-file=.env --import tsx scripts/import-vibe-contacts.mts taazaa data/vibe/<file>.json`
-(add `--dry` to preview). The best title for each account's best offer becomes the primary contact.
-
-The import keeps events from the last 12 months, keeps mergers only when the company is a named
-party, skips crime stories in the legal feed, maps NAICS codes to our industry words, and rules out
-software vendors and units of larger parents (with an "Include anyway" override in the app).
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `npm run dev` | Postgres + schema + Next.js dev server on 4240 |
-| `npm run db` | Postgres only (for tests or scripts) |
-| `npm run db:seed` | Reseed (wipes and rebuilds the dev database) |
-| `npm test` | Unit tests plus integration tests against `acq_test` |
-| `npm run typecheck`, `npm run lint` | Static checks |
-| `npm run ci` | Typecheck, lint, test |
-| `npm run e2e` | Browser smoke test (dev server must be running; uses installed Edge) |
-
-## Going live, in order
-
-1. **Microsoft 365 sign-in**: Entra ID app registration, then set `AZURE_AD_*` and `AUTH_DEV_SIGNIN=false`.
-2. **Claude**: `INTEGRATION_ANTHROPIC=live`, `ANTHROPIC_API_KEY`. Default model `claude-opus-5-5`.
-3. **HubSpot** (milestone 8): private app token; lead status, notes, meetings, deals.
-4. **Meta** (milestone 9): access token and ad account; test launches, results, offline conversions.
-5. **LinkedIn and Google Ads** (milestone 10): when API access is approved.
-6. **Hosting**: any Node host plus managed Postgres. `npm run build && npm start`; set `DATABASE_URL`.
-
-## Note for this laptop
-
-Windows Application Control blocks Next.js's native compiler here, so Next falls back to its WASM
-compiler. The first load of each page after a restart takes 30 to 80 seconds; after that it's quick.
-A production build (`npm run build`) avoids this for demos.
+The previous version of this tool (v1) is described in `docs/ARCHITECTURE.md` and the older entries of
+`docs/CHANGELOG.md`.

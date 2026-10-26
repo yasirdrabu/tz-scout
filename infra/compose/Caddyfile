@@ -1,0 +1,4 @@
+scout.taazaa.ai {
+	encode zstd gzip
+	reverse_proxy web:4240
+}

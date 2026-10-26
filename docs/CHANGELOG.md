@@ -1,5 +1,44 @@
 # Changelog
 
+## 2026-10-26: Taazaa Scout R0 foundation
+
+The base the rest of Scout builds on. Everything runs on a laptop on mock services; nothing is deployed yet.
+
+**What was built**
+- **Platform plumbing**: events saved with the change that caused them, a relay that sends them to NATS, a worker with retries and dead jobs you can retry or discard, a scheduler, an audit log, and health pages.
+- **Tenancy and sign-in**: tenants, people, memberships, and roles with permissions and data limits. Microsoft sign-in, plus a developer sign-in for laptops only.
+- **API keys and `/v1/me`**: keys with scopes and data limits, shown once and revocable. `/v1/me` returns the tenant and what the key may do.
+- **Integrations core on mocks**: connection records, encrypted credentials, a test button and a call log. Test keys always use the mock services.
+- **AI runner with rules fallback**: prompts in versioned files, outputs checked, every run logged. If the model is off or fails, rules answer instead.
+- **Admin screens**: workspaces, system (test event, dead jobs, schedules), integrations, AI runs, audit and members.
+- **The `scout` command**: migrate, seed, worker, relay, scheduler, all-background and web.
+- **Container image and compose** for a laptop and for one VM, **backup and restore-check scripts** (not yet run; first run in CI), and **CI** workflows (build, test, staging deploy).
+
+**Security hardening found in review**
+- Microsoft sign-in for other organisations is locked to an allowed list of tenant ids, and platform admins match only from the home tenant, so a stranger cannot claim someone's email.
+- API keys cannot be given more than the person creating them has, key lookup no longer reveals by timing whether a key prefix exists, and cookie-based writes need the same origin.
+- Credentials are bound to their connection when sealed, and secrets are scrubbed from error text and logs.
+- Test keys can never reach a live service.
+
+**Whole-branch review fixes (2026-10-26)**
+- "Run now" on the System page works for module jobs such as the credentials cleanup.
+- Idempotency keys are now isolated per tenant, and a test checks that every table with a tenant id forces row level security unless it is on a short platform-wide list.
+- Changes made by a platform admin under support access are marked in the audit log and show a "Support access" badge on the Audit page.
+- Calls on sample data no longer change a connection's status or failure count.
+- Worker, relay and scheduler logs scrub secrets and drop database query values.
+- The laptop compose stack listens on 127.0.0.1 only and has a development-only master key.
+- Only platform code, tenancy services, sign-in, the cleanup job and entry points may import the row level security bypass; lint enforces it.
+- The Profile and Members pages show permissions in plain words.
+- Browser tests allow for slow first compiles and warm the main pages first.
+
+**Checked on the laptop (2026-10-26)**: seed and `/v1/me` return the Taazaa tenant; a test event completes the round trip outbox → NATS → worker in about 140 ms, run through the same function the System page calls (the page click itself is covered by the admin browser test); a forced failing job lands in dead jobs; typecheck and lint are clean, and 80 unit, 199 integration and 9 end to end tests pass.
+
+**Still pending**
+- Hosting decision, then the OpenTofu setup for the VM (skipped for now).
+- First run of the CI workflows (needs a push), including the backup and restore job.
+- Staging steps: backup and restore on staging, Microsoft sign-in with a member and a non-member, the test event on staging.
+- Building and starting the container image and compose stacks on a machine with Docker (not possible on this laptop).
+
 ## 2026-10-23: Drag-and-drop import, ABM research sheets, practice buckets
 
 - **Drag and drop** on Buyers, Import: drop one or many files. Research sheets (one company per row with a dated signal, decision-makers, pilot, hook and the researcher's score) are recognised by their columns and imported straight away; plain lead lists go straight in when they have a website or work-email column, otherwise you're asked to confirm the columns. Parser in `src/lib/research.ts` reads all four research layouts, including "master" files that stack two.

@@ -1,3 +1,5 @@
+> Superseded by `docs/spec/` (Taazaa Scout spec v2). Kept as history.
+
 # Build plan
 
 One milestone per Claude Code session. Start each with: "Read CLAUDE.md and docs/SPEC.md, then do milestone N from docs/BUILD_PLAN.md. Plan first, then build."

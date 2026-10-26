@@ -1,0 +1,109 @@
+# Laptop stack. For local use only: dev sign-in is on and every integration is a mock.
+# Run: docker compose -f infra/compose/docker-compose.yml up --build
+# Ports are published on 127.0.0.1 only, so the stack is not reachable from other machines.
+x-scout: &scout
+  image: scout:dev
+  pull_policy: never # built by the migrate service: run "docker compose build" first
+  environment: &scout-env
+    # Development mode, because production refuses the dev sign-in. Never expose this stack.
+    NODE_ENV: development
+    SCOUT_ENV: development
+    DATABASE_URL: postgres://scout_app:scout_app@postgres:5432/scout
+    DATABASE_ADMIN_URL: postgres://scout_admin:scout_admin@postgres:5432/scout
+    DATABASE_SUPERUSER_URL: postgres://scout:scout@postgres:5432/scout
+    NATS_URL: nats://nats:4222
+    AUTH_DEV_SIGNIN: "true"
+    SCOUT_FORCE_MOCK: "true"
+    APP_PUBLIC_URL: http://localhost:4240
+    SCOUT_BIND_HOST: 0.0.0.0
+    # DEVELOPMENT ONLY, NOT FOR PRODUCTION: a fixed, public key so credential saving works on this
+    # laptop stack. Anything sealed with it is readable by anyone with this file. Never reuse it.
+    SCOUT_MASTER_KEY: c2NvdXQtbGFwdG9wLXN0YWNrLWRldi1vbmx5LWtleSE=
+x-after-migrate: &after-migrate
+  postgres:
+    condition: service_healthy
+  nats:
+    condition: service_healthy
+  migrate:
+    condition: service_completed_successfully
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: scout
+      POSTGRES_PASSWORD: scout
+      POSTGRES_DB: scout
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../../src/platform/db/bootstrap.sql:/docker-entrypoint-initdb.d/10-bootstrap.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U scout -d scout"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  nats:
+    image: nats:2.11-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    volumes:
+      - natsdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+
+  migrate:
+    <<: *scout
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    pull_policy: build
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    <<: *scout
+    command: ["web"]
+    ports:
+      - "127.0.0.1:4240:4240"
+    depends_on: *after-migrate
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4240/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    <<: *scout
+    command: ["worker"]
+    depends_on: *after-migrate
+
+  scheduler:
+    <<: *scout
+    command: ["scheduler"]
+    depends_on: *after-migrate
+
+  relay:
+    <<: *scout
+    command: ["relay"]
+    depends_on: *after-migrate
+
+volumes:
+  pgdata:
+  natsdata:

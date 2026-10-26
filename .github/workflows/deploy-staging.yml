@@ -1,0 +1,64 @@
+# Manual staging deploy. Not wired to a push: the staging host is not decided yet.
+#
+# One-time setup in GitHub (Settings):
+#   - Environments: create "staging" and add the required reviewer(s) under "Required reviewers".
+#   - Secrets on the staging environment: STAGING_SSH_HOST, STAGING_SSH_USER, STAGING_SSH_KEY, STAGING_URL
+#     (STAGING_URL is the public base URL, for example https://scout-staging.example.com, same as APP_PUBLIC_URL).
+#   - /opt/scout/.env must set COMPOSE_PROFILES=tunnel (or public-ip), or "up -d" starts no edge service.
+# The host needs /opt/scout with docker-compose.vm.yml and .env, and permission to pull ghcr.io/yasirdrabu/tz-scout.
+name: deploy-staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to deploy (a git sha pushed by ci, or latest)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        with:
+          host: ${{ secrets.STAGING_SSH_HOST }}
+          username: ${{ secrets.STAGING_SSH_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          envs: IMAGE_TAG
+          script_stop: true
+          script: |
+            set -eu
+            cd /opt/scout
+            export IMAGE_TAG
+            compose="docker compose -f docker-compose.vm.yml --env-file /opt/scout/.env"
+            $compose pull
+            $compose run --rm migrate
+            $compose up -d
+      - name: Wait for readyz
+        env:
+          STAGING_URL: ${{ secrets.STAGING_URL }}
+        run: |
+          url="${STAGING_URL%/}/readyz"
+          for i in $(seq 1 12); do
+            if curl -fsS --max-time 5 "$url"; then
+              echo
+              echo "readyz ok"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "readyz did not become ok within 60 seconds: $url" >&2
+          exit 1

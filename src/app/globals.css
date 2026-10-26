@@ -33,10 +33,6 @@ body {
   }
 }
 
-/* Presentation mode: large type for client meetings. */
-.present {
-  font-size: 1.25rem;
-}
 
 ::selection {
   background: theme("colors.accent.soft");

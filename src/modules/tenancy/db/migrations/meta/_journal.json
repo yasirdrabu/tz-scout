@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793033545274,
+      "tag": "0000_tenants_and_memberships",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793034634656,
+      "tag": "0001_better_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793035558419,
+      "tag": "0002_entra_tenant",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793036139659,
+      "tag": "0003_api_key_prefix_unique",
+      "breakpoints": true
+    }
+  ]
+}
