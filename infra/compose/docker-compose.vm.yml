@@ -113,17 +113,38 @@ services:
     depends_on:
       - web
 
-  # Task 19 fills this in: nightly pg_dump to object storage, 14 days kept.
+  # Nightly pg_dump at 02:00 UTC, copied offsite when BACKUP_REMOTE is set, 14 days kept.
+  # Run by hand: docker compose --env-file /opt/scout/.env -f docker-compose.vm.yml run --rm backup /backup.sh
+  # Prove a restore: ... run --rm backup /restore-check.sh
   backup:
-    image: postgres:17
+    build:
+      context: ../backup
     restart: unless-stopped
-    entrypoint: ["sh", "-c", "echo 'backup: not configured yet' && sleep infinity"]
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: scout
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set in /opt/scout/.env}
+      PGDATABASE: scout
+      BACKUP_DIR: /backups
+      BACKUP_REMOTE: ${BACKUP_REMOTE:-}
+      # rclone remote named r2, configured from the environment (Cloudflare R2 or any S3 bucket).
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: ${BACKUP_S3_PROVIDER:-Cloudflare}
+      RCLONE_CONFIG_R2_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+    volumes:
+      - backups:/backups
     depends_on:
       postgres:
         condition: service_healthy
+
+
 
 volumes:
   pgdata:
   natsdata:
   caddydata:
   caddyconfig:
+  backups:

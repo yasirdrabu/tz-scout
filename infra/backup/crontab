@@ -1,0 +1,2 @@
+# supercronic: nightly backup at 02:00 UTC
+0 2 * * * /backup.sh
