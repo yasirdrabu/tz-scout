@@ -1,3 +1,4 @@
+import './registry';
 import { pingHandler } from '@/platform/diagnostics';
 import { log } from '@/platform/log';
 import type { ConsumerDef } from '@/platform/runtime/consumers';

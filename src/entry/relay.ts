@@ -1,3 +1,4 @@
+import './registry';
 import { log } from '@/platform/log';
 import { runRelay } from '@/platform/relay';
 

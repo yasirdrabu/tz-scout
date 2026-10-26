@@ -12,6 +12,15 @@ import { log as rootLog } from './log';
 
 const log = rootLog.child({ role: 'scheduler' });
 
+const reported = new Set<string>();
+/** Logs a bad row once per process per (row id, reason), so a stuck row does not flood the log. */
+function logOnce(row: ScheduleRow, reason: string): void {
+  const key = row.id + '|' + reason;
+  if (reported.has(key)) return;
+  reported.add(key);
+  log.error({ scheduleId: row.id, jobName: row.jobName, err: reason }, 'schedule skipped');
+}
+
 type Tx = Parameters<Parameters<typeof adminDb.transaction>[0]>[0];
 type ScheduleRow = typeof schedule.$inferSelect;
 
@@ -55,34 +64,48 @@ async function enqueueFor(tx: Tx, row: ScheduleRow, correlationId = newId('cor')
 /** Creates or updates the schedule for (tenant, job). Computes `next_run_at` from `now`. Returns the id. */
 export async function upsertSchedule(adminCtx: AdminCtx, input: ScheduleInput, now = new Date()): Promise<string> {
   const def = jobFor(input.jobName);
-  const payload = def.data.parse(input.payload ?? {});
+  const payload = def.data.parse(input.payload ?? {}) as object;
   const nextRunAt = nextRun(input.cron, input.timezone, now);
   return adminDb.transaction(async (tx) => {
-    const [row] = await tx
-      .insert(schedule)
-      .values({
-        id: newId('sch'),
+    const [existing] = await tx
+      .select()
+      .from(schedule)
+      .where(and(eq(schedule.tenantId, input.tenantId), eq(schedule.jobName, input.jobName)))
+      .for('update');
+    let id: string;
+    if (existing) {
+      id = existing.id;
+      const timingChanged = existing.cron !== input.cron || existing.timezone !== input.timezone;
+      await tx
+        .update(schedule)
+        .set({
+          cron: input.cron,
+          timezone: input.timezone,
+          payload,
+          ...(timingChanged ? { nextRunAt } : {}),
+        })
+        .where(eq(schedule.id, id));
+    } else {
+      id = newId('sch');
+      await tx.insert(schedule).values({
+        id,
         tenantId: input.tenantId,
         jobName: input.jobName,
         cron: input.cron,
         timezone: input.timezone,
-        payload: payload as object,
+        payload,
         nextRunAt,
-      })
-      .onConflictDoUpdate({
-        target: [schedule.tenantId, schedule.jobName],
-        set: { cron: input.cron, timezone: input.timezone, payload: payload as object, nextRunAt },
-      })
-      .returning();
+      });
+    }
     auditStub({
       action: 'platform.schedule.upserted',
       actor: adminCtx.actor,
       correlationId: adminCtx.correlationId,
       tenantId: input.tenantId,
-      target: { type: 'schedule', id: row!.id },
+      target: { type: 'schedule', id },
       detail: { jobName: input.jobName, cron: input.cron, timezone: input.timezone },
     });
-    return row!.id;
+    return id;
   });
 }
 
@@ -90,6 +113,7 @@ async function setEnabled(adminCtx: AdminCtx, id: string, enabled: boolean, now 
   await adminDb.transaction(async (tx) => {
     const [row] = await tx.select().from(schedule).where(eq(schedule.id, id)).for('update');
     if (!row) throw notFound(id);
+    if (row.enabled === enabled) return;
     await tx
       .update(schedule)
       .set(enabled ? { enabled, nextRunAt: nextRun(row.cron, row.timezone, now) } : { enabled })
@@ -144,11 +168,14 @@ export async function schedulerTick(now: Date): Promise<number> {
     for (const row of due) {
       try {
         const next = nextRun(row.cron, row.timezone, now);
-        await enqueueFor(tx, row);
-        await tx.update(schedule).set({ lastRunAt: row.nextRunAt, nextRunAt: next }).where(eq(schedule.id, row.id));
+        // Savepoint: a SQL failure rolls back only this row.
+        await tx.transaction(async (sp) => {
+          await enqueueFor(sp, row);
+          await sp.update(schedule).set({ lastRunAt: row.nextRunAt, nextRunAt: next }).where(eq(schedule.id, row.id));
+        });
         published++;
       } catch (e) {
-        log.error({ scheduleId: row.id, jobName: row.jobName, err: (e as Error).message }, 'schedule skipped');
+        logOnce(row, (e as Error).message);
       }
     }
     return published;

@@ -98,4 +98,32 @@ describe('scheduler', () => {
       upsertSchedule(admin, { tenantId: 't_platform', jobName: job.name, cron: '* * * * *', timezone: 'UTC', payload: { n: 'x' } }),
     ).rejects.toThrow();
   });
+
+  it('a row whose enqueue fails in SQL does not stop the other due row', async () => {
+    const failing = defineJob('platform.sched_fail', z.object({}));
+    await adminDb.execute(sql`create or replace function platform.sched_test_fail() returns trigger language plpgsql as $$ begin raise exception 'forced failure'; end $$`);
+    await adminDb.execute(sql`create trigger sched_test_fail before insert on platform.outbox for each row when (new.nats_subject like '%sched_fail%') execute function platform.sched_test_fail()`);
+    try {
+      const good = await dueRow();
+      const bad = await upsertSchedule(admin, {
+        tenantId: 't_platform', jobName: failing.name, cron: '*/5 * * * *', timezone: 'UTC', payload: {},
+      });
+      await adminDb.update(schedule).set({ nextRunAt: new Date(Date.now() - 120_000) }).where(eq(schedule.id, bad));
+      expect(await schedulerTick(new Date())).toBe(1);
+      expect(await jobCount()).toBe(1);
+      expect((await row(good)).nextRunAt.getTime()).toBeGreaterThan(Date.now());
+      expect((await row(bad)).lastRunAt).toBeNull();
+    } finally {
+      await adminDb.execute(sql`drop trigger if exists sched_test_fail on platform.outbox`);
+    }
+  });
+
+  it('upsert with unchanged cron keeps next_run_at; resume of an enabled row is a no-op', async () => {
+    const id = await dueRow();
+    const before = await row(id);
+    await upsertSchedule(admin, { tenantId: 't_platform', jobName: job.name, cron: '*/5 * * * *', timezone: 'UTC', payload: { n: 2 } });
+    expect((await row(id)).nextRunAt.getTime()).toBe(before.nextRunAt.getTime());
+    await resumeSchedule(admin, id);
+    expect((await row(id)).nextRunAt.getTime()).toBe(before.nextRunAt.getTime());
+  });
 });
