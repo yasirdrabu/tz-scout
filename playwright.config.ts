@@ -7,6 +7,9 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
+  // next dev compiles each route on first visit, which can take well over 30 seconds on a cold CI runner.
+  timeout: 90_000,
+  expect: { timeout: 15_000 },
   reporter: [['list']],
   globalSetup: './tests/e2e/global-setup.ts',
   use: { baseURL: `http://localhost:${E2E_PORT}`, trace: 'retain-on-failure' },
