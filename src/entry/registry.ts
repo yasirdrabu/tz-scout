@@ -6,3 +6,5 @@ import '@/platform/diagnostics';
 import '@/modules/tenancy/contracts/events';
 import '@/modules/integrations/contracts/events';
 import '@/modules/integrations';
+import '@/modules/ai-tasks/contracts/events';
+import '@/modules/ai-tasks';

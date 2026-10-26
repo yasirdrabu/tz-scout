@@ -13,7 +13,7 @@ const root = process.cwd();
 export function migrationsFolder(m: ModuleName): string {
   return m === 'platform'
     ? path.join(root, 'src/platform/db/migrations')
-    : path.join(root, 'src/modules', m, 'db/migrations');
+    : path.join(root, 'src/modules', m === 'ai' ? 'ai-tasks' : m, 'db/migrations'); // schema ai, folder ai-tasks
 }
 
 export function bootstrapSqlPath(): string {
