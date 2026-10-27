@@ -64,10 +64,13 @@ type Cursor = { sort: SearchSort; key: string | null; id: string };
 
 const encodeCursor = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString('base64url');
 
+const KEY_SHAPE = { int: /^-?\d{1,9}$/, timestamptz: /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(\.\d{1,6})?(Z|[+-]\d\d(:\d\d)?)$/, text: /^[\s\S]*$/ };
+const keyFits = (cast: keyof typeof KEY_SHAPE, key: unknown): boolean => typeof key === 'string' && KEY_SHAPE[cast].test(key);
+
 function decodeCursor(raw: string, sort: SearchSort): Cursor {
   try {
     const c = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Cursor;
-    if (c.sort === sort && typeof c.id === 'string' && (c.key === null || typeof c.key === 'string')) return c;
+    if (c.sort === sort && typeof c.id === 'string' && (c.key === null || keyFits(SORTS[sort].cast, c.key))) return c;
   } catch {
     // falls through to the error below
   }
@@ -134,7 +137,7 @@ function filters(ctx: ModuleContext, q: SearchQuery): (SQL | undefined)[] {
             ),
         )
       : undefined,
-    q.excluded === undefined ? undefined : q.excluded ? isNotNull(account.excludedReasonKey) : isNull(account.excludedReasonKey),
+    q.excluded === undefined ? undefined : q.excluded ? and(isNotNull(account.excludedReasonKey), eq(account.excludedOverride, false)) : or(isNull(account.excludedReasonKey), eq(account.excludedOverride, true)),
   ];
 }
 
@@ -145,7 +148,7 @@ function filters(ctx: ModuleContext, q: SearchQuery): (SQL | undefined)[] {
 export async function search(ctx: ModuleContext, q: SearchQuery = {}): Promise<{ data: SearchRow[]; nextCursor: string | null }> {
   const sort = q.sort ?? 'priority';
   const spec = SORTS[sort];
-  const limit = Math.min(Math.max(Math.trunc(q.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT);
+  const limit = Math.min(Math.max(Math.trunc(Number.isFinite(q.limit) ? q.limit! : DEFAULT_LIMIT), 1), MAX_LIMIT);
   const cursor = q.cursor ? decodeCursor(q.cursor, sort) : undefined;
   const keyOrder = spec.dir === 'desc' ? sql`${spec.expr} desc nulls last` : sql`${spec.expr} asc nulls last`;
 

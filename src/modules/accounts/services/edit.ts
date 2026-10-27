@@ -13,6 +13,7 @@ import { lockAccount } from './lock';
 import { resolveAccountId } from './match';
 import { repickPrimary } from './primary';
 import { writeSummary } from './summary';
+import { filterVisibleAccountIds } from './visibility';
 
 const subjectOf = (id: string) => ({ type: 'account', id });
 const notFound = (what: 'account' | 'person' | 'signal') => new ScoutError({ slug: 'not-found', status: 404, title: `That ${what} was not found.` });
@@ -27,7 +28,7 @@ function editor(ctx: ModuleContext): { userId: string; chain: SourceChain } {
 /** The live account id for an id that may have been merged. */
 async function accountIdFor(ctx: ModuleContext, id: string): Promise<string> {
   const found = await resolveAccountId(ctx, id);
-  if (!found) throw notFound('account');
+  if (!found || (await filterVisibleAccountIds(ctx, [found.id])).length === 0) throw notFound('account');
   return found.id;
 }
 
@@ -96,7 +97,7 @@ export async function editPerson(ctx: ModuleContext, personId: string, patch: Pe
   const [row] = await ctx.tx.select({ accountId: person.accountId })
     .from(person)
     .where(and(eq(person.tenantId, ctx.tenantId), eq(person.id, personId), isNull(person.archivedAt)));
-  if (!row) throw notFound('person');
+  if (!row || (await filterVisibleAccountIds(ctx, [row.accountId])).length === 0) throw notFound('person');
   const accountId = row.accountId;
   await lockAccount(ctx, accountId);
 
@@ -173,7 +174,7 @@ export async function archiveSignal(ctx: ModuleContext, signalId: string, reason
     .select({ accountId: signal.accountId, archivedAt: signal.archivedAt })
     .from(signal)
     .where(and(eq(signal.tenantId, ctx.tenantId), eq(signal.id, signalId)));
-  if (!row) throw notFound('signal');
+  if (!row || (await filterVisibleAccountIds(ctx, [row.accountId])).length === 0) throw notFound('signal');
   await lockAccount(ctx, row.accountId);
   if (row.archivedAt) return;
   await ctx.tx

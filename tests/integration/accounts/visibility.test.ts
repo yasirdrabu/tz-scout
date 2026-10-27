@@ -1,14 +1,22 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
+  checkExclusion,
+  editAccount,
+  editPerson,
   filterVisibleAccountIds,
   getAccount,
+  getAccountForScoring,
+  getFacts,
+  getSignals,
+  listPeople,
+  mergeAccounts,
   registerSourceAccessProvider,
   search,
   upsertFromArrival,
   type ArrivalForAccounts,
 } from '@/modules/accounts';
-import { accountSummary } from '@/modules/accounts/db/schema';
+import { accountAlias, accountSummary, person } from '@/modules/accounts/db/schema';
 import type { DataLimit } from '@/platform/access';
 import type { ModuleContext } from '@/platform/context';
 import { newId } from '@/platform/ids';
@@ -120,5 +128,49 @@ describe('data limits (TEN-E3-S1-AC2)', () => {
     expect((await idsOf(access, [a, b, c])).sort()).toEqual([a, b].sort());
     expect((await idsOf(limited({ kind: 'all' }), [a, b, c])).sort()).toEqual([a, b, c].sort());
     expect((await idsOf(undefined, [a, b, c])).sort()).toEqual([a, b, c].sort());
+  });
+});
+
+describe('hidden accounts', () => {
+  const sellerAccess = limited({ kind: 'own_source' }, { userId: 'usr_ltd', sourceId: 'src_ltd' });
+
+  it('reads return empty or null, and a merged id whose survivor is hidden returns null', async () => {
+    const hidden = await seed('Hidden Reads', { agentSourceId: 'src_hidden' });
+    const gone = newId('acc');
+    await t.run((ctx) => ctx.tx.insert(accountAlias).values({ tenantId: ctx.tenantId, accountId: hidden, kind: 'merged_id', value: gone }));
+    expect(await as(sellerAccess, (ctx) => getAccount(ctx, gone))).toBeNull();
+    expect(await as(sellerAccess, (ctx) => getSignals(ctx, hidden))).toEqual([]);
+    expect(await as(sellerAccess, (ctx) => getFacts(ctx, hidden))).toEqual([]);
+    expect(await as(sellerAccess, (ctx) => listPeople(ctx, hidden))).toEqual([]);
+    expect(await as(sellerAccess, (ctx) => getAccountForScoring(ctx, hidden))).toBeNull();
+    expect(await as(sellerAccess, (ctx) => checkExclusion(ctx, hidden))).toBeNull();
+    expect(await as(undefined, (ctx) => getAccount(ctx, gone))).toMatchObject({ id: hidden });
+  });
+
+  it('empty any_of, practices and sources see nothing', async () => {
+    const a = await seed('Empty Limits', { agentSourceId: 'src_empty' });
+    for (const limit of [{ kind: 'any_of', limits: [] }, { kind: 'practices', ids: [] }, { kind: 'sources', ids: [] }] as DataLimit[]) {
+      expect(await idsOf(limited(limit), [a]), limit.kind).toEqual([]);
+    }
+  });
+
+  it('a limited principal gets 404 editing or merging an account it cannot see', async () => {
+    const mine = await seed('Visible Mine', { agentSourceId: 'src_ltd' });
+    const hidden = await seed('Hidden Target', { agentSourceId: 'src_hidden2' });
+    const hiddenPerson = (
+      await t.run(async (ctx) => {
+        await upsertFromArrival(
+          ctx,
+          arrival({ sourceChain: { agentSourceId: 'src_hidden2' }, account: { name: 'Hidden Target', domain: (await getAccount(ctx, hidden))!.domain! }, people: [{ firstName: 'Hi', email: 'hi@hidden.example.com' }] }),
+        );
+        return ctx.tx.select({ id: person.id }).from(person).where(eq(person.accountId, hidden));
+      })
+    )[0]!.id;
+    const notFound = { status: 404 };
+    await expect(as(sellerAccess, (ctx) => mergeAccounts(ctx, mine, hidden))).rejects.toMatchObject(notFound);
+    await expect(as(sellerAccess, (ctx) => mergeAccounts(ctx, hidden, mine))).rejects.toMatchObject(notFound);
+    await expect(as(sellerAccess, (ctx) => editAccount(ctx, hidden, { employees: 5 }))).rejects.toMatchObject(notFound);
+    await expect(as(sellerAccess, (ctx) => editPerson(ctx, hiddenPerson, { title: 'CEO' }))).rejects.toMatchObject(notFound);
+    await as(sellerAccess, (ctx) => editAccount(ctx, mine, { employees: 5 })); // its own account still works
   });
 });

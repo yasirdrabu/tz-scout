@@ -53,21 +53,23 @@ describe('search', () => {
   it('filters on excluded, employees, country, tier, priority and owner', async () => {
     const excluded = await seed({ name: 'Filter Excluded Co', employees: 40, hqCountry: 'US' });
     const plain = await seed({ name: 'Filter Plain Co', employees: 400, hqCountry: 'CA' });
+    const overridden = await seed({ name: 'Filter Overridden Co', employees: 400, hqCountry: 'CA' });
+    await t.run((ctx) => ctx.tx.update(account).set({ excludedReasonKey: 'open_deal', excludedOverride: true }).where(eq(account.id, overridden)));
     await t.run((ctx) => ctx.tx.update(account).set({ excludedReasonKey: 'existing_customer' }).where(eq(account.id, excluded)));
     await t.run((ctx) => ctx.tx.update(accountSummary).set({ tier: 'A', priority: 80 }).where(eq(accountSummary.accountId, plain)));
     const ids = async (q: Parameters<typeof search>[1]) =>
       (await t.run((ctx) => search(ctx, { text: 'Filter ', ...q }))).data.map((r) => r.accountId).sort();
     expect(await ids({ excluded: true })).toEqual([excluded]);
-    expect(await ids({ excluded: false })).toEqual([plain]);
-    expect(await ids({ employeesMin: 100 })).toEqual([plain]);
+    expect(await ids({ excluded: false })).toEqual([overridden, plain].sort());
+    expect(await ids({ employeesMin: 100 })).toEqual([overridden, plain].sort());
     expect(await ids({ employeesMax: 100 })).toEqual([excluded]);
-    expect(await ids({ hqCountry: 'CA' })).toEqual([plain]);
+    expect(await ids({ hqCountry: 'CA' })).toEqual([overridden, plain].sort());
     expect(await ids({ tier: 'A' })).toEqual([plain]);
     expect(await ids({ priorityMin: 50 })).toEqual([plain]);
     expect(await ids({ stage: 'won' })).toEqual([]); // CRM columns are empty until R1c
     expect(await ids({ reviewStatusKey: 'new' })).toEqual([]);
     expect(await ids({ ownerUserId: 'usr_nobody' })).toEqual([]);
-    expect(await ids({ unassigned: true })).toEqual([excluded, plain].sort());
+    expect(await ids({ unassigned: true })).toEqual([excluded, overridden, plain].sort());
   });
 
   it('filters on signal kind since a date', async () => {
@@ -109,6 +111,14 @@ describe('search', () => {
 
   it('rejects a cursor it did not issue', async () => {
     await expect(t.run((ctx) => search(ctx, { cursor: 'not-a-cursor' }))).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('rejects a forged cursor whose key does not fit the sort, and ignores a non-finite limit', async () => {
+    const forge = (sort: string, key: string | null) => Buffer.from(JSON.stringify({ sort, key, id: 'acc_x' })).toString('base64url');
+    for (const [sort, key] of [['priority', 'abc'], ['created', 'abc'], ['last_signal', '1; drop'], ['priority', '99999999999']] as const) {
+      await expect(t.run((ctx) => search(ctx, { sort, cursor: forge(sort, key) })), sort).rejects.toMatchObject({ status: 400 });
+    }
+    expect((await t.run((ctx) => search(ctx, { limit: Number.NaN }))).data.length).toBeGreaterThan(0);
   });
 
   it('shows a pinned name edit in search results', async () => {

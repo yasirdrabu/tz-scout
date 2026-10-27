@@ -11,6 +11,7 @@ import { signalDedupKeys } from '../domain/signals';
 import { applyExclusion } from './exclusion';
 import { reproject } from './facts';
 import { lockAccounts } from './lock';
+import { filterVisibleAccountIds } from './visibility';
 import { findMatch } from './people';
 import { repickPrimary } from './primary';
 import { setPractices } from './practices';
@@ -165,6 +166,10 @@ export async function mergeAccounts(ctx: ModuleContext, survivorId: string, merg
   if (!userId) throw new ScoutError({ slug: 'forbidden', status: 403, title: 'Only a person can merge accounts.' });
   if (survivorId === mergedId) throw new ScoutError({ slug: 'conflict', status: 409, title: 'Choose two different accounts.' });
 
+  // A hidden account looks the same as a missing one.
+  if ((await filterVisibleAccountIds(ctx, [survivorId, mergedId])).length < 2) {
+    throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
+  }
   await lockAccounts(ctx, [survivorId, mergedId]);
   const survivor = await loadActive(ctx, survivorId);
   const merged = await loadActive(ctx, mergedId);
