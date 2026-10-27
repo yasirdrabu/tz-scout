@@ -54,8 +54,8 @@ function signalStrengths(rule: ScoringRule, signals: ScoringSignal[], now: Date,
     const value = s.value == null ? null : research ? researchScore(s.value) : s.value;
     const min = minimum(rule);
     if (min != null && (value == null || value < min)) continue;
-    // Growth is a pain signal for fast growth: with no minimum it must still be above zero.
-    if (rule.type === 'growth' && min == null && !(value != null && value > 0)) continue;
+    // Growth is a pain signal for fast growth: with no minimum a known value must be above zero (an unknown value counts, as in v1).
+    if (rule.type === 'growth' && min == null && value != null && value <= 0) continue;
     if (!matchesKeywords(norm(`${s.title} ${s.detail ?? ''}`), rule.match)) continue;
     const r = recency(rule.type, signalDate(s), now, profile) * (research && value != null ? intensity(value) : 1);
     if (r > 0) out.push({ r, id: s.id, matched: s.title });
