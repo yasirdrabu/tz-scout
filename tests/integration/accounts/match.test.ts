@@ -1,9 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
+import { findMatches, resolveAccountId, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { account, accountAlias } from '@/modules/accounts/db/schema';
 import { matchName, trigramSimilarity } from '@/modules/accounts/domain/names';
-import { findMatches, resolveAccountId } from '@/modules/accounts/services/match';
 import { newId } from '@/platform/ids';
 import { runOutbox } from '../helpers/run-outbox';
 import { freshTenant } from '../offers/helpers';
@@ -176,6 +175,16 @@ describe('archived accounts and merged ids', () => {
     expect(await t.run((ctx) => resolveAccountId(ctx, s.accountId))).toEqual({ id: s.accountId });
     expect(await t.run((ctx) => resolveAccountId(ctx, m2.accountId))).toEqual({ id: s.accountId, mergedInto: s.accountId });
     expect(await t.run((ctx) => resolveAccountId(ctx, 'acc_missing'))).toBeNull();
+  });
+});
+
+describe('merge cycles', () => {
+  it('resolveAccountId returns null for a cycle of merged ids', async () => {
+    const x = await create({ account: { name: 'Cycle X', domain: domain() } });
+    const y = await create({ account: { name: 'Cycle Y', domain: domain() } });
+    await addAlias(x.accountId, 'merged_id', y.accountId);
+    await addAlias(y.accountId, 'merged_id', x.accountId);
+    expect(await t.run((ctx) => resolveAccountId(ctx, x.accountId))).toBeNull();
   });
 });
 

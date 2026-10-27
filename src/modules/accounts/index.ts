@@ -14,6 +14,7 @@ export {
 } from './contracts/ports';
 export { FACT_KEYS, isKnownFactKey } from './contracts/types';
 export type { Exclusion } from './services/exclusion';
+export { findMatches, resolveAccountId, type AccountMatch, type MatchCandidate, type MatchConfidence } from './services/match';
 export { setPractices } from './services/practices';
 export { upsertFromArrival, type UpsertResult } from './services/upsert';
 export type {

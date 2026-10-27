@@ -133,18 +133,23 @@ async function possibleMatches(ctx: ModuleContext, live: SQL | undefined, c: Mat
 
 /**
  * Follows `merged_id` aliases to the surviving account. `mergedInto` is set (to the survivor's id) when
- * the id asked for was merged away. Null when the id is neither an account nor a merged id.
+ * the id asked for was merged away. Null when the id is neither an account nor a merged id, or the chain does not end (a cycle).
  */
 export async function resolveAccountId(ctx: ModuleContext, id: string): Promise<{ id: string; mergedInto?: string } | null> {
   let current = id;
+  let settled = false;
   for (let hop = 0; hop < MAX_MERGE_HOPS; hop++) {
     const [alias] = await ctx.tx
       .select({ survivorId: accountAlias.accountId })
       .from(accountAlias)
       .where(and(eq(accountAlias.tenantId, ctx.tenantId), eq(accountAlias.kind, 'merged_id'), eq(accountAlias.value, current)));
-    if (!alias) break;
+    if (!alias) {
+      settled = true;
+      break;
+    }
     current = alias.survivorId;
   }
+  if (!settled) return null; // a cycle or an absurdly long chain: no trustworthy survivor
   const [row] = await ctx.tx
     .select({ id: account.id })
     .from(account)
