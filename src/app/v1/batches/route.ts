@@ -12,8 +12,8 @@ export const GET = v1Route({ permission: 'arrivals:read' }, async (req, _princip
   return listBatches(ctx, { cursor: url.searchParams.get('cursor') || undefined, limit: pageLimit(url) });
 });
 
-export const POST = v1Route({ permission: 'arrivals:write' }, async (req, principal, ctx) => {
-  const r = await submitBatch(ctx, await readJson(req, BATCH_MAX_BYTES), {
+export const POST = v1Route({ permission: 'arrivals:write', maxBytes: BATCH_MAX_BYTES }, async (req, principal, ctx) => {
+  const r = await submitBatch(ctx, await readJson(req), {
     channel: 'api',
     canDeclareWarmIntro: can(principal, 'warm_intro:declare'),
   });

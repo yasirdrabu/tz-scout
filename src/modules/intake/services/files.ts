@@ -83,3 +83,21 @@ export async function readFile(
     .where(and(eq(batchFile.tenantId, ctx.tenantId), eq(batchFile.batchId, batchId), eq(batchFile.storageKey, storageKey)));
   return row ?? null;
 }
+
+export type BatchFileView = { fileName: string; contentType: string; sizeBytes: number; sha256: string; createdAt: Date };
+
+/** The files attached to a batch the caller can see, oldest first. Null when the batch is hidden. */
+export async function listBatchFiles(ctx: ModuleContext, batchId: string): Promise<BatchFileView[] | null> {
+  if (!(await getBatch(ctx, batchId))) return null;
+  return ctx.tx
+    .select({
+      fileName: batchFile.fileName,
+      contentType: batchFile.contentType,
+      sizeBytes: batchFile.sizeBytes,
+      sha256: batchFile.sha256,
+      createdAt: batchFile.createdAt,
+    })
+    .from(batchFile)
+    .where(and(eq(batchFile.tenantId, ctx.tenantId), eq(batchFile.batchId, batchId)))
+    .orderBy(batchFile.createdAt, batchFile.storageKey);
+}

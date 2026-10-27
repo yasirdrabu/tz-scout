@@ -79,7 +79,7 @@ export {
   type MappingOrigin,
   type SavedMapping,
 } from './services/mappings';
-export { attachFile, readFile, type FileInput, type StoredFile } from './services/files';
+export { attachFile, listBatchFiles, readFile, type BatchFileView, type FileInput, type StoredFile } from './services/files';
 export {
   confirmImport,
   createImport,

@@ -8,6 +8,7 @@ import { withTenant } from '@/platform/db/tenant';
 import { ScoutError, toProblem } from '@/platform/errors';
 import { claimKey, sha256, storeResponse } from '@/platform/idempotency';
 import { newId } from '@/platform/ids';
+import { boundedRequest, JSON_MAX_BYTES } from './intake';
 import { logFor } from '@/platform/log';
 
 const CORRELATION = 'x-correlation-id';
@@ -105,6 +106,8 @@ export type V1Options = {
   peopleOnly?: boolean | string;
   /** Refuse anyone who is not a platform admin. `can()` passes admins on every permission, so it cannot say this. */
   platformAdminOnly?: boolean;
+  /** Largest request body, 5 MB unless set. Checked while reading, before hashing or parsing: over it is a 413. */
+  maxBytes?: number;
 };
 
 const json = (status: number, body: unknown, correlationId: string, extra: Record<string, string> = {}) =>
@@ -120,7 +123,8 @@ const json = (status: number, body: unknown, correlationId: string, extra: Recor
  * Always sets `x-correlation-id`.
  */
 export function v1Route(opts: V1Options, handler: V1Handler): (req: Request) => Promise<Response> {
-  return async (req) => {
+  return async (original) => {
+    let req = original;
     const correlationId = correlationFrom(req);
     try {
       const principal = await resolvePrincipal(req);
@@ -148,6 +152,9 @@ export function v1Route(opts: V1Options, handler: V1Handler): (req: Request) => 
           title: 'Forbidden',
           detail: typeof opts.peopleOnly === 'string' ? opts.peopleOnly : 'Only a person can do this.',
         });
+      }
+      if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+        req = await boundedRequest(req, opts.maxBytes ?? JSON_MAX_BYTES);
       }
       let key: string | undefined;
       if ((opts.idempotent ?? true) && req.method === 'POST') {

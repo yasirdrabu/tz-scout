@@ -61,6 +61,48 @@ describe('size limits', () => {
   });
 });
 
+describe('bounded reads', () => {
+  it('a keyed oversize request is a 413', async () => {
+    const res = await call(postArrival, ashKey, 'arrivals', {
+      body: JSON.stringify({ account: { notes: mb(5) } }),
+      headers: { 'content-type': 'application/json', 'idempotency-key': 'big-1' },
+    });
+    expect(res.status).toBe(413);
+    const declared = await call(postArrival, ashKey, 'arrivals', {
+      body: '{}',
+      headers: { 'content-type': 'application/json', 'idempotency-key': 'big-2', 'content-length': String(99 * 1024 * 1024) },
+    });
+    expect(declared.status).toBe(413);
+  });
+
+  it('a streamed body with no Content-Length is cancelled once it passes the limit', async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const chunk = new Uint8Array(1024 * 1024).fill(120);
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        controller.enqueue(chunk);
+        if (pulled > 200) controller.close();
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const req = new Request('http://x/v1/arrivals', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + ashKey,'content-type': 'application/json', 'idempotency-key': 'big-3' },
+      body,
+      duplex: 'half',
+    } as RequestInit);
+    expect(req.headers.get('content-length')).toBeNull();
+    const res = await postArrival(req);
+    expect(res.status).toBe(413);
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(20);
+  });
+});
+
 describe('TEN-E3-S1-AC2: every data limit kind on the list endpoints', () => {
   let ashArrival: string;
   let boArrival: string;

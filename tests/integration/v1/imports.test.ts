@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { GET as getArrivalRoute } from '@/app/v1/arrivals/[id]/route';
+import { GET as itemsRoute } from '@/app/v1/batches/[id]/items/route';
 import { POST as postImport } from '@/app/v1/imports/route';
 import { GET as getImportRoute, POST as importAction } from '@/app/v1/imports/[id]/route';
 import { closeDbs } from '@/platform/db/client';
@@ -9,11 +11,13 @@ import { call, freshTenant, keyFor, personAndAgent, uploadForm, type Tenant } fr
 
 let t: Tenant;
 let ashKey: string;
+let ashAgent: string;
 let boKey: string;
 
 beforeAll(async () => {
   t = await freshTenant();
   const ash = await personAndAgent(t, 'Ash');
+  ashAgent = ash.agentId;
   const bo = await personAndAgent(t, 'Bo');
   const scopes = ['imports:run', 'arrivals:write', 'arrivals:read'] as const;
   ashKey = await keyFor(t, [...scopes], { sourceId: ash.agentId });
@@ -85,5 +89,43 @@ describe('/v1/imports', () => {
   it('needs imports:run', async () => {
     const key = await keyFor(t, ['arrivals:read']);
     expect((await call(postImport, key, 'imports', { body: uploadForm('a.csv', 'a,b\n1,2\n') })).status).toBe(403);
+  });
+});
+
+describe('TEN-E3-S3-AC1: imports without people:read', () => {
+  it('hides raw file rows on the arrival and people contacts in the preview', async () => {
+    const k = `${Date.now().toString(36)}${++n}`;
+    const email = `pat-${k}@filecorp.example`;
+    const csv = `Company ${k},Website ${k},Contact ${k}\nFile Corp,filecorp-${k}.com,${email}\n`;
+    const created = await (await call(postImport, ashKey, 'imports', { body: uploadForm('people.csv', csv) })).json();
+    const mapping = [
+      { header: `Company ${k}`, target: 'account.name' },
+      { header: `Website ${k}`, target: 'account.website' },
+      { header: `Contact ${k}`, target: 'people[0].email' },
+    ];
+    const reader = await keyFor(t, ['imports:run', 'arrivals:read'], { sourceId: ashAgent });
+    const full = await keyFor(t, ['imports:run', 'arrivals:read', 'people:read'], { sourceId: ashAgent });
+
+    const hidden = await (await call(importAction, reader, `imports/${created.import_id}:preview`, { body: { mapping } })).text();
+    expect(hidden).not.toContain(email);
+    expect(await (await call(importAction, full, `imports/${created.import_id}:preview`, { body: { mapping } })).text()).toContain(email);
+
+    await call(importAction, ashKey, `imports/${created.import_id}:confirm`, { body: { mapping } });
+    await runOutbox(t.tenantId);
+    const items = await (await call(itemsRoute, reader, `batches/${created.batch_id}/items`)).json();
+    const id = items.data[0].id;
+    const detail = await (await call(getArrivalRoute, reader, `arrivals/${id}`)).json();
+    expect(JSON.stringify(detail)).not.toContain(email);
+    expect(detail.payload.raw).toMatchObject({ rows: [], rows_hidden: true });
+    expect(detail.payload.raw.headers).toContain(`Contact ${k}`);
+    expect(JSON.stringify(await (await call(getArrivalRoute, full, `arrivals/${id}`)).json())).toContain(email);
+  });
+
+  it('does not show the storage key', async () => {
+    const k = `${Date.now().toString(36)}${++n}`;
+    const created = await (await call(postImport, ashKey, 'imports', { body: uploadForm('s.csv', `Co ${k},Site ${k}\nA,a-${k}.com\n`) })).json();
+    const got = await (await call(getImportRoute, ashKey, `imports/${created.import_id}`)).json();
+    expect(got.file).not.toHaveProperty('storage_key');
+    expect(got.file.sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 });

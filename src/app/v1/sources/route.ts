@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { listSources, registerSource, SOURCE_KINDS, type RegisterSourceInput } from '@/modules/intake';
 import { parseBody } from '../_lib/body';
-import { JSON_MAX_BYTES, limited } from '../_lib/intake';
 import { pageOfList } from '../_lib/pagination';
 import { created, v1Route } from '../_lib/v1-route';
 
@@ -24,5 +23,5 @@ export const GET = v1Route({ permission: 'arrivals:read' }, async (req, _princip
 );
 
 export const POST = v1Route({ permission: 'sources:manage' }, async (req, _principal, ctx) =>
-  created(await registerSource(ctx, await parseBody<RegisterSourceInput>(await limited(req, JSON_MAX_BYTES), createSourceBody))),
+  created(await registerSource(ctx, await parseBody<RegisterSourceInput>(req, createSourceBody))),
 );

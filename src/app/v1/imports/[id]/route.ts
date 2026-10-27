@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { confirmImport, getImport, previewImport } from '@/modules/intake';
 import { can } from '@/modules/tenancy';
 import { parseBody } from '../../_lib/body';
-import { JSON_MAX_BYTES, limited, withoutContacts } from '../../_lib/intake';
+import { withoutContacts } from '../../_lib/intake';
 import { idAndAction, notFound } from '../../_lib/path';
 import { accepted, v1Route } from '../../_lib/v1-route';
 
@@ -22,14 +22,15 @@ export const GET = v1Route({ permission: 'imports:run' }, async (req, _principal
   if (action) throw notFound();
   const found = await getImport(ctx, id);
   if (!found) throw notFound();
-  return found;
+  const { storageKey: _storageKey, ...file } = found.file;
+  return { ...found, file };
 });
 
 // POST /v1/imports/{id}:preview and /v1/imports/{id}:confirm
 export const POST = v1Route({ permission: 'imports:run' }, async (req, principal, ctx) => {
   const { id, action } = idAndAction(req, 'imports');
   if (action !== 'preview' && action !== 'confirm') throw notFound();
-  const body = await limited(req, JSON_MAX_BYTES);
+  const body = req;
   if (action === 'confirm') {
     const { mapping } = await parseBody<z.infer<typeof mappingBody>>(body, mappingBody);
     await confirmImport(ctx, id, mapping);

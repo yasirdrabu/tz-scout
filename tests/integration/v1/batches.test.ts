@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { GET as listBatchesRoute, POST as postBatch } from '@/app/v1/batches/route';
 import { GET as getBatchRoute } from '@/app/v1/batches/[id]/route';
+import { GET as getArrivalRoute } from '@/app/v1/arrivals/[id]/route';
 import { GET as itemsRoute } from '@/app/v1/batches/[id]/items/route';
 import { POST as filesRoute } from '@/app/v1/batches/[id]/files/route';
 import { closeDbs } from '@/platform/db/client';
@@ -11,11 +12,13 @@ import { call, freshTenant, keyFor, personAndAgent, SEND, uploadForm, type Tenan
 
 let t: Tenant;
 let ashKey: string;
+let ashAgent: string;
 let boKey: string;
 
 beforeAll(async () => {
   t = await freshTenant();
   const ash = await personAndAgent(t, 'Ash');
+  ashAgent = ash.agentId;
   const bo = await personAndAgent(t, 'Bo');
   ashKey = await keyFor(t, SEND, { sourceId: ash.agentId });
   boKey = await keyFor(t, SEND, { sourceId: bo.agentId });
@@ -101,5 +104,43 @@ describe('batch status', () => {
     expect((await call(filesRoute, boKey, `batches/${batch_id}/files`, { body: uploadForm('x.csv', 'a') })).status).toBe(404);
     const theirs = await (await call(listBatchesRoute, boKey, 'batches')).json();
     expect(theirs.data.map((x: { id: string }) => x.id)).not.toContain(batch_id);
+  });
+});
+
+describe('TEN-E3-S3-AC1: contact details without people:read', () => {
+  it('hides people contacts and the introducer email in a rejected item, its detail, the items and the batch', async () => {
+    const bad = {
+      account: { name: 'Leaky', domain: 'leaky.example.com', external_ref: 'leak-1' },
+      people: [{ name: 'Pat', title: 'CTO', email: 'pat@leaky.example', phone: '555-0100', mobile: '555-0199', linkedin_url: 'https://linkedin.com/in/pat-leaky' }],
+      warm_intro: { introducer_name: 'Ira', introducer_email: 'ira@intro.example', relationship: 'other' },
+    };
+    const { batch_id, items } = await (await send(ashKey, [bad], 'Leaky')).json();
+    expect(items[0].status).toBe('rejected');
+    const arrivalId = items[0].arrival_id;
+    const reader = await keyFor(t, ['arrivals:read'], { sourceId: ashAgent });
+    const full = await keyFor(t, ['arrivals:read', 'people:read'], { sourceId: ashAgent });
+
+    const texts = [
+      await (await call(getArrivalRoute, reader, `arrivals/${arrivalId}`)).text(),
+      await (await call(itemsRoute, reader, `batches/${batch_id}/items`)).text(),
+      await (await call(getBatchRoute, reader, `batches/${batch_id}`)).text(),
+    ];
+    for (const text of texts) {
+      for (const secret of ['pat@leaky.example', '555-0100', '555-0199', 'pat-leaky', 'ira@intro.example']) expect(text).not.toContain(secret);
+    }
+    expect(texts[0]).toContain('CTO');
+    expect(await (await call(getArrivalRoute, full, `arrivals/${arrivalId}`)).text()).toContain('pat@leaky.example');
+  });
+});
+
+describe('GET /v1/batches/{id} files', () => {
+  it('lists the attached files', async () => {
+    const { batch_id } = await (await send(ashKey, [validArrival()], 'Files')).json();
+    await call(filesRoute, ashKey, `batches/${batch_id}/files`, { body: uploadForm('one.csv', 'a,b\n1,2\n') });
+    const b = await (await call(getBatchRoute, ashKey, `batches/${batch_id}`)).json();
+    expect(b.files).toHaveLength(1);
+    expect(b.files[0]).toMatchObject({ file_name: 'one.csv', content_type: expect.stringContaining('text/csv'), size_bytes: 8, sha256: expect.any(String), created_at: expect.any(String) });
+    expect(b.files[0].created_at).toMatch(/^[0-9]{4}-/);
+    expect(b.files[0]).not.toHaveProperty('storage_key');
   });
 });
