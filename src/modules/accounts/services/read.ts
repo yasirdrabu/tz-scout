@@ -1,10 +1,11 @@
-import { and, asc, desc, eq, gte, inArray, isNull, type SQL } from 'drizzle-orm';
+import { and, arrayOverlaps, asc, desc, eq, exists, gt, gte, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
+import { ScoutError } from '@/platform/errors';
 import type { AccountView, CrmStatus, FactKind, FactView, PersonView, RoleOrigin, SignalKind, SignalView, SourceChain } from '../contracts/types';
-import { account, accountAlias, exclusionRule, fact, person, personRole, signal } from '../db/schema';
+import { account, accountAlias, accountSummary, exclusionRule, fact, person, personRole, signal } from '../db/schema';
 import type { Exclusion } from './exclusion';
 import { resolveAccountId } from './match';
-import { filterVisibleAccountIds } from './visibility';
+import { filterVisibleAccountIds, visibleAccounts } from './visibility';
 
 type PersonRow = typeof person.$inferSelect;
 type FactRow = typeof fact.$inferSelect;
@@ -192,6 +193,14 @@ export async function listPeople(ctx: ModuleContext, accountId: string): Promise
 
 export type ScoringView = {
   accountId: string;
+  domain: string | null;
+  industry: string | null;
+  industryKey: string | null;
+  employees: number | null;
+  revenueCents: number | null;
+  hqCountry: string | null;
+  technologies: string[];
+  headcountGrowth6m: number | null;
   practiceIds: string[];
   facts: FactView[];
   people: PersonView[];
@@ -199,17 +208,27 @@ export type ScoringView = {
   researchTier: 'A' | 'B' | 'C' | null;
   researchTierSignalAt: Date | null;
   excludedReasonKey: string | null;
+  excludedLabel: string | null;
   excludedOverride: boolean;
 };
 
-/** Everything scoring needs in one read: current facts, people with roles, live signals, tier and the exclusion flags. */
+/** Everything scoring needs in one read: current columns, facts, people with roles, live signals, tier and the exclusion flags. Follows a merged id to its survivor. */
 export async function getAccountForScoring(ctx: ModuleContext, accountId: string): Promise<ScoringView | null> {
   const target = await visible(ctx, accountId);
   if (!target) return null;
   const [acc] = await ctx.tx.select().from(account).where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, target.id)));
   if (!acc) return null;
+  const exclusion = acc.excludedReasonKey ? await checkExclusion(ctx, acc.id) : null;
   return {
     accountId: acc.id,
+    domain: acc.domain,
+    industry: acc.industry,
+    industryKey: acc.industryKey,
+    employees: acc.employees,
+    revenueCents: acc.revenueCents,
+    hqCountry: acc.hqCountry,
+    technologies: acc.technologies,
+    headcountGrowth6m: acc.headcountGrowth6m,
     practiceIds: acc.practiceIds,
     facts: await getFacts(ctx, acc.id),
     people: await peopleOf(ctx, [acc.id]),
@@ -217,8 +236,89 @@ export async function getAccountForScoring(ctx: ModuleContext, accountId: string
     researchTier: acc.researchTier as ScoringView['researchTier'],
     researchTierSignalAt: acc.researchTierSignalAt,
     excludedReasonKey: acc.excludedReasonKey,
+    excludedLabel: exclusion?.label ?? null,
     excludedOverride: acc.excludedOverride,
   };
+}
+
+const MAX_PAGE = 200;
+const MAX_SUMMARY_IDS = 1_000;
+
+/**
+ * Active account ids in id order, for background jobs: no visibility filter, so it refuses a context with an access.
+ * `practiceIds` and `includeNoPractice` together keep accounts in any of those practices or in none;
+ * `hasSignalSince` keeps accounts with a live signal on or after that time (an undated one counts from its recorded day).
+ */
+export async function listAccountIds(
+  ctx: ModuleContext,
+  opts: { practiceIds?: string[]; includeNoPractice?: boolean; hasSignalSince?: Date; afterId?: string; limit?: number } = {},
+): Promise<{ ids: string[]; nextAfterId: string | null }> {
+  if (ctx.access) throw new ScoutError({ slug: 'forbidden', status: 403, title: 'Only background jobs can list every account.' });
+  const limit = opts.limit ?? MAX_PAGE;
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE) {
+    throw new ScoutError({ slug: 'validation', status: 400, title: `Ask for 1 to ${MAX_PAGE} accounts at a time.` });
+  }
+  const byPractice =
+    opts.practiceIds || opts.includeNoPractice
+      ? or(
+          opts.practiceIds?.length ? arrayOverlaps(account.practiceIds, opts.practiceIds) : undefined,
+          opts.includeNoPractice ? sql`cardinality(${account.practiceIds}) = 0` : undefined,
+        ) ?? sql`false`
+      : undefined;
+  const bySignal = opts.hasSignalSince
+    ? exists(
+        ctx.tx
+          .select({ one: signal.id })
+          .from(signal)
+          .where(
+            and(
+              eq(signal.tenantId, ctx.tenantId),
+              eq(signal.accountId, account.id),
+              isNull(signal.archivedAt),
+              sql`coalesce(${signal.occurredAt}, ${signal.recordedAt}) >= ${opts.hasSignalSince.toISOString()}::timestamptz`,
+            ),
+          ),
+      )
+    : undefined;
+  const rows = await ctx.tx
+    .select({ id: account.id })
+    .from(account)
+    .where(and(eq(account.tenantId, ctx.tenantId), isNull(account.archivedAt), opts.afterId ? gt(account.id, opts.afterId) : undefined, byPractice, bySignal))
+    .orderBy(asc(account.id))
+    .limit(limit + 1);
+  const ids = rows.slice(0, limit).map((r) => r.id);
+  return { ids, nextAfterId: rows.length > limit ? ids[ids.length - 1]! : null };
+}
+
+export type AccountSummaryView = {
+  accountId: string;
+  stage: string | null;
+  reviewStatusKey: string | null;
+  ownerUserId: string | null;
+  priority: number | null;
+  tier: string | null;
+  bestOfferId: string | null;
+};
+
+/** The summary row of each account the principal can see, for at most 1,000 ids. Ids with no row or no access are left out. */
+export async function getSummaries(ctx: ModuleContext, ids: string[]): Promise<AccountSummaryView[]> {
+  if (ids.length > MAX_SUMMARY_IDS) {
+    throw new ScoutError({ slug: 'validation', status: 400, title: 'Ask for at most 1,000 accounts at a time.' });
+  }
+  if (ids.length === 0) return [];
+  return ctx.tx
+    .select({
+      accountId: accountSummary.accountId,
+      stage: accountSummary.stage,
+      reviewStatusKey: accountSummary.reviewStatusKey,
+      ownerUserId: accountSummary.ownerUserId,
+      priority: accountSummary.priority,
+      tier: accountSummary.tier,
+      bestOfferId: accountSummary.bestOfferId,
+    })
+    .from(accountSummary)
+    .where(and(eq(accountSummary.tenantId, ctx.tenantId), inArray(accountSummary.accountId, ids), await visibleAccounts(ctx)))
+    .orderBy(asc(accountSummary.accountId));
 }
 
 /** The stored exclusion (key, label and whether a person overrode it), or null when the account is not excluded. */

@@ -37,7 +37,10 @@ export {
   getPerson,
   getSignal,
   getSignals,
+  getSummaries,
+  listAccountIds,
   listPeople,
+  type AccountSummaryView,
   type ScoringView,
 } from './services/read';
 export { exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';

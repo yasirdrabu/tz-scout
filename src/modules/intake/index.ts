@@ -14,6 +14,7 @@ export {
   arrivalWaiting,
   batchCompleted,
   batchCreated,
+  sourceTrustChanged,
 } from './contracts/events';
 export { normaliseDomain } from './domain/normalise';
 export { importRunJob, resolveJob, waitingExpireJob } from './contracts/jobs';
@@ -24,6 +25,9 @@ export { listRelationshipDefaults, setRelationshipDefault, type RelationshipDefa
 export { checkArrivalCap, type CapCheck } from './services/caps';
 export {
   SOURCE_KINDS,
+  accountIdsForSource,
+  bestTrustForAccounts,
+  chainsForAccount,
   childSources,
   intakeSourceAccess,
   intakeSourceInfo,

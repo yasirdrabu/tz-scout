@@ -1,5 +1,5 @@
-import { and, asc, eq, gte, inArray, or, sql } from 'drizzle-orm';
-import type { SourceAccessProvider, SourceInfoProvider } from '@/modules/accounts';
+import { and, asc, eq, gt, gte, inArray, isNotNull, or, sql } from 'drizzle-orm';
+import type { SourceAccessProvider, SourceChain, SourceInfoProvider } from '@/modules/accounts';
 import { members, revokeKeysForSource, type SourceValidator } from '@/modules/tenancy';
 import type { DataLimit } from '@/platform/access';
 import type { ModuleContext } from '@/platform/context';
@@ -321,6 +321,64 @@ export const intakeSourceInfo: SourceInfoProvider = {
     return [...new Set(rows.flatMap((r) => [r.person, r.agent, r.vendor]).filter((id): id is string => !!id))];
   },
 };
+
+/** The distinct source chains of the resolved arrivals for these accounts. */
+export async function chainsForAccount(ctx: ModuleContext, accountIds: string[]): Promise<SourceChain[]> {
+  if (accountIds.length === 0) return [];
+  const rows = await ctx.tx
+    .selectDistinct({ person: arrival.personSourceId, agent: arrival.agentSourceId, vendor: arrival.vendorSourceId })
+    .from(arrival)
+    .where(and(eq(arrival.tenantId, ctx.tenantId), inArray(arrival.accountId, accountIds), eq(arrival.status, 'resolved')))
+    .orderBy(asc(arrival.personSourceId), asc(arrival.agentSourceId), asc(arrival.vendorSourceId));
+  return rows.map((r) => ({
+    ...(r.person ? { personSourceId: r.person } : {}),
+    ...(r.agent ? { agentSourceId: r.agent } : {}),
+    ...(r.vendor ? { vendorSourceId: r.vendor } : {}),
+  }));
+}
+
+/** The highest trust over the accounts' chains, with the closest source (agent, else person, else vendor) of the winning chain. */
+export async function bestTrustForAccounts(
+  ctx: ModuleContext,
+  accountIds: string[],
+): Promise<{ trust: number; sourceId: string; sourceName: string } | null> {
+  let best: { trust: number; chain: SourceChain } | null = null;
+  for (const chain of await chainsForAccount(ctx, accountIds)) {
+    const trust = await intakeSourceInfo.getTrust(ctx, chain);
+    if (!best || trust > best.trust) best = { trust, chain };
+  }
+  const sourceId = best && (best.chain.agentSourceId ?? best.chain.personSourceId ?? best.chain.vendorSourceId);
+  if (!best || !sourceId) return null;
+  const row = await loadSource(ctx, sourceId);
+  return { trust: best.trust, sourceId, sourceName: row?.name ?? sourceId };
+}
+
+/** Accounts with a resolved arrival from the source or any source below it, in id order, `limit` (at most 200) at a time. */
+export async function accountIdsForSource(
+  ctx: ModuleContext,
+  sourceId: string,
+  opts: { afterId?: string; limit?: number } = {},
+): Promise<{ ids: string[]; nextAfterId: string | null }> {
+  const limit = opts.limit ?? 200;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw invalid('Ask for 1 to 200 accounts at a time.');
+  const sources = [sourceId, ...(await childSources(ctx, [sourceId]))];
+  const rows = await ctx.tx
+    .selectDistinct({ id: arrival.accountId })
+    .from(arrival)
+    .where(
+      and(
+        eq(arrival.tenantId, ctx.tenantId),
+        eq(arrival.status, 'resolved'),
+        isNotNull(arrival.accountId),
+        opts.afterId ? gt(arrival.accountId, opts.afterId) : undefined,
+        or(inArray(arrival.personSourceId, sources), inArray(arrival.agentSourceId, sources), inArray(arrival.vendorSourceId, sources)),
+      ),
+    )
+    .orderBy(asc(arrival.accountId))
+    .limit(limit + 1);
+  const ids = rows.slice(0, limit).map((r) => r.id!);
+  return { ids, nextAfterId: rows.length > limit ? ids[ids.length - 1]! : null };
+}
 
 /** Accounts' `SourceAccessProvider`. */
 export const intakeSourceAccess: SourceAccessProvider = { childSources, personSourceFor: ensurePersonSource };

@@ -145,7 +145,7 @@ async function publishEvents(
     : [];
   if (!created) {
     const changedKeys = [...new Set(facts.filter((f) => !f.personId && f.status === 'current').map((f) => f.key))];
-    if (changedKeys.length) await publish(ctx, accountUpdated, { accountId, changedKeys }, subject);
+    if (changedKeys.length) await publish(ctx, accountUpdated, { accountId, changedKeys, arrivalId: a.arrivalId }, subject);
   }
   for (const p of people) {
     if (!p.existing) await publish(ctx, personAdded, { accountId, personId: p.personId, roleKeys: p.roleKeys, arrivalId: a.arrivalId }, subject);
@@ -165,6 +165,7 @@ async function publishEvents(
         kind: f.kind as FactKind,
         sourceChain: a.sourceChain,
         becameCurrent: f.status === 'current',
+        arrivalId: a.arrivalId,
       },
       subject,
     );
@@ -184,6 +185,7 @@ async function publishEvents(
         ...(input.value !== undefined ? { value: input.value } : {}),
         ...(input.confidence !== undefined ? { confidence: input.confidence } : {}),
         sourceChain: a.sourceChain,
+        arrivalId: a.arrivalId,
       },
       subject,
     );

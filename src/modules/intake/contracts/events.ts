@@ -76,6 +76,19 @@ export const arrivalRejected = defineEvent(
   }),
 );
 
+export const sourceTrustChanged = defineEvent(
+  'intake.source.trust_changed',
+  1,
+  z.object({
+    sourceId: z.string(),
+    level: z.enum(['person', 'agent', 'vendor']),
+    from: z.number(),
+    to: z.number(),
+    sampleSize: z.number().int(),
+    cause: z.enum(['outcomes', 'conflict_lost', 'warm_intro_points']),
+  }),
+);
+
 export const batchCompleted = defineEvent(
   'intake.batch.completed',
   1,

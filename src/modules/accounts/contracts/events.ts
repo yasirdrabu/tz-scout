@@ -22,7 +22,7 @@ export const accountCreated = defineEvent(
 export const accountUpdated = defineEvent(
   'accounts.account.updated',
   1,
-  z.object({ accountId: z.string(), changedKeys: z.array(z.string()) }),
+  z.object({ accountId: z.string(), changedKeys: z.array(z.string()), arrivalId: z.string().optional() }),
 );
 
 export const accountArchived = defineEvent(
@@ -76,6 +76,7 @@ export const factRecorded = defineEvent(
     kind: z.enum(['firmographic', 'contact', 'research', 'custom', 'form_answer']),
     sourceChain: sourceChainSchema,
     becameCurrent: z.boolean(),
+    arrivalId: z.string().optional(),
   }),
 );
 
@@ -91,5 +92,6 @@ export const signalRecorded = defineEvent(
     value: z.unknown().optional(),
     confidence: z.number().optional(),
     sourceChain: sourceChainSchema,
+    arrivalId: z.string().optional(),
   }),
 );
