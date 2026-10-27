@@ -59,6 +59,16 @@ const chainOf = (r: { personSourceId: string | null; agentSourceId: string | nul
 });
 const LIVE = ['current', 'candidate'];
 
+/** JSON with object keys sorted, so a value read back from jsonb (which reorders keys) compares equal. */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function kindOf(key: string, personId: string | null): FactKind {
   if (key.startsWith('form.')) return 'form_answer';
   if (personId) return 'contact';
@@ -101,8 +111,8 @@ export async function recordFacts(
         inArray(fact.status, LIVE),
       ),
     );
-  const said = new Set(live.map((f) => `${f.key}\n${chainKey(chainOf(f))}\n${JSON.stringify(f.value)}`));
-  const fresh = given.filter((f) => !said.has(`${f.key}\n${chainKey(chain)}\n${JSON.stringify(f.value)}`));
+  const said = new Set(live.map((f) => `${f.key}\n${chainKey(chainOf(f))}\n${stableJson(f.value)}`));
+  const fresh = given.filter((f) => !said.has(`${f.key}\n${chainKey(chain)}\n${stableJson(f.value)}`));
   if (fresh.length === 0) return [];
   const inserted = await ctx.tx
     .insert(fact)
@@ -155,8 +165,25 @@ export async function reproject(ctx: ModuleContext, accountId: string, keys?: st
     if (!trust.has(k)) trust.set(k, await sourceInfoProvider().getTrust(ctx, chainOf(r)));
   }
 
+  // One active account per domain: a domain another active account holds is never picked here. Those facts
+  // stay candidate, and the arrival keeps that domain only as an alias.
+  const domains = [...new Set(rows.filter((r) => !r.personId && r.key === 'domain').map((r) => String(r.value)))];
+  const taken = new Set(
+    domains.length
+      ? (
+          await ctx.tx
+            .select({ domain: account.domain })
+            .from(account)
+            .where(
+              and(eq(account.tenantId, ctx.tenantId), inArray(account.domain, domains), isNull(account.archivedAt), ne(account.id, accountId)),
+            )
+        ).map((r) => r.domain)
+      : [],
+  );
+  const pickable = rows.filter((r) => r.personId || r.key !== 'domain' || !taken.has(String(r.value)));
+
   const groups = new Map<string, typeof rows>();
-  for (const r of rows) {
+  for (const r of pickable) {
     const g = `${r.personId ?? ''}\n${r.key}`;
     groups.set(g, [...(groups.get(g) ?? []), r]);
   }
@@ -209,14 +236,6 @@ async function writeAccountColumns(ctx: ModuleContext, accountId: string, set: P
   if (set.name !== undefined) set.matchName = matchName(String(set.name));
   if (set.hqState !== undefined || set.hqCountry !== undefined) {
     set.hqStateKey = regionKey(set.hqCountry ?? before.hqCountry, set.hqState ?? before.hqState);
-  }
-  if (set.domain !== undefined && set.domain !== before.domain && set.domain !== null) {
-    // Another active account already holds that domain: keep ours (the new one is kept as an alias).
-    const [taken] = await ctx.tx
-      .select({ id: account.id })
-      .from(account)
-      .where(and(eq(account.tenantId, ctx.tenantId), eq(account.domain, String(set.domain)), isNull(account.archivedAt), ne(account.id, accountId)));
-    if (taken) delete set.domain;
   }
   const changed = changedOnly(before, set);
   if (!changed) return;

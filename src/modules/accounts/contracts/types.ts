@@ -90,6 +90,8 @@ export type SignalView = {
   detail: string | null;
   url: string | null;
   value: unknown;
+  /** 0 to 1, from the source. */
+  confidence: number | null;
   occurredAt: Date | null;
   sourceChain: SourceChain;
   arrivalId: string | null;
@@ -143,6 +145,8 @@ type ArrivalSignalBase = {
   detail?: string;
   url?: string;
   value?: unknown;
+  /** 0 to 1, from the source. */
+  confidence?: number;
   externalId?: string;
 };
 

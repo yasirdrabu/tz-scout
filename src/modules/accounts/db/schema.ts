@@ -196,6 +196,7 @@ export const signal = accounts.table(
     detail: text('detail'),
     url: text('url'),
     value: jsonb('value'),
+    confidence: numeric('confidence', { precision: 4, scale: 3, mode: 'number' }), // 0 to 1, from the source
     occurredAt: at('occurred_at'), // optional only for research
     personSourceId: text('person_source_id'),
     agentSourceId: text('agent_source_id'),

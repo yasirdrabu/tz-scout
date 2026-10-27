@@ -1,7 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { registerSourceInfoProvider, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
-import { account, accountSummary, fact, person, personRole, signal } from '@/modules/accounts/db/schema';
+import { account, accountAlias, accountSummary, fact, person, personRole, signal } from '@/modules/accounts/db/schema';
 import { createPractice } from '@/modules/offers';
 import { adminDb } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
@@ -40,6 +40,14 @@ const events = async (accountId: string, type: string) =>
     sql`select payload from platform.outbox where tenant_id = ${t.tenantId} and payload->>'type' = ${type}
         and payload->'data'->>'accountId' = ${accountId} order by seq`,
   )) as unknown as { payload: { data: Record<string, unknown> } }[];
+
+const allEvents = async (accountId: string) =>
+  (
+    (await adminDb.execute(
+      sql`select payload->>'type' as type from platform.outbox where tenant_id = ${t.tenantId}
+          and payload->'data'->>'accountId' = ${accountId} order by seq`,
+    )) as unknown as { type: string }[]
+  ).map((r) => r.type);
 
 /** Resolves once `n` callers are waiting. */
 function barrier(n: number): () => Promise<void> {
@@ -93,6 +101,10 @@ describe('ACC-E1-S1 create and update from arrivals', () => {
     expect(await events(out.accountId, 'accounts.person.added')).toHaveLength(2);
     expect(await events(out.accountId, 'accounts.fact.recorded')).toHaveLength(allFacts.length);
     expect(await events(out.accountId, 'accounts.signal.recorded')).toHaveLength(1);
+    // Only account.created plus one event per item: nothing else.
+    const types = await allEvents(out.accountId);
+    expect(types[0]).toBe('accounts.account.created');
+    expect(types).toHaveLength(1 + 2 + allFacts.length + 1);
   });
 
   it('AC2 a second call with the account id and the same email and signal returns them as existing', async () => {
@@ -155,8 +167,18 @@ describe('practices, research tier, undated signals, exclusion, trust and source
     expect(acc[0]!.practiceIds).toEqual([p.id]);
     const sum = await rows((ctx) => ctx.tx.select().from(accountSummary).where(eq(accountSummary.accountId, first.accountId)));
     expect(sum[0]!.practiceIds).toEqual([p.id]);
-    const updated = await events(first.accountId, 'accounts.account.updated');
-    expect(updated.filter((e) => (e.payload.data.changedKeys as string[]).includes('practice_ids'))).toHaveLength(1);
+    const practiceUpdates = async () =>
+      (await events(first.accountId, 'accounts.account.updated')).filter((e) =>
+        (e.payload.data.changedKeys as string[]).includes('practice_ids'),
+      );
+    // On a new account the hint is part of the creation: no separate update event.
+    expect(await practiceUpdates()).toHaveLength(0);
+
+    const q = await t.run((ctx) => createPractice(ctx, { name: 'Second Practice', slug: 'second-practice' }));
+    await t.run((ctx) => upsertFromArrival(ctx, arrival({ practiceHint: 'second-practice' }), first.accountId));
+    const after = await rows((ctx) => ctx.tx.select().from(account).where(eq(account.id, first.accountId)));
+    expect([...after[0]!.practiceIds].sort()).toEqual([p.id, q.id].sort());
+    expect(await practiceUpdates()).toHaveLength(1);
   });
 
   it('researcher_tier A with a signal dated 2026-06-02 sets both research tier columns', async () => {
@@ -191,6 +213,61 @@ describe('practices, research tier, undated signals, exclusion, trust and source
     const acc = await rows((ctx) => ctx.tx.select().from(account).where(eq(account.id, out.accountId)));
     expect(acc[0]!.excludedReasonKey).toBe('software_vendor');
     expect(await events(out.accountId, 'accounts.account.exclusion_changed')).toHaveLength(1);
+    // account.created goes out before the exclusion event.
+    expect((await allEvents(out.accountId)).slice(0, 2)).toEqual(['accounts.account.created', 'accounts.account.exclusion_changed']);
+  });
+
+  it('a domain another active account holds stays a candidate fact and becomes an alias only', async () => {
+    const held = domain();
+    await t.run((ctx) => upsertFromArrival(ctx, arrival({ account: { name: 'Holder', domain: held } })));
+    const own = domain();
+    const b = await t.run((ctx) => upsertFromArrival(ctx, arrival({ account: { name: 'Other', domain: own } })));
+    const later = arrival({ receivedAt: new Date('2026-10-27T15:00:00Z'), account: { domain: held } });
+    const out = await t.run((ctx) => upsertFromArrival(ctx, later, b.accountId));
+
+    const acc = await rows((ctx) => ctx.tx.select().from(account).where(eq(account.id, b.accountId)));
+    expect(acc[0]!.domain).toBe(own);
+    const domainFacts = await rows((ctx) =>
+      ctx.tx.select().from(fact).where(and(eq(fact.accountId, b.accountId), eq(fact.key, 'domain'))),
+    );
+    expect(domainFacts.find((f) => f.value === held)?.status).toBe('candidate');
+    expect(domainFacts.find((f) => f.value === own)?.status).toBe('current');
+    const aliases = await rows((ctx) => ctx.tx.select().from(accountAlias).where(eq(accountAlias.accountId, b.accountId)));
+    expect(aliases).toEqual([expect.objectContaining({ kind: 'domain', value: held })]);
+
+    const recorded = (await events(b.accountId, 'accounts.fact.recorded')).filter((e) => out.factIds.includes(e.payload.data.factId as string));
+    expect(recorded.map((e) => e.payload.data.becameCurrent)).toEqual([false]);
+    const updated = await events(b.accountId, 'accounts.account.updated');
+    expect(updated.some((e) => (e.payload.data.changedKeys as string[]).includes('domain'))).toBe(false);
+  });
+
+  it('an object-valued fact repeated by the same chain is not stored again', async () => {
+    const value = { zeta: 1, alpha: { b: 2, a: 1 } };
+    const first = await t.run((ctx) =>
+      upsertFromArrival(ctx, arrival({ account: { name: 'Objecty', domain: domain() }, facts: [{ key: 'form.budget', value }] })),
+    );
+    const again = await t.run((ctx) => upsertFromArrival(ctx, arrival({ facts: [{ key: 'form.budget', value }] }), first.accountId));
+    expect(again.factIds).toEqual([]);
+    const stored = await rows((ctx) =>
+      ctx.tx.select().from(fact).where(and(eq(fact.accountId, first.accountId), eq(fact.key, 'form.budget'))),
+    );
+    expect(stored).toHaveLength(1);
+  });
+
+  it('stores a signal confidence and puts it on signal.recorded', async () => {
+    const out = await t.run((ctx) =>
+      upsertFromArrival(
+        ctx,
+        arrival({
+          account: { name: 'Confident', domain: domain() },
+          signals: [{ kind: 'research', type: 'intent', title: 'Researching RCM', value: 82, confidence: 0.9, occurredAt: new Date('2026-10-01T00:00:00Z') }],
+        }),
+      ),
+    );
+    const sig = await rows((ctx) => ctx.tx.select().from(signal).where(eq(signal.accountId, out.accountId)));
+    expect(sig[0]!.confidence).toBe(0.9);
+    const recorded = await events(out.accountId, 'accounts.signal.recorded');
+    expect(recorded[0]!.payload.data).toMatchObject({ type: 'intent', kind: 'research', value: 82, confidence: 0.9 });
   });
 
   it('the employees value from the more trusted chain is current, and trust is read once per chain', async () => {

@@ -112,6 +112,17 @@ async function projectResearchTier(ctx: ModuleContext, accountId: string, a: Arr
     .where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
 }
 
+/** Published before the practice and exclusion events, so a new account is announced first. */
+async function publishCreated(ctx: ModuleContext, accountId: string, a: ArrivalForAccounts): Promise<void> {
+  const [acc] = await ctx.tx.select().from(account).where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
+  await publish(
+    ctx,
+    accountCreated,
+    { accountId, name: acc!.name, domain: acc!.domain, isShell: acc!.isShell, arrivalId: a.arrivalId },
+    subjectOf(accountId),
+  );
+}
+
 async function publishEvents(
   ctx: ModuleContext,
   accountId: string,
@@ -128,10 +139,7 @@ async function publishEvents(
         .from(fact)
         .where(and(eq(fact.tenantId, ctx.tenantId), inArray(fact.id, factIds)))
     : [];
-  if (created) {
-    const [acc] = await ctx.tx.select().from(account).where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
-    await publish(ctx, accountCreated, { accountId, name: acc!.name, domain: acc!.domain, isShell: acc!.isShell, arrivalId: a.arrivalId }, subject);
-  } else {
+  if (!created) {
     const changedKeys = [...new Set(facts.filter((f) => !f.personId && f.status === 'current').map((f) => f.key))];
     if (changedKeys.length) await publish(ctx, accountUpdated, { accountId, changedKeys }, subject);
   }
@@ -170,6 +178,7 @@ async function publishEvents(
         kind: s.kind,
         occurredAt: s.occurredAt.toISOString(),
         ...(input.value !== undefined ? { value: input.value } : {}),
+        ...(input.confidence !== undefined ? { confidence: input.confidence } : {}),
         sourceChain: a.sourceChain,
       },
       subject,
@@ -212,15 +221,16 @@ export async function upsertFromArrival(ctx: ModuleContext, a: ArrivalForAccount
   for (const s of a.signals) signals.push(await storeSignal(ctx, id, s, chain, a.arrivalId, a.receivedAt));
   // 6. Research tier.
   await projectResearchTier(ctx, id, a, factIds);
-  // 7. Practices.
+  if (target.created) await publishCreated(ctx, id, a);
+  // 7. Practices. A new account's practices are part of its creation, not an update.
   const practiceId = await resolvePractice(ctx, a.practiceHint);
-  if (practiceId) await setPractices(ctx, id, [practiceId], 'hint');
+  if (practiceId) await setPractices(ctx, id, [practiceId], 'hint', { publish: !target.created });
   // 8. Exclusion.
   const excluded = await applyExclusion(ctx, id);
   // 9. Summary, with this arrival's sources added inline.
   const sourceIds = [chain.personSourceId, chain.agentSourceId, chain.vendorSourceId].filter((s): s is string => !!s);
   await writeSummary(ctx, id, { addSourceIds: sourceIds });
-  // 10. Events.
+  // 10. Events (account.created went out after step 6).
   await publishEvents(ctx, id, a, target.created, people, signals, factIds);
 
   return {

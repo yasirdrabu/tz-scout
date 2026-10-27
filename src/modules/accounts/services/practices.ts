@@ -7,13 +7,14 @@ import { account } from '../db/schema';
 /**
  * Sets an account's practices. A hint only adds (D25); a person may also remove. Publishes
  * `accounts.account.updated` with `changedKeys: ['practice_ids']` when something changed.
- * Returns the practice ids now on the account.
+ * `publish: false` skips the event (a hint on a just-created account). Returns the practice ids now on the account.
  */
 export async function setPractices(
   ctx: ModuleContext,
   accountId: string,
   practiceIds: string[],
   by: 'hint' | 'person',
+  opts: { publish?: boolean } = {},
 ): Promise<string[]> {
   const [acc] = await ctx.tx
     .select({ practiceIds: account.practiceIds })
@@ -27,6 +28,6 @@ export async function setPractices(
     .update(account)
     .set({ practiceIds: next, updatedAt: new Date() })
     .where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
-  await publish(ctx, accountUpdated, { accountId, changedKeys: ['practice_ids'] }, { type: 'account', id: accountId });
+  if (opts.publish !== false) await publish(ctx, accountUpdated, { accountId, changedKeys: ['practice_ids'] }, { type: 'account', id: accountId });
   return next;
 }

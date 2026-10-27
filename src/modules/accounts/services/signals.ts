@@ -72,6 +72,7 @@ export async function storeSignal(
     detail: input.detail ?? null,
     url,
     value: input.value ?? null,
+    confidence: input.confidence ?? null,
     occurredAt,
     personSourceId: chain.personSourceId ?? null,
     agentSourceId: chain.agentSourceId ?? null,
