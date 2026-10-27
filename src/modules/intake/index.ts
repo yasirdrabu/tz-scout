@@ -15,6 +15,7 @@ export {
   batchCompleted,
   batchCreated,
 } from './contracts/events';
+export { normaliseDomain } from './domain/normalise';
 export { importRunJob, resolveJob, waitingExpireJob } from './contracts/jobs';
 export { intakeAccountMerged, intakeTenantDefaults } from './consumers';
 export { importRunHandler, resolveHandler, waitingExpireHandler } from './jobs';

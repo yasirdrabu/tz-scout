@@ -27,5 +27,5 @@ export const POST = v1Route({ permission: 'people:write' }, async (req, principa
     { target_account_id: id, people: [objectBody(await readJson(req))] },
     { channel: 'api', inline: true, canDeclareWarmIntro: can(principal, 'warm_intro:declare') },
   );
-  return inlineReply(r, (x) => ({ arrivalId: x.arrivalId, personId: x.personIds[0], alreadyKnown: x.alreadyKnown }));
+  return inlineReply(ctx, r, (x) => ({ arrivalId: x.arrivalId, personId: x.personIds[0], alreadyKnown: x.alreadyKnown }));
 });

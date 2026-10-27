@@ -5,7 +5,7 @@ import { ScoutError } from '@/platform/errors';
 import { parseBody } from '../../_lib/body';
 import { idAndAction, notFound } from '../../_lib/path';
 import { v1Route } from '../../_lib/v1-route';
-import { personFor, rejectedReply } from '../../accounts/respond';
+import { personFor, arrivalOutcome } from '../../accounts/respond';
 import { patchFacts, patchPersonBody } from '../../accounts/schemas';
 
 export const dynamic = 'force-dynamic';
@@ -34,5 +34,5 @@ export const PATCH = v1Route({ permission: 'people:write' }, async (req, princip
     { target_account_id: current.accountId, facts: patchFacts(patch, 'person') },
     { channel: 'api', inline: true, targetPersonId: id, canDeclareWarmIntro: can(principal, 'warm_intro:declare') },
   );
-  return r.status === 'rejected' ? rejectedReply(r) : { arrivalId: r.arrivalId, status: r.status };
+  return arrivalOutcome(ctx, r);
 });

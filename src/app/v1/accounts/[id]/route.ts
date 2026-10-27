@@ -5,7 +5,7 @@ import type { ModuleContext } from '@/platform/context';
 import { parseBody } from '../../_lib/body';
 import { idAndAction, notFound } from '../../_lib/path';
 import { v1Route } from '../../_lib/v1-route';
-import { personFor, rejectedReply } from '../respond';
+import { personFor, arrivalOutcome } from '../respond';
 import { patchAccountBody, patchFacts } from '../schemas';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 async function accountOf(ctx: ModuleContext, id: string, canReadPeople: boolean) {
   const account = await getAccount(ctx, id);
   if (!account) throw notFound();
-  return { ...account, people: account.people.map((p) => personFor(p, canReadPeople)), signals: await getSignals(ctx, account.id) };
+  return { ...account, mergedInto: account.mergedInto ?? null, people: account.people.map((p) => personFor(p, canReadPeople)), signals: await getSignals(ctx, account.id) };
 }
 
 export const GET = v1Route({ permission: 'accounts:read' }, async (req, principal, ctx) => {
@@ -36,5 +36,5 @@ export const PATCH = v1Route({ permission: 'accounts:write' }, async (req, princ
     { target_account_id: id, facts: patchFacts(patch, 'account') },
     { channel: 'api', inline: true, canDeclareWarmIntro: can(principal, 'warm_intro:declare') },
   );
-  return r.status === 'rejected' ? rejectedReply(r) : { arrivalId: r.arrivalId, status: r.status };
+  return arrivalOutcome(ctx, r);
 });

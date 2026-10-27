@@ -9,6 +9,8 @@ export type SearchSort = 'priority' | 'last_signal' | 'created' | 'name';
 /** Every ACC-E8 filter. Scoring, review and CRM columns stay empty until R1b and R1c, so filters on them match nothing for now. */
 export type SearchQuery = {
   text?: string;
+  /** Exact, already normalised: the account's domain or one of its domain aliases. */
+  domain?: string;
   industry?: string;
   employeesMin?: number;
   employeesMax?: number;
@@ -108,6 +110,17 @@ function filters(ctx: ModuleContext, q: SearchQuery): (SQL | undefined)[] {
               .select({ one: sql`1` })
               .from(accountAlias)
               .where(and(eq(accountAlias.accountId, account.id), ne(accountAlias.kind, 'merged_id'), ilike(accountAlias.value, like))),
+          ),
+        )
+      : undefined,
+    q.domain
+      ? or(
+          eq(account.domain, q.domain),
+          exists(
+            ctx.tx
+              .select({ one: sql`1` })
+              .from(accountAlias)
+              .where(and(eq(accountAlias.accountId, account.id), eq(accountAlias.kind, 'domain'), eq(accountAlias.value, q.domain))),
           ),
         )
       : undefined,

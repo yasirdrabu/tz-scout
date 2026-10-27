@@ -1,5 +1,6 @@
 import type { PersonView } from '@/modules/accounts';
-import type { InlineResult, SubmitResult } from '@/modules/intake';
+import { getArrival, type InlineResult, type SubmitResult } from '@/modules/intake';
+import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { created, type StatusResult } from '../_lib/v1-route';
 
@@ -13,15 +14,16 @@ export function personFor(p: PersonView, canReadPeople: boolean): Partial<Person
 /** The fact keys that hold a person's contact details. */
 export const CONTACT_KEYS = new Set(['email', 'phone', 'mobile_phone', 'linkedin_url']);
 
-/** 422 for an arrival the service rejected (the account is excluded; what was sent is kept, as the service reports). */
-export const rejectedReply = (r: Pick<SubmitResult, 'arrivalId' | 'status'>): StatusResult => ({
-  status: 422,
-  body: { arrivalId: r.arrivalId, status: r.status, reason: 'excluded' },
-});
+/** The arrival's id and status; a rejected one (the account is excluded) also says why, as the arrival row stores it. */
+export async function arrivalOutcome(ctx: ModuleContext, r: Pick<SubmitResult, 'arrivalId' | 'status'>) {
+  if (r.status !== 'rejected') return { arrivalId: r.arrivalId, status: r.status };
+  return { arrivalId: r.arrivalId, status: r.status, reason: (await getArrival(ctx, r.arrivalId))?.reason ?? null };
+}
 
-/** The reply to an inline targeted arrival: 201 with `reply(result)`, or 422 when it was rejected. */
-export function inlineReply(r: SubmitResult, reply: (x: InlineResult) => object): StatusResult {
-  return r.status === 'rejected' || !r.inlineResult ? rejectedReply(r) : created(reply(r.inlineResult));
+/** 201 with `reply(result)`. A rejected arrival keeps what it stored and adds its status and reason. */
+export async function inlineReply(ctx: ModuleContext, r: SubmitResult, reply: (x: InlineResult) => object): Promise<StatusResult> {
+  const base = r.inlineResult ? reply(r.inlineResult) : {};
+  return created(r.status === 'rejected' ? { ...base, ...(await arrivalOutcome(ctx, r)) } : { arrivalId: r.arrivalId, ...base });
 }
 
 export const objectBody = (raw: unknown): Record<string, unknown> => {

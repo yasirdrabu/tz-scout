@@ -18,7 +18,7 @@ export const POST = v1Route({ permission: 'signals:write' }, async (req, princip
     { channel: 'api', inline: true, canDeclareWarmIntro: can(principal, 'warm_intro:declare') },
   );
   const url = typeof signal.url === 'string' ? signal.url.trim() : '';
-  return inlineReply(r, (x) => ({
+  return inlineReply(ctx, r, (x) => ({
     arrivalId: x.arrivalId,
     signalId: x.signalIds[0],
     alreadyKnown: x.alreadyKnown,

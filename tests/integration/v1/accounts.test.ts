@@ -9,7 +9,7 @@ import { GET as getFacts } from '@/app/v1/accounts/[id]/facts/route';
 import { GET as accountArrivals } from '@/app/v1/accounts/[id]/arrivals/route';
 import { PATCH as patchPerson } from '@/app/v1/people/[id]/route';
 import { mergeAccounts, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
-import { fact, person } from '@/modules/accounts/db/schema';
+import { accountAlias, fact, person } from '@/modules/accounts/db/schema';
 import { SYSTEM_GRANTOR, createApiKey, createTenant, handleDevSignIn, setPrincipalCacheTtl, type Permission } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
 import { adminDb, closeDbs } from '@/platform/db/client';
@@ -131,12 +131,18 @@ describe('POST /v1/accounts/{id}/people', () => {
     expect(res.status).toBe(404);
   });
 
-  it('answers 422 when the account is excluded, keeping what the service reports', async () => {
+  it('an excluded account answers 201 with the stored ids, status rejected and the stored reason', async () => {
     const d = domain();
     const acc = await seed(ash.agentId, { account: { name: 'Excluded Co', domain: d, industryKey: 'software' } });
     const res = await call(addPerson, writeKey, `accounts/${acc.accountId}/people`, { body: { name: 'Ex Person', email: `ex@${d}` } });
-    expect(res.status).toBe(422);
-    expect(await res.json()).toMatchObject({ status: 'rejected', reason: 'excluded' });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({
+      arrival_id: expect.stringMatching(/^arr_/),
+      person_id: expect.stringMatching(/^per_/),
+      already_known: false,
+      status: 'rejected',
+      reason: 'excluded',
+    });
   });
 
   it('needs people:write', async () => {
@@ -183,6 +189,21 @@ describe('reads', () => {
     expect(ids).not.toContain(theirs.accountId);
   });
 
+  it('?domain= is an exact, normalised match that combines with q, and finds an alias', async () => {
+    const stem = newId('acc').slice(-8).toLowerCase();
+    const acme = await seed(ash.agentId, { account: { name: `Dom ${stem}`, domain: `${stem}.com` } });
+    await seed(ash.agentId, { account: { name: `Dom Not ${stem}`, domain: `not${stem}.com` } });
+    await seed(ash.agentId, { account: { name: `Dom Au ${stem}`, domain: `${stem}.com.au` } });
+    const ids = async (qs: string) =>
+      (await (await call(listAccounts, writeKey, `accounts?${qs}`)).json()).data.map((a: { account_id: string }) => a.account_id);
+    expect(await ids(`domain=https://www.${stem.toUpperCase()}.com/about`)).toEqual([acme.accountId]);
+    expect(await ids(`domain=${stem}.com&q=Dom Not`)).toEqual([]);
+    expect(await ids(`domain=${stem}.com&q=Dom ${stem}`)).toEqual([acme.accountId]);
+    await run((ctx) => ctx.tx.insert(accountAlias).values({ tenantId, accountId: acme.accountId, kind: 'domain', value: `alt${stem}.com` }));
+    expect(await ids(`domain=alt${stem}.com`)).toEqual([acme.accountId]);
+    expect((await call(listAccounts, writeKey, 'accounts?domain=not a domain')).status).toBe(400);
+  });
+
   it('ACC-E5-S1-AC3: an account merged away answers with the survivor and merged_into', async () => {
     const keep = await seed(ash.agentId, { account: { name: 'Keeper', domain: domain() } });
     const gone = await seed(ash.agentId, { account: { name: 'Goner', domain: domain() } });
@@ -190,6 +211,7 @@ describe('reads', () => {
     const res = await call(getAccountRoute, writeKey, `accounts/${gone.accountId}`);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ id: keep.accountId, merged_into: keep.accountId });
+    expect((await (await call(getAccountRoute, writeKey, `accounts/${keep.accountId}`)).json()).merged_into).toBeNull();
     expect((await call(getAccountRoute, boKey, `accounts/${keep.accountId}`)).status).toBe(404);
   });
 
@@ -201,9 +223,9 @@ describe('reads', () => {
     expect(hidden).toMatchObject({ first_name: 'Cy', title: 'CFO' });
     for (const k of ['email', 'phone', 'mobile_phone', 'linkedin_url']) expect(hidden).not.toHaveProperty(k);
     const onAccount = (await (await call(getAccountRoute, writeKey, `accounts/${acc.accountId}`)).json()).people[0];
-    expect(onAccount).not.toHaveProperty('email');
+    for (const k of ['email', 'phone', 'mobile_phone', 'linkedin_url']) expect(onAccount).not.toHaveProperty(k);
     const factKeys = (await (await call(getFacts, writeKey, `accounts/${acc.accountId}/facts?include=history`)).json()).data.map((f: { key: string }) => f.key);
-    expect(factKeys).not.toContain('email');
+    for (const k of ['email', 'phone', 'mobile_phone', 'linkedin_url']) expect(factKeys).not.toContain(k);
     expect(factKeys).toContain('title');
 
     const shown = (await (await call(listPeopleRoute, writeKeyWithPeople, `accounts/${acc.accountId}/people`)).json()).data[0];
