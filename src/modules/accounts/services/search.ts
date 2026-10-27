@@ -6,7 +6,7 @@ import { visibleAccounts } from './visibility';
 
 export type SearchSort = 'priority' | 'last_signal' | 'created' | 'name';
 
-/** Every ACC-E8 filter. Scoring, review and CRM columns stay empty until R1b and R1c, so filters on them match nothing for now. */
+/** Every ACC-E8 filter. Scoring columns are filled from scoring.account.scored; review and CRM columns stay empty until R1b Task 12 and R1c, so filters on them match nothing for now. */
 export type SearchQuery = {
   text?: string;
   /** Exact, already normalised: the account's domain or one of its domain aliases. */

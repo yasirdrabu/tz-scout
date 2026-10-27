@@ -51,9 +51,11 @@ export type ScoreSnapshot = {
  * the survivor gets its own scored event.
  */
 export async function applyScore(ctx: ModuleContext, accountId: string, s: ScoreSnapshot): Promise<void> {
+  await lockAccount(ctx, accountId);
+  // Resolved under the lock: a merge in flight holds it, so the answer is current.
   const resolved = await resolveAccountId(ctx, accountId);
   if (!resolved || resolved.mergedInto) return;
-  await lockAccount(ctx, accountId);
+  // The summary row is written with the account (writeSummary), so a missing row makes the update a no-op.
   const written = await ctx.tx
     .update(accountSummary)
     .set({

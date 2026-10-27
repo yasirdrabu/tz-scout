@@ -72,6 +72,13 @@ const summaryOf = async (accountId: string) => {
 
 const deliver = () => runOutbox(t.tenantId);
 
+const ceoAndData = (d: string) => [
+  { firstName: 'Cy', lastName: 'Chief', title: 'Chief Executive Officer', email: `cy@${d}` },
+  { firstName: 'Dee', lastName: 'Data', title: 'Head of Data', email: `dee@${d}` },
+];
+
+const primaryOf = async (accountId: string) => (await t.run((ctx) => listPeople(ctx, accountId))).find((x) => x.isPrimary)?.firstName;
+
 describe('account summary from scoring.account.scored', () => {
   it('fills the score columns and search finds the account by tier, priority and best offer', async () => {
     const out = await seed({ account: { name: 'Scored Co', domain: domain() } });
@@ -112,32 +119,42 @@ describe('account summary from scoring.account.scored', () => {
     expect(await primary()).toBe('Dee');
   });
 
-  it('keeps a pinned primary when the best offer changes', async () => {
-    const d = domain();
-    const out = await seed({
-      account: { name: 'Pinned Co', domain: d },
-      people: [
-        { firstName: 'Cy', lastName: 'Chief', title: 'Chief Executive Officer', email: `cy@${d}` },
-        { firstName: 'Dee', lastName: 'Data', title: 'Head of Data', email: `dee@${d}` },
-      ],
-    });
+  it('keeps a pinned primary when the best offer changes, while an unpinned sibling follows it', async () => {
+    const pinned = await seed({ account: { name: 'Pinned Co', domain: domain() }, people: ceoAndData(domain()) });
+    const sibling = await seed({ account: { name: 'Sibling Co', domain: domain() }, people: ceoAndData(domain()) });
     await deliver();
-    const people = await t.run((ctx) => listPeople(ctx, out.accountId));
-    await t.run((ctx) => pinPrimary({ ...ctx, access: personAccess }, out.accountId, people.find((x) => x.firstName === 'Cy')!.id));
+    const people = await t.run((ctx) => listPeople(ctx, pinned.accountId));
+    await t.run((ctx) => pinPrimary({ ...ctx, access: personAccess }, pinned.accountId, people.find((x) => x.firstName === 'Cy')!.id));
     await deliver();
-    await scored(out.accountId, 1);
+    await scored(pinned.accountId, 1);
+    await scored(sibling.accountId, 1);
     await deliver();
-    expect((await t.run((ctx) => listPeople(ctx, out.accountId))).find((x) => x.isPrimary)?.firstName).toBe('Cy');
+    expect(await primaryOf(pinned.accountId)).toBe('Cy');
+    expect(await primaryOf(sibling.accountId)).toBe('Dee');
   });
 
-  it('skips an older version published after a newer one', async () => {
-    const out = await seed({ account: { name: 'Order Co', domain: domain() } });
+  it('skips an older version published after a newer one, without re-picking the primary', async () => {
+    const out = await seed({ account: { name: 'Order Co', domain: domain() }, people: ceoAndData(domain()) });
     await deliver();
     await scored(out.accountId, 3, { priority: 90 });
     await deliver();
+    expect(await primaryOf(out.accountId)).toBe('Dee');
     await scored(out.accountId, 2, { priority: 10, tier: 'watch', bestOfferId: null });
     await deliver();
     expect(await summaryOf(out.accountId)).toMatchObject({ priority: 90, tier: 'act_now', bestOfferId: offerId, scoreVersion: 3 });
+    expect(await primaryOf(out.accountId)).toBe('Dee');
+  });
+
+  it('clears the best offer when a newer version has none, and re-picks without target titles', async () => {
+    const out = await seed({ account: { name: 'Cleared Co', domain: domain() }, people: ceoAndData(domain()) });
+    await deliver();
+    await scored(out.accountId, 1);
+    await deliver();
+    expect(await primaryOf(out.accountId)).toBe('Dee');
+    await scored(out.accountId, 2, { bestOfferId: null, tier: 'watch' });
+    await deliver();
+    expect(await summaryOf(out.accountId)).toMatchObject({ bestOfferId: null, tier: 'watch', scoreVersion: 2 });
+    expect(await primaryOf(out.accountId)).toBe('Cy');
   });
 
   it('changes nothing on a replay of the same version', async () => {
@@ -146,6 +163,7 @@ describe('account summary from scoring.account.scored', () => {
     await scored(out.accountId, 1);
     await deliver();
     const before = await summaryOf(out.accountId);
+    expect(before.scoreVersion).toBe(1);
     await scored(out.accountId, 1, { priority: 5, tier: 'watch' });
     await deliver();
     expect(await summaryOf(out.accountId)).toEqual(before);
