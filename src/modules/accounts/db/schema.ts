@@ -205,7 +205,13 @@ export const signal = accounts.table(
     recordedAt: now('recorded_at'),
     archivedAt: at('archived_at'),
   },
-  (t) => [index('signal_tenant_account_idx').on(t.tenantId, t.accountId, t.occurredAt)],
+  (t) => [
+    index('signal_tenant_account_idx').on(t.tenantId, t.accountId, t.occurredAt),
+    // Duplicate check by external id; the other two duplicate keys include the day and use the index above.
+    index('signal_tenant_account_external_idx')
+      .on(t.tenantId, t.accountId, t.externalId)
+      .where(sql`external_id is not null`),
+  ],
 );
 
 export const buyingRole = accounts.table(

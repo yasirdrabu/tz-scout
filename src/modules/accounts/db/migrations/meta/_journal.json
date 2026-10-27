@@ -8,6 +8,13 @@
       "when": 1793076947606,
       "tag": "0000_accounts_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793078227348,
+      "tag": "0001_signal_dedup_index",
+      "breakpoints": true
     }
   ]
 }

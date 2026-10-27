@@ -13,6 +13,9 @@ export {
   type SourceInfoProvider,
 } from './contracts/ports';
 export { FACT_KEYS, isKnownFactKey } from './contracts/types';
+export type { Exclusion } from './services/exclusion';
+export { setPractices } from './services/practices';
+export { upsertFromArrival, type UpsertResult } from './services/upsert';
 export type {
   AccountView,
   ArrivalForAccounts,
