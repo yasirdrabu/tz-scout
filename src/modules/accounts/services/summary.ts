@@ -1,6 +1,9 @@
-import { and, eq, isNull, max, sql } from 'drizzle-orm';
+import { and, eq, isNull, lt, max, or, sql } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { account, accountSummary, signal } from '../db/schema';
+import { lockAccount } from './lock';
+import { resolveAccountId } from './match';
+import { repickPrimary } from './primary';
 
 /**
  * Brings the account's search row up to date: `practice_ids`, `last_signal_at` and the union of
@@ -29,4 +32,47 @@ export async function writeSummary(ctx: ModuleContext, accountId: string, opts: 
         updatedAt: new Date(),
       },
     });
+}
+
+export type ScoreSnapshot = {
+  priority: number;
+  fit: number;
+  intent: number;
+  tier: string;
+  bestOfferId: string | null;
+  practiceId: string | null;
+  version: number;
+};
+
+/**
+ * Overwrites the summary's score columns from a `scoring.account.scored` snapshot when its version is newer
+ * than the stored one (the condition is in the update, so a stale or replayed event writes nothing), then
+ * re-picks the primary contact for the new best offer. An id that was merged away or is unknown is ignored:
+ * the survivor gets its own scored event.
+ */
+export async function applyScore(ctx: ModuleContext, accountId: string, s: ScoreSnapshot): Promise<void> {
+  const resolved = await resolveAccountId(ctx, accountId);
+  if (!resolved || resolved.mergedInto) return;
+  await lockAccount(ctx, accountId);
+  const written = await ctx.tx
+    .update(accountSummary)
+    .set({
+      priority: s.priority,
+      fit: s.fit,
+      intent: s.intent,
+      tier: s.tier,
+      bestOfferId: s.bestOfferId,
+      practiceId: s.practiceId,
+      scoreVersion: s.version,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(accountSummary.tenantId, ctx.tenantId),
+        eq(accountSummary.accountId, accountId),
+        or(isNull(accountSummary.scoreVersion), lt(accountSummary.scoreVersion, s.version)),
+      ),
+    )
+    .returning({ accountId: accountSummary.accountId });
+  if (written.length > 0) await repickPrimary(ctx, accountId);
 }

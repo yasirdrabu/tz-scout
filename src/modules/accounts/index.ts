@@ -1,5 +1,5 @@
 // Public interface of the accounts module. Other modules import only this file or `contracts/*`.
-export { accountsTenantDefaults } from './consumers';
+export { accountsSummaryOnScored, accountsTenantDefaults } from './consumers';
 export { DEFAULT_BUYING_ROLES, DEFAULT_EXCLUSION_RULES, VENDOR_PHRASES, seedAccountDefaults } from './defaults';
 export {
   mergeGuard,

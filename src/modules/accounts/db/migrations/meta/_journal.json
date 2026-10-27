@@ -29,6 +29,13 @@
       "when": 1793079907920,
       "tag": "0003_person_primary_pin",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793143017808,
+      "tag": "0004_summary_score_review",
+      "breakpoints": true
     }
   ]
 }
