@@ -12,6 +12,7 @@ export {
   type SourceAccessProvider,
   type SourceInfoProvider,
 } from './contracts/ports';
+export { SIGNAL_TYPES, type SignalType } from './domain/signals';
 export { FACT_KEYS, isKnownFactKey } from './contracts/types';
 export {
   archiveSignal,

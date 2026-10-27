@@ -4,6 +4,7 @@ import { caseStudy, offer, practice } from './db/schema';
 import { createCaseStudy, linkCaseStudy } from './services/case-studies';
 import { createOffer, type OfferPatch } from './services/offers';
 import { createPractice } from './services/practices';
+import { seedSignalRules } from './services/signal-rules';
 
 /** Taazaa's catalogue, from the v1 seed. Practice, offer and case study wording is unchanged. */
 export const TAAZAA_PRACTICES = [
@@ -230,6 +231,7 @@ export async function seedOffers(ctx: ModuleContext): Promise<void> {
           .where(eq(offer.id, id));
       }
     }
+    await seedSignalRules(ctx, id, fields.slug);
     for (const client of cases) await linkCaseStudy(ctx, id, caseIds.get(client)!);
   }
 }

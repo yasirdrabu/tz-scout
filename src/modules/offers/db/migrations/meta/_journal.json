@@ -8,6 +8,13 @@
       "when": 1793075975655,
       "tag": "0000_practices_offers_case_studies",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793137233758,
+      "tag": "0001_signal_rules",
+      "breakpoints": true
     }
   ]
 }

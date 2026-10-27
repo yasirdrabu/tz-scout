@@ -37,3 +37,18 @@ export {
   approvalProblems,
 } from './domain/approval';
 export { TAAZAA_OFFERS, TAAZAA_PRACTICES, seedOffers } from './defaults';
+export {
+  DEFAULT_SIGNAL_RULES,
+  GENERIC_SIGNAL_RULES,
+  SIGNAL_TYPE_KEYS,
+  signalRuleProblems,
+  type SignalRuleInput,
+} from './domain/signal-rules';
+export {
+  listApprovedOffers,
+  listSignalRules,
+  replaceSignalRules,
+  resetSignalRules,
+  type ApprovedOffer,
+  type SignalRule,
+} from './services/signal-rules';

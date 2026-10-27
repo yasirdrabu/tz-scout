@@ -16,7 +16,7 @@ import {
 /**
  * Offers schema. Every table here is a tenant table: `tenant_id` not null, row level security
  * enabled and forced with the standard `tenant_isolation` policy (added by hand in the migration).
- * Signal rules, readiness, segments and won deals arrive in later releases.
+ * Readiness, segments and won deals arrive in later releases.
  */
 export const offers = pgSchema('offers');
 
@@ -120,4 +120,27 @@ export const offerCaseStudy = offers.table(
     primaryKey({ columns: [t.offerId, t.caseStudyId] }),
     index('offer_case_study_case_idx').on(t.tenantId, t.caseStudyId),
   ],
+);
+
+export const signalRule = offers.table(
+  'signal_rule',
+  {
+    id: text('id').primaryKey(), // sr_
+    tenantId: text('tenant_id').notNull(),
+    offerId: text('offer_id')
+      .notNull()
+      .references(() => offer.id),
+    type: text('type').notNull(), // one of the nine signal types
+    label: text('label').notNull(),
+    weight: integer('weight').notNull(), // points, 0 to 100
+    match: textArray('match'), // keywords; empty means any signal of the type
+    minValue: numeric('min_value', { precision: 8, scale: 4, mode: 'number' }),
+    why: text('why').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    origin: text('origin').notNull().default('manual'), // default | manual
+    sort: integer('sort').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('signal_rule_tenant_offer_idx').on(t.tenantId, t.offerId, t.sort)],
 );

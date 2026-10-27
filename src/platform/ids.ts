@@ -22,6 +22,7 @@ export type IdPrefix =
   | 'prc'
   | 'off'
   | 'cs'
+  | 'sr'
   | 'acc'
   | 'per'
   | 'fct'

@@ -48,7 +48,7 @@ it('every table in the offers, accounts and intake schemas has tenant_id and for
     order by 1`);
   const offenders = rows.filter((r) => !PLATFORM_WIDE.has(r.name) && !(r.has_tenant && r.rls && r.forced)).map((r) => r.name);
   expect(offenders, `tables without tenant_id or forced row level security: ${offenders.join(', ')}`).toEqual([]);
-  expect(rows.map((r) => r.name)).toEqual(expect.arrayContaining(['offers.practice', 'offers.offer', 'offers.case_study', 'offers.offer_case_study']));
+  expect(rows.map((r) => r.name)).toEqual(expect.arrayContaining(['offers.practice', 'offers.offer', 'offers.case_study', 'offers.offer_case_study', 'offers.signal_rule']));
 });
 
 it('the allowlist only names tables that exist', async () => {
