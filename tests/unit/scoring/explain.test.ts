@@ -217,6 +217,13 @@ describe('wouldRaise', () => {
     expect(wouldRaise(e, off, acc)).toEqual(['Revenue on file', 'A signal for Big rule', 'A signal for Medium rule', 'A technical buyer on file']);
   });
 
+  it('words an unmet research rule as a research signal in the last 30 days', () => {
+    const off = offer({ industries: ['Logistics'], rules: [rule({ id: 'r', type: 'intent', weight: 50, label: 'Researching' })] });
+    const acc = account({});
+    const { e } = explain(acc, off, []);
+    expect(wouldRaise(e, off, acc)).toContain('A research signal in the last 30 days');
+  });
+
   it('says there is no offer to match against when there is no best offer', () => {
     const { off, acc, sigs } = exampleA();
     const { e } = explain(acc, off, sigs);

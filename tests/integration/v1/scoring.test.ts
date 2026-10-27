@@ -78,13 +78,18 @@ describe('GET /v1/accounts/{id}/score', () => {
     const body = await json(res);
     expect(body).toMatchObject({
       account_id: w.mine,
-      offer: { id: w.best.id, name: 'Best Offer' },
+      offer: 'Best Offer',
+      offer_id: w.best.id,
       best_offer: { id: w.best.id, name: 'Best Offer' },
       tier_reason: 'computed',
       warm_intro_points: 0,
       profile_version: expect.any(Number),
       computed_at: expect.any(String),
     });
+    expect(body).toMatchObject({ priority: expect.any(Number), fit: expect.any(Number), intent: expect.any(Number), tier: expect.any(String) });
+    const factors = body.factors as { name: string; points: number; max: number; reason: string }[];
+    expect(factors.map((f) => f.name)).toEqual(body.lines.filter((l: { group: string }) => l.group !== 'combine').map((l: { label: string }) => l.label));
+    expect(factors.find((f) => f.name === 'Fresh funding')).toMatchObject({ points: expect.any(Number), max: expect.any(Number), reason: expect.any(String) });
     expect(body.lines.map((l: { group: string }) => l.group)).toEqual(expect.arrayContaining(['fit', 'intent', 'combine']));
     expect(body.lines.find((l: { group: string }) => l.group === 'intent')).toMatchObject({ label: 'Fresh funding', kind: 'trigger', signal_ids: [expect.stringMatching(/^sig_/)] });
     expect(body.other_offers).toEqual([expect.objectContaining({ id: w.other.id, name: 'Other Offer' })]);
@@ -103,7 +108,8 @@ describe('GET /v1/accounts/{id}/score', () => {
     const matches = (await json(await call(getMatches, key, `accounts/${w.mine}/matches`))).data;
     const m = matches.find((x: { offer_id: string }) => x.offer_id === w.other.id);
     expect(body).toMatchObject({
-      offer: { id: w.other.id, name: 'Other Offer' },
+      offer: 'Other Offer',
+      offer_id: w.other.id,
       best_offer: { id: w.best.id, name: 'Best Offer' },
       priority: m.match_total,
       fit: m.fit,
@@ -113,10 +119,23 @@ describe('GET /v1/accounts/{id}/score', () => {
     });
     expect(body.lines.some((l: { group: string }) => l.group === 'adjust')).toBe(false);
     expect(body.summary).toContain('for Other Offer');
+    expect(body.factors.length).toBe(body.lines.filter((l: { group: string }) => l.group !== 'combine').length);
+    // SCO-E4-S1-AC1: a capped fit shows its cap line, the lines add up to the total, and the summary uses the capped fit.
+    const cap = body.lines.find((l: { label: string }) => l.label === 'Hard miss');
+    expect(cap).toMatchObject({ group: 'combine', points: m.fit, text: 'Hard miss: fit capped at 45.' });
+    const fitSum = body.lines.filter((l: { group: string }) => l.group === 'fit').reduce((a: number, l: { points: number }) => a + l.points, 0);
+    expect(fitSum).toBeGreaterThan(m.fit);
+    expect(body.lines.find((l: { label: string }) => l.label === 'Match')).toMatchObject({ points: m.match_total, text: expect.stringMatching(/^\d+% fit \(\d+\) and \d+% intent \(\d+\)\.$/) });
+    expect(body.summary).not.toMatch(/strong fit|decent fit/);
+    expect(body.summary).toContain('weak fit');
     expect(body.priority).toBeLessThanOrEqual(best.priority);
     // The best offer asked for by id is the plain explanation, and an unknown offer is a 404.
     expect(await json(await call(getScore, key, `accounts/${w.mine}/score?offer_id=${w.best.id}`))).toEqual(best);
     expect((await call(getScore, key, `accounts/${w.mine}/score?offer_id=off_nope`)).status).toBe(404);
+    // An approved offer the account has no match row for is a 404 too.
+    const late = await w.t.run((ctx) => createOffer(ctx, { name: 'Late Offer', practiceId: w.practice.id, ...completeOffer }));
+    await w.t.run((ctx) => approveOffer(ctx, late.id));
+    expect((await call(getScore, key, `accounts/${w.mine}/score?offer_id=${late.id}`)).status).toBe(404);
   });
 
   it('Review Focus 5: a hidden or missing account is a 404 on score, matches and history, never a 403', async () => {
@@ -218,7 +237,7 @@ describe('scoring profile', () => {
     const put = (body: unknown) => call(putProfile, key, 'scoring/profile', { method: 'PUT', body });
     const bad = await put({ fit_parts: { industry: 50 } });
     expect(bad.status).toBe(400);
-    expect((await json(bad)).errors).toEqual([{ path: 'fitParts', message: 'The fit parts must add up to 100.' }]);
+    expect((await json(bad)).errors).toEqual([{ path: 'fit_parts', message: 'The fit parts must add up to 100.' }]);
     expect((await put({ fit_weight: 0, intent_weight: 0 })).status).toBe(400);
     expect((await put({ half_life_days: 'x' })).status).toBe(400);
     expect((await put({ nope: 1 })).status).toBe(400);

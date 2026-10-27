@@ -45,7 +45,7 @@ export const toScoringAccount = (v: ScoringView): ScoringAccount => ({
   people: v.people.map((p) => ({ title: p.title, roleKeys: p.roles.map((r) => r.key) })),
 });
 
-const toScoringSignals = (v: ScoringView): ScoringSignal[] =>
+export const toScoringSignals = (v: ScoringView): ScoringSignal[] =>
   v.signals.map((s) => ({
     id: s.id,
     type: s.type,

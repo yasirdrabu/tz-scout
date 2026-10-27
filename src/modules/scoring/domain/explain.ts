@@ -2,9 +2,10 @@
 
 import type { RuleHit, ScoreCause, ScoringAccount, ScoringOffer, ScoringProfile, ScoringSignal, ScoringSignalKind, Tier, TierReason } from '../contracts/types';
 import type { FitResult } from './fit';
+import { SIGNAL_TYPES } from '@/modules/accounts/contracts/signal-types';
 import { CURRENT_STATE, recency, signalDate } from './intent';
 
-const HARD_MISS_CAP = 45;
+export const HARD_MISS_CAP = 45;
 const DAY_MS = 86_400_000;
 export const NO_OFFER_TEXT = 'No approved offer to match against.';
 const TIER_TITLE: Record<Tier, string> = { not_fit: 'Not a fit', watch: 'Watch', good_fit: 'Good fit', act_now: 'Act now' };
@@ -70,7 +71,10 @@ export function missingInputs(parts: FitResult['parts']): string[] {
 }
 
 /** "News from Sep 25, 2026 (30 days ago, counts 63%)." from the hit's strongest signal. Current-state types say "on file"; hits with no signal say what matched. */
-function intentText(h: RuleHit, input: ExplanationInput): { text: string; ageDays?: number } {
+export function intentText(
+  h: RuleHit,
+  input: { signals: ScoringSignal[]; now: Date; profile: Pick<ScoringProfile, 'halfLifeDays' | 'maxSignalAgeDays'> },
+): { text: string; ageDays?: number } {
   const s = input.signals.find((x) => x.id === h.signalIds[0]);
   if (!s) return { text: h.why ?? `Matched ${h.matched.join(', ')}.` };
   const what = (s.type ?? 'signal').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
@@ -79,6 +83,13 @@ function intentText(h: RuleHit, input: ExplanationInput): { text: string; ageDay
   const ageDays = Math.max(0, Math.round((input.now.getTime() - at.getTime()) / DAY_MS));
   const counts = Math.round(recency(s.type ?? '', at, input.now, input.profile) * 100);
   return { text: `${what} from ${dateText(at)} (${ago(ageDays)}, counts ${counts}%).`, ageDays };
+}
+
+/** "55% fit (100) and 45% intent (22)." */
+export function matchText(fit: number, intent: number, profile: Pick<ScoringProfile, 'fitWeight' | 'intentWeight'>): string {
+  const weights = profile.fitWeight + profile.intentWeight || 1;
+  const fitShare = Math.round((profile.fitWeight / weights) * 100);
+  return `${fitShare}% fit (${fit}) and ${100 - fitShare}% intent (${intent}).`;
 }
 
 export function buildExplanation(input: ExplanationInput): Explanation {
@@ -108,14 +119,7 @@ export function buildExplanation(input: ExplanationInput): Explanation {
   const rawFit = fit.parts.reduce((sum, p) => sum + p.points, 0);
   if (fit.hardMiss && rawFit > HARD_MISS_CAP) lines.push({ group: 'combine', label: 'Hard miss', points: fit.fit, text: `Hard miss: fit capped at ${HARD_MISS_CAP}.` });
   if (input.combine.cappedAtFit) lines.push({ group: 'combine', label: 'Low fit', points: fit.fit, text: `Fit below 50: total capped at fit (${fit.fit}).` });
-  const weights = profile.fitWeight + profile.intentWeight || 1;
-  const fitShare = Math.round((profile.fitWeight / weights) * 100);
-  lines.push({
-    group: 'combine',
-    label: 'Match',
-    points: input.combine.total,
-    text: `${fitShare}% fit (${fit.fit}) and ${100 - fitShare}% intent (${input.intent}).`,
-  });
+  lines.push({ group: 'combine', label: 'Match', points: input.combine.total, text: matchText(fit.fit, input.intent, profile) });
   if (input.tierText) lines.push({ group: 'combine', label: 'Tier', text: input.tierText });
 
   if (priority.warmPoints > 0) {
@@ -156,7 +160,10 @@ export function wouldRaise(explanation: Explanation, offer: ScoringOffer, accoun
     .filter((r) => r.enabled && !met.has(r.id))
     .sort((a, b) => b.weight - a.weight)
     .slice(0, 2);
-  for (const r of unmet) out.push(`A signal for ${r.label}`);
+  for (const r of unmet) {
+    const research = Object.hasOwn(SIGNAL_TYPES, r.type) && SIGNAL_TYPES[r.type as keyof typeof SIGNAL_TYPES].kind === 'research';
+    out.push(research ? 'A research signal in the last 30 days' : `A signal for ${r.label}`);
+  }
   for (const role of offer.targetBuyingRoles) {
     if (!account.people.some((p) => p.roleKeys.includes(role))) out.push(`A ${role.replace(/_/g, ' ')} on file`);
   }
