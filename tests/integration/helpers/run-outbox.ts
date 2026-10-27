@@ -9,8 +9,8 @@ import { deliverOnce } from '@/platform/runtime/worker';
  * Stands in for the relay and worker in tests: takes the tenant's unsent outbox rows in `seq`
  * order, runs each matching consumer and job handler from `src/entry/worker.ts` through the
  * worker's own processed_event guard, marks the rows sent, and repeats until none are left
- * (handlers may add more). Stops early when `until` returns true after a round, or after
- * `maxRounds`. A handler error is thrown to the test.
+ * (handlers may add more). Stops early when `until` returns true after a round; throws when rows are
+ * still unsent after `maxRounds`. A handler error is thrown to the test.
  */
 export async function runOutbox(
   tenantId: string,
@@ -31,4 +31,10 @@ export async function runOutbox(
     }
     if (opts.until && (await opts.until())) return;
   }
+  const left = await adminDb
+    .select({ seq: outbox.seq })
+    .from(outbox)
+    .where(and(eq(outbox.tenantId, tenantId), isNull(outbox.sentAt)))
+    .limit(1);
+  if (left.length > 0) throw new Error(`runOutbox: rows still unsent after ${opts.maxRounds ?? 10} rounds`);
 }

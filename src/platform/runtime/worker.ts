@@ -12,7 +12,7 @@ import { config } from '../config';
 import type { ModuleContext } from '../context';
 import { adminDb } from '../db/client';
 import { guardTx } from '../db/guarded-tx';
-import { withTenant } from '../db/tenant';
+import { withTenant, type Tx } from '../db/tenant';
 import { recordDeadJob } from '../dead-jobs';
 import { errorText } from '../scrub-error';
 import { EnvelopeSchema, type Envelope } from '../events/envelope';
@@ -191,39 +191,96 @@ function fromJob(j: JobHandlerDef): Sub {
   };
 }
 
+const setLocal = (name: string, value: string) => sql`select set_config(${name}, ${value}, true)`;
+
+/** Points in a run where the worker keeps its retry bookkeeping. All optional. */
+type RunHooks = {
+  /** The data failed the handler's schema. */
+  parseFailed?: () => void;
+  /** Everything is in place and the handler is about to run. May throw to stop the run. */
+  starting?: () => Promise<void>;
+  /** The handler ran past its time limit. */
+  timedOut?: (e: TimedOut) => void;
+};
+
 /**
- * Runs one message through a handler the way the worker does, without NATS or retries: the
- * processed_event guard and the handler share one tenant transaction, and the handler gets a
- * guarded transaction. Errors from the handler propagate and roll back. Tests use it through
- * `runOutbox`.
+ * The part of a delivery that runs inside the tenant transaction: processed_event guard, parse,
+ * optional per-key lock, then the handler under its time limit in a guarded transaction.
+ * Shared by the worker and by `deliverOnce`, so tests run what the worker runs.
  */
-export async function deliverOnce(def: ConsumerDef | JobHandlerDef, envelope: Envelope): Promise<'handled' | 'duplicate'> {
-  const s = def.kind === 'job' ? fromJob(def) : fromConsumer(def);
-  return withTenant(envelope.tenantId, async (tx) => {
-    const inserted = await tx.execute(
+async function runInTx(
+  tx: Tx,
+  s: Sub,
+  envelope: Envelope,
+  busyLockTimeoutMs: number,
+  hooks: RunHooks = {},
+): Promise<'handled' | 'duplicate'> {
+  // A delivery still running elsewhere holds this row uncommitted: do not wait on it for long.
+  await tx.execute(setLocal('lock_timeout', `${busyLockTimeoutMs}ms`));
+  const inserted = await orBusy(
+    tx.execute(
       sql`insert into platform.processed_event (consumer_name, event_id) values (${s.processedName}, ${envelope.id})
           on conflict do nothing returning 1`,
+    ),
+  );
+  if (inserted.length === 0) return 'duplicate';
+  let data: unknown;
+  try {
+    data = s.parse(envelope.data);
+  } catch (e) {
+    hooks.parseFailed?.();
+    if (e instanceof ZodError) throw new Permanent(`Invalid data: ${errorText(e)}`);
+    throw e;
+  }
+  const typed: Envelope = { ...envelope, data };
+  if (s.orderedBy) {
+    // Same key: one at a time (mutual exclusion, not ordering). The holder is done within
+    // timeoutMs, so wait about that long, then put the message back.
+    await tx.execute(setLocal('lock_timeout', `${s.timeoutMs + busyLockTimeoutMs}ms`));
+    const key = `${s.processedName}:${s.orderedBy(typed)}`;
+    await orBusy(tx.execute(sql`select pg_advisory_xact_lock(hashtext(${key}))`));
+  }
+  await hooks.starting?.();
+  // The handler's own statements are bounded by the same time limit as the handler.
+  await tx.execute(setLocal('lock_timeout', '0'));
+  await tx.execute(setLocal('statement_timeout', `${s.timeoutMs}ms`));
+  const guarded = guardTx(tx);
+  try {
+    await withTimeout(
+      s.handle(typed, {
+        tenantId: envelope.tenantId,
+        actor: envelope.actor,
+        correlationId: envelope.correlationId,
+        causationId: envelope.id,
+        ...(envelope.environment ? { environment: envelope.environment } : {}),
+        tx: guarded.tx,
+      }),
+      s.timeoutMs,
     );
-    if (inserted.length === 0) return 'duplicate' as const;
-    const guarded = guardTx(tx);
-    try {
-      await s.handle(
-        { ...envelope, data: s.parse(envelope.data) },
-        {
-          tenantId: envelope.tenantId,
-          actor: envelope.actor,
-          correlationId: envelope.correlationId,
-          causationId: envelope.id,
-          ...(envelope.environment ? { environment: envelope.environment } : {}),
-          tx: guarded.tx,
-        },
-      );
-    } finally {
-      guarded.close('The transaction has ended');
-    }
-    return 'handled' as const;
-  });
+  } catch (e) {
+    // Refuse every later statement: after the rollback this connection goes back to the
+    // pool and may serve another tenant. A statement already sent is bounded by
+    // statement_timeout and runs before the rollback (same connection, in order).
+    // We do not terminate the backend: postgres.js then hangs in end() or crashes on a
+    // null socket (reproduced with postgres 3.4.9).
+    guarded.close('The transaction ended: the handler ran past its time limit or failed');
+    if (e instanceof TimedOut) hooks.timedOut?.(e);
+    throw e;
+  }
+  guarded.close('The transaction has ended');
+  return 'handled';
 }
+
+/**
+ * Runs one message through a handler exactly as the worker's delivery does (same transaction body),
+ * without NATS, retries or dead-lettering. Errors from the handler propagate and roll back.
+ * Tests use it through `runOutbox`.
+ */
+export function deliverOnce(def: ConsumerDef | JobHandlerDef, envelope: Envelope): Promise<'handled' | 'duplicate'> {
+  const s = def.kind === 'job' ? fromJob(def) : fromConsumer(def);
+  return withTenant(envelope.tenantId, (tx) => runInTx(tx, s, envelope, 2000));
+}
+
 
 const ms2ns = (ms: number) => ms * 1_000_000;
 
@@ -300,75 +357,31 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
   const deliveryCount = m.info.deliveryCount;
   const redelivery = deliveryCount > 1;
   const lg = logFor(envelope).child({ consumer: s.processedName, eventId: envelope.id, deliveryCount });
-  const setLocal = (name: string, value: string) => sql`select set_config(${name}, ${value}, true)`;
   let runsBefore = 0;
   let runs = 0; // handler runs including this one, once it starts
   let timedOut: TimedOut | undefined;
   try {
     if (redelivery) runsBefore = await runsSoFar(s, envelope.id);
-    const outcome = await withTenant(envelope.tenantId, async (tx) => {
-      // A delivery still running elsewhere holds this row uncommitted: do not wait on it for long.
-      await tx.execute(setLocal('lock_timeout', `${rt.busyLockTimeoutMs}ms`));
-      const inserted = await orBusy(
-        tx.execute(
-          sql`insert into platform.processed_event (consumer_name, event_id) values (${s.processedName}, ${envelope.id})
-              on conflict do nothing returning 1`,
-        ),
-      );
-      if (inserted.length === 0) return 'duplicate' as const;
-      let data: unknown;
-      try {
-        data = s.parse(envelope.data);
-      } catch (e) {
-        runs = runsBefore + 1;
-        if (e instanceof ZodError) throw new Permanent(`Invalid data: ${errorText(e)}`);
-        throw e;
-      }
-      const typed: Envelope = { ...envelope, data };
-      if (s.orderedBy) {
-        // Same key: one at a time (mutual exclusion, not ordering). The holder is done within
-        // timeoutMs, so wait about that long, then put the message back.
-        await tx.execute(setLocal('lock_timeout', `${s.timeoutMs + rt.busyLockTimeoutMs}ms`));
-        const key = `${s.processedName}:${s.orderedBy(typed)}`;
-        await orBusy(tx.execute(sql`select pg_advisory_xact_lock(hashtext(${key}))`));
-      }
-      // From here the handler runs: this counts toward maxDeliver.
-      if (redelivery) {
-        runs = await countRun(s, envelope.id);
-        if (runs > s.maxDeliver) {
-          runs -= 1;
-          throw new Permanent(`Gave up after ${runs} runs: the last one did not finish`);
-        }
-      } else runs = 1;
-      // The handler's own statements are bounded by the same time limit as the handler.
-      await tx.execute(setLocal('lock_timeout', '0'));
-      await tx.execute(setLocal('statement_timeout', `${s.timeoutMs}ms`));
-      const guarded = guardTx(tx);
-      try {
-        await withTimeout(
-          s.handle(typed, {
-            tenantId: envelope.tenantId,
-            actor: envelope.actor,
-            correlationId: envelope.correlationId,
-            causationId: envelope.id,
-            ...(envelope.environment ? { environment: envelope.environment } : {}),
-            tx: guarded.tx,
-          }),
-          s.timeoutMs,
-        );
-      } catch (e) {
-        // Refuse every later statement: after the rollback this connection goes back to the
-        // pool and may serve another tenant. A statement already sent is bounded by
-        // statement_timeout and runs before the rollback (same connection, in order).
-        // We do not terminate the backend: postgres.js then hangs in end() or crashes on a
-        // null socket (reproduced with postgres 3.4.9).
-        guarded.close('The transaction ended: the handler ran past its time limit or failed');
-        if (e instanceof TimedOut) timedOut = e;
-        throw e;
-      }
-      guarded.close('The transaction has ended');
-      return 'handled' as const;
-    });
+    const outcome = await withTenant(envelope.tenantId, (tx) =>
+      runInTx(tx, s, envelope, rt.busyLockTimeoutMs, {
+        parseFailed: () => {
+          runs = runsBefore + 1;
+        },
+        // From here the handler runs: this counts toward maxDeliver.
+        starting: async () => {
+          if (redelivery) {
+            runs = await countRun(s, envelope.id);
+            if (runs > s.maxDeliver) {
+              runs -= 1;
+              throw new Permanent(`Gave up after ${runs} runs: the last one did not finish`);
+            }
+          } else runs = 1;
+        },
+        timedOut: (e) => {
+          timedOut = e;
+        },
+      }),
+    );
     if (rt.hooks?.beforeAck && (await rt.hooks.beforeAck({ name: s.processedName, envelope, deliveryCount, outcome })) === false) {
       return;
     }
