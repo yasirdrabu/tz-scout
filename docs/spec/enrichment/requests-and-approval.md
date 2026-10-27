@@ -73,5 +73,5 @@ with the estimate. Mapping to request kinds:
 | `company_facts` | `company_firmographics` | A reviewer may switch it to `website_read` before approving |
 | `signals` | `signals_refresh` | Since the account's newest signal |
 
-`provider_hint: vibe` is recorded but Vibe is import-only, so the approver picks Apollo or asks the
-agent to send a Vibe export as a batch.
+`provider_hint` (`apollo` or `vibe`) preselects the provider; the approver may switch it before
+approving.

@@ -17,3 +17,5 @@ tests
 docs
 infra/tofu
 *.tsbuildinfo
+playwright.config.ts
+vitest.config.ts
