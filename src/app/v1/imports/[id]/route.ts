@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { confirmImport, getImport, previewImport } from '@/modules/intake';
 import { can } from '@/modules/tenancy';
 import { parseBody } from '../../_lib/body';
-import { withoutContacts } from '../../_lib/intake';
+import { withoutContacts, withoutReasons } from '../../_lib/intake';
 import { idAndAction, notFound } from '../../_lib/path';
 import { accepted, v1Route } from '../../_lib/v1-route';
 
@@ -17,13 +17,14 @@ const column = z.strictObject({
 const mappingBody = z.strictObject({ mapping: z.array(column) });
 const previewBody = z.strictObject({ mapping: z.array(column).optional() });
 
-export const GET = v1Route({ permission: 'imports:run' }, async (req, _principal, ctx) => {
+export const GET = v1Route({ permission: 'imports:run' }, async (req, principal, ctx) => {
   const { id, action } = idAndAction(req, 'imports');
   if (action) throw notFound();
   const found = await getImport(ctx, id);
   if (!found) throw notFound();
   const { storageKey: _storageKey, ...file } = found.file;
-  return { ...found, file };
+  const mapping = can(principal, 'people:read') ? found.mapping : withoutReasons(found.mapping);
+  return { ...found, mapping, file };
 });
 
 // POST /v1/imports/{id}:preview and /v1/imports/{id}:confirm

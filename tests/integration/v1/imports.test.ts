@@ -129,3 +129,21 @@ describe('TEN-E3-S3-AC1: imports without people:read', () => {
     expect(got.file.sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 });
+
+describe('mapping reasons', () => {
+  it('are shown only with people:read', async () => {
+    const reader = await keyFor(t, ['imports:run', 'arrivals:write', 'arrivals:read'], { sourceId: ashAgent });
+    const full = await keyFor(t, ['imports:run', 'arrivals:write', 'arrivals:read', 'people:read'], { sourceId: ashAgent });
+    const k = `${Date.now().toString(36)}${++n}`;
+    const csv = `Company ${k},Website ${k}\nReason Co,reason-${k}.com\n`;
+    const plain = await (await call(postImport, reader, 'imports', { body: uploadForm('r.csv', csv) })).json();
+    expect(plain.proposed_mapping.length).toBeGreaterThan(0);
+    for (const c of plain.proposed_mapping) expect(c).not.toHaveProperty('reason');
+    const got = await (await call(getImportRoute, reader, `imports/${plain.import_id}`)).json();
+    for (const c of got.mapping) expect(c).not.toHaveProperty('reason');
+
+    const k2 = `${k}b`;
+    const withRead = await (await call(postImport, full, 'imports', { body: uploadForm('r2.csv', `Company ${k2},Website ${k2}\nA,a-${k2}.com\n`) })).json();
+    for (const c of withRead.proposed_mapping) expect(c).toHaveProperty('reason');
+  });
+});

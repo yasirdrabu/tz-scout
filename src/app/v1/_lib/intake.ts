@@ -74,25 +74,22 @@ export async function readUpload(req: Request, max: number, allowed: string[] = 
   };
 }
 
-const PEOPLE_CONTACT = new Set(['email', 'phone', 'mobile', 'mobile_phone', 'linkedin_url']);
+const PEOPLE_KEEP = new Set(['name', 'first_name', 'last_name', 'title', 'buying_role', 'buying_roles', 'notes', 'seniority']);
+const WARM_INTRO_KEEP = new Set(['introducer_name', 'relationship', 'relationship_key', 'note']);
 
-function strip(value: unknown, hidden: Set<string>): unknown {
-  if (Array.isArray(value)) return value.map((v) => strip(v, hidden));
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([k]) => !hidden.has(k))
-        .map(([k, v]) => [k, strip(v, hidden)]),
-    );
-  }
+/** Entries keep only the keys on the list, so a contact stored under any other name (work_email, Email) is dropped too. */
+function keepOnly(value: unknown, keep: Set<string>): unknown {
+  if (Array.isArray(value)) return value.map((v) => keepOnly(v, keep));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([k]) => keep.has(k)));
   return value;
 }
 
 /**
- * TEN-E3-S3-AC1: without `people:read`, removes `email`, `phone`, `mobile`, `mobile_phone` and `linkedin_url`
- * from every people entry and `introducer_email` from every warm_intro, at any depth. A file row's raw form
- * (`headers` with `rows`) keeps its headers and loses its rows (`rows: []`, `rows_hidden: true`), since its
- * cells can't be told apart. A company's own `linkedin_url` stays.
+ * TEN-E3-S3-AC1: without `people:read`, each entry under `people` keeps only name, first_name, last_name,
+ * title, buying_role, buying_roles, notes and seniority, and `warm_intro` keeps only introducer_name,
+ * relationship, relationship_key and note, at any depth (an allow-list, so off-contract keys in raw payloads
+ * go too). A file row's raw form (`headers` with `rows`) keeps its headers and loses its rows
+ * (`rows: []`, `rows_hidden: true`). A company's own `linkedin_url` stays.
  */
 export function withoutContacts<T>(value: T): T {
   const walk = (v: unknown): unknown => {
@@ -103,11 +100,16 @@ export function withoutContacts<T>(value: T): T {
     return Object.fromEntries(
       Object.entries(o).flatMap(([k, x]): [string, unknown][] => {
         if (rawRows && k === 'rows') return [[k, []], ['rows_hidden', true]];
-        if (k === 'people') return [[k, strip(x, PEOPLE_CONTACT)]];
-        if (k === 'warm_intro') return [[k, strip(x, new Set(['introducer_email']))]];
+        if (k === 'people') return [[k, keepOnly(x, PEOPLE_KEEP)]];
+        if (k === 'warm_intro') return [[k, keepOnly(x, WARM_INTRO_KEEP)]];
         return [[k, walk(x)]];
       }),
     );
   };
   return walk(value) as T;
+}
+
+/** The AI suggester's reasons may quote cells from the file, so they are shown only with people:read. */
+export function withoutReasons<T extends { reason?: string }>(mapping: T[]): Omit<T, 'reason'>[] {
+  return mapping.map(({ reason: _reason, ...rest }) => rest);
 }

@@ -1,11 +1,12 @@
 import { createImport } from '@/modules/intake';
-import { FORM_SLACK, IMPORT_MAX_BYTES, readUpload } from '../_lib/intake';
+import { can } from '@/modules/tenancy';
+import { FORM_SLACK, IMPORT_MAX_BYTES, readUpload, withoutReasons } from '../_lib/intake';
 import { accepted, v1Route } from '../_lib/v1-route';
 
 export const dynamic = 'force-dynamic';
 
 // A multi-sheet workbook without `sheet` stores nothing; the answer lists the sheets (200).
-export const POST = v1Route({ permission: 'imports:run', maxBytes: IMPORT_MAX_BYTES + FORM_SLACK }, async (req, _principal, ctx) => {
+export const POST = v1Route({ permission: 'imports:run', maxBytes: IMPORT_MAX_BYTES + FORM_SLACK }, async (req, principal, ctx) => {
   const { fileName, contentType, bytes, fields } = await readUpload(req, IMPORT_MAX_BYTES, ['sheet', 'vendor_source_id']);
   const r = await createImport(ctx, {
     fileName,
@@ -20,7 +21,7 @@ export const POST = v1Route({ permission: 'imports:run', maxBytes: IMPORT_MAX_BY
     batchId: r.batchId,
     status: r.status,
     layout: r.layout,
-    proposedMapping: r.mapping,
+    proposedMapping: can(principal, 'people:read') ? r.mapping : withoutReasons(r.mapping),
     needsConfirm: r.status === 'needs_confirm',
     headers: r.headers,
     rowCount: r.rowCount,

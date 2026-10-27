@@ -144,3 +144,22 @@ describe('GET /v1/batches/{id} files', () => {
     expect(b.files[0]).not.toHaveProperty('storage_key');
   });
 });
+
+describe('TEN-E3-S3-AC1: off-contract contact keys', () => {
+  it('keeps only allowed keys on people and warm_intro in a rejected item', async () => {
+    const bad = {
+      account: { name: 'Odd', domain: 'odd.example.com', external_ref: 'odd-1' },
+      people: [{ name: 'Quinn', title: 'VP', work_email: 'quinn@odd.example', phone_number: '555-0142', Email: 'Q@odd.example', home: 'Elm St 9' }],
+      warm_intro: { introducer_name: 'Ira', contact: 'ira-direct@odd.example', relationship: 'other' },
+    };
+    const { items } = await (await send(ashKey, [bad], 'Odd')).json();
+    expect(items[0].status).toBe('rejected');
+    const reader = await keyFor(t, ['arrivals:read'], { sourceId: ashAgent });
+    const text = await (await call(getArrivalRoute, reader, `arrivals/${items[0].arrival_id}`)).text();
+    for (const secret of ['quinn@odd.example', '555-0142', 'Q@odd.example', 'Elm St 9', 'ira-direct@odd.example']) {
+      expect(text).not.toContain(secret);
+    }
+    expect(text).toContain('Quinn');
+    expect(text).toContain('Ira');
+  });
+});
