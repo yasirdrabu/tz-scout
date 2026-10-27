@@ -1,6 +1,7 @@
 import { cache } from 'react';
 import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
+import { accessFor } from '@/platform/access';
 import { withTenant } from '@/platform/db/tenant';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -71,7 +72,13 @@ export async function tenantAction<T>(
   requirePermission(principal, permission);
   return withTenant(principal.tenantId, (tx) =>
     fn(
-      { tenantId: principal.tenantId, actor: actorFor(principal), correlationId: newId('cor'), tx },
+      {
+        tenantId: principal.tenantId,
+        actor: actorFor(principal),
+        correlationId: newId('cor'),
+        tx,
+        access: accessFor(principal),
+      },
       principal,
     ),
   );

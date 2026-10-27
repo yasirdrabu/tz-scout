@@ -39,13 +39,14 @@ export const idempotencyKey = platform.table(
   'idempotency_key',
   {
     tenantId: text('tenant_id').notNull(),
+    principalId: text('principal_id').notNull(),
     key: text('key').notNull(),
     requestHash: text('request_hash').notNull(),
     responseStatus: integer('response_status').notNull(),
     responseBody: jsonb('response_body').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.tenantId, t.key] })],
+  (t) => [primaryKey({ columns: [t.tenantId, t.principalId, t.key] })],
 );
 
 /**

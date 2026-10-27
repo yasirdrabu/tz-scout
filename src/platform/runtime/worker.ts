@@ -191,6 +191,40 @@ function fromJob(j: JobHandlerDef): Sub {
   };
 }
 
+/**
+ * Runs one message through a handler the way the worker does, without NATS or retries: the
+ * processed_event guard and the handler share one tenant transaction, and the handler gets a
+ * guarded transaction. Errors from the handler propagate and roll back. Tests use it through
+ * `runOutbox`.
+ */
+export async function deliverOnce(def: ConsumerDef | JobHandlerDef, envelope: Envelope): Promise<'handled' | 'duplicate'> {
+  const s = def.kind === 'job' ? fromJob(def) : fromConsumer(def);
+  return withTenant(envelope.tenantId, async (tx) => {
+    const inserted = await tx.execute(
+      sql`insert into platform.processed_event (consumer_name, event_id) values (${s.processedName}, ${envelope.id})
+          on conflict do nothing returning 1`,
+    );
+    if (inserted.length === 0) return 'duplicate' as const;
+    const guarded = guardTx(tx);
+    try {
+      await s.handle(
+        { ...envelope, data: s.parse(envelope.data) },
+        {
+          tenantId: envelope.tenantId,
+          actor: envelope.actor,
+          correlationId: envelope.correlationId,
+          causationId: envelope.id,
+          ...(envelope.environment ? { environment: envelope.environment } : {}),
+          tx: guarded.tx,
+        },
+      );
+    } finally {
+      guarded.close('The transaction has ended');
+    }
+    return 'handled' as const;
+  });
+}
+
 const ms2ns = (ms: number) => ms * 1_000_000;
 
 /** Creates the durable consumer, or updates the fields that may change between releases. */

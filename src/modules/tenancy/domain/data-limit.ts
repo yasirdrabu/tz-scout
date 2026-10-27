@@ -1,13 +1,8 @@
 import { z } from 'zod';
+import type { DataLimit } from '@/platform/access';
 import type { Role } from '../contracts/members';
 
-export type DataLimit =
-  | { kind: 'all' }
-  | { kind: 'practices'; ids: string[] }
-  | { kind: 'own_accounts' }
-  | { kind: 'sources'; ids: string[] }
-  | { kind: 'own_source' }
-  | { kind: 'any_of'; limits: DataLimit[] };
+export type { DataLimit };
 
 export const DataLimitSchema: z.ZodType<DataLimit> = z.lazy(() =>
   z.discriminatedUnion('kind', [

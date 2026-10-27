@@ -1,4 +1,4 @@
-import type { DataLimit } from '../domain/data-limit';
+import type { DataLimit } from '@/platform/access';
 import type { Permission } from '../domain/permissions';
 
 export const ROLES = ['owner', 'leader', 'seller', 'operator'] as const;

@@ -1,3 +1,4 @@
+import type { Access } from './access';
 import type { Tx } from './db/tenant';
 import type { Actor } from './events/envelope';
 
@@ -10,4 +11,6 @@ export type ModuleContext = {
   tx: Tx;
   /** Set when the caller authenticated with an API key. Test keys only ever get mock adapters. */
   environment?: 'live' | 'test';
+  /** Who is asking and what they may see. Set for requests from people and API keys, not for worker runs. */
+  access?: Access;
 };
