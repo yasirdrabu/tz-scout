@@ -13,4 +13,4 @@ export const waitingExpireHandler = defineJobHandler(waitingExpireJob, async (_e
 });
 
 /** Reads an uploaded file with its confirmed mapping and submits one arrival per company (SRC-E4). */
-export const importRunHandler = defineJobHandler(importRunJob, async (e, ctx) => runImport(ctx, e.data.importId));
+export const importRunHandler = defineJobHandler(importRunJob, async (e, ctx) => runImport(ctx, e.data.importId, e.data.cursor ?? 0));

@@ -91,6 +91,11 @@ export async function senderOf(ctx: ModuleContext): Promise<Sender> {
   return { id: row.id, kind: row.kind, chain };
 }
 
+/** The chain with the vendor source the caller chose, when the sender has no vendor of its own. Null when there is nothing to add. */
+export function vendorChain(chain: SourceChain, vendorSourceId: string | undefined): SourceChain | null {
+  return vendorSourceId && !chain.vendorSourceId ? { ...chain, vendorSourceId } : null;
+}
+
 /** Adds the vendor the arrival names in `via_vendor`, matched by the vendor's `settings.key`. Unknown names add nothing. */
 async function withVendor(ctx: ModuleContext, chain: SourceChain, viaVendor: string | null | undefined): Promise<SourceChain> {
   const key = viaVendor?.trim().toLowerCase();
@@ -245,10 +250,7 @@ export async function submitArrival(ctx: ModuleContext, body: unknown, opts: Sub
     if (!cap.allowed) throw capReached(cap.resetsAt);
   }
   const targetAccountId = await targetOf(ctx, a.target_account_id);
-  const chain =
-    opts.vendorSourceId && !sender.chain.vendorSourceId
-      ? { ...sender.chain, vendorSourceId: opts.vendorSourceId }
-      : await withVendor(ctx, sender.chain, a.via_vendor);
+  const chain = vendorChain(sender.chain, opts.vendorSourceId) ?? (await withVendor(ctx, sender.chain, a.via_vendor));
 
   const id = await store(ctx, {
     sender,
@@ -267,11 +269,134 @@ export async function submitArrival(ctx: ModuleContext, body: unknown, opts: Sub
   return { arrivalId: id, status: 'received', duplicateOfRequest: false };
 }
 
+export type StoreItem = {
+  /** What was received (a batch item, or a file company's rows). */
+  raw: unknown;
+  /** The arrival body, when `raw` is something else (file rows). Default: `raw` with its item fields moved. */
+  body?: unknown;
+};
+export type StoreItemsResult = {
+  items: BatchItemResult[];
+  /** Rows stored in this call, rejected ones included: they are the batch's items. */
+  stored: number;
+  rejected: number;
+  /** Items whose ref this source sent in an earlier request: answered with that arrival, not part of this batch. */
+  repeated: number;
+};
+
+/**
+ * Stores items in the order given, as arrivals of `batchId` (Ruling 7), and queues each for resolving.
+ * Items are stored and rejected `invalid` (failing paths in the detail), `duplicate_in_batch` (an
+ * earlier item had the same ref or domain) or `daily_cap_reached`. Rejected items keep their ref only
+ * in `payload.raw`, so the caller can send them again. `before` are items of this batch an earlier call
+ * already handled: they only feed the duplicate check. The source's cap lock is held until the
+ * transaction ends, so callers with many items split them across transactions.
+ */
+export async function storeItems(
+  ctx: ModuleContext,
+  sender: Sender,
+  batchId: string,
+  items: StoreItem[],
+  opts: { channel: Channel; canDeclareWarmIntro?: boolean; vendorSourceId?: string; before?: StoreItem[] },
+): Promise<StoreItemsResult> {
+  const strict = isStrictChannel(opts.channel);
+  const schema = ArrivalV1Schema({ strict });
+  const bodyOf = (i: StoreItem) => (i.body !== undefined ? i.body : moveItemFields(i.raw));
+  const seenRefs = new Set<string>();
+  const seenDomains = new Set<string>();
+  const note = (a: ArrivalV1) => {
+    const ref = refOf(a);
+    const domain = normaliseDomain(a.account?.domain) ?? normaliseDomain(a.account?.website);
+    if (ref) seenRefs.add(ref);
+    if (domain) seenDomains.add(domain);
+  };
+  for (const prior of opts.before ?? []) {
+    if (bytes(prior.raw) > MAX_ARRIVAL_BYTES) continue;
+    const p = schema.safeParse(bodyOf(prior));
+    if (p.success) note(p.data);
+  }
+
+  const cap = isCapped(opts.channel, sender.kind) ? await checkArrivalCap(ctx, sender.id) : null;
+  let remaining = cap ? cap.remaining : Infinity;
+  let capCopy: string | undefined;
+  const out: BatchItemResult[] = [];
+  let rejectedCount = 0;
+  let stored = 0;
+  let repeated = 0;
+
+  for (const item of items) {
+    const body = bodyOf(item);
+    const sentRef = (body as { account?: { external_ref?: unknown } } | null)?.account?.external_ref;
+    const shownRef = typeof sentRef === 'string' && sentRef.trim() ? sentRef.trim() : null;
+    const base = {
+      sender,
+      chain: sender.chain,
+      channel: opts.channel,
+      batchId,
+      raw: item.raw,
+      ...(item.body !== undefined ? { body: item.body } : {}),
+      canDeclareWarmIntro: opts.canDeclareWarmIntro,
+    };
+    const reject = async (reason: NonNullable<Row['rejected']>['reason'], detail: string) => {
+      const id = (await store(ctx, { ...base, externalRef: null, rejected: { reason, detail } }))!;
+      rejectedCount++;
+      stored++;
+      out.push({ arrivalId: id, externalRef: shownRef, status: 'rejected' });
+    };
+
+    if (bytes(item.raw) > MAX_ARRIVAL_BYTES) {
+      await reject('invalid', TOO_LARGE);
+      continue;
+    }
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) {
+      await reject('invalid', problems(parsed.error).map((p) => (p.path ? `${p.path}: ${p.message}` : p.message)).join(' '));
+      continue;
+    }
+    const a = parsed.data;
+    const externalRef = refOf(a);
+    const domain = normaliseDomain(a.account?.domain) ?? normaliseDomain(a.account?.website);
+    if ((externalRef && seenRefs.has(externalRef)) || (domain && seenDomains.has(domain))) {
+      await reject('duplicate_in_batch', 'An earlier item in this batch has the same external_ref or domain.');
+      continue;
+    }
+    note(a);
+
+    const existing = externalRef ? await findByRef(ctx, sender.id, externalRef) : undefined;
+    if (existing) {
+      repeated++;
+      out.push({ arrivalId: existing.id, externalRef, status: existing.status });
+      continue;
+    }
+    if (remaining <= 0) {
+      capCopy ??= `This source reached its daily limit. Send this one again after ${localTime(cap!.resetsAt, await tenantTimezone(ctx))}.`;
+      await reject('daily_cap_reached', capCopy);
+      continue;
+    }
+    const target = a.target_account_id ? await getAccount(ctx, a.target_account_id) : null;
+    if (a.target_account_id && !target) {
+      await reject('invalid', 'target_account_id: That account was not found.');
+      continue;
+    }
+    const chain = vendorChain(sender.chain, opts.vendorSourceId) ?? (await withVendor(ctx, sender.chain, a.via_vendor));
+    const id = await store(ctx, { ...base, chain, externalRef, targetAccountId: target?.id ?? null });
+    if (!id) {
+      repeated++;
+      const won = (await findByRef(ctx, sender.id, externalRef!))!;
+      out.push({ arrivalId: won.id, externalRef, status: won.status });
+      continue;
+    }
+    await enqueueJob(ctx, resolveJob, { arrivalId: id });
+    remaining--;
+    stored++;
+    out.push({ arrivalId: id, externalRef, status: 'received' });
+  }
+  return { items: out, stored, rejected: rejectedCount, repeated };
+}
+
 /**
  * Stores a batch and every item in the order sent (Ruling 7). Only a bad envelope is a 400 with
- * nothing stored. Items are stored and rejected `invalid` (failing paths in the detail),
- * `duplicate_in_batch` (an earlier item had the same ref or domain) or `daily_cap_reached`.
- * Rejected items keep their ref only in `payload.raw`, so the caller can send them again. An item
+ * nothing stored. See `storeItems` for how items are stored and rejected. An item
  * whose ref this source sent in an earlier request gets that arrival back; it is counted in
  * `counts.repeated`, not in `item_count`. A paused or archived source gets 403 before anything is read.
  */
@@ -285,9 +410,6 @@ export async function submitBatch(
   const envelope = BatchEnvelopeV1Schema.safeParse(body);
   if (!envelope.success) throw invalid('Check the request.', problems(envelope.error));
   const b = envelope.data;
-  const cap = isCapped(opts.channel, sender.kind) ? await checkArrivalCap(ctx, sender.id) : null;
-  let remaining = cap ? cap.remaining : Infinity;
-  let capCopy: string | undefined;
 
   const batchId = newId('bat');
   const runAt = b.run_at ? new Date(b.run_at) : new Date();
@@ -305,89 +427,23 @@ export async function submitBatch(
     metadata: b.metadata ?? null,
   });
 
-  const strict = isStrictChannel(opts.channel);
-  const schema = ArrivalV1Schema({ strict });
-  const seenRefs = new Set<string>();
-  const seenDomains = new Set<string>();
-  const items: BatchItemResult[] = [];
-  let rejectedCount = 0;
-  let stored = 0;
-  // Items whose ref this source sent in an earlier request: answered with that arrival, not part of this batch.
-  let repeated = 0;
-
-  for (const rawItem of b.items) {
-    const item = moveItemFields(rawItem);
-    const sentRef = (item as { account?: { external_ref?: unknown } } | null)?.account?.external_ref;
-    const shownRef = typeof sentRef === 'string' && sentRef.trim() ? sentRef.trim() : null;
-    const base = { sender, chain: sender.chain, channel: opts.channel, batchId, raw: rawItem, canDeclareWarmIntro: opts.canDeclareWarmIntro };
-    const reject = async (reason: NonNullable<Row['rejected']>['reason'], detail: string) => {
-      const id = (await store(ctx, { ...base, externalRef: null, rejected: { reason, detail } }))!;
-      rejectedCount++;
-      stored++;
-      items.push({ arrivalId: id, externalRef: shownRef, status: 'rejected' });
-    };
-
-    if (bytes(rawItem) > MAX_ARRIVAL_BYTES) {
-      await reject('invalid', TOO_LARGE);
-      continue;
-    }
-    const parsed = schema.safeParse(item);
-    if (!parsed.success) {
-      await reject('invalid', problems(parsed.error).map((p) => (p.path ? `${p.path}: ${p.message}` : p.message)).join(' '));
-      continue;
-    }
-    const a = parsed.data;
-    const externalRef = refOf(a);
-    const domain = normaliseDomain(a.account?.domain) ?? normaliseDomain(a.account?.website);
-    if ((externalRef && seenRefs.has(externalRef)) || (domain && seenDomains.has(domain))) {
-      await reject('duplicate_in_batch', 'An earlier item in this batch has the same external_ref or domain.');
-      continue;
-    }
-    if (externalRef) seenRefs.add(externalRef);
-    if (domain) seenDomains.add(domain);
-
-    const existing = externalRef ? await findByRef(ctx, sender.id, externalRef) : undefined;
-    if (existing) {
-      repeated++;
-      items.push({ arrivalId: existing.id, externalRef, status: existing.status });
-      continue;
-    }
-    if (remaining <= 0) {
-      capCopy ??= `This source reached its daily limit. Send this one again after ${localTime(cap!.resetsAt, await tenantTimezone(ctx))}.`;
-      await reject('daily_cap_reached', capCopy);
-      continue;
-    }
-    const target = a.target_account_id ? await getAccount(ctx, a.target_account_id) : null;
-    if (a.target_account_id && !target) {
-      await reject('invalid', 'target_account_id: That account was not found.');
-      continue;
-    }
-    const chain = await withVendor(ctx, sender.chain, a.via_vendor);
-    const id = await store(ctx, { ...base, chain, externalRef, targetAccountId: target?.id ?? null });
-    if (!id) {
-      repeated++;
-      const won = (await findByRef(ctx, sender.id, externalRef!))!;
-      items.push({ arrivalId: won.id, externalRef, status: won.status });
-      continue;
-    }
-    await enqueueJob(ctx, resolveJob, { arrivalId: id });
-    remaining--;
-    stored++;
-    items.push({ arrivalId: id, externalRef, status: 'received' });
-  }
+  const result = await storeItems(ctx, sender, batchId, b.items.map((raw) => ({ raw })), opts);
 
   // The batch counts only the rows stored with it, so its counts can add up to its items.
   await ctx.tx
     .update(batch)
-    .set({ itemCount: stored, counts: { resolved: 0, rejected: rejectedCount, newAccounts: 0, alreadyKnown: 0, repeated } })
+    .set({
+      itemCount: result.stored,
+      counts: { resolved: 0, rejected: result.rejected, newAccounts: 0, alreadyKnown: 0, repeated: result.repeated },
+    })
     .where(and(eq(batch.tenantId, ctx.tenantId), eq(batch.id, batchId)));
   await publish(
     ctx,
     batchCreated,
-    { batchId, sourceChain: sender.chain, name: b.name, runAt: runAt.toISOString(), itemCount: stored },
+    { batchId, sourceChain: sender.chain, name: b.name, runAt: runAt.toISOString(), itemCount: result.stored },
     { type: 'batch', id: batchId },
   );
   // Nothing left to resolve (every item rejected or repeated): the batch completes now.
   await settleBatch(ctx, batchId);
-  return { batchId, items };
+  return { batchId, items: result.items };
 }

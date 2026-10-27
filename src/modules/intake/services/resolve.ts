@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, eq, ne, notInArray, sql } from 'drizzle-orm';
 import {
   checkExclusion,
   findMatches,
@@ -14,7 +14,7 @@ import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
 import { ArrivalV1Schema, moveItemFields, type ArrivalV1 } from '../contracts/arrival';
 import { arrivalRejected, arrivalResolved, arrivalWaiting, batchCompleted } from '../contracts/events';
-import { arrival, batch } from '../db/schema';
+import { arrival, batch, fileImport } from '../db/schema';
 import {
   defined,
   lockKeyOf,
@@ -114,7 +114,8 @@ async function wait(
 
 /**
  * Adds to the batch's counts under its row lock, then completes it when no item is received or
- * resolving (waiting items are resolving). Completion happens once: only a `processing` batch completes.
+ * resolving (waiting items are resolving) and its file import, if it has one, has sent every company.
+ * Completion happens once: only a `processing` batch completes.
  */
 export async function settleBatch(ctx: ModuleContext, batchId: string, add: Partial<Counts> = {}): Promise<void> {
   const [b] = await ctx.tx
@@ -130,7 +131,12 @@ export async function settleBatch(ctx: ModuleContext, batchId: string, add: Part
     select count(*)::int as open from intake.arrival
     where tenant_id = ${ctx.tenantId} and batch_id = ${batchId} and status in ('received', 'resolving')
   `)) as unknown as { open: number }[];
-  const completes = b.status === 'processing' && open === 0;
+  const [sending] = await ctx.tx
+    .select({ id: fileImport.id })
+    .from(fileImport)
+    .where(and(eq(fileImport.tenantId, ctx.tenantId), eq(fileImport.batchId, batchId), notInArray(fileImport.status, ['imported', 'failed'])))
+    .limit(1);
+  const completes = b.status === 'processing' && open === 0 && !sending;
   await ctx.tx
     .update(batch)
     .set({ counts, ...(completes ? { status: 'completed', completedAt: new Date() } : {}) })

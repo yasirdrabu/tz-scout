@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { enqueueJob, publish } from '@/platform/events/outbox';
@@ -16,7 +16,7 @@ import { chooseMapping, cleanChosen, hasRequiredFields, saveMapping, type Mappin
 import { settleBatch } from './resolve';
 import { loadSource } from './sources';
 import { getBatch, listArrivals } from './status';
-import { senderOf, submitArrival } from './submit';
+import { senderOf, storeItems, vendorChain } from './submit';
 
 // SRC-E4: a file import is a batch with the original file attached. Parse first, store second, submit one arrival per company.
 
@@ -26,13 +26,16 @@ type Draft = { body: ArrivalV1; raw: { headers: string[]; rows: string[][] } };
 /** What an import stores in `file_import.stats` when it has run (the batch's own counts are read live). */
 type RunStats = {
   sheet: string | null;
+  /** The next company to send: the chunk cursor. */
+  cursor?: number;
   companies?: number;
+  /** Rows stored for the batch, rejected ones included. */
   submitted?: number;
   /** Companies this source had already sent (same external ref); they belong to the earlier batch. */
   repeated?: number;
   skipped?: SkippedRow[];
-  /** Companies that could not be stored, with why (over the daily cap, or not valid). */
-  notSent?: { name: string; reason: string }[];
+  /** Why the import stopped, when it is `failed`. */
+  error?: string;
 };
 
 export type ImportCreated =
@@ -82,7 +85,7 @@ export async function createImport(
   const chosen = await chooseMapping(ctx, { sourceId: sender.id, headers: parsed.headers, sampleRows: parsed.rows.slice(0, 5) });
   const status = chosen.needsConfirm ? 'needs_confirm' : 'queued';
 
-  const chain = { ...sender.chain, ...(input.vendorSourceId ? { vendorSourceId: input.vendorSourceId } : {}) };
+  const chain = vendorChain(sender.chain, input.vendorSourceId) ?? sender.chain;
   const batchId = newId('bat');
   const runAt = new Date();
   const name = parsed.sheet && parsed.sheets.length > 1 ? `${input.fileName} (${parsed.sheet})` : input.fileName;
@@ -96,7 +99,6 @@ export async function createImport(
     name,
     runAt,
   });
-  await publish(ctx, batchCreated, { batchId, sourceChain: chain, name, runAt: runAt.toISOString(), itemCount: 0 }, { type: 'batch', id: batchId });
   const file = await storeFile(ctx, batchId, input);
 
   const id = newId('imp');
@@ -182,58 +184,86 @@ export async function confirmImport(ctx: ModuleContext, importId: string, mappin
   await enqueueJob(ctx, importRunJob, { importId });
 }
 
+/** Companies one `jobs.intake.import.run` message sends. A setter lets tests lower it. */
+let chunkSize = 500;
+export const setImportChunkSize = (n: number): void => {
+  chunkSize = n;
+};
+
 /**
- * Runs `jobs.intake.import.run`. It sends each company as an arrival from the importing source (channel `file`,
- * `raw` = the header row and the company's rows) and sets the batch's item count. Safe to deliver twice: it
- * runs only while the import is `queued`, holding the import's row lock, and the whole run is one transaction,
- * so a second delivery finds `imported` and does nothing, and a failed one leaves nothing half sent.
- * A company the source can't send (over its daily cap, or not valid) is listed in `stats.notSent`.
+ * Runs one chunk of `jobs.intake.import.run`: the companies from `cursor`, up to the chunk size, sent as
+ * arrivals from the importing source (channel `file`, `raw` = the header row and the company's rows) through
+ * the same path as a batch (`storeItems`), so invalid, repeated-in-file and over-cap companies are stored and
+ * rejected. The first chunk publishes `intake.batch.created` with the planned count. The cursor lives in
+ * `stats.cursor`; a message whose cursor is not the stored one is a redelivery and does nothing, and the import
+ * row lock stops two from running at once. Each chunk is its own transaction, so the source's cap lock is
+ * held for a chunk, not the whole file. The last chunk marks the import `imported`; the batch cannot complete before.
+ * A source paused or archived since the import was created stops the import as `failed`, with the reason.
  */
-export async function runImport(ctx: ModuleContext, importId: string): Promise<void> {
+export async function runImport(ctx: ModuleContext, importId: string, cursor = 0): Promise<void> {
   const [imp] = await ctx.tx
     .select()
     .from(fileImport)
     .where(and(eq(fileImport.tenantId, ctx.tenantId), eq(fileImport.id, importId)))
     .for('update');
   if (!imp?.batchId || imp.status !== 'queued') return;
+  const stats = { ...(imp.stats as RunStats) };
+  if ((stats.cursor ?? 0) !== cursor) return;
   const batchId = imp.batchId;
-  const [b] = await ctx.tx.select({ vendorSourceId: batch.vendorSourceId }).from(batch).where(eq(batch.id, batchId));
-  const { drafts, skipped } = await draftsOf(ctx, imp, (imp.mapping as MappingColumn[] | null) ?? []);
+  const [b] = await ctx.tx.select().from(batch).where(and(eq(batch.tenantId, ctx.tenantId), eq(batch.id, batchId)));
+  const setImport = (set: Partial<typeof fileImport.$inferInsert>) =>
+    ctx.tx
+      .update(fileImport)
+      .set({ ...set, updatedAt: new Date() })
+      .where(and(eq(fileImport.tenantId, ctx.tenantId), eq(fileImport.id, importId)));
 
   const sending: ModuleContext = { ...ctx, access: { sourceId: imp.sourceId, dataLimit: { kind: 'own_source' } } };
-  const stats: RunStats = { ...(imp.stats as RunStats), companies: drafts.length, skipped, notSent: [] };
-  let stored = 0;
-  let repeated = 0;
-  const nameOf = (d: Draft) => d.body.account?.name ?? d.body.account?.domain ?? d.body.account?.website ?? 'Unnamed company';
-  for (const [i, d] of drafts.entries()) {
-    try {
-      const r = await submitArrival(sending, d.body, {
-        channel: 'file',
-        batchId,
-        raw: d.raw,
-        ...(b?.vendorSourceId ? { vendorSourceId: b.vendorSourceId } : {}),
-      });
-      if (r.duplicateOfRequest) repeated++;
-      else stored++;
-    } catch (e) {
-      if (!(e instanceof ScoutError)) throw e;
-      if (e.slug === 'cap-reached') {
-        // Over the cap: the rest would be refused too.
-        for (const rest of drafts.slice(i)) stats.notSent!.push({ name: nameOf(rest), reason: e.message });
-        break;
-      }
-      stats.notSent!.push({ name: nameOf(d), reason: e.detail ?? e.message });
-    }
+  let sender;
+  try {
+    sender = await senderOf(sending);
+  } catch (e) {
+    if (!(e instanceof ScoutError)) throw e;
+    await setImport({ status: 'failed', stats: { ...stats, error: `Import stopped: ${e.message}` } });
+    await settleBatch(ctx, batchId);
+    return;
   }
-  stats.submitted = stored;
-  stats.repeated = repeated;
-  await ctx.tx.update(batch).set({ itemCount: stored }).where(and(eq(batch.tenantId, ctx.tenantId), eq(batch.id, batchId)));
+
+  const { drafts, skipped } = await draftsOf(ctx, imp, (imp.mapping as MappingColumn[] | null) ?? []);
+  if (cursor === 0) {
+    stats.companies = drafts.length;
+    stats.skipped = skipped;
+    const sourceChain = {
+      ...(b!.personSourceId ? { personSourceId: b!.personSourceId } : {}),
+      ...(b!.agentSourceId ? { agentSourceId: b!.agentSourceId } : {}),
+      ...(b!.vendorSourceId ? { vendorSourceId: b!.vendorSourceId } : {}),
+    };
+    await publish(
+      ctx,
+      batchCreated,
+      { batchId, sourceChain, name: b!.name, runAt: b!.runAt.toISOString(), itemCount: drafts.length },
+      { type: 'batch', id: batchId },
+    );
+  }
+
+  const end = Math.min(cursor + chunkSize, drafts.length);
+  const item = (d: Draft) => ({ raw: d.raw, body: d.body });
+  const result = await storeItems(sending, sender, batchId, drafts.slice(cursor, end).map(item), {
+    channel: 'file',
+    ...(b!.vendorSourceId ? { vendorSourceId: b!.vendorSourceId } : {}),
+    before: drafts.slice(0, cursor).map(item),
+  });
+  stats.cursor = end;
+  stats.submitted = (stats.submitted ?? 0) + result.stored;
+  stats.repeated = (stats.repeated ?? 0) + result.repeated;
+  const last = end >= drafts.length;
   await ctx.tx
-    .update(fileImport)
-    .set({ status: 'imported', stats, updatedAt: new Date() })
-    .where(and(eq(fileImport.tenantId, ctx.tenantId), eq(fileImport.id, importId)));
-  // Nothing sent (or every item already finished): the batch completes now.
-  await settleBatch(ctx, batchId);
+    .update(batch)
+    .set({ itemCount: sql`${batch.itemCount} + ${result.stored}` })
+    .where(and(eq(batch.tenantId, ctx.tenantId), eq(batch.id, batchId)));
+  await setImport({ status: last ? 'imported' : 'queued', stats });
+  if (!last) await enqueueJob(ctx, importRunJob, { importId, cursor: end });
+  // Counts the chunk's rejections; completes the batch when this was the last chunk and nothing is open.
+  await settleBatch(ctx, batchId, { rejected: result.rejected });
 }
 
 export type ImportView = {
@@ -256,7 +286,8 @@ export type ImportView = {
     rejected: number;
     waiting: { count: number; arrivalIds: string[] };
     skipped: SkippedRow[];
-    notSent: { name: string; reason: string }[];
+    /** Set when the import stopped (`failed`). */
+    error: string | null;
   };
 };
 
@@ -298,7 +329,7 @@ export async function getImport(ctx: ModuleContext, id: string): Promise<ImportV
       rejected: detail.counts.rejected,
       waiting: { count: arrivalIds.length, arrivalIds },
       skipped: run.skipped ?? [],
-      notSent: run.notSent ?? [],
+      error: run.error ?? null,
     },
   };
 }

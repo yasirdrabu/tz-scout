@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import ExcelJS from 'exceljs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -12,16 +12,18 @@ import {
   importRunHandler,
   listWaiting,
   registerSource,
+  setImportChunkSize,
+  submitArrival,
   skipWaiting,
   updateSource,
 } from '@/modules/intake';
 import { arrival, batch } from '@/modules/intake/db/schema';
-import { closeDbs } from '@/platform/db/client';
+import { adminDb, closeDbs } from '@/platform/db/client';
 import { EnvelopeSchema } from '@/platform/events/envelope';
 import { newId } from '@/platform/ids';
 import { deliverOnce } from '@/platform/runtime/worker';
 import { runOutbox } from '../helpers/run-outbox';
-import { asSource, freshTenant, personAndAgent, type Tenant } from './helpers';
+import { asSource, freshTenant, personAndAgent, validArrival, type Tenant } from './helpers';
 
 let t: Tenant;
 let personId: string;
@@ -59,7 +61,7 @@ async function needingConfirm(rows: string[], opts: { as?: Run; withNotes?: bool
   return { r, map: headers.map((h, i) => col(h, targets[i]!)) };
 }
 
-const runJob = (importId: string) =>
+const runJob = (importId: string, cursor?: number) =>
   deliverOnce(
     importRunHandler,
     EnvelopeSchema.parse({
@@ -70,7 +72,7 @@ const runJob = (importId: string) =>
       occurredAt: new Date().toISOString(),
       actor: { kind: 'system', id: 'worker' },
       correlationId: newId('cor'),
-      data: { importId },
+      data: { importId, ...(cursor === undefined ? {} : { cursor }) },
     }),
   );
 
@@ -179,15 +181,100 @@ describe('running an import', () => {
     expect(b).toMatchObject({ personSourceId: personId, vendorSourceId: vendor.id });
   });
 
-  it("keeps an agent's cap: companies over it are reported, not stored", async () => {
-    await t.run((ctx) => updateSource(ctx, agentId, { dailyArrivalCap: 1 }));
-    const as: Run = (fn) => asSource(t, agentId, fn);
+  it("keeps an agent's cap: companies over it are stored and rejected daily_cap_reached", async () => {
+    const { agentId: capAgent } = await personAndAgent(t, 'Cap');
+    await t.run((ctx) => updateSource(ctx, capAgent, { dailyArrivalCap: 1 }));
+    const as: Run = (fn) => asSource(t, capAgent, fn);
     const { r, map } = await needingConfirm([`Cap A,cap-a-${stamp()}.com`, `Cap B,cap-b-${stamp()}.com`], { as });
     await as((ctx) => confirmImport(ctx, r.id, map));
     await runOutbox(t.tenantId);
     const d = (await as((ctx) => getImport(ctx, r.id)))!;
-    expect(d.stats.created).toBe(1);
-    expect(d.stats.notSent).toHaveLength(1);
+    expect(d.stats).toMatchObject({ created: 1, rejected: 1 });
+    const b = (await as((ctx) => getBatch(ctx, r.batchId)))!;
+    expect(b).toMatchObject({ itemCount: 2, status: 'completed' });
+    expect(b.rejections).toHaveLength(1);
+    expect(b.rejections[0]).toMatchObject({ reason: 'daily_cap_reached' });
+    expect(b.rejections[0]!.detail).toMatch(/^This source reached its daily limit. Send this one again after /);
+  });
+
+  it('stores a company that is not valid as an invalid rejection and keeps going', async () => {
+    const k = stamp();
+    const headers = [`Company ${k}`, `Website ${k}`, `Signal ${k}`, `Kind ${k}`];
+    const text = `${headers.join(',')}\nGood Co,good-${k}.com,,\nBad Co,bad-${k}.com,Sued,lawsuit\n`;
+    const r = await asPerson((ctx) => createImport(ctx, csv(text)));
+    if (r.status !== 'needs_confirm') throw new Error('expected needs_confirm');
+    const targets = ['account.name', 'account.website', 'signals[].title', 'signals[].type'];
+    await asPerson((ctx) => confirmImport(ctx, r.id, headers.map((h, i) => col(h, targets[i]!))));
+    await runOutbox(t.tenantId);
+    const b = (await asPerson((ctx) => getBatch(ctx, r.batchId)))!;
+    expect(b).toMatchObject({ itemCount: 2, status: 'completed', counts: { resolved: 1, rejected: 1 } });
+    expect(b.rejections[0]).toMatchObject({ reason: 'invalid' });
+    expect(b.rejections[0]!.detail).toContain('Add the date it happened.');
+    expect((await asPerson((ctx) => getImport(ctx, r.id)))?.stats).toMatchObject({ created: 1, rejected: 1 });
+  });
+
+  it('rejects a company that repeats an earlier ref as duplicate_in_batch, even across chunks', async () => {
+    setImportChunkSize(1);
+    try {
+      const k = stamp();
+      const headers = [`Company ${k}`, `Website ${k}`, `Ref ${k}`];
+      const text = `${headers.join(',')}\nOne Co,one-${k}.com,R1\nTwo Co,two-${k}.com,R2\nThree Co,three-${k}.com,R1\n`;
+      const r = await asPerson((ctx) => createImport(ctx, csv(text)));
+      if (r.status !== 'needs_confirm') throw new Error('expected needs_confirm');
+      const targets = ['account.name', 'account.website', 'account.external_ref'];
+      await asPerson((ctx) => confirmImport(ctx, r.id, headers.map((h, i) => col(h, targets[i]!))));
+      await runOutbox(t.tenantId);
+      const b = (await asPerson((ctx) => getBatch(ctx, r.batchId)))!;
+      expect(b.rejections.map((x) => x.reason)).toEqual(['duplicate_in_batch']);
+    } finally {
+      setImportChunkSize(500);
+    }
+  });
+
+  it('runs in chunks: completes once, publishes created once, and leaves the agent free between chunks', async () => {
+    setImportChunkSize(1);
+    try {
+      const { agentId: chunkAgent } = await personAndAgent(t, 'Chunk');
+      const as: Run = (fn) => asSource(t, chunkAgent, fn);
+      const k = stamp();
+      const { r, map } = await needingConfirm(
+        [`Chunk A,chunk-a-${k}.com`, `Chunk B,chunk-b-${k}.com`, `Chunk C,chunk-c-${k}.com`],
+        { as },
+      );
+      await as((ctx) => confirmImport(ctx, r.id, map));
+      await runJob(r.id); // the first chunk only
+      expect((await as((ctx) => getImport(ctx, r.id)))?.status).toBe('queued');
+      expect((await as((ctx) => getBatch(ctx, r.batchId)))).toMatchObject({ status: 'processing', itemCount: 1 });
+      // The cap lock is free between chunks: the same agent can send meanwhile.
+      await as((ctx) => submitArrival(ctx, validArrival(), { channel: 'api' }));
+
+      await runOutbox(t.tenantId); // the queued first message is now a stale redelivery; the rest run
+      await runJob(r.id, 0);
+      const d = (await as((ctx) => getImport(ctx, r.id)))!;
+      expect(d).toMatchObject({ status: 'imported', stats: { companies: 3, created: 3 } });
+      expect(await as((ctx) => getBatch(ctx, r.batchId))).toMatchObject({ status: 'completed', itemCount: 3 });
+      const count = async (type: string) =>
+        ((await adminDb.execute(
+          sql`select 1 from platform.outbox where tenant_id = ${t.tenantId} and payload->>'type' = ${type} and payload->'data'->>'batchId' = ${r.batchId}`,
+        )) as unknown as unknown[]).length;
+      expect(await count('intake.batch.completed')).toBe(1);
+      expect(await count('intake.batch.created')).toBe(1);
+    } finally {
+      setImportChunkSize(500);
+    }
+  });
+
+  it('stops as failed when the source was paused after the import was created', async () => {
+    const { agentId: pausedAgent } = await personAndAgent(t, 'Paused');
+    const as: Run = (fn) => asSource(t, pausedAgent, fn);
+    const { r, map } = await needingConfirm([`Pause Co,pause-${stamp()}.com`], { as });
+    await as((ctx) => confirmImport(ctx, r.id, map));
+    await t.run((ctx) => updateSource(ctx, pausedAgent, { status: 'paused' }));
+    await runOutbox(t.tenantId);
+    const d = (await as((ctx) => getImport(ctx, r.id)))!;
+    expect(d.status).toBe('failed');
+    expect(d.stats.error).toContain('paused');
+    expect(await as((ctx) => getBatch(ctx, r.batchId))).toMatchObject({ itemCount: 0, status: 'completed' });
   });
 
   it("hides another source's import", async () => {

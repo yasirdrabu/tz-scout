@@ -85,6 +85,7 @@ export {
   createImport,
   getImport,
   previewImport,
+  setImportChunkSize,
   type ImportCreated,
   type ImportView,
 } from './services/imports';
