@@ -1,5 +1,6 @@
 import { defineJobHandler } from '@/platform/runtime/jobs';
-import { resolveJob, waitingExpireJob } from './contracts/jobs';
+import { importRunJob, resolveJob, waitingExpireJob } from './contracts/jobs';
+import { runImport } from './services/imports';
 import { resolveArrival } from './services/resolve';
 import { expireWaiting } from './services/waiting';
 
@@ -10,3 +11,6 @@ export const resolveHandler = defineJobHandler(resolveJob, async (e, ctx) => res
 export const waitingExpireHandler = defineJobHandler(waitingExpireJob, async (_e, ctx) => {
   await expireWaiting(ctx);
 });
+
+/** Reads an uploaded file with its confirmed mapping and submits one arrival per company (SRC-E4). */
+export const importRunHandler = defineJobHandler(importRunJob, async (e, ctx) => runImport(ctx, e.data.importId));

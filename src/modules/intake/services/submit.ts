@@ -34,6 +34,8 @@ export type SubmitOptions = {
   raw?: unknown;
   /** The sender holds `warm_intro:declare` (routes pass `can(principal, ...)`). A person source's key needs it to confirm an intro. */
   canDeclareWarmIntro?: boolean;
+  /** A registered vendor source to fill the vendor slot (a file import's "this list came from"), instead of the body's `via_vendor`. */
+  vendorSourceId?: string;
 };
 
 export type SubmitResult = {
@@ -58,13 +60,13 @@ function problems(error: z.ZodError): Problem[] {
   }));
 }
 
-type Sender = { id: string; kind: string; chain: SourceChain };
+export type Sender = { id: string; kind: string; chain: SourceChain };
 
 /**
  * The sending source and its chain, from `ctx.access.sourceId` (the key's source, or a signed-in
  * person's person source) and its parent. Never from the body (SRC-E2-S1-AC5).
  */
-async function senderOf(ctx: ModuleContext): Promise<Sender> {
+export async function senderOf(ctx: ModuleContext): Promise<Sender> {
   const id = ctx.access?.sourceId;
   const row = id ? await loadSource(ctx, id) : undefined;
   if (!row) {
@@ -243,7 +245,10 @@ export async function submitArrival(ctx: ModuleContext, body: unknown, opts: Sub
     if (!cap.allowed) throw capReached(cap.resetsAt);
   }
   const targetAccountId = await targetOf(ctx, a.target_account_id);
-  const chain = await withVendor(ctx, sender.chain, a.via_vendor);
+  const chain =
+    opts.vendorSourceId && !sender.chain.vendorSourceId
+      ? { ...sender.chain, vendorSourceId: opts.vendorSourceId }
+      : await withVendor(ctx, sender.chain, a.via_vendor);
 
   const id = await store(ctx, {
     sender,

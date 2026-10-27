@@ -17,7 +17,7 @@ export {
 } from './contracts/events';
 export { importRunJob, resolveJob, waitingExpireJob } from './contracts/jobs';
 export { intakeAccountMerged, intakeTenantDefaults } from './consumers';
-export { resolveHandler, waitingExpireHandler } from './jobs';
+export { importRunHandler, resolveHandler, waitingExpireHandler } from './jobs';
 export { DEFAULT_VENDOR_SOURCES, RELATIONSHIP_DEFAULTS, seedIntakeDefaults } from './defaults';
 export { checkArrivalCap, type CapCheck } from './services/caps';
 export {
@@ -69,3 +69,22 @@ export {
 } from './services/status';
 export { visibleArrivals, type ArrivalScope } from './services/visibility';
 export { chooseDuplicate, listWaiting, skipWaiting, supplyCompany, supplyWebsite } from './services/waiting';
+export {
+  chooseMapping,
+  deleteMapping,
+  headerSignature,
+  listMappings,
+  saveMapping,
+  type ChosenMapping,
+  type MappingOrigin,
+  type SavedMapping,
+} from './services/mappings';
+export { attachFile, readFile, type FileInput, type StoredFile } from './services/files';
+export {
+  confirmImport,
+  createImport,
+  getImport,
+  previewImport,
+  type ImportCreated,
+  type ImportView,
+} from './services/imports';
