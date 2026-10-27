@@ -2,8 +2,8 @@
 
 import type { ScoringProfile, Tier } from '../contracts/types';
 
-/** Rounds half away from zero and never returns -0. */
-const roundHalfAway = (n: number) => Math.sign(n) * Math.round(Math.abs(n)) + 0;
+/** Rounds half away from zero and never returns -0. The product is snapped to 9 places first so float error cannot sit just under a half. */
+const roundHalfAway = (n: number) => Math.sign(n) * Math.round(Math.abs(Math.round(n * 1e9) / 1e9)) + 0;
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 export function priority(

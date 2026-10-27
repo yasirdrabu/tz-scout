@@ -17,6 +17,10 @@ describe('bestOffer', () => {
   it('then the offer approved first', () => {
     expect(bestOffer([m('x', 62, 'good_fit'), m('y', 62, 'good_fit')], ['y', 'x'])?.offerId).toBe('y');
   });
+  it('an offer missing from approvedOrder loses a full tie', () => {
+    expect(bestOffer([m('x', 62, 'good_fit'), m('y', 62, 'good_fit')], ['y'])?.offerId).toBe('y');
+    expect(bestOffer([m('x', 62, 'good_fit'), m('y', 62, 'good_fit')], ['x'])?.offerId).toBe('x');
+  });
   it('is null with no matches and does not reorder its input', () => {
     expect(bestOffer([], [])).toBeNull();
     const list = [m('x', 50, 'watch'), m('y', 60, 'watch')];

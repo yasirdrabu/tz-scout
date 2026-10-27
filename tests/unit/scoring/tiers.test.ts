@@ -23,6 +23,14 @@ describe('tierFor', () => {
     expect(t(40, 100, 40)).toBe('watch');
     expect(t(59, 100, 59)).toBe('watch');
   });
+  it('act now boundaries: intent 34/35, total 59/60, fit 59/60', () => {
+    expect(t(70, 34, 61)).toBe('good_fit');
+    expect(t(70, 35, 61)).toBe('act_now');
+    expect(t(70, 50, 59)).toBe('good_fit');
+    expect(t(70, 50, 60)).toBe('act_now');
+    expect(t(59, 50, 61)).toBe('watch');
+    expect(t(60, 50, 61)).toBe('act_now');
+  });
   it('SCO-E3-S1-AC4: a changed threshold moves the tier', () => {
     const strict = { ...profile, tierThresholds: { ...profile.tierThresholds, notFitBelow: 50 } };
     const input = { fit: 45, intent: 10, total: 45, disqualifiedReason: null, hasResearchOrTrigger: false };
@@ -45,6 +53,19 @@ describe('applyFloors', () => {
   });
   it('tier A with a signal exactly 180 days old still counts as recent', () => {
     expect(applyFloors('watch', { ...base, researchTier: 'A', researchSignalAt: daysAgo(180) }, profile, NOW).tier).toBe('act_now');
+  });
+  it('tier A with a signal 181 days old floors at good fit', () => {
+    expect(applyFloors('watch', { ...base, researchTier: 'A', researchSignalAt: daysAgo(181) }, profile, NOW).tier).toBe('good_fit');
+  });
+  it('tier A with no signal date floors at good fit and the text has no date', () => {
+    expect(applyFloors('watch', { ...base, researchTier: 'A' }, profile, NOW)).toEqual({
+      tier: 'good_fit',
+      tierReason: 'research_floor',
+      text: 'Researcher rated A: good fit',
+    });
+  });
+  it('a warm intro at exactly fit 40 lifts', () => {
+    expect(applyFloors('watch', { ...base, warmIntro: true, bestFit: 40 }, profile, NOW).tier).toBe('good_fit');
   });
   it('SCO-E3-S3-AC3: tier B with computed act now stays act now', () => {
     expect(applyFloors('act_now', { ...base, researchTier: 'B' }, profile, NOW)).toEqual({ tier: 'act_now', tierReason: 'computed' });

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { priority } from '@/modules/scoring/domain/priority';
 import type { Tier } from '@/modules/scoring/contracts/types';
-import { profile } from './fixtures';
+import { applyFloors } from '@/modules/scoring/domain/tiers';
+import { daysAgo, NOW, profile } from './fixtures';
 
 const p = (matchTotal: number, warmPoints: number, trust: number | null, finalTier: Tier = 'good_fit') =>
   priority({ matchTotal, finalTier, warmPoints, trust }, profile);
@@ -31,6 +32,28 @@ describe('priority', () => {
     expect(Object.is(p(50, 0, 0.59).trustModifier, 0)).toBe(true);
     expect(p(50, 0, 0.58).trustModifier).toBe(-1);
     expect(p(50, 0, 0.62).trustModifier).toBe(1);
+  });
+  it('exact halves round away from zero despite float error', () => {
+    const mod = (trust: number) => p(50, 0, trust).trustModifier;
+    expect(mod(0.7)).toBe(3);
+    expect(mod(0.5)).toBe(-3);
+    expect(mod(0.54)).toBe(-2);
+    expect(mod(0.46)).toBe(-4);
+    expect(mod(0.62)).toBe(1);
+  });
+  it('floors then priority: a fit-38 account lifted by the research floor gets warm and trust', () => {
+    const floored = applyFloors(
+      'not_fit',
+      { disqualified: false, researchTier: 'A', researchSignalAt: daysAgo(30), warmIntro: false, bestFit: 38 },
+      profile,
+      NOW,
+    );
+    expect(floored.tier).toBe('act_now');
+    expect(priority({ matchTotal: 38, finalTier: floored.tier, warmPoints: 10, trust: 0.8 }, profile)).toEqual({
+      priority: 53,
+      warmPoints: 10,
+      trustModifier: 5,
+    });
   });
   it('no trust leaves priority at the total plus warm points', () => {
     expect(p(50, 5, null)).toEqual({ priority: 55, warmPoints: 5, trustModifier: 0 });
