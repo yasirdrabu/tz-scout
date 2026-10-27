@@ -1,6 +1,6 @@
 import { and, asc, eq, gte, inArray, or, sql } from 'drizzle-orm';
 import type { SourceAccessProvider, SourceInfoProvider } from '@/modules/accounts';
-import { revokeKeysForSource, type SourceValidator } from '@/modules/tenancy';
+import { members, revokeKeysForSource, type SourceValidator } from '@/modules/tenancy';
 import type { DataLimit } from '@/platform/access';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -211,6 +211,22 @@ export async function personSourceFor(ctx: ModuleContext, userId: string): Promi
   return row?.id;
 }
 
+/** A member's person source, created on first use so every owner and new member can send from the web app. */
+export async function ensurePersonSource(ctx: ModuleContext, userId: string): Promise<string | undefined> {
+  const existing = await personSourceFor(ctx, userId);
+  if (existing) return existing;
+  const member = (await members(ctx)).find((m) => m.userId === userId);
+  if (!member) return undefined;
+  try {
+    return (await registerSource(ctx, { kind: 'person', name: member.name.trim() || member.email.split('@')[0]!, userId })).id;
+  } catch (e) {
+    // Lost a race to another request that made it first.
+    const raced = await personSourceFor(ctx, userId);
+    if (raced) return raced;
+    throw e;
+  }
+}
+
 function limitSourceIds(limit: DataLimit): string[] {
   if (limit.kind === 'sources') return limit.ids;
   if (limit.kind === 'any_of') return limit.limits.flatMap(limitSourceIds);
@@ -307,4 +323,4 @@ export const intakeSourceInfo: SourceInfoProvider = {
 };
 
 /** Accounts' `SourceAccessProvider`. */
-export const intakeSourceAccess: SourceAccessProvider = { childSources, personSourceFor };
+export const intakeSourceAccess: SourceAccessProvider = { childSources, personSourceFor: ensurePersonSource };

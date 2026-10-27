@@ -58,6 +58,9 @@ const withCookie = (cookies: Headers) => {
   return new Request('http://localhost:4240/v1/y', { headers: h });
 };
 
+// The owner's person source is created the first time they act.
+const ownerAccess = { dataLimit: { kind: 'all' }, sourceId: expect.stringMatching(/^src_/), childSourceIds: [] };
+
 describe('ctx.access', () => {
   it('v1Route gives the handler the principal data limit', async () => {
     let seen: ModuleContext['access'];
@@ -68,13 +71,13 @@ describe('ctx.access', () => {
     expect((await route(withKey(await apiKey()))).status).toBe(200);
     expect(seen).toEqual({ dataLimit: { kind: 'own_source' } });
     expect((await route(withCookie(ownerHeaders))).status).toBe(200);
-    expect(seen).toEqual({ userId: owner.id, dataLimit: { kind: 'all' } });
+    expect(seen).toEqual({ ...ownerAccess, userId: owner.id });
   });
 
   it('tenantAction gives the callback the principal data limit', async () => {
     currentHeaders = ownerHeaders;
     const seen = await tenantAction(slug, 'members:manage', async (ctx) => ctx.access);
-    expect(seen).toEqual({ userId: owner.id, dataLimit: { kind: 'all' } });
+    expect(seen).toEqual({ ...ownerAccess, userId: owner.id });
   });
 });
 

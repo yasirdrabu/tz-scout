@@ -25,6 +25,8 @@ npm run dev                 # http://localhost:4240 (third terminal)
 
 With Docker instead of `services:local`: `docker compose -f infra/compose/docker-compose.yml up -d`.
 
+Bootstrap (`DATABASE_SUPERUSER_URL`) must run against the app database (`scout`), not `postgres`, or the module schemas get no grants for the app role.
+
 Import a list into a workspace, as the platform admin (the worker then processes it):
 
 ```bash

@@ -106,6 +106,16 @@ describe('data limits (TEN-E3-S1-AC2)', () => {
     expect(await idsOf(limited({ kind: 'practices', ids: ['prc_y'] }), [a, b])).toEqual([b]);
   });
 
+  it('practices follows a person editing practices at once, added and removed', async () => {
+    const a = await seed('Practice Edit', {});
+    const limit = limited({ kind: 'practices', ids: ['prc_edit'] });
+    expect(await idsOf(limit, [a])).toEqual([]);
+    await as({ userId: 'usr_p', dataLimit: { kind: 'all' } }, (ctx) => setPractices(ctx, a, ['prc_edit'], 'person'));
+    expect(await idsOf(limit, [a])).toEqual([a]);
+    await as({ userId: 'usr_p', dataLimit: { kind: 'all' } }, (ctx) => setPractices(ctx, a, [], 'person'));
+    expect(await idsOf(limit, [a])).toEqual([]);
+  });
+
   it('own_accounts sees owned accounts and those imported through the seller person source', async () => {
     const imported = await seed('Imported By Me', { personSourceId: 'src_seller' });
     const owned = await seed('Owned By Me', {});

@@ -3,7 +3,7 @@ import type { ModuleContext } from '@/platform/context';
 import { newId } from '@/platform/ids';
 import { sourceInfoProvider } from '../contracts/ports';
 import { isKnownFactKey, type FactKind, type SourceChain } from '../contracts/types';
-import { account, fact, person } from '../db/schema';
+import { account, accountAlias, fact, person } from '../db/schema';
 import { pickCurrent, type PickFact } from '../domain/current-value';
 import { matchName, regionKey } from '../domain/names';
 
@@ -246,4 +246,12 @@ async function writeAccountColumns(ctx: ModuleContext, accountId: string, set: P
     .update(account)
     .set({ ...changed, updatedAt: new Date() })
     .where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
+}
+
+/** A replaced primary domain stays on the account as a domain alias, so a later arrival on it still matches. */
+export async function keepReplacedDomain(ctx: ModuleContext, accountId: string, previousDomain: string | null): Promise<void> {
+  if (!previousDomain) return;
+  const [acc] = await ctx.tx.select({ domain: account.domain }).from(account).where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
+  if (!acc || acc.domain === previousDomain) return;
+  await ctx.tx.insert(accountAlias).values({ tenantId: ctx.tenantId, accountId, kind: 'domain', value: previousDomain }).onConflictDoNothing();
 }

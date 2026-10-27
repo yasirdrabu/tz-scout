@@ -4,6 +4,8 @@ import { publish } from '@/platform/events/outbox';
 import { accountUpdated } from '../contracts/events';
 import { ScoutError } from '@/platform/errors';
 import { account } from '../db/schema';
+import { lockAccount } from './lock';
+import { writeSummary } from './summary';
 import { filterVisibleAccountIds } from './visibility';
 
 /**
@@ -21,6 +23,7 @@ export async function setPractices(
   if (by === 'person' && (await filterVisibleAccountIds(ctx, [accountId])).length === 0) {
     throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
   }
+  await lockAccount(ctx, accountId);
   const [acc] = await ctx.tx
     .select({ practiceIds: account.practiceIds })
     .from(account)
@@ -33,6 +36,7 @@ export async function setPractices(
     .update(account)
     .set({ practiceIds: next, updatedAt: new Date() })
     .where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
+  await writeSummary(ctx, accountId);
   if (opts.publish !== false) await publish(ctx, accountUpdated, { accountId, changedKeys: ['practice_ids'] }, { type: 'account', id: accountId });
   return next;
 }

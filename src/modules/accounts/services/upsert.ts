@@ -9,7 +9,7 @@ import type { ArrivalAccountFields, ArrivalForAccounts, FactKind } from '../cont
 import { account, accountAlias, fact } from '../db/schema';
 import { matchName } from '../domain/names';
 import { applyExclusion, type Exclusion } from './exclusion';
-import { ACCOUNT_COLUMNS, recordFacts, reproject, type FactInput } from './facts';
+import { ACCOUNT_COLUMNS, keepReplacedDomain, recordFacts, reproject, type FactInput } from './facts';
 import { lockAccount } from './lock';
 import { resolveAccountId } from './match';
 import { matchOrAddPerson, updatePersonFromArrival, type PersonResult } from './people';
@@ -89,9 +89,9 @@ function accountFacts(a: ArrivalForAccounts, isShell: boolean): FactInput[] {
 
 /** `previousDomain`: the domain before this arrival's facts were projected. A replaced primary stays an alias. */
 async function addAliases(ctx: ModuleContext, accountId: string, a: ArrivalForAccounts, previousDomain: string | null): Promise<void> {
+  await keepReplacedDomain(ctx, accountId, previousDomain);
   const [acc] = await ctx.tx.select().from(account).where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
   const rows: (typeof accountAlias.$inferInsert)[] = [];
-  if (previousDomain && previousDomain !== acc!.domain) rows.push({ tenantId: ctx.tenantId, accountId, kind: 'domain', value: previousDomain });
   const domain = a.account.domain?.toLowerCase();
   if (domain && domain !== acc!.domain) rows.push({ tenantId: ctx.tenantId, accountId, kind: 'domain', value: domain });
   const name = a.account.name ? matchName(a.account.name) : '';

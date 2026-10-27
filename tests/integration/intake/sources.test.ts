@@ -85,6 +85,18 @@ describe('registerSource (SRC-E1-S1-AC1)', () => {
     expect(await t.run((ctx) => personSourceFor(ctx, u.id))).toBe(s.id);
     expect(await t.run((ctx) => personSourceFor(ctx, 'usr_nobody'))).toBeUndefined();
   });
+
+  it('creates a member person source on first use, once, and none for a non-member', async () => {
+    const u = await seedUser();
+    await t.run((ctx) => addMember(ctx, { email: u.email, role: 'seller' }));
+    expect(await t.run((ctx) => personSourceFor(ctx, u.id))).toBeUndefined();
+    const first = await t.run((ctx) => sourceAccessProvider().personSourceFor(ctx, u.id));
+    expect(first).toMatch(/^src_/);
+    expect(await t.run((ctx) => sourceAccessProvider().personSourceFor(ctx, u.id))).toBe(first);
+    expect(await t.run((ctx) => personSourceFor(ctx, u.id))).toBe(first);
+    const outsider = await seedUser();
+    expect(await t.run((ctx) => sourceAccessProvider().personSourceFor(ctx, outsider.id))).toBeUndefined();
+  });
 });
 
 describe('starting review status (SRC-E1-S2-AC3)', () => {

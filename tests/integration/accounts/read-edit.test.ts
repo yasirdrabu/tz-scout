@@ -6,6 +6,7 @@ import {
   convertShell,
   editAccount,
   editPerson,
+  findMatches,
   getAccount,
   getAccountForScoring,
   getAccounts,
@@ -235,6 +236,15 @@ describe('ACC-E7-S2 override', () => {
 });
 
 describe('ACC-E1-S2-AC3 convert a shell', () => {
+  it('keeps the replaced domain as an alias, so an arrival on the old domain matches the same account', async () => {
+    const oldDomain = domain();
+    const out = await seed({ account: { name: 'Rebrand Co', domain: oldDomain } });
+    const newDomain = domain();
+    await asPerson((ctx) => editAccount(ctx, out.accountId, { domain: newDomain }));
+    const matches = await t.run((ctx) => findMatches(ctx, { name: 'Rebrand Co', domain: oldDomain }));
+    expect(matches.map((m) => m.accountId)).toEqual([out.accountId]);
+  });
+
   it('keeps the old name as an alias and gives the account a company name and domain', async () => {
     const d = domain();
     const out = await t.run((ctx) =>

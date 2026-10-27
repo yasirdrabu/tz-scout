@@ -8,7 +8,7 @@ import type { ArrivalAccountFields, ArrivalPerson, SourceChain } from '../contra
 import { account, accountAlias, person, personRole, signal } from '../db/schema';
 import { matchName } from '../domain/names';
 import { applyExclusion } from './exclusion';
-import { ACCOUNT_COLUMNS, PERSON_COLUMNS, recordFacts, reproject, type FactInput } from './facts';
+import { ACCOUNT_COLUMNS, PERSON_COLUMNS, keepReplacedDomain, recordFacts, reproject, type FactInput } from './facts';
 import { lockAccount } from './lock';
 import { resolveAccountId } from './match';
 import { repickPrimary } from './primary';
@@ -56,11 +56,15 @@ export async function editAccount(ctx: ModuleContext, accountId: string, patch: 
   await lockAccount(ctx, id);
   const facts = factsFromPatch(patch, ACCOUNT_KEY_BY_FIELD);
   if (facts.length === 0) return;
+  const [before] = await ctx.tx.select({ domain: account.domain }).from(account).where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, id)));
   await recordFacts(ctx, id, null, facts, chain, undefined, userId);
   const keys = facts.map((f) => f.key);
   await reproject(ctx, id, keys);
   const domain = facts.find((f) => f.key === 'domain')?.value;
-  if (typeof domain === 'string') await assertDomainTaken(ctx, id, domain);
+  if (typeof domain === 'string') {
+    await assertDomainTaken(ctx, id, domain);
+    await keepReplacedDomain(ctx, id, before?.domain ?? null);
+  }
   await applyExclusion(ctx, id);
   await publish(ctx, accountUpdated, { accountId: id, changedKeys: keys }, subjectOf(id));
 }
