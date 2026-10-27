@@ -31,7 +31,10 @@ function nameFitsEmail(p: PersonRow, email: string): boolean {
   return forms.includes(local);
 }
 
-function findMatch(people: PersonRow[], input: ArrivalPerson): PersonRow | undefined {
+export type MatchablePerson = { email?: string | null; linkedinUrl?: string | null; firstName?: string | null; lastName?: string | null };
+
+/** The person among `people` that `input` is, by email, then LinkedIn, then name. */
+export function findMatch(people: PersonRow[], input: MatchablePerson): PersonRow | undefined {
   if (input.email) {
     const byEmail = people.find((p) => norm(p.email) === norm(input.email));
     if (byEmail) return byEmail;

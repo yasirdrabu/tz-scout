@@ -36,6 +36,7 @@ export {
   listPeople,
   type ScoringView,
 } from './services/read';
+export { mergeAccounts } from './services/merge';
 export { setPractices } from './services/practices';
 export { upsertFromArrival, type UpsertResult } from './services/upsert';
 export type {
