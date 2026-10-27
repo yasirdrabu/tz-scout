@@ -14,7 +14,7 @@ export type ReviewFlag = (typeof REVIEW_FLAGS)[number];
 /** `account_review.flags`. */
 export type ReviewFlags = {
   newFrom?: { sourceId: string; at: string };
-  declinedBySeller?: { assignmentId: string; sellerUserId: string; reasonKey: string; at: string };
+  declinedBySeller?: { assignmentId: string; sellerUserId: string; sellerName: string; reasonKey: string; reasonLabel: string; at: string };
 };
 
 /** Everything Accounts needs to know about an account's review, sent whole on every write (Ruling 1). */
@@ -24,6 +24,6 @@ export const reviewSnapshotSchema = z.object({
   ownerHistoryUserIds: z.array(z.string()),
   hasOpenAssignment: z.boolean(),
   stage: stageSchema,
-  reviewFlags: z.array(z.string()),
+  reviewFlags: z.array(z.enum(REVIEW_FLAGS)),
 });
 export type ReviewSnapshot = z.infer<typeof reviewSnapshotSchema>;

@@ -14,9 +14,13 @@ describe('addWorkingDays', () => {
     expect(addWorkingDays(at('2026-10-23T15:00:00Z'), 1, 'UTC')).toEqual(at('2026-10-26T15:00:00Z')); // Fri to Mon
   });
 
-  it('starts counting on Monday from a weekend', () => {
-    expect(addWorkingDays(at('2026-10-24T15:00:00Z'), 1, 'UTC')).toEqual(at('2026-10-26T15:00:00Z')); // Sat to Mon
-    expect(addWorkingDays(at('2026-10-25T15:00:00Z'), 2, 'UTC')).toEqual(at('2026-10-27T15:00:00Z')); // Sun to Tue
+  it('counts from the next Monday at midnight when starting on a weekend', () => {
+    expect(addWorkingDays(at('2026-10-24T10:00:00Z'), 1, 'UTC')).toEqual(at('2026-10-27T00:00:00Z')); // Sat 10:00 to Tue 00:00
+    expect(addWorkingDays(at('2026-10-25T15:00:00Z'), 2, 'UTC')).toEqual(at('2026-10-28T00:00:00Z')); // Sun 15:00 to Wed 00:00
+  });
+
+  it('keeps the time of day from Friday', () => {
+    expect(addWorkingDays(at('2026-10-23T15:00:00Z'), 1, 'UTC')).toEqual(at('2026-10-26T15:00:00Z'));
   });
 
   it('returns the same instant for zero days', () => {

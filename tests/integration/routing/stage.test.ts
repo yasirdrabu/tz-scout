@@ -45,7 +45,7 @@ describe('moveStage', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ fromStage: 'arrived', toStage: 'reviewed', causeEventId: 'evt_one' });
     expect(await events(t.tenantId, stageChanged.type, accountId)).toHaveLength(1);
-    expect(await events(t.tenantId, reviewChanged.type, accountId)).toHaveLength(1);
+    expect(await events(t.tenantId, reviewChanged.type, accountId)).toHaveLength(0); // the calling write publishes the snapshot
   });
 
   it('ignores a redelivery of the same cause when an earlier event moved the stage on', async () => {
@@ -83,8 +83,8 @@ describe('moveStage', () => {
 });
 
 describe('publishReviewSnapshot', () => {
-  const assign = (ctx: ModuleContext, accountId: string, sellerUserId: string, status: string) =>
-    ctx.tx.insert(assignment).values({ id: newId('asg'), tenantId: ctx.tenantId, accountId, sellerUserId, assignedBy: 'usr_lead', status });
+  const assign = (ctx: ModuleContext, accountId: string, sellerUserId: string, status: string, acceptedHow: string | null = null) =>
+    ctx.tx.insert(assignment).values({ id: newId('asg'), tenantId: ctx.tenantId, accountId, sellerUserId, assignedBy: 'usr_lead', status, acceptedHow });
 
   it('bumps the version once per call and publishes the snapshot', async () => {
     const accountId = await seedReview(t);
@@ -99,29 +99,31 @@ describe('publishReviewSnapshot', () => {
   it('builds the owner, past sellers, open assignment, stage and flags from routing rows', async () => {
     const accountId = await seedReview(t, 'assigned');
     await t.run(async (ctx) => {
-      await assign(ctx, accountId, 'usr_old', 'declined');
-      await assign(ctx, accountId, 'usr_older', 'withdrawn');
+      await assign(ctx, accountId, 'usr_declined', 'declined');
+      await assign(ctx, accountId, 'usr_replaced', 'replaced');
+      await assign(ctx, accountId, 'usr_old', 'withdrawn', 'seller');
+      await assign(ctx, accountId, 'usr_auto', 'replaced', 'auto_timeout');
       await assign(ctx, accountId, 'usr_now', 'accepted');
       await ctx.tx
         .update(accountReview)
-        .set({ flags: { newFrom: { sourceId: 'src_x', at: '2026-10-27T00:00:00.000Z' }, declinedBySeller: { assignmentId: 'asg_1', sellerUserId: 'usr_old', reasonKey: 'other', at: '2026-10-26T00:00:00.000Z' } } })
+        .set({ flags: { newFrom: { sourceId: 'src_x', at: '2026-10-27T00:00:00.000Z' }, declinedBySeller: { assignmentId: 'asg_1', sellerUserId: 'usr_declined', sellerName: 'Mike', reasonKey: 'other', reasonLabel: 'Other', at: '2026-10-26T00:00:00.000Z' } } })
         .where(eq(accountReview.accountId, accountId));
     });
     const snap = await t.run((ctx) => publishReviewSnapshot(ctx, accountId));
     expect(snap).toEqual({
       reviewStatusKey: 'unvetted',
       ownerUserId: 'usr_now',
-      ownerHistoryUserIds: expect.arrayContaining(['usr_old', 'usr_older']),
+      ownerHistoryUserIds: expect.arrayContaining(['usr_old', 'usr_auto']),
       hasOpenAssignment: true,
       stage: 'assigned',
       reviewFlags: ['declined_by_seller', 'new_from'],
     });
-    expect(snap.ownerHistoryUserIds).toHaveLength(2);
+    expect(snap.ownerHistoryUserIds).toHaveLength(2); // a pending assignment that was declined or replaced is not ownership
   });
 
   it('shows no owner when nothing is open', async () => {
     const accountId = await seedReview(t);
-    await t.run((ctx) => assign(ctx, accountId, 'usr_gone', 'replaced'));
+    await t.run((ctx) => assign(ctx, accountId, 'usr_gone', 'replaced', 'crm_activity'));
     const snap = await t.run((ctx) => publishReviewSnapshot(ctx, accountId));
     expect(snap).toMatchObject({ ownerUserId: null, ownerHistoryUserIds: ['usr_gone'], hasOpenAssignment: false, reviewFlags: [] });
   });

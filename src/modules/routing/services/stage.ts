@@ -6,12 +6,15 @@ import { stageChanged } from '../contracts/events';
 import { stageSchema, type Stage } from '../contracts/types';
 import { accountReview, stageChange } from '../db/schema';
 import { nextStage, type StageEvent } from '../domain/stages';
-import { publishReviewSnapshot } from './snapshot';
 
 /**
  * Applies a stage event to an account. Writes `stage_change` and publishes `routing.stage.changed`
  * only on a real move; a repeat of the same `causeId` is ignored, even when two deliveries race
  * (the unique index on the cause decides). Returns the move, or null when nothing moved.
+ *
+ * It does not publish the review snapshot: the calling write does that once, at its end. One cause
+ * moves an account at most once (unique on account and cause), so a write that needs two moves must
+ * make one move or use distinct causes.
  */
 export async function moveStage(
   ctx: ModuleContext,
@@ -42,6 +45,5 @@ export async function moveStage(
     .set({ stage: to, stageChangedAt: new Date() })
     .where(and(eq(accountReview.tenantId, ctx.tenantId), eq(accountReview.accountId, accountId)));
   await publish(ctx, stageChanged, { accountId, from, to, causeEventId: causeId });
-  await publishReviewSnapshot(ctx, accountId);
   return { from, to };
 }

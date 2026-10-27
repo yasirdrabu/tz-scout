@@ -11,9 +11,11 @@ export {
 export { autoAcceptJob } from './contracts/jobs';
 export {
   ownershipPreflight,
+  PREFLIGHT_RESULTS,
   registerOwnershipPreflight,
   type OwnershipPreflight,
   type OwnershipPreflightResult,
+  type PreflightResultKey,
 } from './contracts/ports';
 export {
   ASSIGNMENT_STATUSES,

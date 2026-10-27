@@ -52,6 +52,15 @@ describe('nextStage', () => {
     expect(nextStage('declined', 'reviewed')).toBeNull();
   });
 
+  it('does not decline or lose a finished account, nor lose a won one', () => {
+    expect(nextStage('won', 'declined')).toBeNull();
+    expect(nextStage('lost', 'declined')).toBeNull();
+    expect(nextStage('lost', 'won')).toBeNull();
+    expect(nextStage('engaged', 'declined')).toBe('declined');
+    expect(nextStage('opportunity', 'declined')).toBe('declined');
+    expect(nextStage('arrived', 'lost')).toBe('lost');
+  });
+
   it('does nothing for declined + withdraw or assignment decline', () => {
     expect(nextStage('declined', 'withdrawn')).toBeNull();
     expect(nextStage('declined', 'assignment_declined')).toBeNull();
