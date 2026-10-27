@@ -13,3 +13,6 @@ export {
 } from './contracts/types';
 export { scoringTenantDefaults } from './consumers';
 export { DEFAULT_PROFILE, seedScoringDefaults } from './defaults';
+export { getProfile, type ProfileView } from './services/profile';
+export { scoreAccount, type AccountScore, type ScoreOptions } from './services/score';
+export { getMatches, getScore, getScoreHistory, type OfferMatchView, type ScoreChangeView } from './services/read';

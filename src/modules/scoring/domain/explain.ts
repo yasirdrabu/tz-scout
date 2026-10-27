@@ -6,6 +6,7 @@ import { CURRENT_STATE, recency, signalDate } from './intent';
 
 const HARD_MISS_CAP = 45;
 const DAY_MS = 86_400_000;
+export const NO_OFFER_TEXT = 'No approved offer to match against.';
 const TIER_TITLE: Record<Tier, string> = { not_fit: 'Not a fit', watch: 'Watch', good_fit: 'Good fit', act_now: 'Act now' };
 
 export type ExplanationLine = {
@@ -26,7 +27,8 @@ export type Explanation = {
   priority: number;
   tier: Tier;
   tierReason: TierReason;
-  bestOffer: { id: string; name: string };
+  /** Null when the tenant has no approved offer to match against. */
+  bestOffer: { id: string; name: string } | null;
   lines: ExplanationLine[];
   otherOffers: { id: string; name: string; total: number; tier: Tier }[];
   missing: string[];
@@ -171,5 +173,6 @@ export function summarySentence(explanation: Explanation): string {
   const warm = group('adjust').find((l) => l.label.startsWith('Warm intro'));
   if (warm) reasons.push(warm.label === 'Warm intro' ? 'a warm intro' : `a warm intro from ${warm.label.slice('Warm intro from '.length)}`);
   const list = reasons.length > 1 ? `${reasons.slice(0, -1).join(', ')}, and ${reasons[reasons.length - 1]}` : reasons[0];
+  if (!explanation.bestOffer) return NO_OFFER_TEXT;
   return `${TIER_TITLE[explanation.tier]} for ${explanation.bestOffer.name} (priority ${explanation.priority}): ${list}.`;
 }
