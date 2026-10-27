@@ -184,7 +184,7 @@ export type ArrivalForAccounts = {
 const ACCOUNT_KEYS = [
   'name', 'domain', 'website_url', 'linkedin_url', 'industry', 'industry_key', 'employees', 'employees_min',
   'employees_max', 'revenue_cents', 'revenue_min_cents', 'revenue_max_cents', 'hq_city', 'hq_state', 'hq_country',
-  'description', 'technologies', 'keywords', 'parent_domain', 'headcount_growth_6m', 'founded_year',
+  'description', 'technologies', 'keywords', 'parent_domain', 'parent_name', 'headcount_growth_6m', 'founded_year',
 ];
 const PERSON_KEYS = [
   'first_name', 'last_name', 'title', 'seniority', 'email', 'email_status', 'phone', 'mobile_phone', 'linkedin_url',
