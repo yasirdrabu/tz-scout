@@ -1,5 +1,5 @@
 import { and, asc, eq, gt, gte, inArray, isNotNull, or, sql } from 'drizzle-orm';
-import type { SourceAccessProvider, SourceChain, SourceInfoProvider } from '@/modules/accounts';
+import { activeAccountIds, type SourceAccessProvider, type SourceChain, type SourceInfoProvider } from '@/modules/accounts';
 import { members, revokeKeysForSource, type SourceValidator } from '@/modules/tenancy';
 import type { DataLimit } from '@/platform/access';
 import type { ModuleContext } from '@/platform/context';
@@ -342,15 +342,17 @@ export async function bestTrustForAccounts(
   ctx: ModuleContext,
   accountIds: string[],
 ): Promise<{ trust: number; sourceId: string; sourceName: string } | null> {
-  let best: { trust: number; chain: SourceChain } | null = null;
+  let best: { trust: number; sourceId: string } | null = null;
   for (const chain of await chainsForAccount(ctx, accountIds)) {
+    // A chain with no source at all cannot be named, so the next-best chain wins instead.
+    const sourceId = chain.agentSourceId ?? chain.personSourceId ?? chain.vendorSourceId;
+    if (!sourceId) continue;
     const trust = await intakeSourceInfo.getTrust(ctx, chain);
-    if (!best || trust > best.trust) best = { trust, chain };
+    if (!best || trust > best.trust) best = { trust, sourceId };
   }
-  const sourceId = best && (best.chain.agentSourceId ?? best.chain.personSourceId ?? best.chain.vendorSourceId);
-  if (!best || !sourceId) return null;
-  const row = await loadSource(ctx, sourceId);
-  return { trust: best.trust, sourceId, sourceName: row?.name ?? sourceId };
+  if (!best) return null;
+  const row = await loadSource(ctx, best.sourceId);
+  return { trust: best.trust, sourceId: best.sourceId, sourceName: row?.name ?? best.sourceId };
 }
 
 /** Accounts with a resolved arrival from the source or any source below it, in id order, `limit` (at most 200) at a time. */
@@ -362,22 +364,31 @@ export async function accountIdsForSource(
   const limit = opts.limit ?? 200;
   if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw invalid('Ask for 1 to 200 accounts at a time.');
   const sources = [sourceId, ...(await childSources(ctx, [sourceId]))];
-  const rows = await ctx.tx
-    .selectDistinct({ id: arrival.accountId })
-    .from(arrival)
-    .where(
-      and(
-        eq(arrival.tenantId, ctx.tenantId),
-        eq(arrival.status, 'resolved'),
-        isNotNull(arrival.accountId),
-        opts.afterId ? gt(arrival.accountId, opts.afterId) : undefined,
-        or(inArray(arrival.personSourceId, sources), inArray(arrival.agentSourceId, sources), inArray(arrival.vendorSourceId, sources)),
-      ),
-    )
-    .orderBy(asc(arrival.accountId))
-    .limit(limit + 1);
-  const ids = rows.slice(0, limit).map((r) => r.id!);
-  return { ids, nextAfterId: rows.length > limit ? ids[ids.length - 1]! : null };
+  const found: string[] = [];
+  let cursor = opts.afterId;
+  // Archived and merged-away accounts are dropped, so read candidates in chunks until the page is full.
+  for (;;) {
+    const rows = await ctx.tx
+      .selectDistinct({ id: arrival.accountId })
+      .from(arrival)
+      .where(
+        and(
+          eq(arrival.tenantId, ctx.tenantId),
+          eq(arrival.status, 'resolved'),
+          isNotNull(arrival.accountId),
+          cursor ? gt(arrival.accountId, cursor) : undefined,
+          or(inArray(arrival.personSourceId, sources), inArray(arrival.agentSourceId, sources), inArray(arrival.vendorSourceId, sources)),
+        ),
+      )
+      .orderBy(asc(arrival.accountId))
+      .limit(1000);
+    const candidates = rows.map((r) => r.id!);
+    found.push(...(await activeAccountIds(ctx, candidates)));
+    if (found.length > limit || candidates.length < 1000) break;
+    cursor = candidates[candidates.length - 1];
+  }
+  const ids = found.slice(0, limit);
+  return { ids, nextAfterId: found.length > limit ? ids[ids.length - 1]! : null };
 }
 
 /** Accounts' `SourceAccessProvider`. */

@@ -258,6 +258,7 @@ export async function listAccountIds(
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE) {
     throw new ScoutError({ slug: 'validation', status: 400, title: `Ask for 1 to ${MAX_PAGE} accounts at a time.` });
   }
+  // An empty `practiceIds` without `includeNoPractice` matches nothing.
   const byPractice =
     opts.practiceIds || opts.includeNoPractice
       ? or(
@@ -288,6 +289,17 @@ export async function listAccountIds(
     .limit(limit + 1);
   const ids = rows.slice(0, limit).map((r) => r.id);
   return { ids, nextAfterId: rows.length > limit ? ids[ids.length - 1]! : null };
+}
+
+/** The subset of `ids` that are active accounts (not archived, so not merged away), in the order given. No visibility filter. */
+export async function activeAccountIds(ctx: ModuleContext, ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const rows = await ctx.tx
+    .select({ id: account.id })
+    .from(account)
+    .where(and(eq(account.tenantId, ctx.tenantId), inArray(account.id, ids), isNull(account.archivedAt)));
+  const ok = new Set(rows.map((r) => r.id));
+  return ids.filter((id) => ok.has(id));
 }
 
 export type AccountSummaryView = {

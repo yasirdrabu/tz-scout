@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { account } from '@/modules/accounts/db/schema';
 import { mergeAccounts } from '@/modules/accounts';
 import {
   accountIdsForSource,
@@ -8,10 +9,11 @@ import {
   getArrival,
   getWarmIntro,
   intakeSourceInfo,
+  registerSource,
   sourceTrustChanged,
   submitArrival,
 } from '@/modules/intake';
-import { arrival } from '@/modules/intake/db/schema';
+import { arrival, source } from '@/modules/intake/db/schema';
 import { closeDbs } from '@/platform/db/client';
 import { eventDef } from '@/platform/events/registry';
 import { newId } from '@/platform/ids';
@@ -83,6 +85,19 @@ describe('chains, trust and sources by account', () => {
     expect(await t.run((ctx) => bestTrustForAccounts(ctx, []))).toBeNull();
   });
 
+  it('bestTrustForAccounts skips a chain with no source and falls back to the next best', async () => {
+    const d = domain();
+    const first = await send(ash.agentId, { domain: d });
+    const second = await send(bo.agentId, { domain: d });
+    await runOutbox(t.tenantId);
+    const accountId = await accountOf(first.arrivalId);
+    await t.run((ctx) =>
+      ctx.tx.update(arrival).set({ personSourceId: null, agentSourceId: null, vendorSourceId: null }).where(eq(arrival.id, second.arrivalId)),
+    );
+    vi.spyOn(intakeSourceInfo, 'getTrust').mockImplementation(async (_ctx, chain) => (chain.agentSourceId ? 0.5 : 0.95));
+    expect(await t.run((ctx) => bestTrustForAccounts(ctx, [accountId]))).toEqual({ trust: 0.5, sourceId: ash.agentId, sourceName: 'Ash agent' });
+  });
+
   it('accountIdsForSource includes the source children and pages by id', async () => {
     const cy = await personAndAgent(t, 'Cy');
     const dee = await personAndAgent(t, 'Dee');
@@ -105,6 +120,25 @@ describe('chains, trust and sources by account', () => {
     const next = await t.run((ctx) => accountIdsForSource(ctx, cy.personId, { limit: 1, afterId: one.nextAfterId! }));
     expect(next).toEqual({ ids: [sorted[1]], nextAfterId: null });
     await expect(t.run((ctx) => accountIdsForSource(ctx, cy.personId, { limit: 201 }))).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe('accountIdsForSource edges', () => {
+  it('includes a source two levels down and leaves out archived accounts', async () => {
+    const eve = await personAndAgent(t, 'Eve');
+    const grand = await t.run(async (ctx) => {
+      const g = await registerSource(ctx, { kind: 'partner', name: 'Eve grandchild' });
+      await ctx.tx.update(source).set({ parentId: eve.agentId }).where(eq(source.id, g.id));
+      return g.id;
+    });
+    const viaAgent = await send(eve.agentId, { domain: domain() });
+    const viaGrand = await send(grand, { domain: domain() });
+    const gone = await send(eve.agentId, { domain: domain() });
+    await runOutbox(t.tenantId);
+    const [agentAcc, grandAcc, goneAcc] = await Promise.all([viaAgent, viaGrand, gone].map((s) => accountOf(s.arrivalId)));
+    await t.run((ctx) => ctx.tx.update(account).set({ archivedAt: new Date() }).where(eq(account.id, goneAcc!)));
+    const ids = (await t.run((ctx) => accountIdsForSource(ctx, eve.personId))).ids;
+    expect(ids).toEqual([agentAcc!, grandAcc!].sort());
   });
 });
 

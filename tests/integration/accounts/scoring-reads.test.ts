@@ -137,6 +137,7 @@ describe('listAccountIds', () => {
     expect([...first.ids, ...second.ids, ...third.ids]).toEqual(ids);
 
     expect((await page({ practiceIds: [p1.id] })).ids).toEqual(ids.slice(0, 100));
+    expect((await page({ practiceIds: [] })).ids).toEqual([]);
     expect((await page({ practiceIds: [p1.id, p2.id] })).ids).toEqual(ids.slice(0, 150));
     const none = await page({ includeNoPractice: true }); // 300 match, so the first page is full
     expect(none.ids).toEqual(ids.slice(150, 350));
@@ -201,6 +202,17 @@ describe('events', () => {
     expect((await eventsOf(accountId, 'accounts.signal.recorded')).at(-1)!.payload.data.arrivalId).toBe(a.arrivalId);
     const updated = (await eventsOf(accountId, 'accounts.account.updated')).at(-1)!.payload.data;
     expect(updated).toMatchObject({ arrivalId: a.arrivalId, changedKeys: ['employees'] });
+  });
+
+  it('a practice hint on an existing account carries arrivalId', async () => {
+    await t.run((ctx) => createPractice(ctx, { name: 'Hint Practice', slug: 'hint-practice' }));
+    const out = await seed();
+    const a = arrival({ practiceHint: 'hint-practice' });
+    await t.run((ctx) => upsertFromArrival(ctx, a, out.accountId));
+    const updates = (await eventsOf(out.accountId, 'accounts.account.updated')).map((e) => e.payload.data);
+    expect(updates.filter((d) => (d.changedKeys as string[]).includes('practice_ids'))).toEqual([
+      { accountId: out.accountId, changedKeys: ['practice_ids'], arrivalId: a.arrivalId },
+    ]);
   });
 
   it('archiveSignal publishes accounts.account.updated with changedKeys signals', async () => {

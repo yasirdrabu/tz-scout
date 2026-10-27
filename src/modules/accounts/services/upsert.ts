@@ -267,7 +267,7 @@ export async function upsertFromArrival(
   if (target.created) await publishCreated(ctx, id, a);
   // 7. Practices. A new account's practices are part of its creation, not an update.
   const practiceId = await resolvePractice(ctx, a.practiceHint);
-  if (practiceId) await setPractices(ctx, id, [practiceId], 'hint', { publish: !target.created });
+  if (practiceId) await setPractices(ctx, id, [practiceId], 'hint', { publish: !target.created, arrivalId: a.arrivalId });
   // 8. Exclusion.
   const excluded = await applyExclusion(ctx, id);
   // 9. Summary, with this arrival's sources added inline.
