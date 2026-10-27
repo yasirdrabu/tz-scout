@@ -25,7 +25,14 @@ export type IdPrefix =
   | 'acc'
   | 'per'
   | 'fct'
-  | 'sig';
+  | 'sig'
+  | 'src'
+  | 'arr'
+  | 'bat'
+  | 'imp'
+  | 'map'
+  | 'wi'
+  | 'blob';
 
 const ulid = monotonicFactory();
 

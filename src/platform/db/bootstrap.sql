@@ -30,10 +30,11 @@ create schema if not exists integrations authorization scout_admin;
 create schema if not exists ai authorization scout_admin;
 create schema if not exists offers authorization scout_admin;
 create schema if not exists accounts authorization scout_admin;
+create schema if not exists intake authorization scout_admin;
 
-grant usage on schema platform, tenancy, integrations, ai, offers, accounts to scout_app;
-grant select, insert, update, delete on all tables in schema platform, tenancy, integrations, ai, offers, accounts to scout_app;
-grant usage, select on all sequences in schema platform, tenancy, integrations, ai, offers, accounts to scout_app;
+grant usage on schema platform, tenancy, integrations, ai, offers, accounts, intake to scout_app;
+grant select, insert, update, delete on all tables in schema platform, tenancy, integrations, ai, offers, accounts, intake to scout_app;
+grant usage, select on all sequences in schema platform, tenancy, integrations, ai, offers, accounts, intake to scout_app;
 
 -- The audit log is append only for the app role (table is created by migration 0005).
 do $$ begin
@@ -42,7 +43,7 @@ do $$ begin
   end if;
 end $$;
 
-alter default privileges for role scout_admin in schema platform, tenancy, integrations, ai, offers, accounts
+alter default privileges for role scout_admin in schema platform, tenancy, integrations, ai, offers, accounts, intake
   grant select, insert, update, delete on tables to scout_app;
-alter default privileges for role scout_admin in schema platform, tenancy, integrations, ai, offers, accounts
+alter default privileges for role scout_admin in schema platform, tenancy, integrations, ai, offers, accounts, intake
   grant usage, select on sequences to scout_app;

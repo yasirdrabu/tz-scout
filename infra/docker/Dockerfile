@@ -36,6 +36,7 @@ COPY --from=build --chown=node:node /app/src/modules/integrations/db/migrations 
 COPY --from=build --chown=node:node /app/src/modules/ai-tasks/db/migrations ./src/modules/ai-tasks/db/migrations
 COPY --from=build --chown=node:node /app/src/modules/offers/db/migrations ./src/modules/offers/db/migrations
 COPY --from=build --chown=node:node /app/src/modules/accounts/db/migrations ./src/modules/accounts/db/migrations
+COPY --from=build --chown=node:node /app/src/modules/intake/db/migrations ./src/modules/intake/db/migrations
 COPY --chown=node:node --chmod=755 infra/docker/entrypoint.sh ./entrypoint.sh
 USER node
 EXPOSE 4240

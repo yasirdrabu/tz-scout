@@ -11,4 +11,6 @@ import '@/modules/ai-tasks';
 import '@/modules/offers/contracts/events';
 import '@/modules/accounts/contracts/events';
 import '@/modules/accounts';
+import '@/modules/intake/contracts/events';
+import '@/modules/intake';
 import './compose';
