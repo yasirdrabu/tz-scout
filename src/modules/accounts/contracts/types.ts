@@ -137,17 +137,19 @@ export type ArrivalPerson = {
   decisionNote?: string;
 };
 
-export type ArrivalSignal = {
+type ArrivalSignalBase = {
   type?: string;
-  kind: SignalKind;
   title: string;
   detail?: string;
   url?: string;
   value?: unknown;
-  /** Required unless `kind` is `research`. */
-  occurredAt?: Date;
   externalId?: string;
 };
+
+/** A dated signal, or a research signal, which may have no date. */
+export type ArrivalSignal =
+  | (ArrivalSignalBase & { kind: 'research'; occurredAt?: Date })
+  | (ArrivalSignalBase & { kind: 'trigger' | 'pain'; occurredAt: Date });
 
 export type ArrivalFact = {
   key: string;

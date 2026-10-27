@@ -57,7 +57,7 @@ describe('accounts.tenant_defaults', () => {
 
 describe('SourceInfoProvider default', () => {
   it('trusts every source at 0.60 when none is registered', async () => {
-    const out = await a.run((ctx) => sourceInfoProvider().getTrust(ctx, ['src_a', 'src_b']));
-    expect(out).toEqual(new Map([['src_a', 0.6], ['src_b', 0.6]]));
+    const out = await a.run((ctx) => sourceInfoProvider().getTrust(ctx, { agentSourceId: 'src_a' }));
+    expect(out).toBe(0.6);
   });
 });

@@ -1,12 +1,13 @@
 import type { ModuleContext } from '@/platform/context';
+import type { SourceChain } from './types';
 
 // Ports Accounts defines and higher modules implement. The composition root (src/entry/compose.ts)
 // registers the implementations; until then the defaults below apply.
 
 /** Implemented by intake. */
 export interface SourceInfoProvider {
-  /** Effective trust (0 to 1) per source id. */
-  getTrust(ctx: ModuleContext, sourceIds: string[]): Promise<Map<string, number>>;
+  /** Effective trust (0 to 1) of one source chain: 0.4 person, 0.3 agent, 0.3 vendor, re-weighted over the levels present. */
+  getTrust(ctx: ModuleContext, chain: SourceChain): Promise<number>;
   sourcesForAccount(ctx: ModuleContext, accountId: string): Promise<string[]>;
 }
 
@@ -30,7 +31,7 @@ export interface SourceAccessProvider {
 const DEFAULT_TRUST = 0.6;
 
 const defaultSourceInfo: SourceInfoProvider = {
-  getTrust: async (_ctx, sourceIds) => new Map(sourceIds.map((id) => [id, DEFAULT_TRUST])),
+  getTrust: async () => DEFAULT_TRUST,
   sourcesForAccount: async () => [],
 };
 const defaultMergeGuard: MergeGuard = { check: async () => ({ allowed: true }) };
