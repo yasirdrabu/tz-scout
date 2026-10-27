@@ -64,7 +64,7 @@ const as = (who: keyof typeof cookies, handler: (r: Request) => Promise<Response
     }),
   );
 
-const domain = () => `${newId('acc').slice(-10).toLowerCase()}.example.com`;
+const domain = () => `${newId('acc').slice(-10).toLowerCase()}-example.com`;
 const seedAccount = async (over: Partial<ArrivalForAccounts> = {}) =>
   (
     await run((ctx) =>
@@ -174,7 +174,6 @@ describe('waiting arrivals', () => {
       const w = await waiting({ account: { name: `${stem} ${firm}`, domain: domain(), country: 'US', region: 'FL', city } });
       return { existing, id: w.id };
     };
-    // Runs first in this group: accounts that earlier tests resolve change what counts as a duplicate.
     // Both arrivals wait before either is answered, so the account one creates can't change the other's candidates.
     const a = await duplicate('NewCo', 'Orlando', 'Harborview Capital Partner');
     const b = await duplicate('SameAs', 'Orlando', 'Westbrook Equity Partner');
