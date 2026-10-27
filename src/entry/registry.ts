@@ -15,4 +15,6 @@ import '@/modules/intake/contracts/events';
 import '@/modules/intake';
 import '@/modules/scoring/contracts/events';
 import '@/modules/scoring';
+import '@/modules/routing/contracts/events';
+import '@/modules/routing';
 import './compose';

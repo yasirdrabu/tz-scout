@@ -38,7 +38,7 @@ describe('migrateAll', () => {
   });
 
   it('orders modules platform, tenancy, integrations, ai, offers', () => {
-    expect([...MODULE_ORDER]).toEqual(['platform', 'tenancy', 'integrations', 'ai', 'offers', 'accounts', 'intake', 'scoring']);
+    expect([...MODULE_ORDER]).toEqual(['platform', 'tenancy', 'integrations', 'ai', 'offers', 'accounts', 'intake', 'scoring', 'routing']);
   });
 
   it('applies a migration once and applies 0 on the second run', async () => {
@@ -52,6 +52,7 @@ describe('migrateAll', () => {
       accounts: emptyMigrations(),
       intake: emptyMigrations(),
       scoring: emptyMigrations(),
+      routing: emptyMigrations(),
     };
     const count = async () => {
       const sql = postgres(db.adminUrl, { max: 1 });

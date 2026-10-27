@@ -5,6 +5,7 @@ import type { DataLimit } from '@/platform/access';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
+import { reviewStatusValidator } from '../contracts/ports';
 import { arrival, source } from '../db/schema';
 
 export const SOURCE_KINDS = ['person', 'agent', 'vendor', 'partner', 'crm', 'web_form', 'scheduled_pull'] as const;
@@ -64,6 +65,11 @@ export type SourcePatch = {
 const invalid = (title: string) => new ScoutError({ slug: 'validation', status: 400, title });
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That source was not found.' });
 
+/** A starting status the tenant picked must be one of its active review statuses (once routing is registered). */
+async function checkReviewStatus(ctx: ModuleContext, key: string | undefined): Promise<void> {
+  if (key && !(await reviewStatusValidator().exists(ctx, key))) throw invalid('Pick a review status from your list.');
+}
+
 type Row = typeof source.$inferSelect;
 
 function view(r: Row): SourceView {
@@ -114,6 +120,7 @@ export async function registerSource(ctx: ModuleContext, input: RegisterSourceIn
   if (!SOURCE_KINDS.includes(input.kind)) throw invalid('Pick a kind of source.');
   const name = checkName(input.name)!;
   checkCap(input.dailyArrivalCap);
+  await checkReviewStatus(ctx, input.initialReviewStatusKey?.trim());
 
   const needs = PARENT_KIND[input.kind];
   if (needs) {
@@ -167,6 +174,7 @@ export async function updateSource(ctx: ModuleContext, id: string, patch: Source
   }
   const initialReviewStatusKey = patch.initialReviewStatusKey?.trim();
   if (patch.initialReviewStatusKey !== undefined && !initialReviewStatusKey) throw invalid('Pick a starting review status.');
+  await checkReviewStatus(ctx, initialReviewStatusKey);
 
   const [row] = await ctx.tx
     .update(source)

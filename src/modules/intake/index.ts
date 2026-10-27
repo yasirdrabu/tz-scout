@@ -95,3 +95,4 @@ export {
   type ImportCreated,
   type ImportView,
 } from './services/imports';
+export { registerReviewStatusValidator, type ReviewStatusValidator } from './contracts/ports';

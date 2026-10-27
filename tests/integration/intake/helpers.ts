@@ -1,11 +1,18 @@
 import '@/entry/compose';
 import { registerSource } from '@/modules/intake';
+import { seedRoutingDefaults } from '@/modules/routing';
 import type { Access } from '@/platform/access';
 import type { ModuleContext } from '@/platform/context';
-import { freshTenant } from '../integrations/helpers';
+import { freshTenant as baseFreshTenant } from '../integrations/helpers';
 
-export type Tenant = Awaited<ReturnType<typeof freshTenant>>;
-export { freshTenant };
+export type Tenant = Awaited<ReturnType<typeof baseFreshTenant>>;
+
+/** A fresh tenant with the routing defaults in place, so a source can name the default review statuses. */
+export async function freshTenant(): Promise<Tenant> {
+  const t = await baseFreshTenant();
+  await t.run((ctx) => seedRoutingDefaults(ctx));
+  return t;
+}
 
 /** Runs `fn` in the tenant as the given source, the way an API key with that source would. */
 export function asSource<T>(t: Tenant, sourceId: string, fn: (ctx: ModuleContext) => Promise<T>): Promise<T> {
