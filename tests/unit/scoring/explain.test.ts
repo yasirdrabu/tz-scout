@@ -36,6 +36,8 @@ function explain(acc: ScoringAccount, off: ScoringOffer, signals: ScoringSignal[
     fit: f,
     hits: i.hits,
     intent: i.intent,
+    signals,
+    now: NOW,
     combine,
     profile,
     tier: floored.tier,
@@ -99,6 +101,7 @@ describe('buildExplanation', () => {
     ]);
     const news = e.lines.find((l) => l.label.startsWith('Re-solicitation'));
     expect(news).toMatchObject({ group: 'intent', points: 15.7, max: 25, kind: 'trigger', signalIds: ['sig_news'] });
+    expect(news?.text).toBe('News from Sep 14, 2026 (30 days ago, counts 63%).');
     expect(e.profileVersion).toBe(3);
     expect(e.computedAt).toBe('2026-10-14T12:00:00.000Z');
   });
@@ -131,7 +134,7 @@ describe('buildExplanation', () => {
     expect(e.lines.find((l) => l.group === 'intent')).toMatchObject({ kind: 'research', signalIds: ['sig_res'] });
     expect(e.missing).toEqual([
       'Revenue unknown: adding it could change fit by up to 10 points.',
-      'Region unknown: adding it could change fit by up to 5 points.',
+      'Location unknown: adding it could change fit by up to 5 points.',
     ]);
   });
 
@@ -151,10 +154,38 @@ describe('buildExplanation', () => {
 
   it('SCO-E3-S3-AC4: a disqualified account stays not a fit and names the exclusion', () => {
     const off = offer({ excludedDomains: ['acme.com'] });
-    const { e } = explain(account(), off, [], { researchTier: 'A', warm: { name: 'Zach Wiant', points: 8 } });
+    const rules = [rule({ id: 'r1', type: 'news', weight: 50 })];
+    const sigs = [signal({ id: 's1', type: 'news', title: 'a' })];
+    const { e } = explain(account(), { ...off, rules }, sigs, { researchTier: 'A', warm: { name: 'Zach Wiant', points: 8 } });
     expect(e.tier).toBe('not_fit');
+    expect(e.lines.filter((l) => l.group === 'fit')).toHaveLength(1);
     expect(e.lines.find((l) => l.label === 'Excluded')?.text).toBe('acme.com is on the excluded list.');
     expect(e.lines.some((l) => l.group === 'adjust')).toBe(false);
+    expect(Math.abs(sumLines(e) - e.priority)).toBeLessThanOrEqual(1);
+  });
+
+  it('a negative trust line shows, a zero modifier line is omitted', () => {
+    const { off, acc, sigs } = exampleA();
+    const low = explain(acc, off, sigs, { trust: { value: 0.4, sourceName: 'Feed' } }).e;
+    expect(low.lines.filter((l) => l.group === 'adjust')).toEqual([{ group: 'adjust', label: 'Source trust 0.40 (Feed)', points: -5, max: 5 }]);
+    expect(Math.abs(sumLines(low) - low.priority)).toBeLessThanOrEqual(1);
+    const neutral = explain(acc, off, sigs, { trust: { value: 0.6, sourceName: 'Feed' } }).e;
+    expect(neutral.lines.some((l) => l.group === 'adjust')).toBe(false);
+  });
+
+  it('intent lines above 100 still add up through the clamp', () => {
+    const { acc } = exampleA();
+    const off = offer({
+      industries: ['Government'],
+      companySizeMin: 1000,
+      companySizeMax: 50000,
+      rules: [rule({ id: 'a', type: 'news', weight: 80 }), rule({ id: 'b', type: 'leadership', weight: 80 })],
+    });
+    const sigs = [signal({ id: 's1', type: 'news', title: 'a' }), signal({ id: 's2', type: 'leadership', title: 'b' })];
+    const { e, i } = explain(acc, off, sigs);
+    expect(i.intent).toBe(100);
+    expect(e.lines.filter((l) => l.group === 'intent').reduce((s, l) => s + (l.points ?? 0), 0)).toBeGreaterThan(100);
+    expect(Math.abs(sumLines(e) - e.priority)).toBeLessThanOrEqual(1);
   });
 });
 
@@ -163,7 +194,7 @@ describe('summarySentence', () => {
     const { off, acc, sigs } = exampleA();
     const { e } = explain(acc, off, sigs, { warm: { name: 'Zach Wiant', points: 8 }, trust: { value: 0.72, sourceName: 'Agent' } });
     expect(summarySentence(e)).toBe(
-      'Good fit for Modernization Blueprint (priority 76): strong fit, Re-solicitation of the paratransit software contract, and a warm intro from Zach Wiant.',
+      'Good fit for Modernization Blueprint (priority 76): strong fit, Re-solicitation of the paratransit software contract 30 days ago, and a warm intro from Zach Wiant.',
     );
   });
 });

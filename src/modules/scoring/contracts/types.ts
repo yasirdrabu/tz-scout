@@ -104,7 +104,8 @@ export type ScoringOffer = {
 };
 
 export type FitPartKey = keyof FitParts;
-export type FitPart = { key: FitPartKey; label: string; points: number; max: number; note: string };
+/** `unknown` is true when the account has no value for this part, so it earned a middle share. */
+export type FitPart = { key: FitPartKey; label: string; points: number; max: number; note: string; unknown: boolean };
 
 export type RuleHit = {
   ruleId: string;

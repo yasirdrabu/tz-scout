@@ -55,7 +55,7 @@ const PART_LABELS: Record<FitPartKey, string> = { industry: 'Industry', size: 'C
 /** Fit 0, with all five parts at 0 points so each says why. */
 const disqualified = (reason: string, profile: ScoringProfile): FitResult => ({
   fit: 0,
-  parts: (Object.keys(PART_LABELS) as FitPartKey[]).map((key) => ({ key, label: PART_LABELS[key], points: 0, max: profile.fitParts[key], note: reason })),
+  parts: (Object.keys(PART_LABELS) as FitPartKey[]).map((key) => ({ key, label: PART_LABELS[key], points: 0, max: profile.fitParts[key], note: reason, unknown: false })),
   disqualifiedReason: reason,
   hardMiss: false,
 });
@@ -71,16 +71,16 @@ export function fit(account: ScoringAccount, offer: ScoringOffer, profile: Scori
   const parts: FitPart[] = [];
   const misses = new Set<FitPartKey>();
   /** `share` is the part of the max earned; 0 with `miss` means known and wrong. */
-  const add = (key: FitPartKey, label: string, share: number, note: string, miss = false) => {
+  const add = (key: FitPartKey, label: string, share: number, note: string, miss = false, unknown = false) => {
     const max = profile.fitParts[key];
-    parts.push({ key, label, points: max * share, max, note });
+    parts.push({ key, label, points: max * share, max, note, unknown });
     if (miss) misses.add(key);
   };
 
   const a = account;
   // Industry
   if (offer.industries.length === 0) add('industry', 'Industry', 1, 'No industry limit on this offer.');
-  else if (!a.industry) add('industry', 'Industry', 0.5, 'Industry unknown.');
+  else if (!a.industry) add('industry', 'Industry', 0.5, 'Industry unknown.', false, true);
   else {
     const hit = offer.industries.find((i) => industryMatches(i, a.industry));
     add('industry', 'Industry', hit ? 1 : 0, hit ? `${a.industry} matches ${hit}.` : `${a.industry} isn't a target industry.`, !hit);
@@ -89,7 +89,7 @@ export function fit(account: ScoringAccount, offer: ScoringOffer, profile: Scori
   // Company size
   const { companySizeMin: lo, companySizeMax: hi } = offer;
   if (lo == null && hi == null) add('size', 'Company size', 1, 'No size limit.');
-  else if (a.employees == null) add('size', 'Company size', 12 / 25, 'Headcount unknown.');
+  else if (a.employees == null) add('size', 'Company size', 12 / 25, 'Headcount unknown.', false, true);
   else {
     const e = a.employees;
     const inRange = (lo == null || e >= lo) && (hi == null || e <= hi);
@@ -102,7 +102,7 @@ export function fit(account: ScoringAccount, offer: ScoringOffer, profile: Scori
   const rlo = offer.revenueMinCents;
   const rhi = offer.revenueMaxCents;
   if (rlo == null && rhi == null) add('revenue', 'Revenue', 1, 'No revenue limit.');
-  else if (a.revenueCents == null) add('revenue', 'Revenue', 0.5, 'Revenue unknown.');
+  else if (a.revenueCents == null) add('revenue', 'Revenue', 0.5, 'Revenue unknown.', false, true);
   else {
     const ok = (rlo == null || a.revenueCents >= rlo) && (rhi == null || a.revenueCents <= rhi);
     add('revenue', 'Revenue', ok ? 1 : 0, `About $${Math.round(a.revenueCents / 100_000_000)}M${ok ? ', in band' : ', out of band'}.`);
@@ -110,7 +110,7 @@ export function fit(account: ScoringAccount, offer: ScoringOffer, profile: Scori
 
   // Region
   if (offer.regions.length === 0) add('region', 'Region', 1, 'No region limit.');
-  else if (!a.country) add('region', 'Region', 0.5, 'Location unknown.');
+  else if (!a.country) add('region', 'Region', 0.5, 'Location unknown.', false, true);
   else {
     const country = a.country;
     const ok = offer.regions.some((r) => sameCountry(r, country));

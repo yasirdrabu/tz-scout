@@ -6,7 +6,7 @@ import { norm } from './fit';
 
 const DAY_MS = 86400_000;
 /** Types that describe the current state of the company, so they do not fade. */
-const CURRENT_STATE = new Set(['tech', 'growth', 'workforce']);
+export const CURRENT_STATE = new Set(['tech', 'growth', 'workforce']);
 
 /** Research scores arrive as 0 to 1 or 0 to 100. This is the one place that reads them as 0 to 1. */
 export function researchScore(value: number): number {
@@ -23,12 +23,12 @@ function keywordHit(text: string, keyword: string): boolean {
 const matchesKeywords = (text: string, keywords: string[]) => keywords.length === 0 || keywords.some((k) => keywordHit(text, k));
 
 /** When a signal happened; with no date, the day it was recorded. */
-function signalDate(s: ScoringSignal): Date {
+export function signalDate(s: ScoringSignal): Date {
   if (s.occurredAt) return s.occurredAt;
   return new Date(Math.floor(s.recordedAt.getTime() / DAY_MS) * DAY_MS);
 }
 
-function recency(type: string, at: Date, now: Date, profile: ScoringProfile): number {
+export function recency(type: string, at: Date, now: Date, profile: Pick<ScoringProfile, 'halfLifeDays' | 'maxSignalAgeDays'>): number {
   if (CURRENT_STATE.has(type)) return 1;
   const age = (now.getTime() - at.getTime()) / DAY_MS;
   if (age > profile.maxSignalAgeDays) return 0;

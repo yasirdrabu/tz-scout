@@ -50,6 +50,11 @@ describe('fit', () => {
     expect(r.fit).toBe(0);
     expect(r.disqualifiedReason).toContain('Software vendor');
   });
+  it('flags the parts whose input is unknown', () => {
+    const r = score(account({ industry: null, employees: null, revenueCents: null, country: null }));
+    expect(r.parts.filter((p) => p.unknown).map((p) => p.key)).toEqual(['industry', 'size', 'revenue', 'region']);
+    expect(score(account()).parts.some((p) => p.unknown)).toBe(false);
+  });
   it('US aliases are equal', () => {
     for (const country of ['USA', 'US', 'U.S.', 'United States of America']) {
       expect(part(score(account({ country })), 'region').points).toBe(10);
