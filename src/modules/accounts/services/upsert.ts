@@ -87,9 +87,11 @@ function accountFacts(a: ArrivalForAccounts, isShell: boolean): FactInput[] {
   return out;
 }
 
-async function addAliases(ctx: ModuleContext, accountId: string, a: ArrivalForAccounts): Promise<void> {
+/** `previousDomain`: the domain before this arrival's facts were projected. A replaced primary stays an alias. */
+async function addAliases(ctx: ModuleContext, accountId: string, a: ArrivalForAccounts, previousDomain: string | null): Promise<void> {
   const [acc] = await ctx.tx.select().from(account).where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
   const rows: (typeof accountAlias.$inferInsert)[] = [];
+  if (previousDomain && previousDomain !== acc!.domain) rows.push({ tenantId: ctx.tenantId, accountId, kind: 'domain', value: previousDomain });
   const domain = a.account.domain?.toLowerCase();
   if (domain && domain !== acc!.domain) rows.push({ tenantId: ctx.tenantId, accountId, kind: 'domain', value: domain });
   const name = a.account.name ? matchName(a.account.name) : '';
@@ -219,11 +221,15 @@ export async function upsertFromArrival(ctx: ModuleContext, a: ArrivalForAccount
   const id = await lockLive(ctx, target.id);
   const chain = a.sourceChain;
 
+  const [before] = await ctx.tx
+    .select({ domain: account.domain })
+    .from(account)
+    .where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, id)));
   // 1, 2. Facts about the account, then the current values.
   const factIds = await recordFacts(ctx, id, null, accountFacts(a, target.isShell), chain, a.arrivalId);
   await reproject(ctx, id);
   // 3. Aliases.
-  await addAliases(ctx, id, a);
+  await addAliases(ctx, id, a, before?.domain ?? null);
   // 4. People.
   const people: PersonResult[] = [];
   for (const [i, p] of a.people.entries()) {

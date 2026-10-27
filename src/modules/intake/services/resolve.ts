@@ -3,64 +3,44 @@ import {
   checkExclusion,
   findMatches,
   getAccounts,
-  isKnownFactKey,
   matchName,
-  splitName,
   trigramSimilarity,
   upsertFromArrival,
   type ArrivalForAccounts,
   type Exclusion,
   type SourceChain,
 } from '@/modules/accounts';
-import type { ArrivalAccountFields, ArrivalFact, ArrivalPerson, ArrivalSignal } from '@/modules/accounts/contracts/types';
 import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
 import { ArrivalV1Schema, moveItemFields, type ArrivalV1 } from '../contracts/arrival';
 import { arrivalRejected, arrivalResolved, arrivalWaiting, batchCompleted } from '../contracts/events';
 import { arrival, batch } from '../db/schema';
-import { industryKey } from '../domain/industry';
-import { countryCode, domainFromEmail, normaliseDomain, parseRange } from '../domain/normalise';
-import { relationshipKey } from '../domain/warm-intro';
+import {
+  defined,
+  lockKeyOf,
+  normaliseArrival,
+  revive,
+  shellEmail,
+  unmapped,
+  waitingFor,
+  withInput,
+  type Normalised,
+  type ResolutionInput,
+  type WaitingOn,
+} from '../domain/normalise-arrival';
 import { normaliseWithAi } from '../tasks/arrival-normalise';
 import { DEFAULT_REVIEW_STATUS, intakeSourceInfo, loadSource, type SourceKind } from './sources';
-import { recordWarmIntro, type DeclaredBy, type WarmIntroInput, type WarmIntroView } from './warm-intros';
+import { recordWarmIntro, type DeclaredBy, type WarmIntroView } from './warm-intros';
 
 export type RejectReason = 'invalid' | 'excluded' | 'daily_cap_reached' | 'duplicate_in_batch';
-type WaitingOn = 'needs_website' | 'needs_company' | 'possible_duplicate';
-
-/** What a person decided while the arrival waited (written by the waiting services). */
-export type ResolutionInput = {
-  website?: string;
-  company?: { name: string; website?: string };
-  soleProprietor?: boolean;
-  duplicate?: { kind: 'same_as'; accountId: string } | { kind: 'new_company' };
-};
-
 export type InlineResult = { arrivalId: string; accountId: string; personIds: string[]; signalIds: string[]; alreadyKnown: boolean };
 
 /** Tests only: runs after each step is recorded, so a test can fail a job part-way. */
 export const resolveTestHooks: { afterStep?: (step: string) => void | Promise<void> } = {};
 
-/** Step 2's output, saved on `arrival.normalised` (dates as ISO strings in the database). */
-type Normalised = {
-  account: ArrivalAccountFields;
-  people: ArrivalPerson[];
-  signals: ArrivalSignal[];
-  facts: ArrivalFact[];
-  research: Record<string, unknown>;
-  practiceHint?: string;
-  offerHint?: string;
-  soleProprietor: boolean;
-  warmIntro?: WarmIntroInput;
-};
-
 type ArrivalRow = typeof arrival.$inferSelect;
 type Counts = { resolved: number; rejected: number; newAccounts: number; alreadyKnown: number };
 
-const str = (s: string | null | undefined): string | undefined => s?.trim() || undefined;
-const num = (v: number | null | undefined): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
-const defined = <T extends object>(o: T): T =>
-  Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 const subject = (id: string) => ({ type: 'arrival', id });
 const chainOf = (r: ArrivalRow): SourceChain =>
   defined({
@@ -69,165 +49,10 @@ const chainOf = (r: ArrivalRow): SourceChain =>
     vendorSourceId: r.vendorSourceId ?? undefined,
   });
 
-// ---- Step 2: normalising (pure apart from the AI fallback) ----
-
-function normaliseAccount(a: ArrivalV1, industry: string | undefined): ArrivalAccountFields {
-  const acc = a.account ?? {};
-  const website = normaliseDomain(acc.website) ? str(acc.website) : undefined;
-  // A sole proprietor's email names a person, not a company.
-  const emailDomain = a.sole_proprietor ? null : a.people.map((p) => normaliseDomain(domainFromEmail(p.email))).find(Boolean);
-  const employees = parseRange(acc.employees_range);
-  const revenue = parseRange(acc.revenue_range);
-  const cents = (v: number | null | undefined) => (v == null ? undefined : v * 100);
-  return defined({
-    name: str(acc.name),
-    domain: normaliseDomain(acc.domain) ?? normaliseDomain(acc.website) ?? emailDomain ?? undefined,
-    websiteUrl: website,
-    linkedinUrl: str(acc.linkedin_url),
-    industry: str(acc.industry),
-    industryKey: industry,
-    employees: num(acc.employees),
-    employeesMin: employees?.min ?? undefined,
-    employeesMax: employees?.max ?? undefined,
-    revenueCents: num(acc.revenue_cents),
-    revenueMinCents: cents(revenue?.min),
-    revenueMaxCents: cents(revenue?.max),
-    hqCity: str(acc.city),
-    hqState: str(acc.region),
-    hqCountry: countryCode(acc.country) ?? undefined,
-    description: str(acc.description),
-    technologies: acc.technologies?.length ? acc.technologies : undefined,
-    keywords: acc.keywords?.length ? acc.keywords : undefined,
-    parentDomain: normaliseDomain(acc.parent_domain) ?? undefined,
-  });
-}
-
-function normalisePeople(a: ArrivalV1): ArrivalPerson[] {
-  return a.people.map((p) => {
-    const split = !str(p.first_name) && !str(p.last_name) && str(p.name) ? splitName(p.name!) : null;
-    const roleKeys = [...new Set([p.buying_role, ...(p.buying_roles ?? [])].map((r) => str(r)).filter((r): r is string => !!r))];
-    return defined({
-      firstName: str(p.first_name) ?? split?.firstName,
-      lastName: str(p.last_name) ?? split?.lastName ?? undefined,
-      title: str(p.title),
-      email: str(p.email)?.toLowerCase(),
-      phone: str(p.phone),
-      linkedinUrl: str(p.linkedin_url),
-      roleKeys: roleKeys.length ? roleKeys : undefined,
-      decisionNote: str(p.notes),
-    });
-  });
-}
-
-function normaliseSignals(a: ArrivalV1): ArrivalSignal[] {
-  return a.signals.map(
-    (s) =>
-      defined({
-        kind: s.type ?? (s.fine_type === 'intent' ? 'research' : 'trigger'),
-        type: str(s.fine_type),
-        title: s.title.trim(),
-        occurredAt: s.occurred_at ? new Date(s.occurred_at) : undefined,
-        detail: str(s.detail),
-        url: str(s.url),
-        confidence: num(s.confidence),
-      }) as ArrivalSignal,
-  );
-}
-
-/** Known fact keys only: unknown keys stay in the raw payload. */
-function normaliseFacts(a: ArrivalV1): ArrivalFact[] {
-  const list: ArrivalFact[] = Array.isArray(a.facts)
-    ? a.facts.map((f) => ({
-        key: f.key,
-        value: f.value,
-        ...defined({ url: str(f.url), note: str(f.note), observedAt: f.observed_at ? new Date(f.observed_at) : undefined }),
-      }))
-    : Object.entries(a.facts).map(([key, value]) => ({ key, value }));
-  return list.filter((f) => isKnownFactKey(f.key) && f.value !== undefined);
-}
-
-/**
- * SRC-E3 step 2. Rules first; Claude only for an industry or relationship no rule maps, and never
- * inline. An unmapped relationship becomes `other`.
- */
+/** SRC-E3 step 2: rules first; Claude only for text no rule maps, and never inline. */
 async function normalise(ctx: ModuleContext, a: ArrivalV1, opts: { ai: boolean }): Promise<Normalised> {
-  const acc = a.account ?? {};
-  const intro = a.warm_intro;
-  const industryRule = industryKey(acc.industry);
-  const relationshipRule = intro ? (relationshipKey(intro.relationship_key) ?? relationshipKey(intro.relationship)) : null;
-  const askIndustry = !!str(acc.industry) && !industryRule;
-  const askRelationship = !!str(intro?.relationship) && !relationshipRule;
-  const ai =
-    opts.ai && (askIndustry || askRelationship)
-      ? await normaliseWithAi(ctx, { industry: askIndustry ? acc.industry : null, relationship: askRelationship ? intro?.relationship : null })
-      : null;
-
-  const hasIntro = !!intro && [intro.introducer_name, intro.introducer_email, intro.relationship, intro.relationship_key].some((v) => str(v));
-  const research = defined(Object.fromEntries(Object.entries(a.research ?? {}).map(([k, v]) => [k, v ?? undefined])));
-  return defined({
-    account: normaliseAccount(a, industryRule ?? (askIndustry ? (ai?.industryKey ?? undefined) : undefined)),
-    people: normalisePeople(a),
-    signals: normaliseSignals(a),
-    facts: normaliseFacts(a),
-    research,
-    practiceHint: str(acc.practice_hint),
-    offerHint: str(acc.offer_hint),
-    soleProprietor: a.sole_proprietor,
-    warmIntro: hasIntro
-      ? defined({
-          introducerName: str(intro!.introducer_name),
-          introducerEmail: str(intro!.introducer_email),
-          relationshipText: str(intro!.relationship),
-          relationshipKey: relationshipRule ?? relationshipKey(ai?.relationshipKey) ?? 'other',
-          note: str(intro!.note),
-        })
-      : undefined,
-  });
-}
-
-/** The saved step 2 output with its dates restored. */
-function revive(saved: unknown): Normalised {
-  const n = saved as Normalised;
-  const date = (d: unknown) => (typeof d === 'string' ? new Date(d) : (d as Date | undefined));
-  return {
-    ...n,
-    signals: n.signals.map((s) => defined({ ...s, occurredAt: date(s.occurredAt) }) as ArrivalSignal),
-    facts: n.facts.map((f) => defined({ ...f, observedAt: date(f.observedAt) })),
-  };
-}
-
-/** A person's answer, applied over the saved normalising (the website, the company, or "sole proprietor"). */
-function withInput(n: Normalised, input: ResolutionInput | null): Normalised {
-  if (!input) return n;
-  const website = input.website ?? input.company?.website;
-  const domain = normaliseDomain(website);
-  return {
-    ...n,
-    account: defined({
-      ...n.account,
-      name: str(input.company?.name) ?? n.account.name,
-      ...(domain ? { domain, websiteUrl: website!.trim() } : {}),
-    }),
-    soleProprietor: n.soleProprietor || !!input.soleProprietor,
-  };
-}
-
-const isShell = (n: Normalised) => n.soleProprietor && !n.account.name;
-const shellEmail = (n: Normalised) => (isShell(n) ? n.people.find((p) => p.email)?.email : undefined);
-
-/** SRC-E3 step 3. */
-function waitingFor(n: Normalised, targeted: boolean): WaitingOn | null {
-  if (targeted || n.soleProprietor || n.account.domain || n.account.linkedinUrl) return null;
-  if (!n.account.name && n.people.some((p) => p.email)) return 'needs_company';
-  return 'needs_website';
-}
-
-/** The resolve lock key: the domain, else the matching name and country, else the shell email, else the arrival. */
-function lockKeyOf(n: Normalised, arrivalId: string): string {
-  if (n.account.domain) return n.account.domain;
-  if (n.account.name) return `name:${matchName(n.account.name)}|${n.account.hqCountry ?? ''}`;
-  const email = shellEmail(n);
-  return email ? `email:${email}` : arrivalId;
+  const ask = opts.ai ? unmapped(a) : null;
+  return normaliseArrival(a, ask ? await normaliseWithAi(ctx, ask) : null);
 }
 
 function forAccounts(row: ArrivalRow, n: Normalised): ArrivalForAccounts {
@@ -360,9 +185,13 @@ export async function rejectArrival(
 
 // ---- The pipeline ----
 
-/** Who declared the intro, from the closest source and the principal that sent the arrival. */
+/**
+ * Who declared the intro, from the closest source and the principal that sent the arrival. A person
+ * source's key confirms only with `warm_intro:declare`; without it the intro counts like an agent's.
+ */
 function declaredBy(row: ArrivalRow, kind: string | undefined): DeclaredBy {
-  if (kind === 'person') return row.principal.startsWith('user:') ? 'person' : 'person_key';
+  if (kind === 'person' && row.principal.startsWith('user:')) return 'person';
+  if (kind === 'person') return row.canDeclareWarmIntro ? 'person_key' : 'agent';
   return kind === 'agent' || kind === 'scheduled_pull' ? 'agent' : 'vendor';
 }
 
@@ -383,7 +212,7 @@ async function isFirstFromSource(ctx: ModuleContext, row: ArrivalRow, accountId:
   return !earlier;
 }
 
-/** Step 7: rejected when ruled out and not overridden, else resolved with `intake.arrival.resolved`. */
+/** Step 7, returning the outcome: rejected when ruled out and not overridden, else resolved with `intake.arrival.resolved`. */
 async function finish(
   ctx: ModuleContext,
   row: ArrivalRow,
@@ -391,10 +220,10 @@ async function finish(
   accountId: string,
   excluded: Exclusion | null,
   intro: WarmIntroView | null,
-): Promise<void> {
+): Promise<'resolved' | 'rejected'> {
   if (excluded && !excluded.override) {
     await rejectArrival(ctx, row.id, 'excluded', excluded.label, accountId);
-    return;
+    return 'rejected';
   }
   const first = await isFirstFromSource(ctx, row, accountId);
   const closest = await loadSource(ctx, row.closestSourceId);
@@ -424,6 +253,7 @@ async function finish(
   if (row.batchId) {
     await settleBatch(ctx, row.batchId, { resolved: 1, ...(row.resolution === 'created' ? { newAccounts: 1 } : { alreadyKnown: 1 }) });
   }
+  return 'resolved';
 }
 
 /** Step 1. The body is `payload.arrival` when the raw payload is something else (file rows), else `payload.raw`. */
@@ -538,10 +368,11 @@ export async function resolveInline(ctx: ModuleContext, arrivalId: string): Prom
   if (!n) return { status: 'rejected' };
   const r = await upsertFromArrival(ctx, forAccounts(row, n), row.targetAccountId!);
   await record(ctx, row, 'upsert', { accountId: r.accountId, resolution: r.created ? 'created' : 'attached' });
-  await finish(ctx, row, n, r.accountId, r.excluded, null);
+  // An excluded target is rejected `excluded`; the people and signals stay on the kept account.
+  const status = await finish(ctx, row, n, r.accountId, r.excluded, null);
   const sent = r.personIds.length + r.signalIds.length;
   return {
-    status: row.status,
+    status,
     inlineResult: {
       arrivalId,
       accountId: r.accountId,

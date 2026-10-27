@@ -3,16 +3,10 @@ import { memberRole, userIdForEmail } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { newId } from '@/platform/ids';
 import { relationshipDefault, warmIntro, warmIntroRule } from '../db/schema';
+import type { WarmIntroInput } from '../domain/normalise-arrival';
 import { isConfirmed, strongest, warmIntroFullPoints, warmIntroPoints } from '../domain/warm-intro';
 
-/** A declared intro after normalising: the relationship key is already mapped (else `other`). */
-export type WarmIntroInput = {
-  introducerName?: string;
-  introducerEmail?: string;
-  relationshipText?: string;
-  relationshipKey: string;
-  note?: string;
-};
+export type { WarmIntroInput };
 
 export type DeclaredBy = 'person' | 'person_key' | 'agent' | 'vendor';
 

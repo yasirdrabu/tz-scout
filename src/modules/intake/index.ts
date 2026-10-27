@@ -42,8 +42,8 @@ export {
   resolveArrival,
   type InlineResult,
   type RejectReason,
-  type ResolutionInput,
 } from './services/resolve';
+export type { ResolutionInput } from './domain/normalise-arrival';
 export { getWarmIntro, recordWarmIntro, type DeclaredBy, type WarmIntroInput, type WarmIntroView } from './services/warm-intros';
 export {
   isStrictChannel,

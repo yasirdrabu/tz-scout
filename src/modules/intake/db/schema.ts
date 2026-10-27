@@ -102,6 +102,7 @@ export const arrival = intake.table(
     lockKey: text('lock_key'), // the resolve lock: domain, else name and country, else shell email
     steps: text('steps').array().notNull().default(sql`'{}'::text[]`), // pipeline steps already done
     warmIntroId: text('warm_intro_id'),
+    canDeclareWarmIntro: boolean('can_declare_warm_intro').notNull().default(false), // the sender held warm_intro:declare
     resolvedAt: at('resolved_at'),
   },
   (t) => [

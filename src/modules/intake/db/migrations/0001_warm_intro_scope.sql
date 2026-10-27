@@ -1,0 +1,1 @@
+ALTER TABLE "intake"."arrival" ADD COLUMN "can_declare_warm_intro" boolean DEFAULT false NOT NULL;

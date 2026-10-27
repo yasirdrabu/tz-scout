@@ -32,6 +32,8 @@ export type SubmitOptions = {
   inline?: boolean;
   /** What was received, when the body was built from it (file rows with their headers). Defaults to the body. */
   raw?: unknown;
+  /** The sender holds `warm_intro:declare` (routes pass `can(principal, ...)`). A person source's key needs it to confirm an intro. */
+  canDeclareWarmIntro?: boolean;
 };
 
 export type SubmitResult = {
@@ -149,6 +151,7 @@ type Row = {
   body?: unknown;
   externalRef: string | null;
   targetAccountId?: string | null;
+  canDeclareWarmIntro?: boolean;
   rejected?: { reason: 'invalid' | 'daily_cap_reached' | 'duplicate_in_batch'; detail: string };
 };
 
@@ -171,6 +174,7 @@ async function store(ctx: ModuleContext, r: Row): Promise<string | null> {
       payloadHash: sha256(JSON.stringify(r.raw ?? null)),
       externalRef: r.rejected ? null : r.externalRef,
       targetAccountId: r.targetAccountId ?? null,
+      canDeclareWarmIntro: r.canDeclareWarmIntro ?? false,
       ...(r.rejected ? { status: 'rejected', rejectReason: r.rejected.reason, rejectDetail: r.rejected.detail } : {}),
     })
     .onConflictDoNothing()
@@ -250,6 +254,7 @@ export async function submitArrival(ctx: ModuleContext, body: unknown, opts: Sub
     ...(opts.raw !== undefined ? { body } : {}),
     externalRef,
     targetAccountId,
+    canDeclareWarmIntro: opts.canDeclareWarmIntro,
   });
   if (!id) return (await duplicate())!;
   if (opts.inline) return { arrivalId: id, duplicateOfRequest: false, ...(await resolveInline(ctx, id)) };
@@ -268,7 +273,7 @@ export async function submitArrival(ctx: ModuleContext, body: unknown, opts: Sub
 export async function submitBatch(
   ctx: ModuleContext,
   body: unknown,
-  opts: { channel: Channel },
+  opts: { channel: Channel; canDeclareWarmIntro?: boolean },
 ): Promise<{ batchId: string; items: BatchItemResult[] }> {
   const sender = await senderOf(ctx);
   if (bytes(body) > MAX_BATCH_BYTES) throw invalid('A batch can be up to 10 MB.');
@@ -309,7 +314,7 @@ export async function submitBatch(
     const item = moveItemFields(rawItem);
     const sentRef = (item as { account?: { external_ref?: unknown } } | null)?.account?.external_ref;
     const shownRef = typeof sentRef === 'string' && sentRef.trim() ? sentRef.trim() : null;
-    const base = { sender, chain: sender.chain, channel: opts.channel, batchId, raw: rawItem };
+    const base = { sender, chain: sender.chain, channel: opts.channel, batchId, raw: rawItem, canDeclareWarmIntro: opts.canDeclareWarmIntro };
     const reject = async (reason: NonNullable<Row['rejected']>['reason'], detail: string) => {
       const id = (await store(ctx, { ...base, externalRef: null, rejected: { reason, detail } }))!;
       rejectedCount++;

@@ -408,3 +408,78 @@ describe('waiting checks', () => {
     expect(await rowOf(out.arrivalId)).toMatchObject({ status: 'resolving', waitingOn: 'needs_company' });
   });
 });
+
+describe('fix round 1', () => {
+  const resume = (id: string, input: Record<string, unknown>) =>
+    t.run(async (ctx) => {
+      await ctx.tx.update(arrival).set({ resolutionInput: input }).where(eq(arrival.id, id));
+      const { resolveArrival } = await import('@/modules/intake/services/resolve');
+      await resolveArrival(ctx, id);
+    });
+  const batchOf = async (id: string) => (await t.run((ctx) => ctx.tx.select().from(batch).where(eq(batch.id, id))))[0]!;
+
+  it('waits needs_company for a LinkedIn page with no name, keeping its batch open until a person supplies the company', async () => {
+    const out = await asAgent((ctx) =>
+      submitBatch(ctx, { name: 'Linkedin only', items: [{ account: { linkedin_url: 'https://linkedin.com/company/nameless' } }] }, { channel: 'webhook' }),
+    );
+    await runOutbox(t.tenantId);
+    const id = out.items[0]!.arrivalId;
+    expect(await rowOf(id)).toMatchObject({ status: 'resolving', waitingOn: 'needs_company' });
+    expect(await batchOf(out.batchId)).toMatchObject({ status: 'processing' });
+
+    await resume(id, { company: { name: 'Nameless Partners' } });
+    expect(await rowOf(id)).toMatchObject({ status: 'resolved', waitingOn: null });
+    expect(await batchOf(out.batchId)).toMatchObject({ status: 'completed' });
+    expect(await events('intake.batch.completed', 'batchId', out.batchId)).toHaveLength(1);
+  });
+
+  it('waits needs_company for a sole proprietor whose person has no name', async () => {
+    const out = await send({ sole_proprietor: true, people: [{ email: 'nobody.named@gmail.com' }] }, agentId, 'file');
+    await runOutbox(t.tenantId);
+    expect(await rowOf(out.arrivalId)).toMatchObject({ status: 'resolving', waitingOn: 'needs_company' });
+  });
+
+  it('keeps a replaced primary domain as an alias, so an arrival on the old primary still attaches', async () => {
+    const a = uniqueDomain();
+    const b = uniqueDomain();
+    const acc = await seed({ account: { name: 'Two Domains', domain: a } });
+    await t.run((ctx) => ctx.tx.insert(accountAlias).values({ tenantId: t.tenantId, accountId: acc.accountId, kind: 'domain', value: b }));
+    const onB = await send({ account: { name: 'Two Domains', domain: b } });
+    await runOutbox(t.tenantId);
+    const onA = await send({ account: { name: 'Two Domains', domain: a } });
+    await runOutbox(t.tenantId);
+    expect((await rowOf(onB.arrivalId)).accountId).toBe(acc.accountId);
+    expect((await rowOf(onA.arrivalId)).accountId).toBe(acc.accountId);
+    const live = await t.run((ctx) =>
+      ctx.tx.select().from(account).where(and(inArray(account.domain, [a, b]), isNull(account.archivedAt))),
+    );
+    expect(live.map((x) => x.id)).toEqual([acc.accountId]);
+  });
+
+  it('reports an inline arrival on an excluded account as rejected', async () => {
+    const domain = uniqueDomain();
+    const acc = await seed({ account: { name: 'Excluded Target', domain, industryKey: 'software' } });
+    const out = await asAgent((ctx) =>
+      submitArrival(ctx, { target_account_id: acc.accountId, people: [{ name: 'Ex Person', email: `ex@${domain}` }] }, { channel: 'api', inline: true }),
+    );
+    expect(out.status).toBe('rejected');
+    expect(await rowOf(out.arrivalId)).toMatchObject({ status: 'rejected', rejectReason: 'excluded', rejectDetail: 'Software vendor' });
+  });
+
+  it('confirms a person-source key intro only with warm_intro:declare', async () => {
+    const asKey = (can: boolean) =>
+      t.run((ctx) =>
+        submitArrival(
+          { ...ctx, actor: { kind: 'agent', id: 'key_person' }, access: { sourceId: personId, dataLimit: { kind: 'own_source' } } },
+          { account: { name: 'Key Intro', domain: uniqueDomain() }, warm_intro: { introducer_name: 'Ash', relationship: 'employee_network' } },
+          { channel: 'api', canDeclareWarmIntro: can },
+        ),
+      );
+    const withScope = await asKey(true);
+    const without = await asKey(false);
+    await runOutbox(t.tenantId);
+    const intro = async (id: string) => (await t.run((ctx) => ctx.tx.select().from(warmIntro).where(eq(warmIntro.arrivalId, id))))[0];
+    expect(await intro(withScope.arrivalId)).toMatchObject({ confirmed: true, points: 8, effectivePoints: 8 });
+    expect(await intro(without.arrivalId)).toMatchObject({ confirmed: false, points: 8, effectivePoints: 4 });
+  });
+});
