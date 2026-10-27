@@ -87,6 +87,7 @@ function valueTypeOf(value: unknown): string {
 /**
  * Stores what a source said, as `candidate` facts; `reproject` decides which are current.
  * A fact this chain already said (same key, same value, still live) is not stored again.
+ * `pinnedBy` (a user id) stores them pinned; only an already pinned fact counts as said then.
  * Returns the ids of the facts it stored.
  */
 export async function recordFacts(
@@ -96,6 +97,7 @@ export async function recordFacts(
   facts: FactInput[],
   chain: SourceChain,
   arrivalId?: string,
+  pinnedBy?: string,
 ): Promise<string[]> {
   const given = facts.filter((f) => f.value !== undefined && f.value !== null);
   if (given.length === 0) return [];
@@ -111,7 +113,7 @@ export async function recordFacts(
         inArray(fact.status, LIVE),
       ),
     );
-  const said = new Set(live.map((f) => `${f.key}\n${chainKey(chainOf(f))}\n${stableJson(f.value)}`));
+  const said = new Set(live.filter((f) => !!f.pinnedAt === !!pinnedBy).map((f) => `${f.key}\n${chainKey(chainOf(f))}\n${stableJson(f.value)}`));
   const fresh = given.filter((f) => !said.has(`${f.key}\n${chainKey(chain)}\n${stableJson(f.value)}`));
   if (fresh.length === 0) return [];
   const inserted = await ctx.tx
@@ -134,6 +136,7 @@ export async function recordFacts(
         note: f.note ?? null,
         observedAt: f.observedAt ?? new Date(),
         status: 'candidate',
+        ...(pinnedBy ? { pinnedBy, pinnedAt: new Date() } : {}),
       })),
     )
     .returning({ id: fact.id });
