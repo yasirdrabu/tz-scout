@@ -1,6 +1,7 @@
 import '@/entry/compose';
 import { actorFor, resolvePrincipal, requirePermission, type Permission, type Principal } from '@/modules/tenancy';
-import { accessFor } from '@/platform/access';
+import { sourceAccessProvider } from '@/modules/accounts';
+import { accessWithSources } from '@/platform/access';
 import type { ModuleContext } from '@/platform/context';
 import { config } from '@/platform/config';
 import { withTenant } from '@/platform/db/tenant';
@@ -172,13 +173,16 @@ export function v1Route(opts: V1Options, handler: V1Handler): (req: Request) => 
             return json(c.status, c.body, correlationId, { 'idempotent-replayed': 'true' });
           }
         }
-        const r = await handler(req, principal, {
+        const ctx: ModuleContext = {
           tenantId: principal.tenantId,
           actor,
           correlationId,
           tx,
-          access: accessFor(principal),
           ...(principal.environment ? { environment: principal.environment } : {}),
+        };
+        const r = await handler(req, principal, {
+          ...ctx,
+          access: await accessWithSources(ctx, principal, sourceAccessProvider()),
         });
         if (r instanceof Response) {
           if (key) throw new Error('An idempotent route must return an object, not a Response');

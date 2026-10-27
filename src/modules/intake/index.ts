@@ -16,3 +16,32 @@ export {
   batchCreated,
 } from './contracts/events';
 export { importRunJob, resolveJob, waitingExpireJob } from './contracts/jobs';
+export { intakeTenantDefaults } from './consumers';
+export { DEFAULT_VENDOR_SOURCES, RELATIONSHIP_DEFAULTS, seedIntakeDefaults } from './defaults';
+export { checkArrivalCap, type CapCheck } from './services/caps';
+export {
+  SOURCE_KINDS,
+  childSources,
+  intakeSourceAccess,
+  intakeSourceInfo,
+  intakeSourceValidator,
+  listSources,
+  personSourceFor,
+  registerSource,
+  updateSource,
+  type RegisterSourceInput,
+  type SourceKind,
+  type SourceListRow,
+  type SourcePatch,
+  type SourceStatus,
+  type SourceView,
+} from './services/sources';
+export {
+  isStrictChannel,
+  submitArrival,
+  submitBatch,
+  type BatchItemResult,
+  type Channel,
+  type SubmitOptions,
+  type SubmitResult,
+} from './services/submit';

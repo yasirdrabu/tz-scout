@@ -1,5 +1,6 @@
 import './registry';
 import { accountsTenantDefaults, exclusionsRecheckHandler } from '@/modules/accounts';
+import { intakeTenantDefaults } from '@/modules/intake';
 import { credentialsCleanupHandler } from '@/modules/integrations';
 import { pingHandler } from '@/platform/diagnostics';
 import { log } from '@/platform/log';
@@ -8,7 +9,7 @@ import type { JobHandlerDef } from '@/platform/runtime/jobs';
 import { startWorker } from '@/platform/runtime/worker';
 
 /** Every consumer in the app. Modules add theirs here as they land. */
-export const consumers: ConsumerDef[] = [accountsTenantDefaults];
+export const consumers: ConsumerDef[] = [accountsTenantDefaults, intakeTenantDefaults];
 
 /** Every job handler in the app. */
 export const jobs: JobHandlerDef[] = [pingHandler, credentialsCleanupHandler, exclusionsRecheckHandler];
