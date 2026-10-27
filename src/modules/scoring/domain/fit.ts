@@ -50,16 +50,23 @@ const sameCountry = (a: string, b: string) => norm(a) === norm(b) || (US.has(nor
 
 export type FitResult = { fit: number; parts: FitPart[]; disqualifiedReason: string | null; hardMiss: boolean };
 
-const disqualified = (reason: string): FitResult => ({ fit: 0, parts: [], disqualifiedReason: reason, hardMiss: false });
+const PART_LABELS: Record<FitPartKey, string> = { industry: 'Industry', size: 'Company size', revenue: 'Revenue', region: 'Region', buyer: 'Buyer contact' };
+
+/** Fit 0, with all five parts at 0 points so each says why. */
+const disqualified = (reason: string, profile: ScoringProfile): FitResult => ({
+  fit: 0,
+  parts: (Object.keys(PART_LABELS) as FitPartKey[]).map((key) => ({ key, label: PART_LABELS[key], points: 0, max: profile.fitParts[key], note: reason })),
+  disqualifiedReason: reason,
+  hardMiss: false,
+});
 
 export function fit(account: ScoringAccount, offer: ScoringOffer, profile: ScoringProfile): FitResult {
-  if (account.excluded) return disqualified(account.excluded.label);
+  if (account.excluded) return disqualified(account.excluded.label, profile);
   if (offer.excludedDomains.some((d) => d.toLowerCase() === account.domain.toLowerCase())) {
-    return disqualified(`${account.domain} is on the excluded list.`);
+    return disqualified(`${account.domain} is on the excluded list.`, profile);
   }
-  if (offer.excludedCategories.some((c) => industryMatches(c, account.industry))) {
-    return disqualified(`${account.industry} is an excluded category.`);
-  }
+  const category = offer.excludedCategories.find((c) => industryMatches(c, account.industry));
+  if (category) return disqualified(`${account.industry} is in the excluded category ${category}.`, profile);
 
   const parts: FitPart[] = [];
   const misses = new Set<FitPartKey>();

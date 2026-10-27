@@ -1,6 +1,6 @@
 // Intent: is there a reason to buy now? Scores an offer's signal rules against dated signals (SCO-E1).
 
-import { SIGNAL_TYPES } from '@/modules/accounts';
+import { SIGNAL_TYPES } from '@/modules/accounts/contracts/signal-types';
 import type { RuleHit, ScoringAccount, ScoringProfile, ScoringRule, ScoringSignal } from '../contracts/types';
 import { norm } from './fit';
 
@@ -38,6 +38,12 @@ function recency(type: string, at: Date, now: Date, profile: ScoringProfile): nu
 /** A research score of 0.60 counts half, 0.80 or more counts fully. */
 const intensity = (score: number) => Math.max(0, Math.min(1, (score - 0.4) / 0.4));
 
+/** A rule's minimum, read like the values it is compared with: a research minimum of 60 means 0.60. */
+function minimum(rule: ScoringRule): number | null {
+  if (rule.minValue == null) return null;
+  return SIGNAL_TYPES[rule.type as keyof typeof SIGNAL_TYPES].kind === 'research' ? researchScore(rule.minValue) : rule.minValue;
+}
+
 type Strength = { r: number; id: string | null; matched: string };
 
 function signalStrengths(rule: ScoringRule, signals: ScoringSignal[], now: Date, profile: ScoringProfile): Strength[] {
@@ -46,7 +52,8 @@ function signalStrengths(rule: ScoringRule, signals: ScoringSignal[], now: Date,
     if (s.type !== rule.type) continue;
     const research = s.kind === 'research';
     const value = s.value == null ? null : research ? researchScore(s.value) : s.value;
-    if (rule.minValue != null && (value == null || value < rule.minValue)) continue;
+    const min = minimum(rule);
+    if (min != null && (value == null || value < min)) continue;
     if (!matchesKeywords(norm(`${s.title} ${s.detail ?? ''}`), rule.match)) continue;
     const r = recency(rule.type, signalDate(s), now, profile) * (research && value != null ? intensity(value) : 1);
     if (r > 0) out.push({ r, id: s.id, matched: s.title });
@@ -55,17 +62,16 @@ function signalStrengths(rule: ScoringRule, signals: ScoringSignal[], now: Date,
 }
 
 function strengthsFor(rule: ScoringRule, account: ScoringAccount, signals: ScoringSignal[], now: Date, profile: ScoringProfile): Strength[] {
-  if (rule.type === 'growth' && rule.match.length === 0 && account.headcountGrowth6m != null) {
-    // Growth is a current value on the account; an old growth signal must not outvote it.
-    const g = account.headcountGrowth6m;
-    const ok = rule.minValue != null ? g >= rule.minValue : g > 0;
-    return ok ? [{ r: 1, id: null, matched: `Headcount up ${Math.round(g * 100)}% in six months` }] : [];
-  }
   const out = signalStrengths(rule, signals, now, profile);
   if (rule.type === 'tech') {
     for (const t of account.technologies) {
       if (matchesKeywords(norm(t), rule.match)) out.push({ r: 1, id: null, matched: t });
     }
+  }
+  if (rule.type === 'growth' && rule.match.length === 0 && account.headcountGrowth6m != null) {
+    // The account's current growth counts like a technology on its stack: one more strength that does not fade.
+    const g = account.headcountGrowth6m;
+    if (rule.minValue == null || g >= rule.minValue) out.push({ r: 1, id: null, matched: `Headcount up ${Math.round(g * 100)}% in six months` });
   }
   return out;
 }

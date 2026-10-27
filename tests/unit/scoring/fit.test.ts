@@ -41,7 +41,9 @@ describe('fit', () => {
   it('an excluded category disqualifies', () => {
     const r = score(account({ industry: 'Gambling' }));
     expect(r.fit).toBe(0);
-    expect(r.disqualifiedReason).toMatch(/excluded/);
+    expect(r.disqualifiedReason).toContain('Gambling');
+    expect(r.parts).toHaveLength(5);
+    expect(r.parts.every((p) => p.points === 0 && p.note === r.disqualifiedReason)).toBe(true);
   });
   it('an account excluded for every offer disqualifies with its label', () => {
     const r = score(account({ excluded: { label: 'Software vendor' } }));

@@ -100,6 +100,16 @@ describe('research (SCO-E1-S2-AC2, AC4)', () => {
     expect(at(0.7)).toBe(30);
     expect(at(0.84)).toBe(40);
   });
+  it('a research minimum of 60 means 0.60', () => {
+    const r = [rule({ id: 'i', type: 'intent', weight: 40, minValue: 60 })];
+    const at60 = (v: number) => run(account(), [signal({ id: 'i', type: 'intent', title: 'AI', value: v })], r).intent;
+    expect(at60(0.55)).toBe(0);
+    expect(at60(0.6)).toBe(20);
+    expect(at60(70)).toBe(30);
+  });
+  it('exactly 0.80 earns all', () => {
+    expect(at(0.8)).toBe(40);
+  });
   it('0.40 earns none', () => {
     expect(run(account(), [signal({ id: 'i', type: 'intent', title: 'AI', value: 0.4 })], [rule({ id: 'i', type: 'intent', weight: 40 })]).intent).toBe(0);
   });
@@ -134,6 +144,15 @@ describe('current-state signals', () => {
   it('growth reads the current headcount growth on the account', () => {
     expect(run(account({ headcountGrowth6m: 0.18 }), [], rules).intent).toBe(20);
     expect(run(account({ headcountGrowth6m: 0.05 }), [], rules).intent).toBe(0);
+  });
+  it('the account growth column adds to matching growth signals and never replaces them', () => {
+    const g = [rule({ id: 'g', type: 'growth', weight: 10, minValue: 0.1 })];
+    const old = signal({ id: 'g', type: 'growth', title: 'Headcount up', value: 0.18, occurredAt: daysAgo(400) });
+    expect(run(account({ headcountGrowth6m: 0.05 }), [old], g).intent).toBe(10);
+    expect(run(account({ headcountGrowth6m: 0.05 }), [], g).intent).toBe(0);
+    expect(run(account({ headcountGrowth6m: 0.12 }), [], g).intent).toBe(10);
+    expect(run(account({ headcountGrowth6m: 0.12 }), [old], [rule({ id: 'g', type: 'growth', weight: 100, minValue: 0.1 })]).intent).toBe(100);
+    expect(run(account({ headcountGrowth6m: -0.2 }), [], [rule({ id: 'g', type: 'growth', weight: 10 })]).intent).toBe(10);
   });
   it('workforce respects the minimum on its value', () => {
     const w = [rule({ id: 'w', type: 'workforce', weight: 20, minValue: 0.3 })];
