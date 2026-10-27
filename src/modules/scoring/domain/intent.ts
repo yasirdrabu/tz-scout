@@ -54,6 +54,8 @@ function signalStrengths(rule: ScoringRule, signals: ScoringSignal[], now: Date,
     const value = s.value == null ? null : research ? researchScore(s.value) : s.value;
     const min = minimum(rule);
     if (min != null && (value == null || value < min)) continue;
+    // Growth is a pain signal for fast growth: with no minimum it must still be above zero.
+    if (rule.type === 'growth' && min == null && !(value != null && value > 0)) continue;
     if (!matchesKeywords(norm(`${s.title} ${s.detail ?? ''}`), rule.match)) continue;
     const r = recency(rule.type, signalDate(s), now, profile) * (research && value != null ? intensity(value) : 1);
     if (r > 0) out.push({ r, id: s.id, matched: s.title });
@@ -70,8 +72,9 @@ function strengthsFor(rule: ScoringRule, account: ScoringAccount, signals: Scori
   }
   if (rule.type === 'growth' && rule.match.length === 0 && account.headcountGrowth6m != null) {
     // The account's current growth counts like a technology on its stack: one more strength that does not fade.
+    // At or above the minimum, or above zero when the rule has none.
     const g = account.headcountGrowth6m;
-    if (rule.minValue == null || g >= rule.minValue) out.push({ r: 1, id: null, matched: `Headcount up ${Math.round(g * 100)}% in six months` });
+    if (rule.minValue == null ? g > 0 : g >= rule.minValue) out.push({ r: 1, id: null, matched: `Headcount up ${Math.round(g * 100)}% in six months` });
   }
   return out;
 }

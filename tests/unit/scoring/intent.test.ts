@@ -152,7 +152,12 @@ describe('current-state signals', () => {
     expect(run(account({ headcountGrowth6m: 0.05 }), [], g).intent).toBe(0);
     expect(run(account({ headcountGrowth6m: 0.12 }), [], g).intent).toBe(10);
     expect(run(account({ headcountGrowth6m: 0.12 }), [old], [rule({ id: 'g', type: 'growth', weight: 100, minValue: 0.1 })]).intent).toBe(100);
-    expect(run(account({ headcountGrowth6m: -0.2 }), [], [rule({ id: 'g', type: 'growth', weight: 10 })]).intent).toBe(10);
+    const free = [rule({ id: 'g', type: 'growth', weight: 10 })];
+    expect(run(account({ headcountGrowth6m: 0.02 }), [], free).intent).toBe(10);
+    expect(run(account({ headcountGrowth6m: 0 }), [], free).intent).toBe(0);
+    expect(run(account({ headcountGrowth6m: -0.2 }), [], free).intent).toBe(0);
+    expect(run(account(), [signal({ id: 'g', type: 'growth', title: 'Headcount down', value: -0.1 })], free).intent).toBe(0);
+    expect(run(account(), [signal({ id: 'g', type: 'growth', title: 'Headcount up', value: 0.05 })], free).intent).toBe(10);
   });
   it('workforce respects the minimum on its value', () => {
     const w = [rule({ id: 'w', type: 'workforce', weight: 20, minValue: 0.3 })];
