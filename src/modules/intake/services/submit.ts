@@ -209,12 +209,13 @@ async function targetOf(ctx: ModuleContext, id: string | null | undefined): Prom
 }
 
 /**
- * Stores one arrival exactly as received and queues it for resolving. Order: validate, check the
- * sender, return an earlier arrival with the same `external_ref`, take the cap lock and check the
+ * Stores one arrival exactly as received and queues it for resolving. Order: check the sender
+ * (paused or archived is a 403), validate, return an earlier arrival with the same `external_ref`, take the cap lock and check the
  * cap, check the target account, insert. Publishes `intake.arrival.received` in the same
  * transaction and enqueues `jobs.intake.resolve` unless `inline`.
  */
 export async function submitArrival(ctx: ModuleContext, body: unknown, opts: SubmitOptions): Promise<SubmitResult> {
+  const sender = await senderOf(ctx);
   const raw = opts.raw === undefined ? body : opts.raw;
   if (bytes(raw) > MAX_ARRIVAL_BYTES) throw invalid(TOO_LARGE);
   const parsed = ArrivalV1Schema({ strict: isStrictChannel(opts.channel) }).safeParse(body);
@@ -222,7 +223,6 @@ export async function submitArrival(ctx: ModuleContext, body: unknown, opts: Sub
   const a = parsed.data;
   if (opts.inline && !a.target_account_id) throw new Error('Only a targeted arrival can be resolved inline');
 
-  const sender = await senderOf(ctx);
   const externalRef = refOf(a);
   const duplicate = async (): Promise<SubmitResult | null> => {
     const existing = externalRef ? await findByRef(ctx, sender.id, externalRef) : undefined;
@@ -248,18 +248,20 @@ export async function submitArrival(ctx: ModuleContext, body: unknown, opts: Sub
  * Stores a batch and every item in the order sent (Ruling 7). Only a bad envelope is a 400 with
  * nothing stored. Items are stored and rejected `invalid` (failing paths in the detail),
  * `duplicate_in_batch` (an earlier item had the same ref or domain) or `daily_cap_reached`.
- * Rejected items keep their ref only in `payload.raw`, so the caller can send them again.
+ * Rejected items keep their ref only in `payload.raw`, so the caller can send them again. An item
+ * whose ref this source sent in an earlier request gets that arrival back; it is counted in
+ * `counts.repeated`, not in `item_count`. A paused or archived source gets 403 before anything is read.
  */
 export async function submitBatch(
   ctx: ModuleContext,
   body: unknown,
   opts: { channel: Channel },
 ): Promise<{ batchId: string; items: BatchItemResult[] }> {
+  const sender = await senderOf(ctx);
   if (bytes(body) > MAX_BATCH_BYTES) throw invalid('A batch can be up to 10 MB.');
   const envelope = BatchEnvelopeV1Schema.safeParse(body);
   if (!envelope.success) throw invalid('Check the request.', problems(envelope.error));
   const b = envelope.data;
-  const sender = await senderOf(ctx);
   const cap = isCapped(opts.channel, sender.kind) ? await checkArrivalCap(ctx, sender.id) : null;
   let remaining = cap ? cap.remaining : Infinity;
   let capCopy: string | undefined;
@@ -278,14 +280,7 @@ export async function submitBatch(
     notes: b.notes ?? null,
     criteria: b.criteria ?? null,
     metadata: b.metadata ?? null,
-    itemCount: b.items.length,
   });
-  await publish(
-    ctx,
-    batchCreated,
-    { batchId, sourceChain: sender.chain, name: b.name, runAt: runAt.toISOString(), itemCount: b.items.length },
-    { type: 'batch', id: batchId },
-  );
 
   const strict = isStrictChannel(opts.channel);
   const schema = ArrivalV1Schema({ strict });
@@ -293,6 +288,9 @@ export async function submitBatch(
   const seenDomains = new Set<string>();
   const items: BatchItemResult[] = [];
   let rejectedCount = 0;
+  let stored = 0;
+  // Items whose ref this source sent in an earlier request: answered with that arrival, not part of this batch.
+  let repeated = 0;
 
   for (const rawItem of b.items) {
     const item = moveItemFields(rawItem);
@@ -302,6 +300,7 @@ export async function submitBatch(
     const reject = async (reason: NonNullable<Row['rejected']>['reason'], detail: string) => {
       const id = (await store(ctx, { ...base, externalRef: null, rejected: { reason, detail } }))!;
       rejectedCount++;
+      stored++;
       items.push({ arrivalId: id, externalRef: shownRef, status: 'rejected' });
     };
 
@@ -326,6 +325,7 @@ export async function submitBatch(
 
     const existing = externalRef ? await findByRef(ctx, sender.id, externalRef) : undefined;
     if (existing) {
+      repeated++;
       items.push({ arrivalId: existing.id, externalRef, status: existing.status });
       continue;
     }
@@ -342,20 +342,27 @@ export async function submitBatch(
     const chain = await withVendor(ctx, sender.chain, a.via_vendor);
     const id = await store(ctx, { ...base, chain, externalRef, targetAccountId: target?.id ?? null });
     if (!id) {
+      repeated++;
       const won = (await findByRef(ctx, sender.id, externalRef!))!;
       items.push({ arrivalId: won.id, externalRef, status: won.status });
       continue;
     }
     await enqueueJob(ctx, resolveJob, { arrivalId: id });
     remaining--;
+    stored++;
     items.push({ arrivalId: id, externalRef, status: 'received' });
   }
 
-  if (rejectedCount > 0) {
-    await ctx.tx
-      .update(batch)
-      .set({ counts: { resolved: 0, rejected: rejectedCount, newAccounts: 0, alreadyKnown: 0 } })
-      .where(and(eq(batch.tenantId, ctx.tenantId), eq(batch.id, batchId)));
-  }
+  // The batch counts only the rows stored with it, so its counts can add up to its items.
+  await ctx.tx
+    .update(batch)
+    .set({ itemCount: stored, counts: { resolved: 0, rejected: rejectedCount, newAccounts: 0, alreadyKnown: 0, repeated } })
+    .where(and(eq(batch.tenantId, ctx.tenantId), eq(batch.id, batchId)));
+  await publish(
+    ctx,
+    batchCreated,
+    { batchId, sourceChain: sender.chain, name: b.name, runAt: runAt.toISOString(), itemCount: stored },
+    { type: 'batch', id: batchId },
+  );
   return { batchId, items };
 }

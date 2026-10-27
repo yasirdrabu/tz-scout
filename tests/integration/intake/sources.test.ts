@@ -156,6 +156,18 @@ describe('archiving', () => {
     expect((await call()).status).toBe(401);
   });
 
+  it('is final: an archived source cannot be made active or paused again', async () => {
+    const { agentId } = await personAndAgent(t);
+    await t.run((ctx) => updateSource(ctx, agentId, { status: 'archived' }));
+    for (const status of ['active', 'paused'] as const) {
+      await expect(t.run((ctx) => updateSource(ctx, agentId, { status }))).rejects.toMatchObject({
+        status: 409,
+        message: "An archived source can't be reactivated. Create a new source.",
+      });
+    }
+    expect((await t.run((ctx) => updateSource(ctx, agentId, { name: 'Renamed' }))).status).toBe('archived');
+  });
+
   it('refuses new keys for an archived or unknown source', async () => {
     const { agentId } = await personAndAgent(t);
     await t.run((ctx) => updateSource(ctx, agentId, { status: 'archived' }));
@@ -257,6 +269,19 @@ describe('ports', () => {
       0.6,
     );
     expect(await t.run((ctx) => sourceInfoProvider().getTrust(ctx, {}))).toBe(0.6);
+
+    // Weights 0.4 person, 0.3 agent, 0.3 vendor, re-weighted over the levels present.
+    const vendor = await t.run((ctx) => registerSource(ctx, { kind: 'vendor', name: 'Weighted vendor' }));
+    await t.run((ctx) => ctx.tx.update(source).set({ trust: 1 }).where(eq(source.id, personId)));
+    await t.run((ctx) => ctx.tx.update(source).set({ trust: 0.2 }).where(eq(source.id, vendor.id)));
+    const trust = (chain: Parameters<ReturnType<typeof sourceInfoProvider>['getTrust']>[1]) =>
+      t.run((ctx) => sourceInfoProvider().getTrust(ctx, chain));
+    expect(await trust({ personSourceId: personId, agentSourceId: agentId })).toBeCloseTo((0.4 * 1 + 0.3 * 0.6) / 0.7, 10);
+    expect(await trust({ personSourceId: personId, agentSourceId: agentId, vendorSourceId: vendor.id })).toBeCloseTo(
+      0.4 * 1 + 0.3 * 0.6 + 0.3 * 0.2,
+      10,
+    );
+    expect(await trust({ agentSourceId: agentId, vendorSourceId: vendor.id })).toBeCloseTo((0.3 * 0.6 + 0.3 * 0.2) / 0.6, 10);
 
     const accountId = newId('acc');
     const add = (status: string) =>

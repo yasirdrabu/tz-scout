@@ -152,6 +152,14 @@ export async function updateSource(ctx: ModuleContext, id: string, patch: Source
   const visible = await visibleSourceIds(ctx);
   const current = await loadSource(ctx, id);
   if (!current || (visible && !visible.includes(id))) throw notFound();
+  // Archived is final: its keys are revoked, so a new source is the way back.
+  if (current.status === 'archived' && patch.status !== undefined && patch.status !== 'archived') {
+    throw new ScoutError({
+      slug: 'conflict',
+      status: 409,
+      title: "An archived source can't be reactivated. Create a new source.",
+    });
+  }
   const name = checkName(patch.name);
   checkCap(patch.dailyArrivalCap);
   if (patch.status !== undefined && !['active', 'paused', 'archived'].includes(patch.status)) {

@@ -141,6 +141,12 @@ describe('source status (SRC-E1-S2-AC4)', () => {
     await expect(
       asSource(t, agentId, (ctx) => submitBatch(ctx, { name: 'Run', items: [validArrival()] }, { channel: 'api' })),
     ).rejects.toMatchObject({ status: 403, message: 'This source is paused' });
+    // The status is checked before the body.
+    await expect(single(agentId, 'api', { account: { domain: 'not a domain' } })).rejects.toMatchObject({ status: 403 });
+    await expect(asSource(t, agentId, (ctx) => submitBatch(ctx, { items: [] }, { channel: 'api' }))).rejects.toMatchObject({
+      status: 403,
+      message: 'This source is paused',
+    });
     expect(await stored(agentId)).toBe(0);
 
     await t.run((ctx) => updateSource(ctx, agentId, { status: 'active' }));

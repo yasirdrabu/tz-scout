@@ -207,6 +207,23 @@ describe('submitBatch (Review Focus 5, submission side)', () => {
     expect(events.some((e) => (e.payload as { data: { batchId: string } }).data.batchId === out.batchId)).toBe(true);
   });
 
+  it('answers an item repeating an earlier request with that arrival, outside the batch counts', async () => {
+    const first = await asAgent((ctx) => submitArrival(ctx, validArrival({ external_ref: 'b-cross' }), { channel: 'api' }));
+    const out = await asAgent((ctx) =>
+      submitBatch(ctx, { name: 'Repeat', items: [validArrival({ external_ref: 'b-cross' }), validArrival()] }, { channel: 'api' }),
+    );
+    expect(out.items[0]).toEqual({ arrivalId: first.arrivalId, externalRef: 'b-cross', status: 'received' });
+    expect((await rowOf(first.arrivalId)).batchId).toBeNull();
+    const [b] = await t.run((ctx) => ctx.tx.select().from(batch).where(eq(batch.id, out.batchId)));
+    expect(b!.itemCount).toBe(1);
+    expect(b!.counts).toMatchObject({ rejected: 0, repeated: 1 });
+    const [created] = await adminDb
+      .select({ payload: outbox.payload })
+      .from(outbox)
+      .where(and(eq(outbox.tenantId, t.tenantId), sql`${outbox.payload}->'data'->>'batchId' = ${out.batchId}`, sql`${outbox.payload}->>'type' = 'intake.batch.created'`));
+    expect((created!.payload as { data: { itemCount: number } }).data.itemCount).toBe(1);
+  });
+
   it('rejects a repeated normalised domain duplicate_in_batch', async () => {
     const d = `dup-${Date.now()}.com`;
     const out = await asAgent((ctx) =>
