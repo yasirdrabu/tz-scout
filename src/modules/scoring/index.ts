@@ -11,8 +11,10 @@ export {
   type TierReason,
   type TierThresholds,
 } from './contracts/types';
-export { scoringTenantDefaults } from './consumers';
+export { scoringConsumers, scoringTenantDefaults } from './consumers';
+export { ageingHandler, rescoreAccountsHandler, rescorePageHandler } from './jobs';
 export { DEFAULT_PROFILE, seedScoringDefaults } from './defaults';
-export { getProfile, type ProfileView } from './services/profile';
+export { getProfile, resetProfile, updateProfile, type ProfilePatch, type ProfileView } from './services/profile';
+export { requestRescore } from './services/rescore';
 export { scoreAccount, type AccountScore, type ScoreOptions } from './services/score';
 export { getMatches, getScore, getScoreHistory, type OfferMatchView, type ScoreChangeView } from './services/read';

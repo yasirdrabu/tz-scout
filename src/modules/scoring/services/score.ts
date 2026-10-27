@@ -22,8 +22,8 @@ import { getProfile, type ProfileView } from './profile';
 
 export type AccountScore = typeof accountScore.$inferSelect;
 
-/** `profile` and `offers` let a rescore job load them once for many accounts. `now` is for tests. */
-export type ScoreOptions = { now?: Date; profile?: ProfileView; offers?: ApprovedOffer[] };
+/** `profile` and `offers` let a rescore job load them once for many accounts. `alsoAccountIds` are accounts just merged into this one, whose warm intro and source chains count too. `now` is for tests. */
+export type ScoreOptions = { now?: Date; profile?: ProfileView; offers?: ApprovedOffer[]; alsoAccountIds?: string[] };
 
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
 
@@ -114,8 +114,9 @@ export async function scoreAccount(
   const profile = opts.profile ?? (await getProfile(ctx));
   const loaded = opts.offers ?? (await listApprovedOffers(ctx, { practiceIds: view.practiceIds }));
   const offers = loaded.filter((o) => view.practiceIds.length === 0 || view.practiceIds.includes(o.practiceId));
-  const warm = await getWarmIntro(ctx, [id]);
-  const trust = await bestTrustForAccounts(ctx, [id]);
+  const chainIds = [id, ...(opts.alsoAccountIds ?? [])];
+  const warm = await getWarmIntro(ctx, chainIds);
+  const trust = await bestTrustForAccounts(ctx, chainIds);
 
   const account = toScoringAccount(view);
   const signals = toScoringSignals(view);

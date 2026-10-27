@@ -96,7 +96,7 @@ export const scoreChange = scoring.table(
     toTier: text('to_tier').notNull(),
     fromOfferId: text('from_offer_id'),
     toOfferId: text('to_offer_id'),
-    cause: text('cause').notNull(), // new_signal | new_fact | rules_changed | offer_changed | trust_changed | warm_intro | manual_rescore
+    cause: text('cause').notNull(), // new_signal | new_fact | rules_changed | offer_changed | trust_changed | warm_intro | manual_rescore | ageing
     causeEventId: text('cause_event_id'),
     at: at('at').notNull().defaultNow(),
   },

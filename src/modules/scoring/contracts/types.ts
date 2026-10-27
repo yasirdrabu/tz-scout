@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const SCORE_CAUSES = ['new_signal', 'new_fact', 'rules_changed', 'offer_changed', 'trust_changed', 'warm_intro', 'manual_rescore'] as const;
+export const SCORE_CAUSES = ['new_signal', 'new_fact', 'rules_changed', 'offer_changed', 'trust_changed', 'warm_intro', 'manual_rescore', 'ageing'] as const;
 export const scoreCauseSchema = z.enum(SCORE_CAUSES);
 export type ScoreCause = z.infer<typeof scoreCauseSchema>;
 

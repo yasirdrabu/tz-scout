@@ -9,7 +9,13 @@ export const rescoreAccountsJob = defineJob(
   { timeoutMs: 300_000 },
 );
 
-export const rescoreFilterSchema = z.object({ practiceId: z.string().optional(), sourceId: z.string().optional(), offerId: z.string().optional() });
+/** No field means every account. `includeNoPractice` adds accounts with no practice to a `practiceId` filter. `sourceId` and `offerId` (accounts holding a match for it) each stand alone. */
+export const rescoreFilterSchema = z.object({
+  practiceId: z.string().optional(),
+  includeNoPractice: z.boolean().optional(),
+  sourceId: z.string().optional(),
+  offerId: z.string().optional(),
+});
 export type RescoreFilter = z.infer<typeof rescoreFilterSchema>;
 
 /** Lists 200 account ids matching `filter` after `afterId`, enqueues a rescore.accounts message for them and re-enqueues itself with the cursor. */

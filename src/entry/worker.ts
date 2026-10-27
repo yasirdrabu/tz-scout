@@ -2,7 +2,7 @@ import './registry';
 import { accountsTenantDefaults, exclusionsRecheckHandler } from '@/modules/accounts';
 import { importRunHandler, intakeAccountMerged, intakeTenantDefaults, resolveHandler, waitingExpireHandler } from '@/modules/intake';
 import { credentialsCleanupHandler } from '@/modules/integrations';
-import { scoringTenantDefaults } from '@/modules/scoring';
+import { ageingHandler, rescoreAccountsHandler, rescorePageHandler, scoringConsumers } from '@/modules/scoring';
 import { pingHandler } from '@/platform/diagnostics';
 import { log } from '@/platform/log';
 import type { ConsumerDef } from '@/platform/runtime/consumers';
@@ -10,10 +10,10 @@ import type { JobHandlerDef } from '@/platform/runtime/jobs';
 import { startWorker } from '@/platform/runtime/worker';
 
 /** Every consumer in the app. Modules add theirs here as they land. */
-export const consumers: ConsumerDef[] = [accountsTenantDefaults, intakeTenantDefaults, intakeAccountMerged, scoringTenantDefaults];
+export const consumers: ConsumerDef[] = [accountsTenantDefaults, intakeTenantDefaults, intakeAccountMerged, ...scoringConsumers];
 
 /** Every job handler in the app. */
-export const jobs: JobHandlerDef[] = [pingHandler, credentialsCleanupHandler, exclusionsRecheckHandler, resolveHandler, waitingExpireHandler, importRunHandler];
+export const jobs: JobHandlerDef[] = [pingHandler, credentialsCleanupHandler, exclusionsRecheckHandler, resolveHandler, waitingExpireHandler, importRunHandler, rescoreAccountsHandler, rescorePageHandler, ageingHandler];
 
 /** Worker role: consumers and job handlers. Runs until SIGINT or SIGTERM. */
 export async function main(): Promise<void> {
