@@ -13,6 +13,7 @@ import { arrivalRejected, arrivalResolved, sourceTrustChanged } from '@/modules/
 import { getOffer } from '@/modules/offers';
 import { offerApproved, offerArchived, offerChanged } from '@/modules/offers/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
+import { ScoutError } from '@/platform/errors';
 import type { EventDef } from '@/platform/events/registry';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { rulesChanged } from './contracts/events';
@@ -116,9 +117,15 @@ export const rescoreOnOfferChanged = defineConsumer({
   handle: async (e, ctx) => {
     if (!e.data.affectsMatching) return;
     await startRescore(ctx, { offerId: e.data.offerId }, 'offer_changed');
-    if ((await getOffer(ctx, e.data.offerId)).status === 'approved') {
-      await startRescore(ctx, practiceAndUnassigned(e.data.practiceId), 'offer_changed');
-    }
+    // An offer that can no longer be read is treated as not approved.
+    const stillApproved = await getOffer(ctx, e.data.offerId).then(
+      (o) => o.status === 'approved',
+      (err: unknown) => {
+        if (err instanceof ScoutError && err.status === 404) return false;
+        throw err;
+      },
+    );
+    if (stillApproved) await startRescore(ctx, practiceAndUnassigned(e.data.practiceId), 'offer_changed');
   },
 });
 

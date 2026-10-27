@@ -5,6 +5,7 @@ import { listApprovedOffers } from '@/modules/offers';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { enqueueJob } from '@/platform/events/outbox';
+import { log } from '@/platform/log';
 import { ageingJob, rescoreAccountsJob, rescorePageJob, type RescoreFilter } from '../contracts/jobs';
 import type { ScoreCause } from '../contracts/types';
 import { accountScore, offerMatch } from '../db/schema';
@@ -18,19 +19,24 @@ const AGEING_MIN_AGE_MS = 20 * 3_600_000;
 
 /**
  * Scores each account in its own savepoint, with the profile and approved offers loaded once. An account that is
- * gone is skipped. Any other failure fails the message; a retry is safe because unchanged inputs write nothing.
+ * gone is skipped. Any other failure is logged and that account is queued again on its own, so one bad account
+ * does not undo the other scores; a lone account that fails fails the message, and the normal retries apply.
  */
 export async function rescoreAccounts(ctx: ModuleContext, accountIds: string[], cause: ScoreCause): Promise<void> {
   const profile = await getProfile(ctx);
   const offers = await listApprovedOffers(ctx);
+  const failed: string[] = [];
   for (const id of accountIds) {
     try {
       await ctx.tx.transaction((tx) => scoreAccount({ ...ctx, tx }, id, cause, undefined, { profile, offers }));
     } catch (e) {
       if (e instanceof ScoutError && e.status === 404) continue;
-      throw e;
+      if (accountIds.length === 1) throw e;
+      log.error({ accountId: id, err: (e as Error).message }, 'rescore: account failed, queued again alone');
+      failed.push(id);
     }
   }
+  for (const id of failed) await enqueueJob(ctx, rescoreAccountsJob, { accountIds: [id], cause });
 }
 
 /** One page of account ids for `filter`, in id order. */
@@ -68,6 +74,9 @@ export const startRescore = (ctx: ModuleContext, filter: RescoreFilter, cause: S
 
 /** Rescores the whole tenant, or one practice or source (SCO-E5-S4-AC1). The route checks `scoring:manage`. */
 export function requestRescore(ctx: ModuleContext, filter: { practiceId?: string; sourceId?: string } = {}): Promise<string> {
+  if (filter.practiceId && filter.sourceId) {
+    throw new ScoutError({ slug: 'validation', status: 400, title: 'Choose a practice or a source, not both.' });
+  }
   return startRescore(ctx, filter, 'manual_rescore');
 }
 

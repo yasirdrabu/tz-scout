@@ -1,5 +1,19 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+
+// A test can name accounts whose scoring throws; every other account scores as usual.
+const failing = vi.hoisted(() => new Set<string>());
+vi.mock('@/modules/scoring/services/score', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/modules/scoring/services/score')>();
+  return {
+    ...real,
+    scoreAccount: (...args: Parameters<typeof real.scoreAccount>) => {
+      if (failing.has(args[1])) throw new Error('boom');
+      return real.scoreAccount(...args);
+    },
+  };
+});
+
 import '@/entry/compose';
 import { mergeAccounts, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { account } from '@/modules/accounts/db/schema';
@@ -8,18 +22,21 @@ import { getArrival, intakeSourceInfo, registerSource, submitArrival } from '@/m
 import { arrivalRejected, arrivalResolved, sourceTrustChanged } from '@/modules/intake/contracts/events';
 import { approveOffer, archiveOffer, createOffer, createPractice } from '@/modules/offers';
 import { offerChanged } from '@/modules/offers/contracts/events';
-import { ageingJob, getScore, requestRescore, scoreAccount, updateProfile } from '@/modules/scoring';
+import { getScore, requestRescore, scoreAccount, updateProfile } from '@/modules/scoring';
 import { accountScore, offerMatch, scoreChange } from '@/modules/scoring/db/schema';
+import { ageingPage, rescoreAccounts } from '@/modules/scoring/services/rescore';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb, closeDbs } from '@/platform/db/client';
-import { enqueueJob } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { publishTestEvent } from '../helpers/publish';
 import { runOutbox } from '../helpers/run-outbox';
 import { completeOffer, freshTenant } from '../offers/helpers';
 
 afterAll(closeDbs);
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  failing.clear();
+});
 
 type Tenant = Awaited<ReturnType<typeof freshTenant>>;
 const NOW = new Date('2026-10-27T12:00:00Z');
@@ -89,7 +106,7 @@ describe('single-account triggers (SCO-E5-S1)', () => {
         { firstName: 'Ada', lastName: 'One', title: 'CTO' },
         { firstName: 'Bo', lastName: 'Two', title: 'CIO' },
       ],
-      signals: [{ kind: 'trigger', type: 'funding', title: 'Series B', occurredAt: new Date(Date.now() - 5 * DAY) }],
+      signals: [{ kind: 'trigger', type: 'funding', title: 'Series B', occurredAt: new Date(NOW.getTime() - 5 * DAY) }],
       facts: [
         { key: 'employees', value: 300 },
         { key: 'hq_country', value: 'US' },
@@ -201,19 +218,37 @@ describe('fan-out on offers (SCO-E5-S2)', () => {
     expect((await scoredEvents(t, onlyOffer.accountId)).pop()).toMatchObject({ previousBestOfferId: best.id, bestOfferId: null });
   });
 
-  it('offer.changed rescores only when it affects matching', async () => {
+  it('offer.changed rescores only when it affects matching, and skips the practice page once the offer is not approved', async () => {
     const { t, practice } = await world();
     const o = await approved(t, practice.id, 'Lead');
     await runOutbox(t.tenantId);
+    const a = await seed(t);
+    await score(t, a.accountId);
+    expect((await current(t, a.accountId))!.version).toBe(1);
     const pages = async () => (await outboxOf(t, 'jobs.scoring.rescore.page')).length;
-    const before = await pages();
-    await publishTestEvent(t.tenantId, offerChanged, { offerId: o.id, practiceId: practice.id, changed: ['promise'], affectsMatching: false });
+    const setOffer = (patch: ReturnType<typeof sql>) => t.run((ctx) => ctx.tx.execute(sql`update offers.offer ${patch} where id = ${o.id}`));
+    const changed = (affectsMatching: boolean) =>
+      publishTestEvent(t.tenantId, offerChanged, { offerId: o.id, practiceId: practice.id, changed: ['industries'], affectsMatching });
+
+    await setOffer(sql`set industries = array['healthcare']::text[]`);
+    let before = await pages();
+    await changed(false);
     await runOutbox(t.tenantId);
     expect(await pages()).toBe(before);
-    await publishTestEvent(t.tenantId, offerChanged, { offerId: o.id, practiceId: practice.id, changed: ['industries'], affectsMatching: true });
+    expect((await current(t, a.accountId))!.version).toBe(1);
+
+    await changed(true);
     await runOutbox(t.tenantId);
     // One page job for accounts holding a match, one for the practice and accounts with no practice.
     expect(await pages()).toBe(before + 2);
+    expect((await current(t, a.accountId))!.version).toBe(2);
+
+    await setOffer(sql`set status = 'archived'`);
+    before = await pages();
+    await changed(true);
+    await runOutbox(t.tenantId);
+    expect(await pages()).toBe(before + 1);
+    expect((await current(t, a.accountId))!.bestOfferId).toBeNull();
   });
 });
 
@@ -266,27 +301,50 @@ describe('fan-out on trust and rules', () => {
 });
 
 describe('ageing', () => {
-  it('rescores only accounts with a young signal that were last scored over 20 hours ago', async () => {
+  it('rescores accounts with a young signal that were never scored or last scored over 20 hours ago, and no others', async () => {
     const { t, practice } = await world();
     await approved(t, practice.id, 'Lead');
     await runOutbox(t.tenantId);
-    const young = [{ kind: 'trigger' as const, type: 'funding', title: 'Series B', occurredAt: new Date(Date.now() - 5 * DAY) }];
+    const young = [{ kind: 'trigger' as const, type: 'funding', title: 'Series B', occurredAt: new Date(NOW.getTime() - 5 * DAY) }];
     const stale = await seed(t, [], { signals: young });
     const fresh = await seed(t, [], { signals: young });
+    const neverScored = await seed(t, [], { signals: young });
     const noSignal = await seed(t);
-    const oldSignal = await seed(t, [], { signals: [{ kind: 'trigger', type: 'funding', title: 'Old news', occurredAt: new Date(Date.now() - 400 * DAY) }] });
+    const oldSignal = await seed(t, [], { signals: [{ kind: 'trigger', type: 'funding', title: 'Old news', occurredAt: new Date(NOW.getTime() - 400 * DAY) }] });
     for (const a of [stale, fresh, noSignal, oldSignal]) await score(t, a.accountId);
     await t.run((ctx) =>
       ctx.tx.execute(
-        sql`update scoring.account_score set computed_at = now() - interval '30 hours' where account_id in (${stale.accountId}, ${noSignal.accountId}, ${oldSignal.accountId})`,
+        sql`update scoring.account_score set computed_at = ${NOW.toISOString()}::timestamptz - interval '30 hours' where account_id in (${stale.accountId}, ${noSignal.accountId}, ${oldSignal.accountId})`,
       ),
     );
-    await runOutbox(t.tenantId);
     const sentBefore = (await outboxOf(t, 'jobs.scoring.rescore.accounts')).length;
-    await t.run((ctx) => enqueueJob(ctx, ageingJob, {}));
+    await t.run((ctx) => ageingPage(ctx, undefined, NOW));
+    const ids = (await outboxOf(t, 'jobs.scoring.rescore.accounts')).slice(sentBefore).flatMap((j) => j.data.accountIds as string[]);
+    expect(ids.sort()).toEqual([stale.accountId, neverScored.accountId].sort());
+  });
+});
+
+describe('a failing account', () => {
+  it('does not undo the other scores: it is queued again on its own', async () => {
+    const { t, practice } = await world();
+    await approved(t, practice.id, 'Lead');
     await runOutbox(t.tenantId);
-    const jobs = (await outboxOf(t, 'jobs.scoring.rescore.accounts')).slice(sentBefore);
-    expect(jobs.flatMap((j) => j.data.accountIds as string[])).toEqual([stale.accountId]);
+    const [one, bad, three] = [await seed(t), await seed(t), await seed(t)];
+    failing.add(bad.accountId);
+    const sentBefore = (await outboxOf(t, 'jobs.scoring.rescore.accounts')).length;
+    await t.run((ctx) => rescoreAccounts(ctx, [one.accountId, bad.accountId, three.accountId], 'manual_rescore'));
+    expect(await current(t, one.accountId)).toBeDefined();
+    expect(await current(t, three.accountId)).toBeDefined();
+    expect(await current(t, bad.accountId)).toBeUndefined();
+    const followUps = (await outboxOf(t, 'jobs.scoring.rescore.accounts')).slice(sentBefore);
+    expect(followUps.map((j) => j.data.accountIds)).toEqual([[bad.accountId]]);
+  });
+
+  it('a lone failing account fails the message so the normal retries apply', async () => {
+    const { t } = await world();
+    const bad = await seed(t);
+    failing.add(bad.accountId);
+    await expect(t.run((ctx) => rescoreAccounts(ctx, [bad.accountId], 'manual_rescore'))).rejects.toThrow('boom');
   });
 });
 
@@ -338,5 +396,43 @@ describe('merge', () => {
     expect(await matchRows(t, mergedId)).toHaveLength(0);
     expect((await current(t, survivor.accountId))!.warmPoints).toBeGreaterThan(0);
     expect(await t.run((ctx) => getScore(ctx, survivor.accountId))).toMatchObject({ accountId: survivor.accountId });
+  });
+});
+
+describe('requestRescore', () => {
+  it('refuses a practice and a source together', async () => {
+    const { t, practice } = await world();
+    await expect(t.run((ctx) => requestRescore(ctx, { practiceId: practice.id, sourceId: 'src_one' }))).rejects.toMatchObject({
+      status: 400,
+      message: 'Choose a practice or a source, not both.',
+    });
+  });
+});
+
+describe('scoring with merged ids', () => {
+  it('alsoAccountIds brings the merged account warm intro and trust chains into the survivor score, with no other consumer involved', async () => {
+    const { t, practice } = await world();
+    await approved(t, practice.id, 'Lead');
+    await runOutbox(t.tenantId);
+    vi.spyOn(intakeSourceInfo, 'getTrust').mockResolvedValue(0.9);
+    const agentId = await t.run(async (ctx) => {
+      const person = await registerSource(ctx, { kind: 'person', name: 'Ash' });
+      return (await registerSource(ctx, { kind: 'agent', name: 'Ash agent', parentId: person.id })).id;
+    });
+    const sent = await t.run((ctx) =>
+      submitArrival(
+        { ...ctx, access: { sourceId: agentId, dataLimit: { kind: 'own_source' } } },
+        { account: { name: 'Warm Co', domain: domain(), industry: 'Logistics' }, warm_intro: { introducer_name: 'Ash', relationship_key: 'event_meeting' } },
+        { channel: 'api', canDeclareWarmIntro: true },
+      ),
+    );
+    await runOutbox(t.tenantId);
+    const otherId = (await t.run((ctx) => getArrival(ctx, sent.arrivalId)))!.accountId!;
+    const survivor = await seed(t);
+    const alone = await t.run((ctx) => scoreAccount(ctx, survivor.accountId, 'new_fact', undefined, { now: NOW }));
+    expect(alone.score).toMatchObject({ warmPoints: 0, trustSourceId: null });
+    const both = await t.run((ctx) => scoreAccount(ctx, survivor.accountId, 'new_fact', undefined, { now: NOW, alsoAccountIds: [otherId] }));
+    expect(both.score.warmPoints).toBeGreaterThan(0);
+    expect(both.score).toMatchObject({ trustSourceId: agentId, warmIntroducerName: 'Ash' });
   });
 });
