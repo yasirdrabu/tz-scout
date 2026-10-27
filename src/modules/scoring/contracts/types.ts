@@ -8,6 +8,9 @@ export const TIERS = ['not_fit', 'watch', 'good_fit', 'act_now'] as const;
 export const tierSchema = z.enum(TIERS);
 export type Tier = z.infer<typeof tierSchema>;
 
+/** One offer's score for an account, as the best-offer pick and priority read it. */
+export type Match = { offerId: string; fit: number; intent: number; total: number; tier: Tier };
+
 export const TIER_REASONS = ['computed', 'research_floor', 'warm_intro_floor'] as const;
 export type TierReason = (typeof TIER_REASONS)[number];
 
@@ -38,6 +41,10 @@ export type ScoringProfile = {
   halfLifeDays: number;
   maxSignalAgeDays: number;
   tierThresholds: TierThresholds;
+  warmIntroCap: number;
+  trustModifierMax: number;
+  trustNeutral: number;
+  researchFloorDays: number;
 };
 
 export type ScoringPerson = { title: string | null; roleKeys: string[] };
