@@ -400,11 +400,15 @@ export async function resolveArrival(ctx: ModuleContext, arrivalId: string): Pro
  * Inline resolution of a targeted arrival (`add_person`, `add_signal`): steps 1, 2 (rules only,
  * never Claude), 5 and 7 in the caller's transaction.
  */
-export async function resolveInline(ctx: ModuleContext, arrivalId: string): Promise<{ status: string; inlineResult?: InlineResult }> {
+export async function resolveInline(
+  ctx: ModuleContext,
+  arrivalId: string,
+  opts: { targetPersonId?: string } = {},
+): Promise<{ status: string; inlineResult?: InlineResult }> {
   const row = (await load(ctx, arrivalId))!;
   const n = await validated(ctx, row, { ai: false });
   if (!n) return { status: 'rejected' };
-  const r = await upsertFromArrival(ctx, forAccounts(row, n), row.targetAccountId!);
+  const r = await upsertFromArrival(ctx, forAccounts(row, n), row.targetAccountId!, opts.targetPersonId ? { personId: opts.targetPersonId } : {});
   await record(ctx, row, 'upsert', { accountId: r.accountId, resolution: r.created ? 'created' : 'attached' });
   // An excluded target is rejected `excluded`; the people and signals stay on the kept account.
   const status = await finish(ctx, row, n, r.accountId, r.excluded, null);

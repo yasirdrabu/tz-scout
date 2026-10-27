@@ -169,6 +169,16 @@ export async function getFacts(
   return rows.map(toFact);
 }
 
+/** One person with their roles, when the principal can see their account. */
+export async function getPerson(ctx: ModuleContext, personId: string): Promise<PersonView | null> {
+  const [row] = await ctx.tx
+    .select({ accountId: person.accountId })
+    .from(person)
+    .where(and(eq(person.tenantId, ctx.tenantId), eq(person.id, personId), isNull(person.archivedAt)));
+  if (!row || !(await canSee(ctx, row.accountId))) return null;
+  return (await peopleOf(ctx, [row.accountId])).find((p) => p.id === personId) ?? null;
+}
+
 export async function listPeople(ctx: ModuleContext, accountId: string): Promise<PersonView[]> {
   const target = await visible(ctx, accountId);
   return target ? peopleOf(ctx, [target.id]) : [];

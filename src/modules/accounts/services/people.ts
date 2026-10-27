@@ -3,6 +3,8 @@ import type { ModuleContext } from '@/platform/context';
 import { newId } from '@/platform/ids';
 import type { ArrivalPerson, SourceChain } from '../contracts/types';
 import { fact, person, personRole } from '../db/schema';
+import { ScoutError } from '@/platform/errors';
+import { reprojectPerson } from './edit';
 import { PERSON_COLUMNS, recordFacts, reproject, type FactInput } from './facts';
 
 type PersonRow = typeof person.$inferSelect;
@@ -121,4 +123,35 @@ export async function matchOrAddPerson(
     changedKeys: match ? [...recordedKeys, ...(added.length ? ['roles'] : [])] : [],
     roleKeys: roles.map((r) => r.roleKey).sort(),
   };
+}
+
+/**
+ * Records facts about a person already at the account, for a targeted arrival that names the person
+ * (an API key's `PATCH /people/{id}`). Facts stay unpinned; a changed email updates the person. The
+ * caller holds the account lock.
+ */
+export async function updatePersonFromArrival(
+  ctx: ModuleContext,
+  accountId: string,
+  personId: string,
+  input: FactInput[],
+  chain: SourceChain,
+  arrivalId: string,
+): Promise<PersonResult> {
+  const [row] = await ctx.tx
+    .select({ id: person.id })
+    .from(person)
+    .where(and(eq(person.tenantId, ctx.tenantId), eq(person.id, personId), eq(person.accountId, accountId), isNull(person.archivedAt)));
+  if (!row) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That person was not found.' });
+  const facts = input.map((f) => (f.key === 'email' && typeof f.value === 'string' ? { ...f, value: f.value.trim().toLowerCase() } : f));
+  const factIds = await recordFacts(ctx, accountId, personId, facts, chain, arrivalId);
+  const keys = factIds.length
+    ? [...new Set((await ctx.tx.select({ key: fact.key }).from(fact).where(inArray(fact.id, factIds))).map((f) => f.key))]
+    : [];
+  if (keys.length) await reprojectPerson(ctx, accountId, keys);
+  const roles = await ctx.tx
+    .select({ roleKey: personRole.roleKey })
+    .from(personRole)
+    .where(and(eq(personRole.tenantId, ctx.tenantId), eq(personRole.personId, personId)));
+  return { personId, existing: true, factIds, changedKeys: keys, roleKeys: roles.map((r) => r.roleKey).sort() };
 }

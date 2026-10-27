@@ -36,6 +36,8 @@ export type SubmitOptions = {
   canDeclareWarmIntro?: boolean;
   /** A registered vendor source to fill the vendor slot (a file import's "this list came from"), instead of the body's `via_vendor`. */
   vendorSourceId?: string;
+  /** Inline only: the facts are about this person at the target account (set by routes, never read from a body). */
+  targetPersonId?: string;
 };
 
 export type SubmitResult = {
@@ -236,6 +238,7 @@ export async function submitArrival(ctx: ModuleContext, body: unknown, opts: Sub
   if (!parsed.success) throw invalid('Check the request.', problems(parsed.error));
   const a = parsed.data;
   if (opts.inline && !a.target_account_id) throw new Error('Only a targeted arrival can be resolved inline');
+  if (opts.targetPersonId && !opts.inline) throw new Error('A person target needs an inline arrival');
 
   const externalRef = refOf(a);
   const duplicate = async (): Promise<SubmitResult | null> => {
@@ -264,7 +267,7 @@ export async function submitArrival(ctx: ModuleContext, body: unknown, opts: Sub
     canDeclareWarmIntro: opts.canDeclareWarmIntro,
   });
   if (!id) return (await duplicate())!;
-  if (opts.inline) return { arrivalId: id, duplicateOfRequest: false, ...(await resolveInline(ctx, id)) };
+  if (opts.inline) return { arrivalId: id, duplicateOfRequest: false, ...(await resolveInline(ctx, id, { targetPersonId: opts.targetPersonId })) };
   await enqueueJob(ctx, resolveJob, { arrivalId: id });
   return { arrivalId: id, status: 'received', duplicateOfRequest: false };
 }

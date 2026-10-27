@@ -33,6 +33,7 @@ export {
   getAccountForScoring,
   getAccounts,
   getFacts,
+  getPerson,
   getSignals,
   listPeople,
   type ScoringView,

@@ -12,7 +12,7 @@ import { applyExclusion, type Exclusion } from './exclusion';
 import { ACCOUNT_COLUMNS, recordFacts, reproject, type FactInput } from './facts';
 import { lockAccount } from './lock';
 import { resolveAccountId } from './match';
-import { matchOrAddPerson, type PersonResult } from './people';
+import { matchOrAddPerson, updatePersonFromArrival, type PersonResult } from './people';
 import { repickPrimary } from './primary';
 import { setPractices } from './practices';
 import { storeSignal, type StoredSignal } from './signals';
@@ -216,7 +216,13 @@ async function lockLive(ctx: ModuleContext, id: string): Promise<string> {
  * (ACC-E1-S1). Runs in the caller's transaction, under the account lock. Reads apply no visibility:
  * it runs inside intake's pipeline.
  */
-export async function upsertFromArrival(ctx: ModuleContext, a: ArrivalForAccounts, accountId?: string): Promise<UpsertResult> {
+export async function upsertFromArrival(
+  ctx: ModuleContext,
+  a: ArrivalForAccounts,
+  accountId?: string,
+  /** `personId`: the arrival's facts are about this person at the account, not about the account or new people. */
+  opts: { personId?: string } = {},
+): Promise<UpsertResult> {
   const target = await createOrLoad(ctx, a, accountId);
   const id = await lockLive(ctx, target.id);
   const chain = a.sourceChain;
@@ -226,13 +232,19 @@ export async function upsertFromArrival(ctx: ModuleContext, a: ArrivalForAccount
     .from(account)
     .where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, id)));
   // 1, 2. Facts about the account, then the current values.
-  const factIds = await recordFacts(ctx, id, null, accountFacts(a, target.isShell), chain, a.arrivalId);
+  const factIds = await recordFacts(ctx, id, null, accountFacts(opts.personId ? { ...a, facts: [] } : a, target.isShell), chain, a.arrivalId);
   await reproject(ctx, id);
   // 3. Aliases.
   await addAliases(ctx, id, a, before?.domain ?? null);
   // 4. People.
   const people: PersonResult[] = [];
-  for (const [i, p] of a.people.entries()) {
+  if (opts.personId) {
+    const input = a.facts.map((f) => ({ key: f.key, value: f.value, url: f.url, note: f.note, observedAt: f.observedAt ?? a.receivedAt }));
+    const r = await updatePersonFromArrival(ctx, id, opts.personId, input, chain, a.arrivalId);
+    people.push(r);
+    factIds.push(...r.factIds);
+  }
+  for (const [i, p] of (opts.personId ? [] : a.people).entries()) {
     const personFacts = a.facts
       .filter((f) => f.personIndex === i)
       .map((f) => ({ key: f.key, value: f.value, url: f.url, note: f.note, observedAt: f.observedAt ?? a.receivedAt }));
