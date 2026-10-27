@@ -9,6 +9,7 @@ import {
   upsertFromArrival,
   type ArrivalForAccounts,
 } from '@/modules/accounts';
+import { recordFacts } from '@/modules/accounts/services/facts';
 import { account, accountAlias, accountSummary, person, personAlias } from '@/modules/accounts/db/schema';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb } from '@/platform/db/client';
@@ -182,6 +183,64 @@ describe('mergeAccounts', () => {
     await expect(asPerson((ctx) => mergeAccounts(ctx, a.accountId, b.accountId))).rejects.toMatchObject({
       status: 409,
       message: 'An archived account cannot be merged.',
+    });
+  });
+
+  it("keeps the survivor's own domain when it holds the merged domain as a candidate", async () => {
+    const dA = domain();
+    const dB = domain();
+    const a = await seed({ account: { name: 'Flip One', domain: dA } });
+    const b = await seed({ account: { name: 'Flip Two', domain: dB } });
+    await t.run((ctx) =>
+      upsertFromArrival(ctx, arrival({ receivedAt: new Date('2026-10-27T10:00:00Z'), account: { domain: dB } }), a.accountId),
+    );
+    await asPerson((ctx) => mergeAccounts(ctx, a.accountId, b.accountId));
+    const [row] = await t.run((ctx) => ctx.tx.select().from(account).where(eq(account.id, a.accountId)));
+    expect(row!.domain).toBe(dA);
+    expect((await t.run((ctx) => findMatches(ctx, { domain: dA }))).map((m) => m.accountId)).toEqual([a.accountId]);
+    expect((await t.run((ctx) => findMatches(ctx, { domain: dB }))).map((m) => m.accountId)).toEqual([a.accountId]);
+  });
+
+  it('a collapsed person whose email another person at the survivor holds still merges', async () => {
+    const dA = domain();
+    const shared = `shared@${domain()}`;
+    const a = await seed({
+      account: { name: 'Clash One', domain: dA },
+      people: [
+        { firstName: 'Ana', lastName: 'Silva', email: `ana@${dA}` },
+        { firstName: 'Bo', lastName: 'Lin', email: shared },
+      ],
+    });
+    const b = await seed({
+      account: { name: 'Clash Two', domain: domain() },
+      people: [{ firstName: 'Ana', lastName: 'Silva', email: `ana@${domain()}` }],
+    });
+    // A newer, unprojected email candidate for B's Ana that Bo already holds at the survivor.
+    await t.run((ctx) =>
+      recordFacts(ctx, b.accountId, b.personIds[0]!, [{ key: 'email', value: shared, observedAt: new Date('2026-10-28T00:00:00Z') }], { personSourceId: 'src_x' }),
+    );
+    await asPerson((ctx) => mergeAccounts(ctx, a.accountId, b.accountId));
+    const view = await t.run((ctx) => getAccount(ctx, a.accountId));
+    expect(view!.people.map((p) => [p.firstName, p.email]).sort()).toEqual([
+      ['Ana', `ana@${dA}`],
+      ['Bo', shared],
+    ]);
+  });
+
+  it('an arrival that targets a merged account lands on the survivor; other archived accounts are not found', async () => {
+    const a = await seed({ account: { name: 'Land One', domain: domain() } });
+    const b = await seed({ account: { name: 'Land Two', domain: domain() } });
+    await asPerson((ctx) => mergeAccounts(ctx, a.accountId, b.accountId));
+    const out = await t.run((ctx) => upsertFromArrival(ctx, arrival({ account: { employees: 77 } }), b.accountId));
+    expect(out.accountId).toBe(a.accountId);
+    const [row] = await t.run((ctx) => ctx.tx.select().from(account).where(eq(account.id, a.accountId)));
+    expect(row!.employees).toBe(77);
+
+    const c = await seed({ account: { name: 'Gone One', domain: domain() } });
+    await t.run((ctx) => ctx.tx.update(account).set({ archivedAt: new Date() }).where(eq(account.id, c.accountId)));
+    await expect(t.run((ctx) => upsertFromArrival(ctx, arrival({ account: { employees: 1 } }), c.accountId))).rejects.toMatchObject({
+      status: 404,
+      message: 'That account was not found.',
     });
   });
 });

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -101,29 +101,52 @@ async function moveSignals(ctx: ModuleContext, survivorId: string, mergedId: str
   return duplicates;
 }
 
-/** The survivor keeps its own name and domain: the merged account's facts for them move but stop competing. */
+/**
+ * The survivor keeps its own name and domain: when it has a current value, every other live name or domain fact
+ * of either account (the merged account's, and the survivor's own candidates) stops competing. The merged values
+ * stay as aliases.
+ */
 async function moveFacts(ctx: ModuleContext, survivorId: string, mergedId: string): Promise<void> {
-  const keys = ['name', 'domain'];
   const held = await ctx.tx
     .select({ key: fact.key })
     .from(fact)
     .where(
-      and(
-        eq(fact.tenantId, ctx.tenantId),
-        eq(fact.accountId, survivorId),
-        isNull(fact.personId),
-        inArray(fact.key, keys),
-        inArray(fact.status, ['current', 'candidate']),
-      ),
+      and(eq(fact.tenantId, ctx.tenantId), eq(fact.accountId, survivorId), isNull(fact.personId), inArray(fact.key, ['name', 'domain']), eq(fact.status, 'current')),
     );
   const heldKeys = [...new Set(held.map((h) => h.key))];
   if (heldKeys.length) {
     await ctx.tx
       .update(fact)
       .set({ status: 'superseded' })
-      .where(and(eq(fact.tenantId, ctx.tenantId), eq(fact.accountId, mergedId), isNull(fact.personId), inArray(fact.key, heldKeys), inArray(fact.status, ['current', 'candidate'])));
+      .where(
+        and(
+          eq(fact.tenantId, ctx.tenantId),
+          inArray(fact.accountId, [survivorId, mergedId]),
+          isNull(fact.personId),
+          inArray(fact.key, heldKeys),
+          inArray(fact.status, ['current', 'candidate']),
+          sql`not (${fact.accountId} = ${survivorId} and ${fact.status} = 'current')`,
+        ),
+      );
   }
   await ctx.tx.update(fact).set({ accountId: survivorId }).where(and(eq(fact.tenantId, ctx.tenantId), eq(fact.accountId, mergedId)));
+}
+
+/** An email fact that another person at the survivor already holds would break the one-email-per-person index; it stops competing. */
+async function dropClashingEmails(ctx: ModuleContext, survivorId: string): Promise<void> {
+  const people = await ctx.tx
+    .select({ id: person.id, email: person.email })
+    .from(person)
+    .where(and(eq(person.tenantId, ctx.tenantId), eq(person.accountId, survivorId), isNull(person.archivedAt)));
+  const owner = new Map(people.filter((p) => p.email).map((p) => [p.email!.toLowerCase(), p.id]));
+  const facts = await ctx.tx
+    .select({ id: fact.id, personId: fact.personId, value: fact.value })
+    .from(fact)
+    .where(and(eq(fact.tenantId, ctx.tenantId), eq(fact.accountId, survivorId), eq(fact.key, 'email'), inArray(fact.status, ['current', 'candidate'])));
+  const clashing = facts
+    .filter((f) => typeof f.value === 'string' && owner.has(f.value.toLowerCase()) && owner.get(f.value.toLowerCase()) !== f.personId)
+    .map((f) => f.id);
+  if (clashing.length) await ctx.tx.update(fact).set({ status: 'superseded' }).where(and(eq(fact.tenantId, ctx.tenantId), inArray(fact.id, clashing)));
 }
 
 /** Moves the merged account's aliases (earlier merged ids and external ids included), skipping ones the survivor has. */
@@ -148,7 +171,7 @@ export async function mergeAccounts(ctx: ModuleContext, survivorId: string, merg
   const verdict = await mergeGuard().check(ctx, survivorId, mergedId);
   if (!verdict.allowed) throw new ScoutError({ slug: 'conflict', status: 409, title: verdict.reason });
 
-  const [mergedSummary] = await ctx.tx.select({ sourceIds: accountSummary.sourceIds }).from(accountSummary).where(eq(accountSummary.accountId, mergedId));
+  const [mergedSummary] = await ctx.tx.select({ sourceIds: accountSummary.sourceIds }).from(accountSummary).where(and(eq(accountSummary.tenantId, ctx.tenantId), eq(accountSummary.accountId, mergedId)));
   const peopleBefore = await ctx.tx
     .select({ id: person.id })
     .from(person)
@@ -161,6 +184,7 @@ export async function mergeAccounts(ctx: ModuleContext, survivorId: string, merg
   const { moved, collapsed } = await movePeople(ctx, survivorId, mergedId);
   const duplicateSignalIds = await moveSignals(ctx, survivorId, mergedId);
   await moveFacts(ctx, survivorId, mergedId);
+  await dropClashingEmails(ctx, survivorId);
   await moveAliases(ctx, survivorId, mergedId);
   await setPractices(ctx, survivorId, merged.practiceIds, 'hint', { publish: false });
 

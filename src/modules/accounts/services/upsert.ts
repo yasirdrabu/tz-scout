@@ -11,6 +11,7 @@ import { matchName } from '../domain/names';
 import { applyExclusion, type Exclusion } from './exclusion';
 import { ACCOUNT_COLUMNS, recordFacts, reproject, type FactInput } from './facts';
 import { lockAccount } from './lock';
+import { resolveAccountId } from './match';
 import { matchOrAddPerson, type PersonResult } from './people';
 import { repickPrimary } from './primary';
 import { setPractices } from './practices';
@@ -188,14 +189,34 @@ async function publishEvents(
 }
 
 /**
+ * After the lock is held the account may have been merged away meanwhile: continue on the survivor.
+ * An account archived for any other reason is not found.
+ */
+async function lockLive(ctx: ModuleContext, id: string): Promise<string> {
+  await lockAccount(ctx, id);
+  const live = async (accountId: string) => {
+    const [row] = await ctx.tx
+      .select({ archivedAt: account.archivedAt })
+      .from(account)
+      .where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
+    return !!row && !row.archivedAt;
+  };
+  if (await live(id)) return id;
+  const found = await resolveAccountId(ctx, id);
+  if (!found || found.id === id) throw notFound();
+  await lockAccount(ctx, found.id);
+  if (!(await live(found.id))) throw notFound();
+  return found.id;
+}
+
+/**
  * The one entry point intake uses to create or update an account from a resolved arrival
  * (ACC-E1-S1). Runs in the caller's transaction, under the account lock. Reads apply no visibility:
  * it runs inside intake's pipeline.
  */
 export async function upsertFromArrival(ctx: ModuleContext, a: ArrivalForAccounts, accountId?: string): Promise<UpsertResult> {
   const target = await createOrLoad(ctx, a, accountId);
-  const id = target.id;
-  await lockAccount(ctx, id);
+  const id = await lockLive(ctx, target.id);
   const chain = a.sourceChain;
 
   // 1, 2. Facts about the account, then the current values.
