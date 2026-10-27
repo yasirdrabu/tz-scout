@@ -29,7 +29,7 @@ are owned by Sources and intake. Scoring reads them through those modules' publi
 |---|---|
 | Accounts | `getAccountForScoring(accountId)`: facts (industry, employees, revenue, country, technologies, headcount growth), people with titles and buying roles, signals, research tier and date, exclusion |
 | Offers and practices | `listApprovedOffers(practiceId?)` with fit criteria and signal rules; `medianWonDealCents(practiceId)` |
-| Sources and intake | `getWarmIntro(accountId)` (introducer and points), `getTrust(sourceIds[])` |
+| Sources and intake | `getWarmIntro(accountId)` (introducer and points), `getTrust(chain)` |
 
 ## Epics
 

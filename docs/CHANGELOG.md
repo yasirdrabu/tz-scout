@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-27: Taazaa Scout R1a accounts and intake
+
+Every account now enters Scout through one path and lands as an account with people, facts, signals and its sources recorded. This release has the `/v1` API only; screens come later.
+
+**What was built**
+- **Offers and practices**: practices, offers and case studies, with the approval steps (draft, approved, archived).
+- **Accounts**: accounts, people with buying roles, facts that remember who said what, signals, duplicate matching, merge, exclusion rules and lists, and data limits that hide accounts a key may not see.
+- **Sources and intake**: a registry of person, agent and vendor sources with daily caps, single arrivals, batches, and CSV, Excel and Markdown imports with automatic column mapping. Every arrival is stored exactly as received, then de-duplicated. Arrivals that need a website, a company or a duplicate decision wait for a person and expire after 30 days.
+- **Warm intros**: declared intros carry default points; an unconfirmed intro counts half, rounded down.
+- **Seed data and the CLI**: `scout seed` now adds a person source for each user, a Local development agent and a development key bound to it. `scout import <tenant-slug> <file>` imports a list as the platform admin.
+- **One-path test**: the same company sent as a single arrival, a batch item, a CSV row and an inline arrival is one account with four sources.
+
+**Decisions to know about**
+- File imports by a person are not capped by the daily arrival cap; the 10,000-row limit bounds them.
+- Every source starts at trust 0.60 until R3.
+- Uploaded files are stored in Postgres so the nightly backups cover them.
+- An inline arrival on a ruled-out account returns `201` with the stored ids and a rejected status.
+
 ## 2026-10-26: Taazaa Scout R0 foundation
 
 The base the rest of Scout builds on. Everything runs on a laptop on mock services; nothing is deployed yet.

@@ -1,6 +1,7 @@
 import './registry';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { bootstrapDatabase, migrateAll } from '@/platform/db/migrate';
@@ -25,6 +26,7 @@ Long-running roles (stop with SIGTERM or SIGINT)
 One-shot commands
   migrate             Bootstrap (when DATABASE_SUPERUSER_URL is set), then apply migrations
   seed                Local development data (refuses production)
+  import <slug> <file>  Import a CSV or XLSX list into a workspace, as the platform admin's person source
   keys:create         --tenant <slug> --name <name> --scopes a,b [--test]
   tenants:create      --slug <s> --name <n> --currency <USD> --timezone <zone> --owner-email <email>
                       Operator command: run it on the server. It acts as a system platform admin.
@@ -94,6 +96,35 @@ function need(values: Record<string, string | boolean | undefined>, name: string
   return v;
 }
 
+/** Imports a file as the platform admin's person source and prints the batch. The worker does the rest. */
+async function importFile(slug: string, file: string): Promise<number> {
+  const { ADMIN_EMAIL } = await import('./seed');
+  const { createImport, personSourceFor, registerSource } = await import('@/modules/intake');
+  const { ensurePlatformAdmin, listTenants } = await import('@/modules/tenancy');
+  const { withTenant } = await import('@/platform/db/tenant');
+  const { newId } = await import('@/platform/ids');
+  const tenant = (await listTenants()).find((t) => t.slug === slug);
+  if (!tenant) throw new Error(`No workspace with the slug "${slug}".`);
+  const bytes = await readFile(file);
+  const adminId = await ensurePlatformAdmin(ADMIN_EMAIL);
+  const result = await withTenant(tenant.id, async (tx) => {
+    const base = { tenantId: tenant.id, actor: { kind: 'user' as const, id: adminId }, correlationId: newId('cor'), tx };
+    const sourceId =
+      (await personSourceFor(base, adminId)) ?? (await registerSource(base, { kind: 'person', name: ADMIN_EMAIL.split('@')[0]!, userId: adminId })).id;
+    return createImport(
+      { ...base, access: { sourceId, dataLimit: { kind: 'all' } } },
+      { fileName: path.basename(file), contentType: 'application/octet-stream', bytes },
+    );
+  });
+  if (result.status === 'needs_sheet') {
+    console.error(`The workbook has several sheets (${result.sheets.join(', ')}). Save the one you want as its own file and try again.`);
+    return 1;
+  }
+  console.log(`Batch ${result.batchId}: ${result.rowCount} rows, layout ${result.layout ?? 'none'}, import ${result.id} is ${result.status}.`);
+  if (result.status === 'needs_confirm') console.log('The columns need a person to confirm them in the web app. Nothing is sent until then.');
+  return 0;
+}
+
 /** Runs one command. Returns the exit code. */
 export async function run(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
@@ -118,8 +149,15 @@ export async function run(argv: string[]): Promise<number> {
     case 'seed': {
       const { seed } = await import('./seed');
       const { devApiKey } = await seed();
-      console.log(`Seed data is ready.\nDev API key for taazaa (status:read, members:read): ${devApiKey}`);
+      console.log(`Seed data is ready.\nDev API key for taazaa (bound to the Local development agent): ${devApiKey}`);
       return 0;
+    }
+    case 'import': {
+      const [slug, file] = rest;
+      if (!slug || !file) throw new Error(`Usage: scout import <tenant-slug> <file>
+
+${USAGE}`);
+      return importFile(slug, file);
     }
     case 'keys:create': {
       const { values } = parseArgs({

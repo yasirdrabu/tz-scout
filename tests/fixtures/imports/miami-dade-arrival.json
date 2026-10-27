@@ -1,0 +1,44 @@
+{
+  "account": {
+    "name": "Miami-Dade County DTPW",
+    "domain": "miamidade.gov",
+    "website": "https://www.miamidade.gov/global/transportation/home.page",
+    "linkedin_url": null,
+    "country": "US", "region": "FL", "city": "Miami",
+    "industry": "Public transportation",
+    "employees": 3000,
+    "revenue_cents": null,
+    "notes": "Found while researching Florida CTCs.",
+    "practice_hint": "ai-operating-platforms",
+    "offer_hint": null,
+    "external_ref": "yasir-agent-2026-10-25-0041",
+
+    "description": "Florida's largest community transportation coordinator.",
+    "employees_range": null, "revenue_range": null,
+    "technologies": ["Trapeze PASS"], "keywords": ["paratransit", "microtransit"],
+    "parent_domain": null,
+    "custom_fields": { "abm_motion": "tier_1_one_to_one", "fleet_tier": "unverified" }
+  },
+  "people": [
+    { "name": "Jarice Rodriguez",
+      "title": "Chief of Paratransit Operations & Mobility Services",
+      "buying_role": "business_owner", "email": null, "phone": null, "linkedin_url": null,
+      "notes": "Leads STS; FPTA 2026 speaker." }
+  ],
+  "signals": [
+    { "type": "trigger", "title": "Software-only re-solicitation approved (R-481-26)",
+      "occurred_at": "2026-06-02", "url": "https://www.miamidade.gov/solicitations/r-481-26", "detail": null, "confidence": 0.9 }
+  ],
+  "facts": { "contract_value_cents": 2090000000 },
+  "warm_intro": { "introducer_name": "Ashkan Eskandari", "introducer_email": "ash@taazaa.com",
+                  "relationship": "knows the CTC director from FPTA", "note": null },
+
+  "research": {
+    "hook": "A software-only re-solicitation is open.", "problem": "Paratransit scheduling runs on an aging platform.", "pilot": "A 4-week audit of trip scheduling.", "price_cents": null, "value_hypothesis": "Fewer missed trips and faster eligibility checks.",
+    "incumbent": "Trapeze", "caveats": "Cone of silence once the RFP is out", "contact_route": "Public procurement contact page",
+    "next_action": "Ask for an intro through FPTA.", "researcher_score": 79, "researcher_tier": "A"
+  },
+  "sole_proprietor": false,
+  "via_vendor": "apollo",
+  "target_account_id": null
+}

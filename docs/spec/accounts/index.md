@@ -14,8 +14,9 @@ ACC never takes data straight from outside. New data comes through intake (SRC c
 
 **ACC calls no module above it** (spec's call, D29). It defines two interfaces in `accounts/contracts`
 that higher modules implement, wired by the composition root:
-- `SourceInfoProvider` (implemented by SRC): `getTrust(ctx, sourceIds)` for picking current fact values,
+- `SourceInfoProvider` (implemented by SRC): `getTrust(ctx, chain)` (one effective trust for a source chain) for picking current fact values,
   `sourcesForAccount(ctx, accountId)`.
+- `SourceAccessProvider` (implemented by SRC): `childSources(ctx, sourceIds)` and `personSourceFor(ctx, userId)`, used to apply the `own_source` data limit without importing SRC.
 - `MergeGuard` (implemented by CRM): `check(ctx, survivorId, mergedId)` refuses merges of accounts
   linked to different CRM companies (ACC-E5).
 
@@ -26,17 +27,18 @@ calls ACC); ACC's endpoints below are routed to SRC by the API layer, not by ACC
 
 | Table | Key fields | Notes |
 |---|---|---|
-| `account` | `id` (`acc_`), `tenant_id`, `name`, `domain`, `website_url`, `linkedin_url`, `industry`, `employees`, `employees_min`, `employees_max`, `revenue_cents`, `revenue_min_cents`, `revenue_max_cents`, `hq_city`, `hq_state`, `hq_country`, `description`, `technologies[]`, `keywords[]`, `parent_domain`, `headcount_growth_6m`, `founded_year`, `is_shell`, `research_tier` (`A`, `B`, `C`), `research_tier_signal_at`, `practice_ids[]`, `excluded_reason_key`, `excluded_override`, `crm_status`, `archived_at`, `created_at` | Current values: a projection of the current facts, for fast lists and search. `research_tier` is the ABM researcher's tier (current `researcher_tier` fact) and `research_tier_signal_at` the date of the dated signal that came with it; SCO uses both as a tier floor. `practice_ids` (may be empty) is owned by ACC and set from an arrival's `practice_hint`, file-import practice recognition, or a person; it is additive (a new hint adds, never removes) and only a person removes one (spec's call, D25) |
+| `account` | `id` (`acc_`), `tenant_id`, `name`, `match_name`, `domain`, `website_url`, `linkedin_url`, `industry`, `industry_key`, `employees`, `employees_min`, `employees_max`, `revenue_cents`, `revenue_min_cents`, `revenue_max_cents`, `hq_city`, `hq_state`, `hq_state_key`, `hq_country`, `description`, `technologies[]`, `keywords[]`, `parent_domain`, `headcount_growth_6m`, `founded_year`, `is_shell`, `research_tier` (`A`, `B`, `C`), `research_tier_signal_at`, `practice_ids[]`, `excluded_reason_key`, `excluded_override`, `crm_status`, `archived_at`, `created_at` | Current values: a projection of the current facts, for fast lists and search. `research_tier` is the ABM researcher's tier (current `researcher_tier` fact) and `research_tier_signal_at` the date of the dated signal that came with it; SCO uses both as a tier floor. `practice_ids` (may be empty) is owned by ACC and set from an arrival's `practice_hint`, file-import practice recognition, or a person; it is additive (a new hint adds, never removes) and only a person removes one (spec's call, D25) |
 | `account_alias` | `account_id`, `kind` (`domain`, `name`, `merged_id`, `external_id`), `value`, `system` | Domains and names it is also known by; ids of merged accounts; outside ids `(hubspot, 123)` |
-| `person` | `id` (`per_`), `tenant_id`, `account_id`, `first_name`, `last_name`, `title`, `seniority`, `email`, `email_status`, `phone`, `mobile_phone`, `linkedin_url`, `is_primary`, `decision_note`, `archived_at` | Current values, also a projection of facts |
+| `person` | `id` (`per_`), `tenant_id`, `account_id`, `first_name`, `last_name`, `title`, `seniority`, `email`, `email_status`, `phone`, `mobile_phone`, `linkedin_url`, `is_primary`, `primary_pinned_at`, `primary_pinned_by`, `decision_note`, `archived_at` | Current values, also a projection of facts |
 | `person_role` | `person_id`, `role_key`, `origin` (`stated`, `guessed_from_title`, `set_by_person`), `set_by`, `set_at` | Many roles per person |
 | `person_alias` | `person_id`, `kind` (`email`, `merged_id`, `external_id`), `value`, `system` | |
 | `fact` | `id` (`fct_`), `tenant_id`, `account_id`, `person_id?`, `key`, `value` (JSON), `value_type`, `kind` (`firmographic`, `contact`, `research`, `custom`, `form_answer`), source chain ids, `arrival_id`, `url`, `note`, `observed_at`, `recorded_at`, `status` (`current`, `candidate`, `superseded`, `archived`), `pinned_by`, `pinned_at` | Every value ever said about an account or person |
 | `conflict` | `id` (`cfl_`), `tenant_id`, `account_id`, `person_id?`, `key`, `fact_ids[]`, `status` (`open`, `resolved`), `kept_fact_id`, `resolved_by`, `resolved_at`, `note` | |
-| `signal` | `id` (`sig_`), `tenant_id`, `account_id`, `type`, `kind`, `title`, `detail`, `url`, `value`, `occurred_at`, source chain ids, `arrival_id`, `external_id`, `recorded_at`, `archived_at` | Dated reasons to buy |
+| `signal` | `id` (`sig_`), `tenant_id`, `account_id`, `type`, `kind`, `title`, `detail`, `url`, `value`, `confidence` (0 to 1, from the source), `occurred_at`, source chain ids, `arrival_id`, `external_id`, `recorded_at`, `archived_at` | Dated reasons to buy |
 | `custom_field` | `tenant_id`, `key`, `label`, `type`, `options`, `practice_ids[]`, `show_in_brief`, `sort` | Definitions (ACC-E6) |
 | `buying_role` | `tenant_id`, `key`, `label`, `sort`, `archived` | Configurable list, seeded with defaults |
 | `exclusion_rule` | `tenant_id`, `key`, `label`, `kind`, `params`, `enabled` | ACC-E7 |
+| `exclusion_list` | `tenant_id`, `kind` (`vendor_keyword`, `parent_domain`, `parent_name`, `do_not_contact_domain`), `value` | The lists the exclusion rules read; editing one queues `accounts.exclusions.recheck` |
 | `account_summary` | `account_id`, `priority`, `fit`, `intent`, `tier`, `best_offer_id`, `practice_id`, `review_status_key`, `owner_user_id`, `stage`, `source_ids[]`, `last_signal_at`, `updated_at` | Read model for search, built from SCO, REV, SRC and CRM events |
 
 New id prefix: `cfl_` (conflict).

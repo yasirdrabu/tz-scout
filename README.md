@@ -25,6 +25,22 @@ npm run dev                 # http://localhost:4240 (third terminal)
 
 With Docker instead of `services:local`: `docker compose -f infra/compose/docker-compose.yml up -d`.
 
+Import a list into a workspace, as the platform admin (the worker then processes it):
+
+```bash
+npm run scout -- import taazaa tests/fixtures/imports/research-a.csv
+```
+
+Send an arrival with the development key that seed printed (it is bound to the Local development agent):
+
+```bash
+curl -X POST http://localhost:4240/v1/arrivals \
+  -H "Authorization: Bearer <key from seed>" -H "Content-Type: application/json" \
+  -d @tests/fixtures/imports/miami-dade-arrival.json
+```
+
+The answer has a `status_url`. Fetch it with the same key until `status` is `resolved` and it shows an `account_id`.
+
 Check it: `curl -H "Authorization: Bearer <key from seed>" http://localhost:4240/v1/me` returns the tenant.
 Sign in with the developer sign-in form (needs `AUTH_DEV_SIGNIN=true`, never in production). In Admin,
 System, "Send test event" shows the round trip through the outbox, NATS and the worker.

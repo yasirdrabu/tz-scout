@@ -65,6 +65,17 @@ module adds an event or tool.
 | `ai.run.completed` | AI | An AI task ran (cost, tokens) | ANL (cost) |
 | `platform.job.dead` | PLT | A job exhausted its retries | Admin |
 
+## Jobs
+
+Jobs travel the same way as events, as `jobs.<name>` messages. Each module spec describes what its jobs do.
+
+| Job | Owner | Meaning |
+|---|---|---|
+| `intake.resolve` | SRC | Runs the resolve pipeline for one arrival |
+| `intake.import.run` | SRC | Reads an uploaded file with its confirmed mapping and submits companies in chunks of 500; the next chunk is queued in the same transaction, with the cursor kept on the import |
+| `intake.waiting.expire` | SRC | Rejects arrivals that waited 30 days for a person. A per-tenant schedule, daily at 04:00 UTC |
+| `accounts.exclusions.recheck` | ACC | Re-evaluates exclusion across a tenant's accounts after a rule or list changed |
+
 ## Account funnel stages (D15) and the events that move them
 
 Review and routing (REV) owns stage tracking: it consumes the triggers below, computes the account's

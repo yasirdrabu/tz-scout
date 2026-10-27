@@ -52,6 +52,18 @@ account to Engaged within 15 minutes, and a new deal moves it to Opportunity wit
 scheduled Apollo pull runs and its accounts reach the review queue. v1 data migrated and verified. The
 team works in Scout.
 
+R1a status (Accounts and intake, updated 2026-10-27). The `/v1` API only; screens come from the front end.
+
+- [x] Offers and practices, Accounts and Sources and intake modules with their schemas, events and jobs.
+- [x] One intake path: single arrivals, batches (with item-level `external_ref` and `notes`), CSV, Excel and Markdown imports with automatic column mapping, the resolve pipeline with duplicate checks and waiting arrivals, and inline targeted arrivals.
+- [x] Accounts with people, buying roles, facts with provenance, signals, exclusion rules and lists, merge, and the data-limit filter.
+- [x] Basic warm intros (unconfirmed intros count half, rounded down), daily arrival caps, idempotency keys per caller.
+- [x] Seed data (offers, defaults, a person source per user, a development agent and its key) and `scout import <tenant-slug> <file>`.
+- [x] One-path test: the same company from a single arrival, a batch item, a CSV row and an inline arrival is one account with four sources.
+- [ ] CI `images` job builds and its migrate step creates the `offers`, `accounts` and `intake` tables. Pending: needs a push.
+
+Moved to later plans: R1b has scoring, signal rules, review statuses and their validation, source feedback, counts by stage, the primary re-pick on best-offer change, and "New from <source>" on assigned accounts. R1c has CRM, HubSpot qualified leads, `crm_status` consumers, a registered `MergeGuard` and the cross-module merge test. R1d has the MCP tools, Apollo and Vibe pulls, usage caps through INT `checkCap`, per-minute rate limits, OpenAPI, the v1 data migration and the 500-a-minute throughput test.
+
 ## R2 ABM
 
 Full account page (layout A: conflicts box, Enrich button, playbook section, stage-dependent order),

@@ -17,11 +17,24 @@ import {
   userIdForEmail,
 } from '@/modules/tenancy';
 import { seedAccountDefaults } from '@/modules/accounts';
+import { listSources, personSourceFor, registerSource, seedIntakeDefaults } from '@/modules/intake';
 import { seedOffers } from '@/modules/offers';
 
-const ADMIN_EMAIL = 'yasir@taazaa.com';
+export const ADMIN_EMAIL = 'yasir@taazaa.com';
 const PLATFORM_TENANT = 't_platform';
 const DEV_KEY_NAME = 'Local development key';
+const DEV_AGENT_NAME = 'Local development agent';
+const DEV_KEY_SCOPES = [
+  'arrivals:write',
+  'arrivals:read',
+  'accounts:read',
+  'accounts:write',
+  'people:write',
+  'signals:write',
+  'imports:run',
+  'offers:read',
+  'status:read',
+] as const;
 
 const TENANTS = [
   {
@@ -48,7 +61,7 @@ const TENANTS = [
 ] as const;
 
 /**
- * Local development data: one platform admin, two tenants, a few people and a dev API key. Safe to
+ * Local development data: one platform admin, two tenants, a few people, a person source for each, a development agent and a dev API key bound to it. Safe to
  * run again. Also schedules the hourly credential cleanup. Returns a fresh key for `taazaa` on each run, because
  * a key's secret is only shown once.
  */
@@ -90,6 +103,22 @@ export async function seed(): Promise<{ devApiKey: string }> {
       await seedAccountDefaults(ctx(tx));
       // Taazaa's own catalogue; other tenants start with no offers.
       if (t.slug === 'taazaa') await seedOffers(ctx(tx));
+      // Existing tenants never got the tenant.created event, so call the intake defaults directly.
+      await seedIntakeDefaults(ctx(tx));
+    });
+    // Sources come after the first transaction commits, so the sellers' users exist.
+    const emails = [ADMIN_EMAIL, t.ownerEmail, ...t.sellers.map((s) => s.email)];
+    await withTenant(row.id, async (tx) => {
+      const c = ctx(tx);
+      let adminSourceId = '';
+      for (const email of emails) {
+        const userId = await userIdForEmail(email);
+        if (!userId) continue;
+        const id = (await personSourceFor(c, userId)) ?? (await registerSource(c, { kind: 'person', name: email.split('@')[0]!, userId })).id;
+        if (email === ADMIN_EMAIL) adminSourceId = id;
+      }
+      const have = (await listSources(c)).find((s) => s.kind === 'agent' && s.name === DEV_AGENT_NAME);
+      if (!have) await registerSource(c, { kind: 'agent', name: DEV_AGENT_NAME, parentId: adminSourceId });
     });
     if (t.slug === 'taazaa') taazaaId = row.id;
   }
@@ -109,9 +138,10 @@ export async function seed(): Promise<{ devApiKey: string }> {
   const { secret } = await withTenant(taazaaId, async (tx) => {
     const ctx: ModuleContext = { tenantId: taazaaId, actor, correlationId: newId('cor'), tx };
     await revokeActiveKeysNamed(ctx, DEV_KEY_NAME, 'Replaced by a newer development key');
+    const agent = (await listSources(ctx)).find((s) => s.kind === 'agent' && s.name === DEV_AGENT_NAME)!;
     return createApiKey(
       ctx,
-      { name: DEV_KEY_NAME, environment: 'test', scopes: ['status:read', 'members:read'] },
+      { name: DEV_KEY_NAME, environment: 'test', scopes: [...DEV_KEY_SCOPES], sourceId: agent.id },
       SYSTEM_GRANTOR,
     );
   });

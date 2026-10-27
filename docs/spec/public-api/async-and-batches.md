@@ -16,6 +16,7 @@ polling or webhook. Agents can send one account or a batch with run notes and fi
   true or false, `duplicate_of` if it matched) or `rejected` (with `reason`: `invalid`, `excluded`,
   `daily_cap_reached`, `duplicate_in_batch`). Resolved arrivals then follow the account's stage via
   `GET /accounts/{id}/status`.
+- A targeted arrival that adds a person or a signal to an existing account resolves inside the call. If the account is ruled out, it still returns `201` with the stored ids, `status: "rejected"` and `reason: "excluded"`, so the caller reads the rejection as data.
 - Target: an arrival is `resolved` within 10 seconds at p95 when no enrichment is needed.
 - **Batch request:**
 
@@ -63,7 +64,7 @@ As an AE running a research agent, I want to send 200 accounts with notes about 
 reviewer knows how they were found.
 - API-E2-S2-AC1 Batch name, run date, notes, criteria and metadata are stored and shown on the batch
   page in the web app.
-- API-E2-S2-AC2 Item results are listed with the caller's `external_ref`.
+- API-E2-S2-AC2 Item results are listed with the caller's `external_ref`. Each item also accepts its own `external_ref` and `notes`; a repeat of an `external_ref` this source already sent is returned with the earlier arrival id and counted in the batch's `counts.repeated`.
 
 ### API-E2-S3 Follow up later
 As an agent, I want to ask what happened to everything I sent this month, so that I can report back
