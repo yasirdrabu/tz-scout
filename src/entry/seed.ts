@@ -16,6 +16,7 @@ import {
   revokeActiveKeysNamed,
   userIdForEmail,
 } from '@/modules/tenancy';
+import { seedAccountDefaults } from '@/modules/accounts';
 import { seedOffers } from '@/modules/offers';
 
 const ADMIN_EMAIL = 'yasir@taazaa.com';
@@ -86,6 +87,7 @@ export async function seed(): Promise<{ devApiKey: string }> {
         if (have.has(s.email)) continue;
         await addMember(ctx(tx), { email: s.email, role: 'seller', crmOwnerIds: { hubspot: s.hubspotOwnerId } });
       }
+      await seedAccountDefaults(ctx(tx));
       // Taazaa's own catalogue; other tenants start with no offers.
       if (t.slug === 'taazaa') await seedOffers(ctx(tx));
     });

@@ -1,3 +1,4 @@
+import '@/entry/compose';
 import { actorFor, resolvePrincipal, requirePermission, type Permission, type Principal } from '@/modules/tenancy';
 import { accessFor } from '@/platform/access';
 import type { ModuleContext } from '@/platform/context';

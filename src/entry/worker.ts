@@ -1,4 +1,5 @@
 import './registry';
+import { accountsTenantDefaults } from '@/modules/accounts';
 import { credentialsCleanupHandler } from '@/modules/integrations';
 import { pingHandler } from '@/platform/diagnostics';
 import { log } from '@/platform/log';
@@ -7,7 +8,7 @@ import type { JobHandlerDef } from '@/platform/runtime/jobs';
 import { startWorker } from '@/platform/runtime/worker';
 
 /** Every consumer in the app. Modules add theirs here as they land. */
-export const consumers: ConsumerDef[] = [];
+export const consumers: ConsumerDef[] = [accountsTenantDefaults];
 
 /** Every job handler in the app. */
 export const jobs: JobHandlerDef[] = [pingHandler, credentialsCleanupHandler];

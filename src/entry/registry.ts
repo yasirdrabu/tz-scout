@@ -9,3 +9,5 @@ import '@/modules/integrations';
 import '@/modules/ai-tasks/contracts/events';
 import '@/modules/ai-tasks';
 import '@/modules/offers/contracts/events';
+import '@/modules/accounts/contracts/events';
+import './compose';

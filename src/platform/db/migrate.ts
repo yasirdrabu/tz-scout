@@ -5,7 +5,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { config } from '@/platform/config';
 
-export const MODULE_ORDER = ['platform', 'tenancy', 'integrations', 'ai', 'offers'] as const;
+export const MODULE_ORDER = ['platform', 'tenancy', 'integrations', 'ai', 'offers', 'accounts'] as const;
 export type ModuleName = (typeof MODULE_ORDER)[number];
 
 const root = process.cwd();

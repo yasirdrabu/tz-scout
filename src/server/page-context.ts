@@ -1,3 +1,4 @@
+import '@/entry/compose';
 import { cache } from 'react';
 import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
