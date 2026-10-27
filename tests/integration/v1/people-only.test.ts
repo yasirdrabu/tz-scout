@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { PATCH as patchSource } from '@/app/v1/sources/[id]/route';
@@ -18,7 +18,8 @@ import { GET as getWarmIntros } from '@/app/v1/settings/warm-intros/route';
 import { PUT as putWarmIntro } from '@/app/v1/settings/warm-intros/[key]/route';
 import { getAccount, getSignals, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { account } from '@/modules/accounts/db/schema';
-import { saveMapping, submitBatch } from '@/modules/intake';
+import { listMappings, saveMapping, submitBatch } from '@/modules/intake';
+import { archivePractice, createPractice } from '@/modules/offers';
 import { arrival } from '@/modules/intake/db/schema';
 import { SYSTEM_GRANTOR, addMember, createApiKey, createTenant, handleDevSignIn, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
@@ -33,6 +34,7 @@ let slug: string;
 let owner: Awaited<ReturnType<typeof seedUser>>;
 let cookies: Record<'owner' | 'operator' | 'seller' | 'admin', string>;
 let ash: { personId: string; agentId: string };
+let bo: { personId: string; agentId: string };
 const run = <T>(fn: Parameters<typeof inTenant<T>>[2]) => inTenant(tenantId, owner.actor, fn);
 
 async function signIn(userId: string): Promise<string> {
@@ -98,6 +100,7 @@ beforeAll(async () => {
   await runOutbox(tenantId);
   cookies = { owner: await signIn(owner.id), operator: await member('operator'), seller: await member('seller'), admin: await signIn(admin.id) };
   ash = await personAndAgent({ tenantId, actor: owner.actor, run } as never, 'Ash');
+  bo = await personAndAgent({ tenantId, actor: owner.actor, run } as never, 'Bo');
 });
 beforeEach(() => setPrincipalCacheTtl(0));
 afterAll(closeDbs);
@@ -109,6 +112,15 @@ describe('sources', () => {
     expect(await res.json()).toMatchObject({ id: ash.agentId, status: 'paused', daily_arrival_cap: 40 });
     expect((await as('operator', patchSource, `sources/${ash.agentId}`, 'PATCH', { status: 'active' })).status).toBe(200);
     expect((await as('seller', patchSource, `sources/${ash.agentId}`, 'PATCH', { status: 'paused' })).status).toBe(403);
+    const key = (await run((ctx) => createApiKey(ctx, { name: 'k', environment: 'live', scopes: ['sources:manage'], sourceId: ash.agentId }, SYSTEM_GRANTOR))).secret;
+    const viaKey = await patchSource(
+      new Request(`http://x/v1/sources/${ash.agentId}`, {
+        method: 'PATCH',
+        headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'active' }),
+      }),
+    );
+    expect(viaKey.status).toBe(403);
   });
 
   it('lists and deletes saved mappings; a seller gets 403', async () => {
@@ -125,6 +137,27 @@ describe('sources', () => {
   });
 });
 
+describe('saved mappings and the data limit', () => {
+  it("a key limited to its own source cannot list or delete another source's mappings", async () => {
+    const theirs = await run((ctx) =>
+      saveMapping(ctx, { sourceId: bo.personId, headers: ['Firm', 'Url'], mapping: [{ header: 'Firm', target: 'account.name', confidence: 1, reason: 'x' }] }),
+    );
+    const key = (
+      await run((ctx) =>
+        createApiKey(ctx, { name: 'k', environment: 'live', scopes: ['imports:run'], sourceId: ash.agentId, dataLimit: { kind: 'own_source' } }, SYSTEM_GRANTOR),
+      )
+    ).secret;
+    const send = (handler: (r: Request) => Promise<Response>, path: string, method: string) =>
+      handler(new Request(`http://x/v1/${path}`, { method, headers: { authorization: `Bearer ${key}` } }));
+    expect((await send(listMappingsRoute, `sources/${bo.personId}/mappings`, 'GET')).status).toBe(404);
+    expect((await send(deleteMappingRoute, `sources/${bo.personId}/mappings/${theirs.id}`, 'DELETE')).status).toBe(404);
+    expect((await send(deleteMappingRoute, `sources/${ash.agentId}/mappings/${theirs.id}`, 'DELETE')).status).toBe(404);
+    expect((await send(deleteMappingRoute, 'sources/%zz/mappings/x', 'DELETE')).status).toBe(404);
+    expect(await run((ctx) => listMappings(ctx, bo.personId))).toHaveLength(1);
+    expect((await send(listMappingsRoute, `sources/${ash.agentId}/mappings`, 'GET')).status).toBe(200);
+  });
+});
+
 describe('waiting arrivals', () => {
   const waiting = async (item: unknown) => {
     const out = await asSource({ tenantId, actor: owner.actor, run } as never, ash.agentId, (ctx) =>
@@ -133,6 +166,24 @@ describe('waiting arrivals', () => {
     await runOutbox(tenantId);
     return { batchId: out.batchId, id: out.items[0]!.arrivalId };
   };
+
+  it('chooses a duplicate: new_company and same_as a candidate both succeed', async () => {
+    const duplicate = async (label: string, city: string, firm: string) => {
+      const stem = `${label}${Date.now().toString(36)}`;
+      const existing = await seedAccount({ account: { name: `${stem} ${firm}s`, hqCountry: 'US', hqState: 'FL', hqCity: 'Tampa' } as never });
+      const w = await waiting({ account: { name: `${stem} ${firm}`, domain: domain(), country: 'US', region: 'FL', city } });
+      return { existing, id: w.id };
+    };
+    // Runs first in this group: accounts that earlier tests resolve change what counts as a duplicate.
+    // Both arrivals wait before either is answered, so the account one creates can't change the other's candidates.
+    const a = await duplicate('NewCo', 'Orlando', 'Harborview Capital Partner');
+    const b = await duplicate('SameAs', 'Orlando', 'Westbrook Equity Partner');
+    expect((await as('operator', arrivalAction, `arrivals/${a.id}:choose`, 'POST', { new_company: true })).status).toBe(200);
+    expect((await as('operator', arrivalAction, `arrivals/${b.id}:choose`, 'POST', { same_as: b.existing })).status).toBe(200);
+    await runOutbox(tenantId);
+    const rows = await run((ctx) => ctx.tx.select().from(arrival).where(inArray(arrival.id, [a.id, b.id])));
+    expect(rows.map((r) => r.status)).toEqual(['resolved', 'resolved']);
+  });
 
   it('lists the waiting list, and supplies a website', async () => {
     const { id } = await waiting({ account: { name: 'Needs A Site' } });
@@ -203,9 +254,18 @@ describe('accounts', () => {
 
   it('sets practices', async () => {
     const id = await seedAccount();
-    const res = await as('owner', putPractices, `accounts/${id}/practices`, 'PUT', { practice_ids: ['prc_a', 'prc_b'] });
+    const a = (await run((ctx) => createPractice(ctx, { name: `P ${newId('prc')}` }))).id;
+    const b = (await run((ctx) => createPractice(ctx, { name: `Q ${newId('prc')}` }))).id;
+    const gone = (await run((ctx) => createPractice(ctx, { name: `R ${newId('prc')}` }))).id;
+    await run((ctx) => archivePractice(ctx, gone));
+    const res = await as('owner', putPractices, `accounts/${id}/practices`, 'PUT', { practice_ids: [a, b] });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ practice_ids: ['prc_a', 'prc_b'] });
+    expect(await res.json()).toEqual({ practice_ids: [a, b] });
+    for (const bad of ['prc_nope', gone]) {
+      const refused = await as('owner', putPractices, `accounts/${id}/practices`, 'PUT', { practice_ids: [bad] });
+      expect(refused.status).toBe(400);
+      expect(JSON.stringify(await refused.json())).toContain('Pick practices from your practice list.');
+    }
     expect((await as('owner', putPractices, `accounts/${id}/practices`, 'PUT', { practice_ids: 'x' })).status).toBe(400);
     expect((await as('operator', putPractices, `accounts/${id}/practices`, 'PUT', { practice_ids: [] })).status).toBe(200);
   });
@@ -225,7 +285,7 @@ describe('accounts', () => {
     const signalId = (await run((ctx) => getSignals(ctx, id)))[0]!.id;
     const res = await as('owner', signalAction, `signals/${signalId}:archive`, 'POST', { reason: 'Not relevant' });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ id: signalId, archived: true });
+    expect(await res.json()).toMatchObject({ id: signalId, title: 'Hired a CIO', archived_at: expect.any(String) });
     expect(await run((ctx) => getSignals(ctx, id))).toHaveLength(0);
     expect((await as('owner', signalAction, 'signals/sig_missing:archive', 'POST', {})).status).toBe(404);
   });
@@ -235,7 +295,7 @@ describe('accounts', () => {
     expect((await as('owner', accountAction, `accounts/${id}:override-exclusion`, 'POST', {})).status).toBe(400);
     const res = await as('owner', accountAction, `accounts/${id}:override-exclusion`, 'POST', { note: 'Big reseller deal' });
     expect(res.status).toBe(200);
-    expect((await as('seller', deleteOverride, `accounts/${id}/exclusion-override`, 'DELETE')).status).not.toBe(204);
+    expect((await as('seller', deleteOverride, `accounts/${id}/exclusion-override`, 'DELETE')).status).toBe(404);
     expect((await as('owner', deleteOverride, `accounts/${id}/exclusion-override`, 'DELETE')).status).toBe(204);
     const [row] = await run((ctx) => ctx.tx.select().from(account).where(eq(account.id, id)));
     expect(row!.excludedOverride).toBe(false);
@@ -247,6 +307,11 @@ describe('accounts', () => {
     const res = await as('owner', accountAction, `accounts/${id}:convert-shell`, 'POST', { name: 'Pat Studio', domain: d });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ name: 'Pat Studio', domain: d });
+    // Not a shell any more.
+    expect((await as('owner', accountAction, `accounts/${id}:convert-shell`, 'POST', { name: 'Again', domain: domain() })).status).toBe(409);
+    // A seller who cannot see the account gets 404.
+    const hidden = await seedAccount({ account: {} as never, soleProprietor: true, people: [{ firstName: 'Hid', lastName: 'Den', email: `hid@${domain()}` }] as never });
+    expect((await as('seller', accountAction, `accounts/${hidden}:convert-shell`, 'POST', { name: 'X', domain: domain() })).status).toBe(404);
   });
 });
 

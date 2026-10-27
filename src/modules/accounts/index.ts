@@ -34,6 +34,7 @@ export {
   getAccounts,
   getFacts,
   getPerson,
+  getSignal,
   getSignals,
   listPeople,
   type ScoringView,

@@ -15,8 +15,8 @@ const patchSourceBody = z
   })
   .partial();
 
-/** Pause, resume, archive, rename, change the daily limit or the starting review status. */
-export const PATCH = v1Route({ permission: 'sources:manage' }, async (req, _principal, ctx) => {
+/** People only: a key must not lift its own pause or cap. Pause, resume, archive, rename, change the daily limit or the starting review status. */
+export const PATCH = v1Route({ permission: 'sources:manage', peopleOnly: true }, async (req, _principal, ctx) => {
   const { id, action } = idAndAction(req, 'sources');
   if (action) throw notFound();
   return updateSource(ctx, id, await parseBody<SourcePatch>(req, patchSourceBody));

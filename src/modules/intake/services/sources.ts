@@ -218,7 +218,7 @@ function limitSourceIds(limit: DataLimit): string[] {
 }
 
 /** The sources the principal may see: its own and the ones its limit names, with their children. Null means all. */
-async function visibleSourceIds(ctx: ModuleContext): Promise<string[] | null> {
+export async function visibleSourceIds(ctx: ModuleContext): Promise<string[] | null> {
   const access = ctx.access;
   if (!access || access.dataLimit.kind === 'all') return null;
   const roots = [...(access.sourceId ? [access.sourceId] : []), ...limitSourceIds(access.dataLimit)];

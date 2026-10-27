@@ -5,12 +5,11 @@ import { noContent, v1Route } from '../../../../_lib/v1-route';
 export const dynamic = 'force-dynamic';
 
 export const DELETE = v1Route({ permission: 'imports:run' }, async (req, _principal, ctx) => {
-  const { id, action } = idAndAction(req, 'sources');
-  const parts = new URL(req.url).pathname.split('/').filter(Boolean);
-  const mappingId = decodeURIComponent(parts[parts.indexOf('mappings') + 1] ?? '');
-  if (action || !mappingId) throw notFound();
-  // The mapping must belong to this source, and the source must be one the caller can see.
-  if (!(await listMappings(ctx, id)).some((m) => m.id === mappingId)) throw notFound();
+  const { id: sourceId, action } = idAndAction(req, 'sources');
+  const { id: mappingId, action: mappingAction } = idAndAction(req, 'mappings');
+  if (action || mappingAction) throw notFound();
+  // The mapping must belong to the source in the path; the service hides sources outside the data limit.
+  if (!(await listMappings(ctx, sourceId)).some((m) => m.id === mappingId)) throw notFound();
   await deleteMapping(ctx, mappingId);
   return noContent();
 });

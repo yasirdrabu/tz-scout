@@ -7,6 +7,7 @@ import { columnMapping } from '../db/schema';
 import { detectLayout } from '../import/layouts';
 import { isAllowedTarget, type MappingColumn } from '../import/synonyms';
 import { suggestMapping } from '../tasks/csv-column-mapping';
+import { visibleSourceIds } from './sources';
 
 // SRC-E4: which mapping a file gets, and the mappings a source has saved.
 
@@ -104,7 +105,16 @@ export async function saveMapping(
   return view(row!);
 }
 
+const hidden = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That source was not found.' });
+
+/** A source outside the caller's data limit looks like a missing one. */
+async function assertSourceVisible(ctx: ModuleContext, sourceId: string): Promise<void> {
+  const visible = await visibleSourceIds(ctx);
+  if (visible && !visible.includes(sourceId)) throw hidden();
+}
+
 export async function listMappings(ctx: ModuleContext, sourceId: string): Promise<SavedMapping[]> {
+  await assertSourceVisible(ctx, sourceId);
   const rows = await ctx.tx
     .select()
     .from(columnMapping)
@@ -114,6 +124,11 @@ export async function listMappings(ctx: ModuleContext, sourceId: string): Promis
 }
 
 export async function deleteMapping(ctx: ModuleContext, id: string): Promise<void> {
+  const [found] = await ctx.tx
+    .select({ sourceId: columnMapping.sourceId })
+    .from(columnMapping)
+    .where(and(eq(columnMapping.tenantId, ctx.tenantId), eq(columnMapping.id, id)));
+  if (found) await assertSourceVisible(ctx, found.sourceId);
   const gone = await ctx.tx
     .delete(columnMapping)
     .where(and(eq(columnMapping.tenantId, ctx.tenantId), eq(columnMapping.id, id)))

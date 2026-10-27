@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { archiveSignal } from '@/modules/accounts';
+import { archiveSignal, getSignal } from '@/modules/accounts';
 import { parseBody } from '../../_lib/body';
 import { idAndAction } from '../../_lib/path';
 import { byAction, v1Route } from '../../_lib/v1-route';
@@ -14,6 +14,6 @@ export const POST = byAction('signals', {
     const { id } = idAndAction(req, 'signals');
     const { reason } = await parseBody<{ reason?: string }>(req, archiveBody);
     await archiveSignal(ctx, id, reason ?? '');
-    return { id, archived: true };
+    return (await getSignal(ctx, id))!;
   }),
 });

@@ -151,6 +151,12 @@ export async function getSignals(
   return rows.map(toSignal);
 }
 
+/** One signal, when the principal can see its account. */
+export async function getSignal(ctx: ModuleContext, signalId: string): Promise<SignalView | null> {
+  const [row] = await ctx.tx.select().from(signal).where(and(eq(signal.tenantId, ctx.tenantId), eq(signal.id, signalId)));
+  return row && (await visible(ctx, row.accountId)) ? toSignal(row) : null;
+}
+
 /** Current facts, or every fact with its status when `includeHistory` is set. */
 export async function getFacts(
   ctx: ModuleContext,
