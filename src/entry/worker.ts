@@ -1,5 +1,5 @@
 import './registry';
-import { accountsTenantDefaults } from '@/modules/accounts';
+import { accountsTenantDefaults, exclusionsRecheckHandler } from '@/modules/accounts';
 import { credentialsCleanupHandler } from '@/modules/integrations';
 import { pingHandler } from '@/platform/diagnostics';
 import { log } from '@/platform/log';
@@ -11,7 +11,7 @@ import { startWorker } from '@/platform/runtime/worker';
 export const consumers: ConsumerDef[] = [accountsTenantDefaults];
 
 /** Every job handler in the app. */
-export const jobs: JobHandlerDef[] = [pingHandler, credentialsCleanupHandler];
+export const jobs: JobHandlerDef[] = [pingHandler, credentialsCleanupHandler, exclusionsRecheckHandler];
 
 /** Worker role: consumers and job handlers. Runs until SIGINT or SIGTERM. */
 export async function main(): Promise<void> {

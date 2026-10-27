@@ -4,14 +4,14 @@ import type { AccountView, CrmStatus, FactKind, FactView, PersonView, RoleOrigin
 import { account, accountAlias, exclusionRule, fact, person, personRole, signal } from '../db/schema';
 import type { Exclusion } from './exclusion';
 import { resolveAccountId } from './match';
+import { filterVisibleAccountIds } from './visibility';
 
 type PersonRow = typeof person.$inferSelect;
 type FactRow = typeof fact.$inferSelect;
 type SignalRow = typeof signal.$inferSelect;
 
-/** Visibility by data limit arrives with Task 10; this is the one place it plugs in. */
-async function canSee(_ctx: ModuleContext, _accountId: string): Promise<boolean> {
-  return true;
+async function canSee(ctx: ModuleContext, accountId: string): Promise<boolean> {
+  return (await filterVisibleAccountIds(ctx, [accountId])).length === 1;
 }
 
 /** Follows merged ids, then checks the caller may see the account. */
