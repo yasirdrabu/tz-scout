@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isConfirmed, relationshipKey, strongest, warmIntroPoints } from '@/modules/intake/domain/warm-intro';
+import { isConfirmed, relationshipKey, strongest, warmIntroFullPoints, warmIntroPoints } from '@/modules/intake/domain/warm-intro';
 
 const defaults = {
   customer_referral: 15,
@@ -26,6 +26,9 @@ describe('warmIntroPoints', () => {
     expect(warmIntroPoints({ relationshipKey: 'other', introducerRule: -3, defaults, confirmed: true })).toBe(0);
     expect(warmIntroPoints({ relationshipKey: 'other', introducerRule: 40, defaults, confirmed: false })).toBe(10);
   });
+  it('keeps the full points apart from the ones that count', () => {
+    expect(warmIntroFullPoints({ relationshipKey: 'employee_network', defaults })).toBe(8);
+  });
   it('falls back to other for a key the tenant removed', () => {
     expect(warmIntroPoints({ relationshipKey: 'gone', defaults, confirmed: true })).toBe(3);
   });
@@ -33,8 +36,8 @@ describe('warmIntroPoints', () => {
 
 describe('strongest', () => {
   it('picks the highest points, not the sum', () => {
-    const b = { id: 'b', points: 12 };
-    expect(strongest([{ id: 'a', points: 4 }, b, { id: 'c', points: 5 }])).toBe(b);
+    const b = { id: 'b', effectivePoints: 12 };
+    expect(strongest([{ id: 'a', effectivePoints: 4 }, b, { id: 'c', effectivePoints: 5 }])).toBe(b);
   });
   it('is null for none', () => {
     expect(strongest([])).toBeNull();

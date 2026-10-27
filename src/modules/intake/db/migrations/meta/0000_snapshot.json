@@ -1,5 +1,5 @@
 {
-  "id": "6a2a89aa-fcba-4c16-8a19-6530da036ec1",
+  "id": "aea8c9aa-fa8f-43c5-97bb-0372c234c0b9",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1084,6 +1084,12 @@
         },
         "points": {
           "name": "points",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "effective_points": {
+          "name": "effective_points",
           "type": "integer",
           "primaryKey": false,
           "notNull": true

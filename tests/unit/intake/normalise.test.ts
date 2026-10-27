@@ -42,6 +42,7 @@ describe('countryCode', () => {
     ['us', 'US'],
     ['United Kingdom', 'GB'],
     ['GB', 'GB'],
+    ['UK', 'GB'],
     ['Narnia', null],
     ['', null],
   ])('%s gives %s', (input, expected) => {
@@ -84,5 +85,6 @@ describe('industryKey', () => {
   it('leaves unknown text unmapped', () => {
     expect(industryKey('Underwater basket weaving')).toBeNull();
     expect(industryKey('')).toBeNull();
+    expect(industryKey('legalese')).toBeNull();
   });
 });

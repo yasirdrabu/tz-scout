@@ -41,6 +41,10 @@ describe('intake.arrival', () => {
     const [row] = await t.run((ctx) => ctx.tx.select().from(arrival).where(eq(arrival.id, arrivalId)));
     expect(row!.status).toBe('resolving');
     expect(row!.payloadHash).toBe('h1');
+
+    await expect(t.run((ctx) => ctx.tx.delete(arrival).where(eq(arrival.id, arrivalId)))).rejects.toMatchObject({
+      cause: { message: expect.stringMatching(/permission denied/i) },
+    });
   });
 
   it('keeps one arrival per source and external_ref, but not for rows without a ref', async () => {

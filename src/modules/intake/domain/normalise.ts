@@ -30,6 +30,7 @@ export function domainFromEmail(email: string | null | undefined): string | null
 export function countryCode(input: string | null | undefined): string | null {
   const text = input?.trim();
   if (!text) return null;
+  if (text.toUpperCase() === 'UK') return 'GB';
   if (text.length === 2) return countries.isValid(text.toUpperCase()) ? text.toUpperCase() : null;
   if (text.length === 3) return countries.toAlpha2(text.toUpperCase()) ?? countries.getAlpha2Code(text, 'en') ?? null;
   return countries.getAlpha2Code(text, 'en') ?? null;

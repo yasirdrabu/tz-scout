@@ -21,8 +21,11 @@ const WORDS: [string, string][] = [
   ['life sciences', 'life_sciences'],
   ['biotech', 'life_sciences'],
   ['pharma', 'life_sciences'],
+  ['pharmaceuticals', 'life_sciences'],
+  ['biotechnology', 'life_sciences'],
   ['healthcare', 'healthcare_services'],
   ['hospital', 'healthcare_services'],
+  ['hospitals', 'healthcare_services'],
   ['legal', 'legal_services'],
   ['it services', 'it_services'],
   ['information technology', 'it_services'],
@@ -56,5 +59,5 @@ export function industryKey(text: string | null | undefined): string | null {
     return hit ? hit[1] : null;
   }
   const flat = ` ${t.replace(/[^a-z0-9]+/g, ' ').trim()} `;
-  return WORDS.find(([phrase]) => flat.includes(` ${phrase}`))?.[1] ?? null;
+  return WORDS.find(([phrase]) => flat.includes(` ${phrase} `))?.[1] ?? null;
 }

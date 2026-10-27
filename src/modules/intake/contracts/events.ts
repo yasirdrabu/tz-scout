@@ -55,7 +55,7 @@ export const arrivalResolved = defineEvent(
       .object({
         warmIntroId: z.string(),
         relationshipKey: z.string(),
-        points: z.number().int(),
+        points: z.number().int(), // the effective points (halved while unconfirmed)
         confirmed: z.boolean(),
       })
       .optional(),

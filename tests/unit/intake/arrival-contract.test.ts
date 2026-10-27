@@ -120,8 +120,38 @@ describe('ArrivalV1Schema', () => {
       'signals.0.occurred_at: Add the date it happened.',
     ]);
     expect(ArrivalV1Schema({ strict: false }).safeParse(body).success).toBe(true);
-    const trigger = { ...body, signals: [{ type: 'trigger', title: 'Funding' }] };
-    expect(ArrivalV1Schema({ strict: false }).safeParse(trigger).success).toBe(true);
+    const fine = { ...body, signals: [{ fine_type: 'intent', title: 'Reading about AI' }] };
+    expect(ArrivalV1Schema({ strict: false }).safeParse(fine).success).toBe(true);
+  });
+
+  it('only a research signal may be undated, even in lenient mode', () => {
+    const s = ArrivalV1Schema({ strict: false });
+    for (const signals of [[{ type: 'trigger', title: 'Funding' }], [{ type: 'pain', title: 'Hiring' }], [{ fine_type: 'funding', title: 'Raised' }]]) {
+      expect(messages(s.safeParse({ account: { name: 'Acme' }, signals }))).toEqual(['signals.0.occurred_at: Add the date it happened.']);
+    }
+  });
+
+  it('a signal says what kind it is', () => {
+    const body = { account: { name: 'Acme', domain: 'acme.com' }, signals: [{ title: 'Something', occurred_at: '2026-01-01' }] };
+    for (const strict of [true, false]) {
+      expect(messages(ArrivalV1Schema({ strict }).safeParse(body))).toEqual(['signals.0.type: Say what kind of signal this is.']);
+    }
+  });
+
+  it('strict mode: a sole proprietor needs no company but needs the person email', () => {
+    const s = ArrivalV1Schema({ strict: true });
+    expect(s.safeParse({ sole_proprietor: true, people: [{ name: 'Ada Lovelace', email: 'ada@gmail.com' }] }).success).toBe(true);
+    expect(messages(s.safeParse({ sole_proprietor: true }))).toEqual(["people: Add the person's email."]);
+    expect(messages(s.safeParse({ sole_proprietor: true, people: [{ name: 'Ada' }] }))).toEqual(["people: Add the person's email."]);
+  });
+
+  it('strict mode: a website or LinkedIn value that is not one is not an identity', () => {
+    const s = ArrivalV1Schema({ strict: true });
+    expect(messages(s.safeParse({ account: { name: 'Acme', website: 'not a url' } }))).toEqual([
+      'account.website: Must be a website like https://acme.com.',
+    ]);
+    expect(s.safeParse({ account: { name: 'Acme', linkedin_url: 'https://linkedin.com/company/acme' } }).success).toBe(true);
+    expect(s.safeParse({ account: { name: 'Acme', linkedin_url: 'acme' } }).success).toBe(false);
   });
 
   it('lenient mode accepts a name-only account and a lone person', () => {
@@ -165,6 +195,11 @@ describe('ArrivalV1Schema', () => {
 });
 
 describe('BatchV1Schema', () => {
+  it('leaves an item whose account is not an object for the item check', () => {
+    const r = BatchV1Schema({ strict: true }).safeParse({ ...batch, items: [{ external_ref: 'r', account: 'Acme' }] });
+    expect(r.success).toBe(false);
+  });
+
   it('parses the async-and-batches example and moves item external_ref and notes into account', () => {
     const r = BatchV1Schema({ strict: true }).parse(batch);
     expect(r.items).toHaveLength(1);

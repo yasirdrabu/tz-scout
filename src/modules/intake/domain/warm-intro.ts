@@ -18,21 +18,23 @@ export function relationshipKey(text: string | null | undefined): string | null 
   return RULES.find(([re]) => re.test(t))?.[1] ?? null;
 }
 
-/** Points an intro adds: the introducer's rule, else the relationship default; 0 to 20; half (rounded down) until confirmed. */
-export function warmIntroPoints(a: {
-  relationshipKey: string;
-  introducerRule?: number;
-  defaults: Record<string, number>;
-  confirmed: boolean;
-}): number {
+type PointsInput = { relationshipKey: string; introducerRule?: number; defaults: Record<string, number> };
+
+/** The full points of an intro: the introducer's rule, else the relationship default; 0 to 20. */
+export function warmIntroFullPoints(a: PointsInput): number {
   const base = a.introducerRule ?? a.defaults[a.relationshipKey] ?? a.defaults.other ?? 0;
-  const clamped = Math.min(20, Math.max(0, Math.round(base)));
-  return a.confirmed ? clamped : Math.floor(clamped / 2);
+  return Math.min(20, Math.max(0, Math.round(base)));
 }
 
-/** The intro with the most points. Intros are never added together. */
-export function strongest<T extends { points: number }>(intros: readonly T[]): T | null {
-  return intros.reduce<T | null>((best, i) => (best === null || i.points > best.points ? i : best), null);
+/** The points that count: the full points, or half (rounded down) until confirmed. */
+export function warmIntroPoints(a: PointsInput & { confirmed: boolean }): number {
+  const full = warmIntroFullPoints(a);
+  return a.confirmed ? full : Math.floor(full / 2);
+}
+
+/** The intro with the most effective points. Intros are never added together. */
+export function strongest<T extends { effectivePoints: number }>(intros: readonly T[]): T | null {
+  return intros.reduce<T | null>((best, i) => (best === null || i.effectivePoints > best.effectivePoints ? i : best), null);
 }
 
 /** A person, or a person source's key with `warm_intro:declare`, confirms their own intro. An agent or vendor does not. */

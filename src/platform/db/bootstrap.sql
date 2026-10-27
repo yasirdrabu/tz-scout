@@ -41,6 +41,10 @@ do $$ begin
   if to_regclass('platform.audit_log') is not null then
     revoke update, delete on platform.audit_log from scout_app;
   end if;
+  -- Nobody deletes an arrival (table is created by the intake migration).
+  if to_regclass('intake.arrival') is not null then
+    revoke delete on intake.arrival from scout_app;
+  end if;
 end $$;
 
 alter default privileges for role scout_admin in schema platform, tenancy, integrations, ai, offers, accounts, intake

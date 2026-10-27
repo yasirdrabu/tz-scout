@@ -12,6 +12,7 @@ export const MAX_SIGNALS = 50;
 export const MAX_FACTS = 200;
 export const MAX_BATCH_ITEMS = 1000;
 
+const LINKEDIN = /linkedin\.com\//i;
 const text = z.string().nullish();
 const num = z.number().nullish();
 const DATE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
@@ -104,11 +105,16 @@ const research = z
   .strict();
 
 export function ArrivalV1Schema(opts: { strict: boolean }) {
-  const strictSignal = opts.strict
-    ? signal.superRefine((s, ctx) => {
-        if (s.occurred_at == null) ctx.addIssue({ code: 'custom', path: ['occurred_at'], message: 'Add the date it happened.' });
-      })
-    : signal;
+  // Only a research signal may be undated, and only when it comes from a file, webhook or vendor.
+  const checkedSignal = signal.superRefine((s, ctx) => {
+    if (!s.type && !s.fine_type) {
+      ctx.addIssue({ code: 'custom', path: ['type'], message: 'Say what kind of signal this is.' });
+    }
+    const research = s.type === 'research' || (!s.type && s.fine_type === 'intent');
+    if (s.occurred_at == null && (opts.strict || !research)) {
+      ctx.addIssue({ code: 'custom', path: ['occurred_at'], message: 'Add the date it happened.' });
+    }
+  });
 
   const facts = z.union([
     z.record(z.string(), z.unknown()).refine((f) => Object.keys(f).length <= MAX_FACTS, 'At most 200 facts.'),
@@ -119,7 +125,7 @@ export function ArrivalV1Schema(opts: { strict: boolean }) {
     .object({
       account: account.nullish(),
       people: z.array(person).max(MAX_PEOPLE, 'At most 25 people.').default([]),
-      signals: z.array(strictSignal).max(MAX_SIGNALS, 'At most 50 signals.').default([]),
+      signals: z.array(checkedSignal).max(MAX_SIGNALS, 'At most 50 signals.').default([]),
       facts: facts.default({}),
       warm_intro: warmIntro.nullish(),
       research: research.nullish(),
@@ -134,13 +140,30 @@ export function ArrivalV1Schema(opts: { strict: boolean }) {
       if (d && normaliseDomain(d) === null) {
         ctx.addIssue({ code: 'custom', path: ['account', 'domain'], message: 'Must be a domain like acme.com.' });
       }
+      const acc = a.account;
+      if (acc?.website && normaliseDomain(acc.website) === null) {
+        ctx.addIssue({ code: 'custom', path: ['account', 'website'], message: 'Must be a website like https://acme.com.' });
+      }
+      if (acc?.linkedin_url && !LINKEDIN.test(acc.linkedin_url)) {
+        ctx.addIssue({ code: 'custom', path: ['account', 'linkedin_url'], message: 'Must be a LinkedIn page like linkedin.com/company/acme.' });
+      }
       // A targeted arrival attaches to a known account, so it carries no company of its own.
       if (a.target_account_id) return;
+      // A sole proprietor is the person: the shell account matches on their email.
+      if (a.sole_proprietor) {
+        if (!a.people.some((p) => p.email?.trim())) {
+          ctx.addIssue({ code: 'custom', path: ['people'], message: "Add the person's email." });
+        }
+        return;
+      }
       if (!a.account?.name?.trim()) {
         ctx.addIssue({ code: 'custom', path: ['account', 'name'], message: 'Add the company name.' });
       }
-      const hasIdentity = [a.account?.domain, a.account?.website, a.account?.linkedin_url].some((v) => v?.trim());
-      if (!hasIdentity && !a.sole_proprietor) {
+      const hasIdentity =
+        normaliseDomain(acc?.domain) !== null || normaliseDomain(acc?.website) !== null || LINKEDIN.test(acc?.linkedin_url ?? '');
+      const gaveOne = [acc?.domain, acc?.website, acc?.linkedin_url].some((v) => v?.trim());
+      // A value that was sent but is not valid already has its own message above.
+      if (!hasIdentity && !gaveOne) {
         ctx.addIssue({ code: 'custom', path: ['account', 'domain'], message: 'Add a website, domain or LinkedIn page.' });
       }
     });
@@ -153,7 +176,8 @@ export function moveItemFields(item: unknown): unknown {
   if (typeof item !== 'object' || item === null || Array.isArray(item)) return item;
   const { external_ref, notes, account: acc, ...rest } = item as Record<string, unknown>;
   if (external_ref === undefined && notes === undefined) return item;
-  const base = typeof acc === 'object' && acc !== null && !Array.isArray(acc) ? (acc as Record<string, unknown>) : {};
+  if (acc !== undefined && acc !== null && (typeof acc !== 'object' || Array.isArray(acc))) return item;
+  const base = (acc ?? {}) as Record<string, unknown>;
   return {
     ...rest,
     account: {

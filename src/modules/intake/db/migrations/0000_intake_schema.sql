@@ -135,6 +135,7 @@ CREATE TABLE "intake"."warm_intro" (
 	"relationship_key" text NOT NULL,
 	"note" text,
 	"points" integer NOT NULL,
+	"effective_points" integer NOT NULL,
 	"confirmed" boolean DEFAULT false NOT NULL,
 	"confirmed_by" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
@@ -216,3 +217,5 @@ BEGIN
 END;
 $$;--> statement-breakpoint
 CREATE TRIGGER arrival_payload_immutable BEFORE UPDATE ON "intake"."arrival" FOR EACH ROW EXECUTE FUNCTION "intake"."arrival_payload_immutable"();
+--> statement-breakpoint
+REVOKE DELETE ON "intake"."arrival" FROM scout_app;

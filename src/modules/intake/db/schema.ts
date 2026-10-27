@@ -192,7 +192,8 @@ export const warmIntro = intake.table(
     relationshipText: text('relationship_text'),
     relationshipKey: text('relationship_key').notNull(),
     note: text('note'),
-    points: integer('points').notNull(), // 0 to 20, already halved while unconfirmed
+    points: integer('points').notNull(), // full points, 0 to 20
+    effectivePoints: integer('effective_points').notNull(), // what counts: half of points (rounded down) until confirmed
     confirmed: boolean('confirmed').notNull().default(false),
     confirmedBy: text('confirmed_by'),
     createdAt: now('created_at'),
