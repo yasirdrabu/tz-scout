@@ -25,6 +25,8 @@ type Numbered = { n: number; cells: string[] };
 
 const TOO_BIG = 'This file is over 20 MB. Split it and import the parts.';
 const TOO_MANY = 'This file has more than 10,000 rows. Split it and import the parts.';
+// Rows of any kind, blank ones included, that a sheet may hold before it is refused.
+const HARD_ROW_CEILING = 100_000;
 const blank = (cells: string[]) => cells.every((c) => c.trim() === '');
 
 /** CSV with quotes, escaped quotes and line breaks inside quotes. Detects comma, semicolon or tab. */
@@ -122,7 +124,9 @@ async function streamWorkbook(bytes: Uint8Array, want: string | undefined): Prom
     sheets.push(name);
     if (chosen !== null || (want !== undefined && name !== want)) continue;
     chosen = name;
+    let seen = 0;
     for await (const row of ws) {
+      if (++seen > HARD_ROW_CEILING) throw new FileParseError(TOO_MANY);
       const cells = rowCells(row);
       if (blank(cells)) continue;
       rows.push({ n: row.number, cells });
@@ -140,22 +144,33 @@ async function loadWorkbook(bytes: Uint8Array, want: string | undefined): Promis
   const sheets = wb.worksheets.map((w) => w.name);
   const ws = want === undefined ? wb.worksheets[0] : wb.worksheets.find((w) => w.name === want);
   if (!ws) throw noSheet(want);
+  if (ws.rowCount > HARD_ROW_CEILING || ws.actualRowCount > MAX_FILE_ROWS + 1) throw new FileParseError(TOO_MANY);
   const rows: Numbered[] = [];
-  ws.eachRow((row) => {
-    const cells = rowCells(row);
-    if (!blank(cells)) rows.push({ n: row.number, cells });
-  });
+  for (let n = 1; n <= ws.rowCount; n++) {
+    const cells = rowCells(ws.getRow(n));
+    if (blank(cells)) continue;
+    rows.push({ n, cells });
+    if (rows.length > MAX_FILE_ROWS + 1) throw new FileParseError(TOO_MANY);
+  }
   return { rows, sheets, sheet: ws.name };
 }
 
-// The streaming reader needs the workbook part before the sheets and fails on files that order them
-// otherwise (exceljs's own writer does). The whole file is at most 20 MB, so loading it is the safe fallback.
+const UNREADABLE = "We couldn't read this Excel file. Save it again as .xlsx and retry.";
+
+// The streaming reader needs the workbook part before the sheets. On a file that orders them otherwise
+// (exceljs's own writer does) it fails with this one error, and only then is the file loaded whole (20 MB at most).
+const isOrderingFailure = (e: unknown) => e instanceof TypeError && /reading 'sheets'/.test(e.message);
+
 async function readWorkbook(bytes: Uint8Array, want: string | undefined): Promise<Sheet> {
   try {
-    return await streamWorkbook(bytes, want);
+    try {
+      return await streamWorkbook(bytes, want);
+    } catch (e) {
+      if (!isOrderingFailure(e)) throw e;
+      return await loadWorkbook(bytes, want);
+    }
   } catch (e) {
-    if (e instanceof FileParseError) throw e;
-    return loadWorkbook(bytes, want);
+    throw e instanceof FileParseError ? e : new FileParseError(UNREADABLE);
   }
 }
 

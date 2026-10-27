@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
-import { describe, expect, it } from 'vitest';
+import JSZip from 'jszip';
+import { describe, expect, it, vi } from 'vitest';
 import { parseFile } from '@/modules/intake/import/parse';
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -9,6 +10,17 @@ async function workbook(build: (wb: ExcelJS.Workbook) => void): Promise<Uint8Arr
   const wb = new ExcelJS.Workbook();
   build(wb);
   return new Uint8Array(await wb.xlsx.writeBuffer());
+}
+
+/** The same workbook with the parts in the order Excel writes them: workbook first, sheets last. */
+async function excelOrder(bytes: Uint8Array): Promise<Uint8Array> {
+  const src = await JSZip.loadAsync(bytes);
+  const first = ['[Content_Types].xml', '_rels/.rels', 'xl/workbook.xml', 'xl/_rels/workbook.xml.rels', 'xl/sharedStrings.xml', 'xl/styles.xml'];
+  const out = new JSZip();
+  for (const name of [...first, ...Object.keys(src.files).filter((n) => !first.includes(n) && !src.files[n]!.dir)]) {
+    out.file(name, await src.files[name]!.async('uint8array'));
+  }
+  return out.generateAsync({ type: 'uint8array' });
 }
 
 describe('parseFile: CSV', () => {
@@ -84,6 +96,51 @@ describe('parseFile: Excel', () => {
   it('says so when the sheet does not exist', async () => {
     const bytes = await workbook((wb) => wb.addWorksheet('Leads').addRow(['a']));
     await expect(parseFile({ fileName: 'book.xlsx', bytes }, { sheet: 'Nope' })).rejects.toThrow('This file has no sheet called Nope.');
+  });
+});
+
+describe('parseFile: Excel read path', () => {
+  const twoSheets = (wb: ExcelJS.Workbook) => {
+    wb.addWorksheet('Leads').addRow(['Company']);
+    const b = wb.addWorksheet('Contacts');
+    b.addRow(['Name']);
+    b.addRow(['Jane']);
+  };
+
+  it('streams a file written in Excel order, without loading the whole workbook', async () => {
+    const bytes = await excelOrder(await workbook(twoSheets));
+    const load = vi.spyOn(ExcelJS.Workbook.prototype, 'xlsx', 'get');
+    try {
+      const p = await parseFile({ fileName: 'book.xlsx', bytes }, { sheet: 'Contacts' });
+      expect(p.sheets).toEqual(['Leads', 'Contacts']);
+      expect(p.rows).toEqual([['Jane']]);
+      expect(load).not.toHaveBeenCalled();
+    } finally {
+      load.mockRestore();
+    }
+  });
+
+  it('applies the row limit on the streaming path too', async () => {
+    const bytes = await excelOrder(
+      await workbook((wb) => {
+        const ws = wb.addWorksheet('Big');
+        ws.addRow(['a']);
+        for (let i = 0; i < 10_001; i++) ws.addRow([i]);
+      }),
+    );
+    await expect(parseFile({ fileName: 'big.xlsx', bytes })).rejects.toThrow('This file has more than 10,000 rows. Split it and import the parts.');
+  });
+
+  it('reads a file in the order exceljs writes it, by loading it', async () => {
+    const bytes = await workbook(twoSheets);
+    expect((await parseFile({ fileName: 'book.xlsx', bytes }, { sheet: 'Contacts' })).rows).toEqual([['Jane']]);
+  });
+
+  it('gives a friendly error for a file that is not a workbook', async () => {
+    const message = "We couldn't read this Excel file. Save it again as .xlsx and retry.";
+    await expect(parseFile({ fileName: 'bad.xlsx', bytes: enc('this is not a zip file at all') })).rejects.toThrow(message);
+    const truncated = (await workbook(twoSheets)).slice(0, 300);
+    await expect(parseFile({ fileName: 'cut.xlsx', bytes: truncated })).rejects.toThrow(message);
   });
 });
 
