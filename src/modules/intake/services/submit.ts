@@ -13,6 +13,7 @@ import { resolveJob } from '../contracts/jobs';
 import { arrival, batch, source } from '../db/schema';
 import { normaliseDomain } from '../domain/normalise';
 import { checkArrivalCap, isCapped } from './caps';
+import { resolveInline, settleBatch, type InlineResult } from './resolve';
 import { loadSource } from './sources';
 
 export type Channel = 'api' | 'mcp' | 'file' | 'webhook' | 'form' | 'enrichment' | 'web';
@@ -27,7 +28,7 @@ const TOO_LARGE = 'An arrival can be up to 256 KB.';
 export type SubmitOptions = {
   channel: Channel;
   batchId?: string;
-  /** Targeted arrivals only: resolved inside the call (the resolve pipeline adds this), so no resolve job is queued. */
+  /** Targeted arrivals only: resolved inside the call (SRC-E3 steps 1, 2, 5 and 7), so no resolve job is queued. */
   inline?: boolean;
   /** What was received, when the body was built from it (file rows with their headers). Defaults to the body. */
   raw?: unknown;
@@ -37,7 +38,7 @@ export type SubmitResult = {
   arrivalId: string;
   status: string;
   duplicateOfRequest: boolean;
-  inlineResult?: unknown;
+  inlineResult?: InlineResult;
 };
 
 export type BatchItemResult = { arrivalId: string; externalRef: string | null; status: string };
@@ -144,6 +145,8 @@ type Row = {
   channel: Channel;
   batchId?: string;
   raw: unknown;
+  /** The arrival body, when `raw` is something else (file rows): the resolve job reads it. */
+  body?: unknown;
   externalRef: string | null;
   targetAccountId?: string | null;
   rejected?: { reason: 'invalid' | 'daily_cap_reached' | 'duplicate_in_batch'; detail: string };
@@ -164,7 +167,7 @@ async function store(ctx: ModuleContext, r: Row): Promise<string | null> {
       closestSourceId: r.sender.id,
       principal: `${ctx.actor.kind}:${ctx.actor.id}`,
       channel: r.channel,
-      payload: { raw: r.raw, contractVersion: 1 },
+      payload: { raw: r.raw, contractVersion: 1, ...(r.body !== undefined ? { arrival: r.body } : {}) },
       payloadHash: sha256(JSON.stringify(r.raw ?? null)),
       externalRef: r.rejected ? null : r.externalRef,
       targetAccountId: r.targetAccountId ?? null,
@@ -238,9 +241,19 @@ export async function submitArrival(ctx: ModuleContext, body: unknown, opts: Sub
   const targetAccountId = await targetOf(ctx, a.target_account_id);
   const chain = await withVendor(ctx, sender.chain, a.via_vendor);
 
-  const id = await store(ctx, { sender, chain, channel: opts.channel, batchId: opts.batchId, raw, externalRef, targetAccountId });
+  const id = await store(ctx, {
+    sender,
+    chain,
+    channel: opts.channel,
+    batchId: opts.batchId,
+    raw,
+    ...(opts.raw !== undefined ? { body } : {}),
+    externalRef,
+    targetAccountId,
+  });
   if (!id) return (await duplicate())!;
-  if (!opts.inline) await enqueueJob(ctx, resolveJob, { arrivalId: id });
+  if (opts.inline) return { arrivalId: id, duplicateOfRequest: false, ...(await resolveInline(ctx, id)) };
+  await enqueueJob(ctx, resolveJob, { arrivalId: id });
   return { arrivalId: id, status: 'received', duplicateOfRequest: false };
 }
 
@@ -364,5 +377,7 @@ export async function submitBatch(
     { batchId, sourceChain: sender.chain, name: b.name, runAt: runAt.toISOString(), itemCount: stored },
     { type: 'batch', id: batchId },
   );
+  // Nothing left to resolve (every item rejected or repeated): the batch completes now.
+  await settleBatch(ctx, batchId);
   return { batchId, items };
 }

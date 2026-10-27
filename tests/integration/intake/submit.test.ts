@@ -166,7 +166,9 @@ describe('submitArrival (SRC-E2-S1)', () => {
       submitArrival(ctx, { target_account_id: target.accountId, people: [{ name: 'Bo' }] }, { channel: 'api', inline: true }),
     );
     const types = (await outboxFor(out.arrivalId)).map((r) => (r.payload as { type: string }).type);
-    expect(types).toEqual(['intake.arrival.received']);
+    // Resolved in the call (Task 14), so it is received and resolved with no job queued.
+    expect(types).toEqual(expect.arrayContaining(['intake.arrival.received', 'intake.arrival.resolved']));
+    expect(types).not.toContain('jobs.intake.resolve');
   });
 });
 

@@ -12,7 +12,7 @@ export type SourceKind = (typeof SOURCE_KINDS)[number];
 export type SourceStatus = 'active' | 'paused' | 'archived';
 
 /** SRC-E1: sources a person stands behind start as `needs_review`, the rest as `unvetted`. */
-const DEFAULT_REVIEW_STATUS: Record<SourceKind, string> = {
+export const DEFAULT_REVIEW_STATUS: Record<SourceKind, string> = {
   person: 'needs_review',
   crm: 'needs_review',
   web_form: 'needs_review',

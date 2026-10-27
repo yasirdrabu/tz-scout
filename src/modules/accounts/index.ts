@@ -25,6 +25,7 @@ export {
   type PersonPatch,
 } from './services/edit';
 export type { Exclusion } from './services/exclusion';
+export { matchName, splitName, trigramSimilarity } from './domain/names';
 export { findMatches, resolveAccountId, type AccountMatch, type MatchCandidate, type MatchConfidence } from './services/match';
 export {
   checkExclusion,

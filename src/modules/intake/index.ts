@@ -17,6 +17,7 @@ export {
 } from './contracts/events';
 export { importRunJob, resolveJob, waitingExpireJob } from './contracts/jobs';
 export { intakeTenantDefaults } from './consumers';
+export { resolveHandler } from './jobs';
 export { DEFAULT_VENDOR_SOURCES, RELATIONSHIP_DEFAULTS, seedIntakeDefaults } from './defaults';
 export { checkArrivalCap, type CapCheck } from './services/caps';
 export {
@@ -36,6 +37,14 @@ export {
   type SourceStatus,
   type SourceView,
 } from './services/sources';
+export {
+  rejectArrival,
+  resolveArrival,
+  type InlineResult,
+  type RejectReason,
+  type ResolutionInput,
+} from './services/resolve';
+export { getWarmIntro, recordWarmIntro, type DeclaredBy, type WarmIntroInput, type WarmIntroView } from './services/warm-intros';
 export {
   isStrictChannel,
   submitArrival,
