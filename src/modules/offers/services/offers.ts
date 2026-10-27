@@ -9,7 +9,7 @@ import { offerApproved, offerArchived, offerChanged } from '../contracts/events'
 import { offer, offerCaseStudy, practice } from '../db/schema';
 import { BUYER_DEFINITION_WARNING, affectsMatching, approvalProblems } from '../domain/approval';
 import { slugify } from '../domain/slug';
-import { slugTaken } from './practices';
+import { rethrowTaken, slugTaken } from './practices';
 
 export type Offer = typeof offer.$inferSelect;
 /** Every field a person can set on an offer. */
@@ -32,11 +32,12 @@ async function load(ctx: ModuleContext, id: string, lock = false): Promise<Offer
   return row;
 }
 
-async function assertActivePractice(ctx: ModuleContext, practiceId: string): Promise<void> {
-  const [row] = await ctx.tx
+async function assertActivePractice(ctx: ModuleContext, practiceId: string, lock = false): Promise<void> {
+  const q = ctx.tx
     .select({ id: practice.id })
     .from(practice)
     .where(and(eq(practice.id, practiceId), eq(practice.tenantId, ctx.tenantId), eq(practice.status, 'active')));
+  const [row] = await (lock ? q.for('share') : q);
   if (!row) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That practice was not found.' });
 }
 
@@ -64,7 +65,8 @@ export async function createOffer(ctx: ModuleContext, input: OfferInput): Promis
   const [row] = await ctx.tx
     .insert(offer)
     .values({ ...input, id: newId('off'), tenantId: ctx.tenantId, slug, name, promise })
-    .returning();
+    .returning()
+    .catch(rethrowTaken);
   await audit(ctx, { action: 'offers.offer.created', subject: { type: 'offer', id: row!.id }, after: { slug, name } });
   return row!;
 }
@@ -113,7 +115,8 @@ export async function updateOffer(
       updatedAt: new Date(),
     })
     .where(and(eq(offer.id, id), eq(offer.tenantId, ctx.tenantId)))
-    .returning();
+    .returning()
+    .catch(rethrowTaken);
 
   const subject = { type: 'offer', id };
   await publish(
@@ -147,6 +150,8 @@ export async function approveOffer(ctx: ModuleContext, id: string): Promise<Offe
   if (before.status === 'archived') {
     throw new ScoutError({ slug: 'offer-archived', status: 409, title: 'An archived offer cannot be approved.' });
   }
+  // A share lock keeps the practice from being archived until this transaction ends.
+  await assertActivePractice(ctx, before.practiceId, true);
   const problems = approvalProblems(before);
   if (problems.length > 0) {
     throw new ScoutError({

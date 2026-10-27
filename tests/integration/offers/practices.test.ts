@@ -66,6 +66,25 @@ describe('OFF-E1-S1 manage practices', () => {
   });
 });
 
+describe('practice and offer consistency', () => {
+  it('a draft offer in an archived practice cannot be approved', async () => {
+    const p = await t.run((ctx) => createPractice(ctx, { name: 'Archived With Draft' }));
+    const o = await t.run((ctx) => createOffer(ctx, { name: 'Stranded Draft', practiceId: p.id, ...completeOffer }));
+    await t.run((ctx) => archivePractice(ctx, p.id));
+    await expect(t.run((ctx) => approveOffer(ctx, o.id))).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('a concurrent duplicate slug gets the friendly error, not a 500', async () => {
+    const results = await Promise.allSettled([
+      t.run((ctx) => createPractice(ctx, { name: 'Race One', slug: 'race' })),
+      t.run((ctx) => createPractice(ctx, { name: 'Race Two', slug: 'race' })),
+    ]);
+    const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    expect(failed).toHaveLength(1);
+    expect(failed[0]!.reason).toMatchObject({ status: 409, message: 'That short name is taken.' });
+  });
+});
+
 describe('OFF-E1-S2 resolvePractice', () => {
   let ops: string;
   let longKw: string;

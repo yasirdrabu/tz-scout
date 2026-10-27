@@ -191,6 +191,15 @@ describe('OFF-E2-S2 approve', () => {
   });
 });
 
+describe('slug race', () => {
+  it('a concurrent duplicate offer slug gets the friendly error, not a 500', async () => {
+    const results = await Promise.allSettled([draft('Race A', { slug: 'offer-race' }), draft('Race B', { slug: 'offer-race' })]);
+    const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    expect(failed).toHaveLength(1);
+    expect(failed[0]!.reason).toMatchObject({ status: 409, message: 'That short name is taken.' });
+  });
+});
+
 describe('isolation', () => {
   it('another tenant cannot read or list the offer', async () => {
     const o = await draft('Private');

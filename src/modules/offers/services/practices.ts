@@ -24,11 +24,18 @@ const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: '
 const invalid = (path: string, message: string) =>
   new ScoutError({ slug: 'validation', status: 400, title: 'Check the practice.', errors: [{ path, message }] });
 
-async function load(ctx: ModuleContext, id: string): Promise<Practice> {
-  const [row] = await ctx.tx
+/** SQLSTATE 23505, whether the driver error is wrapped or not. */
+export function isUniqueViolation(e: unknown): boolean {
+  const code = (x: unknown) => (x as { code?: string } | null | undefined)?.code;
+  return code(e) === '23505' || code((e as { cause?: unknown } | null)?.cause) === '23505';
+}
+
+async function load(ctx: ModuleContext, id: string, lock = false): Promise<Practice> {
+  const q = ctx.tx
     .select()
     .from(practice)
     .where(and(eq(practice.id, id), eq(practice.tenantId, ctx.tenantId)));
+  const [row] = await (lock ? q.for('update') : q);
   if (!row) throw notFound();
   return row;
 }
@@ -41,6 +48,9 @@ async function assertSlugFree(ctx: ModuleContext, slug: string, selfId?: string)
   if (row) throw slugTaken();
 }
 
+export const rethrowTaken = (e: unknown): never => {
+  throw isUniqueViolation(e) ? slugTaken() : e;
+};
 const pick = (o: Practice, keys: string[]) => Object.fromEntries(keys.map((k) => [k, o[k as keyof Practice]]));
 const cleanKeywords = (keywords: string[]) => [...new Set(keywords.map((k) => k.trim()).filter(Boolean))];
 
@@ -63,7 +73,8 @@ export async function createPractice(ctx: ModuleContext, input: PracticeInput): 
       briefTemplateKey: input.briefTemplateKey ?? null,
       sort: input.sort ?? 0,
     })
-    .returning();
+    .returning()
+    .catch(rethrowTaken);
   const subject = { type: 'practice', id: row!.id };
   await publish(ctx, practiceChanged, { practiceId: row!.id, changed: ['created'] }, subject);
   await audit(ctx, { action: 'offers.practice.created', subject, after: { slug, name } });
@@ -102,7 +113,8 @@ export async function updatePractice(
     .update(practice)
     .set({ ...set, updatedAt: new Date() })
     .where(and(eq(practice.id, id), eq(practice.tenantId, ctx.tenantId)))
-    .returning();
+    .returning()
+    .catch(rethrowTaken);
   const subject = { type: 'practice', id };
   await publish(ctx, practiceChanged, { practiceId: id, changed }, subject);
   await audit(ctx, { action: 'offers.practice.updated', subject, before: pick(before, changed), after: pick(row!, changed) });
@@ -111,7 +123,8 @@ export async function updatePractice(
 
 /** Archives a practice. Blocked while it still has approved offers. */
 export async function archivePractice(ctx: ModuleContext, id: string): Promise<Practice> {
-  const before = await load(ctx, id);
+  // The row lock serialises with approveOffer, which locks the practice FOR SHARE.
+  const before = await load(ctx, id, true);
   if (before.status === 'archived') return before;
   const blocking = await ctx.tx
     .select({ name: offer.name })
