@@ -1,6 +1,9 @@
+import '@/entry/compose';
 import { cache } from 'react';
 import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
+import { sourceAccessProvider } from '@/modules/accounts';
+import { accessWithSources } from '@/platform/access';
 import { withTenant } from '@/platform/db/tenant';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -69,10 +72,8 @@ export async function tenantAction<T>(
     throw new ScoutError({ slug: 'forbidden', status: 403, title: 'Forbidden', detail: "You don't have access to that." });
   }
   requirePermission(principal, permission);
-  return withTenant(principal.tenantId, (tx) =>
-    fn(
-      { tenantId: principal.tenantId, actor: actorFor(principal), correlationId: newId('cor'), tx },
-      principal,
-    ),
-  );
+  return withTenant(principal.tenantId, async (tx) => {
+    const ctx: ModuleContext = { tenantId: principal.tenantId, actor: actorFor(principal), correlationId: newId('cor'), tx };
+    return fn({ ...ctx, access: await accessWithSources(ctx, principal, sourceAccessProvider()) }, principal);
+  });
 }

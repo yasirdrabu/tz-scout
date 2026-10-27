@@ -112,6 +112,13 @@ export async function tenantSummary(ctx: ModuleContext): Promise<{ id: string; s
   return t;
 }
 
+/** The context tenant's IANA timezone, for example `America/New_York`. */
+export async function tenantTimezone(ctx: ModuleContext): Promise<string> {
+  const [t] = await ctx.tx.select({ timezone: tenant.timezone }).from(tenant).where(eq(tenant.id, ctx.tenantId));
+  if (!t) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That workspace was not found.' });
+  return t.timezone;
+}
+
 export type TenantRow = { id: string; slug: string; name: string; currency: string; timezone: string; status: string };
 
 /** Every tenant, newest last. Platform-wide, so it uses `adminDb`; callers must be platform admins. */

@@ -1,0 +1,1 @@
+ALTER TABLE "accounts"."signal" ADD COLUMN "confidence" numeric(4, 3);

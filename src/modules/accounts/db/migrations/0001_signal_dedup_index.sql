@@ -1,0 +1,1 @@
+CREATE INDEX "signal_tenant_account_external_idx" ON "accounts"."signal" USING btree ("tenant_id","account_id","external_id") WHERE external_id is not null;

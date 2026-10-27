@@ -16,7 +16,7 @@ import { DataLimitSchema, defaultDataLimit, isWithin, type DataLimit } from '../
 import { PERMISSIONS, isPermission, type Permission } from '../domain/permissions';
 import { apiKey, tenant } from '../db/schema';
 
-export const NEEDS_SOURCE_LATER = 'Keys that send accounts need a source. Sources arrive in the next release.';
+export const NEEDS_SOURCE_LATER = 'Pick the source this key sends for.';
 
 const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 const TOKEN = /^scout_(live|test)_([0-9A-Za-z]{32})$/;
@@ -202,6 +202,16 @@ export async function revokeActiveKeysNamed(ctx: ModuleContext, name: string, re
     .from(apiKey)
     .where(and(eq(apiKey.tenantId, ctx.tenantId), eq(apiKey.name, name), isNull(apiKey.revokedAt)));
   for (const r of rows) await revokeApiKey(ctx, r.id, reason);
+  return rows.length;
+}
+
+/** Revokes every active key that sends for this source, when the source is archived. Returns how many. */
+export async function revokeKeysForSource(ctx: ModuleContext, sourceId: string): Promise<number> {
+  const rows = await ctx.tx
+    .select({ id: apiKey.id })
+    .from(apiKey)
+    .where(and(eq(apiKey.tenantId, ctx.tenantId), eq(apiKey.sourceId, sourceId), isNull(apiKey.revokedAt)));
+  for (const r of rows) await revokeApiKey(ctx, r.id, 'Source archived');
   return rows.length;
 }
 

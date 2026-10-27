@@ -6,6 +6,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrateAll, MODULE_ORDER } from '@/platform/db/migrate';
 import { freshDatabase } from '../helpers/db';
 
+function emptyMigrations(): string {
+  const dir = mkdtempSync(path.join(tmpdir(), 'scout-mig-'));
+  mkdirSync(path.join(dir, 'meta'));
+  writeFileSync(path.join(dir, 'meta', '_journal.json'), JSON.stringify({ version: '7', dialect: 'postgresql', entries: [] }));
+  return dir;
+}
+
 function probeMigrations(): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'scout-mig-'));
   mkdirSync(path.join(dir, 'meta'));
@@ -30,12 +37,21 @@ describe('migrateAll', () => {
     await db.drop();
   });
 
-  it('orders modules platform, tenancy, integrations, ai', () => {
-    expect([...MODULE_ORDER]).toEqual(['platform', 'tenancy', 'integrations', 'ai']);
+  it('orders modules platform, tenancy, integrations, ai, offers', () => {
+    expect([...MODULE_ORDER]).toEqual(['platform', 'tenancy', 'integrations', 'ai', 'offers', 'accounts', 'intake']);
   });
 
   it('applies a migration once and applies 0 on the second run', async () => {
-    const folders = { platform: '/nonexistent', tenancy: '/nonexistent', integrations: '/nonexistent', ai: probeMigrations() }; // isolate from real migrations
+    // Isolate from real migrations.
+    const folders = {
+      platform: emptyMigrations(),
+      tenancy: emptyMigrations(),
+      integrations: emptyMigrations(),
+      ai: probeMigrations(),
+      offers: emptyMigrations(),
+      accounts: emptyMigrations(),
+      intake: emptyMigrations(),
+    };
     const count = async () => {
       const sql = postgres(db.adminUrl, { max: 1 });
       try {
@@ -53,7 +69,9 @@ describe('migrateAll', () => {
     expect(await count()).toBe(1);
   });
 
-  it('tolerates modules with no migrations', async () => {
-    await expect(migrateAll({ adminUrl: db.adminUrl })).resolves.toBeDefined();
+  it('throws when a module has no migration journal', async () => {
+    await expect(migrateAll({ adminUrl: db.adminUrl, folders: { offers: '/nonexistent' } })).rejects.toThrow(
+      /offers.*no migration journal/i,
+    );
   });
 });

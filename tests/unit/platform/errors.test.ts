@@ -8,6 +8,20 @@ describe('toProblem', () => {
     expect(r.body.type).toBe('https://scout.taazaa.ai/problems/key-revoked');
     expect(r.body.title).toBe('Key revoked');
   });
+  it('merges extensions into the body and returns headers', () => {
+    const r = toProblem(
+      new ScoutError({
+        slug: 'rate-limited',
+        status: 429,
+        title: 'Slow down',
+        extensions: { resets_at: '2026-01-01T00:00:00.000Z' },
+        headers: { 'retry-after': '30' },
+      }),
+    );
+    expect(r.body.resets_at).toBe('2026-01-01T00:00:00.000Z');
+    expect(r.body.status).toBe(429);
+    expect(r.headers).toEqual({ 'retry-after': '30' });
+  });
   it('hides unknown errors', () => {
     const r = toProblem(new Error('x'));
     expect(r.status).toBe(500);

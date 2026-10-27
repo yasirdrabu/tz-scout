@@ -86,7 +86,7 @@ A change of 0.02 or more publishes `intake.source.trust_changed`. It is also rep
 (SRC-E5).
 
 **How scoring uses trust** (owned by SCO, stated here so both sides agree): source trust moves
-priority by at most ±5 points and never changes fit or intent. SCO reads it with `getTrust(sourceIds)`.
+priority by at most ±5 points and never changes fit or intent. SCO reads it with `getTrust(chain)`.
 
 ## Data
 

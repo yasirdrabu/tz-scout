@@ -80,6 +80,47 @@ describe('scout CLI', () => {
     expect(sched[0]).toMatchObject({ cron: '0 * * * *', timezone: 'UTC' });
   }, 90_000);
 
+  it('seed leaves one development agent under the admin, a person source per user, and a key bound to the agent', async () => {
+    const id = ((await adminDb.execute(sql`select id from tenancy.tenant where slug = 'taazaa'`)) as unknown as { id: string }[])[0]!.id;
+    const agents = (await adminDb.execute(
+      sql`select id, parent_id from intake.source where tenant_id = ${id} and kind = 'agent' and name = 'Local development agent'`,
+    )) as unknown as { id: string; parent_id: string }[];
+    expect(agents).toHaveLength(1);
+    const parent = (await adminDb.execute(
+      sql`select kind, user_id from intake.source where id = ${agents[0]!.parent_id}`,
+    )) as unknown as { kind: string; user_id: string }[];
+    expect(parent[0]!.kind).toBe('person');
+    const users = (await adminDb.execute(
+      sql`select email from tenancy.membership m join tenancy.user u on u.id = m.user_id where m.tenant_id = ${id}`,
+    )) as unknown as { email: string }[];
+    const people = (await adminDb.execute(sql`select user_id from intake.source where tenant_id = ${id} and kind = 'person'`)) as unknown as { user_id: string }[];
+    expect(people.length).toBeGreaterThanOrEqual(users.length);
+    expect(new Set(people.map((p) => p.user_id)).size).toBe(people.length);
+    const key = (await adminDb.execute(
+      sql`select source_id, scopes from tenancy.api_key where tenant_id = ${id} and name = 'Local development key' and revoked_at is null`,
+    )) as unknown as { source_id: string; scopes: string[] }[];
+    expect(key[0]!.source_id).toBe(agents[0]!.id);
+    expect([...key[0]!.scopes].sort()).toEqual(
+      ['accounts:read', 'accounts:write', 'arrivals:read', 'arrivals:write', 'imports:run', 'offers:read', 'people:write', 'signals:write', 'status:read'],
+    );
+    const vendors = await adminDb.execute(sql`select 1 from intake.source where tenant_id = ${id} and kind = 'vendor'`);
+    expect(vendors.length).toBeGreaterThan(0);
+  }, 30_000);
+
+  it('import taazaa research-a.csv exits 0 and prints the batch', async () => {
+    const r = await scout(['import', 'taazaa', 'tests/fixtures/imports/research-a.csv']).done;
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/Batch bat_\w+: 4 rows, layout research, import imp_\w+ is queued\./);
+    const batches = await adminDb.execute(sql`select 1 from intake.file_import where status = 'queued'`);
+    expect(batches).toHaveLength(1);
+  }, 60_000);
+
+  it('import names an unknown workspace', async () => {
+    const r = await scout(['import', 'nowhere', 'tests/fixtures/imports/research-a.csv']).done;
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('No workspace with the slug "nowhere".');
+  }, 60_000);
+
   it('keys:create prints a live key', async () => {
     const r = await scout(['keys:create', '--tenant', 'taazaa', '--name', 't', '--scopes', 'status:read']).done;
     expect(r.code).toBe(0);

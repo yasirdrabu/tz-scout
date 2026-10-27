@@ -20,12 +20,14 @@ checks, caps and trust only work if every arrival goes through here. That includ
 |---|---|---|
 | `source` | `id` (`src_`), `tenant_id`, `kind`, `name`, `parent_id`, `user_id`, `status`, `initial_review_status_key`, `daily_arrival_cap`, `trust`, `trust_updated_at`, `settings` | The registry. See [source-registry-and-trust.md](source-registry-and-trust.md) |
 | `source_trust_history` | `source_id`, `computed_at`, `trust`, `sample_size`, `inputs` | One row per nightly compute or event-driven change |
-| `arrival` | `id` (`arr_`), `tenant_id`, `batch_id`, `person_source_id`, `agent_source_id`, `vendor_source_id`, `principal`, `received_at`, `contract_version`, `payload` (JSON, immutable), `payload_hash`, `external_ref`, `target_account_id`, `status` (`received`, `resolving`, `resolved`, `rejected`), `waiting_on`, `reject_reason`, `account_id`, `resolution` (`created`, `attached`), `duplicate_candidates`, `warm_intro_id`, `resolved_at` | Stored exactly as received (D13) |
-| `batch` | `id` (`bat_`), `tenant_id`, source chain ids, `principal`, `name`, `run_at`, `notes`, `criteria`, `metadata`, `item_count`, `counts`, `status` (`processing`, `completed`), `completed_at` | One-off arrivals have no batch |
+| `arrival` | `id` (`arr_`), `tenant_id`, `batch_id`, `person_source_id`, `agent_source_id`, `vendor_source_id`, `closest_source_id` (the agent, else the person, else the vendor), `principal`, `channel`, `received_at`, `contract_version`, `payload` (JSON, immutable), `payload_hash`, `external_ref`, `target_account_id`, `status` (`received`, `resolving`, `resolved`, `rejected`), `waiting_on`, `waiting_since`, `reject_reason`, `reject_detail`, `account_id`, `resolution` (`created`, `attached`), `duplicate_candidates`, `resolution_input` (what a person decided while it waited), `normalised` (the output of step 2), `lock_key` (the resolve lock), `steps` (pipeline steps already done), `warm_intro_id`, `can_declare_warm_intro` (the sender held `warm_intro:declare`), `resolved_at` | Stored exactly as received (D13). `payload` holds `raw` (what was sent) and `arrival` (the arrival.v1 body built from it) |
+| `batch` | `id` (`bat_`), `tenant_id`, source chain ids, `principal`, `name`, `run_at`, `notes`, `criteria`, `metadata`, `item_count` (rows stored with this batch), `counts` (by arrival status, plus `repeated`: items this source had already sent, which belong to the earlier batch and sit outside completion), `status` (`processing`, `completed`), `completed_at` | One-off arrivals have no batch |
 | `batch_file` | `batch_id`, `file_name`, `content_type`, `size_bytes`, `storage_key`, `sha256` | Up to 10 per batch |
 | `file_import` | `id` (`imp_`), `tenant_id`, `batch_id`, `source_id`, `file_name`, `layout`, `headers`, `row_count`, `mapping`, `mapping_origin`, `status`, `stats` | A CSV, Excel or Markdown upload |
+| `file_blob` | `storage_key` (`blob_`), `tenant_id`, `content` (`bytea`), `size_bytes` | Uploaded files live in Postgres, so nightly backups cover them |
+| `relationship_default` | `tenant_id`, `relationship_key`, `label`, `points` | The tenant's default points per warm-intro relationship (SRC-E5) |
 | `column_mapping` | `id` (`map_`), `tenant_id`, `source_id`, `header_signature`, `mapping`, `created_by`, `last_used_at` | Saved mappings, reused automatically |
-| `warm_intro` | `id` (`wi_`), `arrival_id`, `account_id`, `introducer_user_id`, `introducer_name`, `introducer_email`, `relationship_text`, `relationship_key`, `note`, `points`, `confirmed`, `confirmed_by` | One per arrival that declares an intro |
+| `warm_intro` | `id` (`wi_`), `arrival_id`, `account_id`, `introducer_user_id`, `introducer_name`, `introducer_email`, `relationship_text`, `relationship_key`, `note`, `points`, `effective_points` (what counts: half of `points`, rounded down, until confirmed), `confirmed`, `confirmed_by` | One per arrival that declares an intro |
 | `warm_intro_rule` | `tenant_id`, `introducer_user_id` or `introducer_email`, `relationship_key`, `points` | Points per introducer and relationship |
 | `arrival_outcome` | `arrival_id`, `account_id`, source chain ids, `max_stage`, `declined`, `conflicts_lost`, `updated_at` | Read model for trust, built from events |
 | `source_feedback` | `id`, `source_id`, `arrival_id`, `account_id`, `kind`, `note`, `created_at` | What a source is told about its arrivals |
@@ -59,11 +61,11 @@ intro).
 | `submitBatch(ctx, batch, items)` | ENR, API, MCP | |
 | `registerSource(ctx, source)` | ENR | Creates a `scheduled_pull` or `vendor` source |
 | `sourcesForAccount(ctx, accountId)` | ANL | Sources whose arrivals resolved to the account |
-| `getTrust(ctx, sourceIds)` | SCO | Effective trust as a decimal 0 to 1 over the given person, agent and vendor sources (new sources 0.60) |
+| `getTrust(ctx, chain)` | SCO | Effective trust as a decimal 0 to 1 for one source chain (its person, agent and vendor sources, re-weighted over the levels present; new sources 0.60) |
 
 **Implements for other modules (inverted interfaces, spec's call, D29):** `SourceValidator` defined by
 TEN (`exists(ctx, sourceId)`, used when a key or grant is created) and `SourceInfoProvider` defined by
-ACC (`getTrust(ctx, sourceIds)`, `sourcesForAccount(ctx, accountId)`, used to pick current fact values).
+ACC (`getTrust(ctx, chain)`, `sourcesForAccount(ctx, accountId)`, used to pick current fact values).
 The composition root registers SRC's implementations, so neither TEN nor ACC imports SRC.
 | `getWarmIntro(ctx, accountId)` | SCO, PLB | The strongest warm intro on the account: introducer (user id or name), relationship key, points 0 to 20, confirmed; or none |
 | `accountForArrival(ctx, arrivalId)` | REV (`get_account_status`), API, MCP | The arrival's account id once resolved, its status and `waiting_on` otherwise |

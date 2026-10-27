@@ -5,7 +5,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { config } from '@/platform/config';
 
-export const MODULE_ORDER = ['platform', 'tenancy', 'integrations', 'ai'] as const;
+export const MODULE_ORDER = ['platform', 'tenancy', 'integrations', 'ai', 'offers', 'accounts', 'intake'] as const;
 export type ModuleName = (typeof MODULE_ORDER)[number];
 
 const root = process.cwd();
@@ -60,7 +60,8 @@ export async function migrateAll(opts: MigrateOptions = {}): Promise<{ applied: 
   try {
     for (const m of MODULE_ORDER) {
       const folder = opts.folders?.[m] ?? migrationsFolder(m);
-      if (!existsSync(path.join(folder, 'meta', '_journal.json'))) continue; // module has no migrations yet
+      const journal = path.join(folder, 'meta', '_journal.json');
+      if (!existsSync(journal)) throw new Error(`Module "${m}" has no migration journal (expected ${journal}).`);
       const count = async () => {
         const r = await client.unsafe(
           `select count(*)::int as n from information_schema.tables where table_schema = '${m}' and table_name = '__migrations'`,

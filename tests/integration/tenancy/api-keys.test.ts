@@ -77,7 +77,7 @@ describe('createApiKey', () => {
 
   it('refuses arrivals:write while no source validator is registered', async () => {
     await expect(make(['arrivals:write'])).rejects.toThrow(
-      'Keys that send accounts need a source. Sources arrive in the next release.',
+      'Pick the source this key sends for.',
     );
   });
 
