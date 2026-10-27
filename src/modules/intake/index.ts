@@ -16,8 +16,8 @@ export {
   batchCreated,
 } from './contracts/events';
 export { importRunJob, resolveJob, waitingExpireJob } from './contracts/jobs';
-export { intakeTenantDefaults } from './consumers';
-export { resolveHandler } from './jobs';
+export { intakeAccountMerged, intakeTenantDefaults } from './consumers';
+export { resolveHandler, waitingExpireHandler } from './jobs';
 export { DEFAULT_VENDOR_SOURCES, RELATIONSHIP_DEFAULTS, seedIntakeDefaults } from './defaults';
 export { checkArrivalCap, type CapCheck } from './services/caps';
 export {
@@ -54,3 +54,18 @@ export {
   type SubmitOptions,
   type SubmitResult,
 } from './services/submit';
+export {
+  accountForArrival,
+  getArrival,
+  getBatch,
+  listArrivals,
+  listBatchItems,
+  listBatches,
+  type ArrivalDetail,
+  type ArrivalFilter,
+  type ArrivalView,
+  type BatchDetail,
+  type BatchView,
+} from './services/status';
+export { visibleArrivals, type ArrivalScope } from './services/visibility';
+export { chooseDuplicate, listWaiting, skipWaiting, supplyCompany, supplyWebsite } from './services/waiting';

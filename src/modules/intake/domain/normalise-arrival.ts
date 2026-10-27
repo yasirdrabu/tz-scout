@@ -37,6 +37,8 @@ export type ResolutionInput = {
   website?: string;
   company?: { name: string; website?: string };
   soleProprietor?: boolean;
+  /** The sole proprietor's name, for a person who came with none. */
+  personName?: string;
   duplicate?: { kind: 'same_as'; accountId: string } | { kind: 'new_company' };
 };
 
@@ -179,6 +181,13 @@ export function revive(saved: unknown): Normalised {
   };
 }
 
+/** Gives the first person the name, keeping their other fields. */
+function named(people: ArrivalPerson[], full: string): ArrivalPerson[] {
+  const { firstName, lastName } = splitName(full);
+  const first = { ...people[0], firstName, ...(lastName ? { lastName } : {}) };
+  return [first, ...people.slice(1)];
+}
+
 /** A person's answer, applied over the saved normalising (the website, the company, or "sole proprietor"). */
 export function withInput(n: Normalised, input: ResolutionInput | null): Normalised {
   if (!input) return n;
@@ -192,6 +201,7 @@ export function withInput(n: Normalised, input: ResolutionInput | null): Normali
       ...(domain ? { domain, websiteUrl: website!.trim() } : {}),
     }),
     soleProprietor: n.soleProprietor || !!input.soleProprietor,
+    people: input.personName ? named(n.people, input.personName) : n.people,
   };
 }
 
