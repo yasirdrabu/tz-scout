@@ -1,6 +1,6 @@
 // The score explanation: every point of a priority as a line a person can check (SCO-E4).
 
-import type { RuleHit, ScoringAccount, ScoringOffer, ScoringProfile, ScoringSignal, ScoringSignalKind, Tier, TierReason } from '../contracts/types';
+import type { RuleHit, ScoreCause, ScoringAccount, ScoringOffer, ScoringProfile, ScoringSignal, ScoringSignalKind, Tier, TierReason } from '../contracts/types';
 import type { FitResult } from './fit';
 import { CURRENT_STATE, recency, signalDate } from './intent';
 
@@ -63,7 +63,7 @@ const ago = (days: number) => (days === 0 ? 'today' : days === 1 ? '1 day ago' :
 const dateText = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 
 /** Unknown parts earned a middle share, so the most they can move is the larger side of it. The name comes from the note ("Headcount unknown."). */
-function missingInputs(parts: FitResult['parts']): string[] {
+export function missingInputs(parts: FitResult['parts']): string[] {
   return parts
     .filter((p) => p.unknown)
     .map((p) => `${p.note.replace(/ unknown\.$/, '')} unknown: adding it could change fit by up to ${Math.round(Math.max(p.points, p.max - p.points))} points.`);
@@ -176,3 +176,17 @@ export function summarySentence(explanation: Explanation): string {
   const list = reasons.length > 1 ? `${reasons.slice(0, -1).join(', ')}, and ${reasons[reasons.length - 1]}` : reasons[0];
   return `${TIER_TITLE[explanation.tier]} for ${explanation.bestOffer.name} (priority ${explanation.priority}): ${list}.`;
 }
+
+const CAUSE_WORDS: Record<ScoreCause, string> = {
+  new_signal: 'A new signal arrived.',
+  new_fact: 'New details arrived for the account.',
+  rules_changed: 'The scoring settings changed.',
+  offer_changed: 'An offer changed.',
+  trust_changed: 'Source trust changed.',
+  warm_intro: 'A warm intro was recorded.',
+  manual_rescore: 'A rescore was requested.',
+  ageing: 'Signals got older.',
+};
+
+/** A score change's cause as a sentence for the history list (SCO-E4-S3-AC1). */
+export const causeInWords = (cause: string): string => CAUSE_WORDS[cause as ScoreCause] ?? 'The score was recomputed.';

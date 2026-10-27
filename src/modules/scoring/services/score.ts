@@ -32,7 +32,7 @@ async function lockScoring(ctx: ModuleContext, accountId: string): Promise<void>
   await ctx.tx.execute(sql`select pg_advisory_xact_lock(hashtext(${ctx.tenantId} || ':scoring:' || ${accountId}))`);
 }
 
-const toScoringAccount = (v: ScoringView): ScoringAccount => ({
+export const toScoringAccount = (v: ScoringView): ScoringAccount => ({
   domain: v.domain ?? '',
   industry: v.industry,
   industryKey: v.industryKey,
@@ -57,7 +57,7 @@ const toScoringSignals = (v: ScoringView): ScoringSignal[] =>
     recordedAt: s.recordedAt,
   }));
 
-const toScoringOffer = (o: ApprovedOffer): ScoringOffer => ({
+export const toScoringOffer = (o: ApprovedOffer): ScoringOffer => ({
   id: o.id,
   industries: o.industries,
   excludedCategories: o.excludedCategories,

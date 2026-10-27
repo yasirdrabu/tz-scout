@@ -18,3 +18,5 @@ export { getProfile, resetProfile, updateProfile, type ProfilePatch, type Profil
 export { requestRescore } from './services/rescore';
 export { scoreAccount, type AccountScore, type ScoreOptions } from './services/score';
 export { getMatches, getScore, getScoreHistory, type OfferMatchView, type ScoreChangeView } from './services/read';
+export { explainScore, type ScoreExplanation } from './services/explain';
+export { causeInWords } from './domain/explain';
