@@ -204,6 +204,27 @@ describe('events', () => {
     expect(updated).toMatchObject({ arrivalId: a.arrivalId, changedKeys: ['employees'] });
   });
 
+  it('person and exclusion events from an arrival carry arrivalId', async () => {
+    const d = domain();
+    const email = `pat@${d}`;
+    const first = arrival({
+      account: { name: 'Person Event Co', domain: d },
+      people: [{ firstName: 'Pat', lastName: 'Lee', email, title: 'Analyst' }],
+    });
+    const out = await t.run((ctx) => upsertFromArrival(ctx, first));
+    expect((await eventsOf(out.accountId, 'accounts.person.added')).at(-1)!.payload.data.arrivalId).toBe(first.arrivalId);
+
+    const second = arrival({
+      account: { name: 'Person Event Co', domain: d, industryKey: 'software' },
+      people: [{ firstName: 'Pat', lastName: 'Lee', email, title: 'Director of Data' }],
+    });
+    await t.run((ctx) => upsertFromArrival(ctx, second, out.accountId));
+    const updated = (await eventsOf(out.accountId, 'accounts.person.updated')).at(-1)!.payload.data;
+    expect(updated).toMatchObject({ changedKeys: expect.arrayContaining(['title']), arrivalId: second.arrivalId });
+    const excluded = (await eventsOf(out.accountId, 'accounts.account.exclusion_changed')).at(-1)!.payload.data;
+    expect(excluded).toMatchObject({ excludedReasonKey: 'software_vendor', arrivalId: second.arrivalId });
+  });
+
   it('a practice hint on an existing account carries arrivalId', async () => {
     await t.run((ctx) => createPractice(ctx, { name: 'Hint Practice', slug: 'hint-practice' }));
     const out = await seed();

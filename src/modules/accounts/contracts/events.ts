@@ -40,7 +40,7 @@ export const accountMerged = defineEvent(
 export const accountExclusionChanged = defineEvent(
   'accounts.account.exclusion_changed',
   1,
-  z.object({ accountId: z.string(), excludedReasonKey: z.string().optional(), override: z.boolean() }),
+  z.object({ accountId: z.string(), excludedReasonKey: z.string().optional(), override: z.boolean(), arrivalId: z.string().optional() }),
 );
 
 export const personAdded = defineEvent(
@@ -62,6 +62,7 @@ export const personUpdated = defineEvent(
     personId: z.string(),
     changedKeys: z.array(z.string()),
     roleKeys: z.array(z.string()),
+    arrivalId: z.string().optional(),
   }),
 );
 

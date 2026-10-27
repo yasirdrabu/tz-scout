@@ -150,7 +150,7 @@ async function publishEvents(
   for (const p of people) {
     if (!p.existing) await publish(ctx, personAdded, { accountId, personId: p.personId, roleKeys: p.roleKeys, arrivalId: a.arrivalId }, subject);
     else if (p.changedKeys.length) {
-      await publish(ctx, personUpdated, { accountId, personId: p.personId, changedKeys: p.changedKeys, roleKeys: p.roleKeys }, subject);
+      await publish(ctx, personUpdated, { accountId, personId: p.personId, changedKeys: p.changedKeys, roleKeys: p.roleKeys, arrivalId: a.arrivalId }, subject);
     }
   }
   for (const f of facts) {
@@ -269,7 +269,7 @@ export async function upsertFromArrival(
   const practiceId = await resolvePractice(ctx, a.practiceHint);
   if (practiceId) await setPractices(ctx, id, [practiceId], 'hint', { publish: !target.created, arrivalId: a.arrivalId });
   // 8. Exclusion.
-  const excluded = await applyExclusion(ctx, id);
+  const excluded = await applyExclusion(ctx, id, { arrivalId: a.arrivalId });
   // 9. Summary, with this arrival's sources added inline.
   const sourceIds = [chain.personSourceId, chain.agentSourceId, chain.vendorSourceId].filter((s): s is string => !!s);
   await writeSummary(ctx, id, { addSourceIds: sourceIds });
