@@ -115,7 +115,7 @@ describe('search', () => {
 
   it('rejects a forged cursor whose key does not fit the sort, and ignores a non-finite limit', async () => {
     const forge = (sort: string, key: string | null) => Buffer.from(JSON.stringify({ sort, key, id: 'acc_x' })).toString('base64url');
-    for (const [sort, key] of [['priority', 'abc'], ['created', 'abc'], ['last_signal', '1; drop'], ['priority', '99999999999']] as const) {
+    for (const [sort, key] of [['priority', 'abc'], ['created', 'abc'], ['last_signal', '1; drop'], ['priority', '99999999999'], ['created', '2026-99-99 00:00:00Z'], ['last_signal', '2026-02-30 00:00:00+00']] as const) {
       await expect(t.run((ctx) => search(ctx, { sort, cursor: forge(sort, key) })), sort).rejects.toMatchObject({ status: 400 });
     }
     expect((await t.run((ctx) => search(ctx, { limit: Number.NaN }))).data.length).toBeGreaterThan(0);

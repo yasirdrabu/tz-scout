@@ -2,7 +2,9 @@ import { and, eq } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
 import { accountUpdated } from '../contracts/events';
+import { ScoutError } from '@/platform/errors';
 import { account } from '../db/schema';
+import { filterVisibleAccountIds } from './visibility';
 
 /**
  * Sets an account's practices. A hint only adds (D25); a person may also remove. Publishes
@@ -16,6 +18,9 @@ export async function setPractices(
   by: 'hint' | 'person',
   opts: { publish?: boolean } = {},
 ): Promise<string[]> {
+  if (by === 'person' && (await filterVisibleAccountIds(ctx, [accountId])).length === 0) {
+    throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
+  }
   const [acc] = await ctx.tx
     .select({ practiceIds: account.practiceIds })
     .from(account)

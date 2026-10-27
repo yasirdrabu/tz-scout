@@ -65,7 +65,14 @@ type Cursor = { sort: SearchSort; key: string | null; id: string };
 const encodeCursor = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString('base64url');
 
 const KEY_SHAPE = { int: /^-?\d{1,9}$/, timestamptz: /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(\.\d{1,6})?(Z|[+-]\d\d(:\d\d)?)$/, text: /^[\s\S]*$/ };
-const keyFits = (cast: keyof typeof KEY_SHAPE, key: unknown): boolean => typeof key === 'string' && KEY_SHAPE[cast].test(key);
+const realDate = (key: string): boolean => {
+  const day = key.slice(0, 10);
+  const t = Date.parse(day + 'T00:00:00Z');
+  const [h, m, s] = key.slice(11, 19).split(':').map(Number) as [number, number, number];
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === day && h < 24 && m < 60 && s < 60;
+};
+const keyFits = (cast: keyof typeof KEY_SHAPE, key: unknown): boolean =>
+  typeof key === 'string' && KEY_SHAPE[cast].test(key) && (cast !== 'timestamptz' || realDate(key));
 
 function decodeCursor(raw: string, sort: SearchSort): Cursor {
   try {

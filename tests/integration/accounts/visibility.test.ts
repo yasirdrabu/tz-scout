@@ -11,6 +11,7 @@ import {
   getSignals,
   listPeople,
   mergeAccounts,
+  setPractices,
   registerSourceAccessProvider,
   search,
   upsertFromArrival,
@@ -171,6 +172,8 @@ describe('hidden accounts', () => {
     await expect(as(sellerAccess, (ctx) => mergeAccounts(ctx, hidden, mine))).rejects.toMatchObject(notFound);
     await expect(as(sellerAccess, (ctx) => editAccount(ctx, hidden, { employees: 5 }))).rejects.toMatchObject(notFound);
     await expect(as(sellerAccess, (ctx) => editPerson(ctx, hiddenPerson, { title: 'CEO' }))).rejects.toMatchObject(notFound);
+    await expect(as(sellerAccess, (ctx) => setPractices(ctx, hidden, [], 'person'))).rejects.toMatchObject(notFound);
+    await as(sellerAccess, (ctx) => setPractices(ctx, hidden, ['prc_h'], 'hint')); // the intake path is unfiltered
     await as(sellerAccess, (ctx) => editAccount(ctx, mine, { employees: 5 })); // its own account still works
   });
 });
