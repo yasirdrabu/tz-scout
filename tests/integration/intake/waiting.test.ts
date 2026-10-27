@@ -289,6 +289,9 @@ describe('waiting actions under data limits', () => {
       status: 404,
       message: 'That account was not found.',
     });
+    // A hidden account that was never a candidate answers the same way.
+    const stranger = (await possibleDuplicate('Stranger', { agentSourceId: 'src_elsewhere' })).existing;
+    await expect(limited(access, (ctx) => chooseDuplicate(ctx, id, { kind: 'same_as', accountId: stranger }))).rejects.toMatchObject({ status: 404 });
     expect(await rowOf(id)).toMatchObject({ resolutionInput: null });
   });
 });

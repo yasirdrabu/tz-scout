@@ -219,7 +219,16 @@ function narrowed(b: BatchRow, rows: ArrivalRow[]): BatchView {
       counts[r.resolution === 'created' ? 'newAccounts' : 'alreadyKnown']++;
     }
   }
-  return { ...batchView(b), itemCount: rows.length, counts };
+  // Status follows the visible items only, so an open hidden item can't be inferred from it.
+  const open = rows.some((r) => r.status === 'received' || r.status === 'resolving');
+  const doneAt = rows.map((r) => r.resolvedAt?.getTime()).filter((t): t is number => t !== undefined);
+  return {
+    ...batchView(b),
+    itemCount: rows.length,
+    counts,
+    status: open ? 'processing' : 'completed',
+    completedAt: open || doneAt.length === 0 ? null : new Date(Math.max(...doneAt)),
+  };
 }
 
 export async function listBatches(ctx: ModuleContext, f: { cursor?: string; limit?: number } = {}): Promise<Page<BatchView>> {

@@ -157,16 +157,14 @@ export async function settleBatch(ctx: ModuleContext, batchId: string, add: Part
   );
 }
 
-/** The one path for every rejection after an arrival is stored: the row, the event, and the batch counts. */
-export async function rejectArrival(
+/** Writes a rejection on a row the caller holds locked, and publishes it. Does not touch the batch. */
+async function rejectRow(
   ctx: ModuleContext,
-  arrivalId: string,
+  row: ArrivalRow,
   reason: RejectReason,
   detail: string,
   accountId?: string,
 ): Promise<void> {
-  const row = await load(ctx, arrivalId);
-  if (!row || row.status === 'resolved' || row.status === 'rejected') return;
   await record(ctx, row, 'outcome', {
     status: 'rejected',
     rejectReason: reason,
@@ -178,10 +176,43 @@ export async function rejectArrival(
   await publish(
     ctx,
     arrivalRejected,
-    { arrivalId, ...(row.batchId ? { batchId: row.batchId } : {}), reason, detail, ...(accountId ? { accountId } : {}) },
-    subject(arrivalId),
+    { arrivalId: row.id, ...(row.batchId ? { batchId: row.batchId } : {}), reason, detail, ...(accountId ? { accountId } : {}) },
+    subject(row.id),
   );
+}
+
+/** The one path for every rejection after an arrival is stored: the row, the event, and the batch counts. */
+export async function rejectArrival(
+  ctx: ModuleContext,
+  arrivalId: string,
+  reason: RejectReason,
+  detail: string,
+  accountId?: string,
+): Promise<void> {
+  const row = await load(ctx, arrivalId);
+  if (!row || row.status === 'resolved' || row.status === 'rejected') return;
+  await rejectRow(ctx, row, reason, detail, accountId);
   if (row.batchId) await settleBatch(ctx, row.batchId, { rejected: 1 });
+}
+
+/**
+ * Rejects several arrivals the caller already locked (FOR UPDATE, in id order), then settles each
+ * affected batch once, in id order. Lock order stays arrival then batch, as in a resolve job, so
+ * a bulk rejection can't deadlock with one.
+ */
+export async function rejectLocked(
+  ctx: ModuleContext,
+  rows: ArrivalRow[],
+  reason: RejectReason,
+  detailOf: (row: ArrivalRow) => string,
+): Promise<void> {
+  const perBatch = new Map<string, number>();
+  for (const row of rows) {
+    if (row.status === 'resolved' || row.status === 'rejected') continue;
+    await rejectRow(ctx, row, reason, detailOf(row));
+    if (row.batchId) perBatch.set(row.batchId, (perBatch.get(row.batchId) ?? 0) + 1);
+  }
+  for (const batchId of [...perBatch.keys()].sort()) await settleBatch(ctx, batchId, { rejected: perBatch.get(batchId)! });
 }
 
 // ---- The pipeline ----
@@ -275,7 +306,7 @@ async function validated(ctx: ModuleContext, row: ArrivalRow, opts: { ai: boolea
     return null;
   }
   if (!row.steps.includes('validate')) await record(ctx, row, 'validate', { status: 'resolving' });
-  // Before any lock: the AI call may take seconds.
+  // Before the resolve lock and the account lock: the AI call may take seconds. (The arrival row is already locked by `load`.)
   await record(ctx, row, 'normalise', { normalised: await normalise(ctx, v.body, opts) });
   return revive(row.normalised);
 }

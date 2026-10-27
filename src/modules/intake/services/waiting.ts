@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds } from '@/modules/accounts';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
@@ -8,7 +8,7 @@ import { resolveJob } from '../contracts/jobs';
 import { arrival } from '../db/schema';
 import { normaliseDomain } from '../domain/normalise';
 import type { ResolutionInput, WaitingOn } from '../domain/normalise-arrival';
-import { rejectArrival } from './resolve';
+import { rejectLocked } from './resolve';
 import { toViews, type ArrivalView } from './status';
 import { findArrival, pageArrivals } from './visibility';
 
@@ -105,11 +105,12 @@ export function chooseDuplicate(
 ): Promise<void> {
   return resume(ctx, arrivalId, 'intake.arrival.choose_duplicate', ['possible_duplicate'], async (row) => {
     if (choice.kind === 'same_as') {
-      const candidates = (row.duplicateCandidates as { accountId: string }[] | null) ?? [];
-      if (!candidates.some((c) => c.accountId === choice.accountId)) throw invalid('Choose one of the accounts Scout found.');
+      // Visibility first, so a hidden account answers the same whether or not it was a candidate.
       if ((await filterVisibleAccountIds(ctx, [choice.accountId])).length === 0) {
         throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
       }
+      const candidates = (row.duplicateCandidates as { accountId: string }[] | null) ?? [];
+      if (!candidates.some((c) => c.accountId === choice.accountId)) throw invalid('Choose one of the accounts Scout found.');
     }
     return { duplicate: choice };
   });
@@ -124,31 +125,27 @@ export async function skipWaiting(ctx: ModuleContext, batchId: string, by: strin
     ids.push(...page.data.map((r) => r.id));
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
-  for (const id of ids) {
-    await rejectArrival(ctx, id, 'invalid', `Skipped by ${by}.`);
-    await audit(ctx, { action: 'intake.arrival.skip', subject: { type: 'arrival', id }, after: { batchId } });
-  }
-  return ids.length;
+  if (ids.length === 0) return 0;
+  const locked = await ctx.tx
+    .select()
+    .from(arrival)
+    .where(and(eq(arrival.tenantId, ctx.tenantId), inArray(arrival.id, ids), waitingNow))
+    .orderBy(arrival.id)
+    .for('update');
+  await rejectLocked(ctx, locked, 'invalid', () => `Skipped by ${by}.`);
+  for (const r of locked) await audit(ctx, { action: 'intake.arrival.skip', subject: { type: 'arrival', id: r.id }, after: { batchId } });
+  return locked.length;
 }
 
 /** SRC-E3-S3-AC3: rejects arrivals that have waited more than 30 days, with a reason that says why. */
 export async function expireWaiting(ctx: ModuleContext): Promise<number> {
+  // Locked up front in id order and checked under the lock: an answer that just arrived refreshed `waiting_since`.
   const stale = await ctx.tx
-    .select({ id: arrival.id, waitingOn: arrival.waitingOn })
+    .select()
     .from(arrival)
     .where(and(eq(arrival.tenantId, ctx.tenantId), staleNow))
-    .orderBy(arrival.waitingSince);
-  let expired = 0;
-  for (const s of stale) {
-    // Locked and re-checked: an answer that arrived since the list was read refreshed `waiting_since`.
-    const [still] = await ctx.tx
-      .select({ waitingOn: arrival.waitingOn })
-      .from(arrival)
-      .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.id, s.id), staleNow))
-      .for('update');
-    if (!still) continue;
-    await rejectArrival(ctx, s.id, 'invalid', EXPIRY_DETAIL[still.waitingOn as WaitingOn]);
-    expired++;
-  }
-  return expired;
+    .orderBy(arrival.id)
+    .for('update');
+  await rejectLocked(ctx, stale, 'invalid', (r) => EXPIRY_DETAIL[r.waitingOn as WaitingOn]);
+  return stale.length;
 }

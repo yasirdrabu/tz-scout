@@ -225,6 +225,8 @@ describe('batches seen only through account visibility', () => {
     ] satisfies Access[]) {
       const b = await as(access, (ctx) => getBatch(ctx, out.batchId));
       expect(b).toMatchObject({
+        status: 'completed',
+        completedAt: expect.any(Date),
         itemCount: 1,
         counts: { resolved: 1, rejected: 0, newAccounts: 1, alreadyKnown: 0 },
         stages: { received: 0, resolving: 0, waiting: 0, resolved: 1, rejected: 0 },
@@ -252,5 +254,20 @@ describe('batches seen only through account visibility', () => {
     expect(listed).toContain(mine.batchId);
     expect(listed).not.toContain(theirs.batchId);
     expect(await as(access, (ctx) => listBatchItems(ctx, theirs.batchId))).toBeNull();
+  });
+});
+
+describe('narrowed batch status', () => {
+  it('follows the visible items, not hidden open ones', async () => {
+    const out = await asSource(t, ash.agentId, (ctx) =>
+      submitBatch(ctx, { name: `Open hidden ${++n}`, items: [validArrival(), { account: { name: 'Still waiting' } }] }, { channel: 'webhook' }),
+    );
+    await runOutbox(t.tenantId);
+    await inPractice(await accountOf(out.items[0]!.arrivalId), 'prc_batch_open');
+    const access: Access = { dataLimit: { kind: 'practices', ids: ['prc_batch_open'] } };
+    expect(await t.run((ctx) => getBatch(ctx, out.batchId))).toMatchObject({ status: 'processing', completedAt: null });
+    expect(await as(access, (ctx) => getBatch(ctx, out.batchId))).toMatchObject({ status: 'completed', itemCount: 1 });
+    const listed = (await as(access, (ctx) => listBatches(ctx, { limit: 200 }))).data.find((b) => b.id === out.batchId);
+    expect(listed).toMatchObject({ status: 'completed' });
   });
 });
