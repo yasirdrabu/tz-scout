@@ -36,6 +36,7 @@ const send = (sourceId: string, body: unknown = validArrival()) => asSource(t, s
 const as = <T>(access: Access, fn: (ctx: ModuleContext) => Promise<T>) => t.run((ctx) => fn({ ...ctx, access }));
 const inPractice = (accountId: string, practiceId: string) =>
   t.run((ctx) => ctx.tx.update(accountSummary).set({ practiceIds: [practiceId] }).where(eq(accountSummary.accountId, accountId)));
+const accountOf = async (arrivalId: string) => (await t.run((ctx) => getArrival(ctx, arrivalId)))!.accountId!;
 const ids = (rows: ArrivalView[]) => rows.map((r) => r.id);
 
 describe('batch status (SRC-E2-S3-AC1)', () => {
@@ -200,5 +201,56 @@ describe('account-based data limits (TEN-E3-S1-AC2)', () => {
     const third = await send(bo.agentId);
     await runOutbox(t.tenantId);
     expect(await as(access, (ctx) => getArrival(ctx, third.arrivalId))).toBeNull();
+  });
+});
+
+describe('batches seen only through account visibility', () => {
+  it('shows just the visible items: item count, counts, stages, rejections and items', async () => {
+    const out = await asSource(t, ash.agentId, (ctx) =>
+      submitBatch(
+        ctx,
+        { name: `Partly visible ${++n}`, items: [validArrival(), validArrival(), { account: { domain: 'acme.com', external_ref: 'secret-ref' }, unknown_field: true }] },
+        { channel: 'webhook' },
+      ),
+    );
+    await runOutbox(t.tenantId);
+    const visibleAccount = await accountOf(out.items[0]!.arrivalId);
+    await inPractice(visibleAccount, 'prc_batch_a');
+    const hiddenBatch = await asSource(t, bo.agentId, (ctx) => submitBatch(ctx, { name: `Nothing visible ${++n}`, items: [validArrival()] }, { channel: 'api' }));
+    await runOutbox(t.tenantId);
+
+    for (const access of [
+      { dataLimit: { kind: 'practices', ids: ['prc_batch_a'] } },
+      { userId: 'usr_x', sourceId: 'src_none', dataLimit: { kind: 'any_of', limits: [{ kind: 'practices', ids: ['prc_batch_a'] }] } },
+    ] satisfies Access[]) {
+      const b = await as(access, (ctx) => getBatch(ctx, out.batchId));
+      expect(b).toMatchObject({
+        itemCount: 1,
+        counts: { resolved: 1, rejected: 0, newAccounts: 1, alreadyKnown: 0 },
+        stages: { received: 0, resolving: 0, waiting: 0, resolved: 1, rejected: 0 },
+        rejections: [],
+      });
+      const listed = (await as(access, (ctx) => listBatches(ctx, { limit: 200 }))).data;
+      expect(listed.find((x) => x.id === out.batchId)).toMatchObject({ itemCount: 1, counts: { rejected: 0 } });
+      expect(listed.map((x) => x.id)).not.toContain(hiddenBatch.batchId);
+      const items = await as(access, (ctx) => listBatchItems(ctx, out.batchId));
+      expect(ids(items!.data)).toEqual([out.items[0]!.arrivalId]);
+      expect(await as(access, (ctx) => getBatch(ctx, hiddenBatch.batchId))).toBeNull();
+      expect(await as(access, (ctx) => listBatchItems(ctx, hiddenBatch.batchId))).toBeNull();
+      expect(await as(access, (ctx) => getArrival(ctx, out.items[2]!.arrivalId))).toBeNull();
+    }
+  });
+
+  it('own_accounts sees a batch of its own accounts in full, and none of another source', async () => {
+    const mine = await asSource(t, ash.agentId, (ctx) => submitBatch(ctx, { name: `Mine ${++n}`, items: [validArrival(), validArrival()] }, { channel: 'api' }));
+    const theirs = await asSource(t, bo.agentId, (ctx) => submitBatch(ctx, { name: `Theirs ${++n}`, items: [validArrival()] }, { channel: 'api' }));
+    await runOutbox(t.tenantId);
+    const access: Access = { userId: 'usr_owner', sourceId: ash.personId, dataLimit: { kind: 'own_accounts' } };
+    expect(await as(access, (ctx) => getBatch(ctx, mine.batchId))).toMatchObject({ itemCount: 2, counts: { resolved: 2 } });
+    expect(await as(access, (ctx) => getBatch(ctx, theirs.batchId))).toBeNull();
+    const listed = (await as(access, (ctx) => listBatches(ctx, { limit: 200 }))).data.map((b) => b.id);
+    expect(listed).toContain(mine.batchId);
+    expect(listed).not.toContain(theirs.batchId);
+    expect(await as(access, (ctx) => listBatchItems(ctx, theirs.batchId))).toBeNull();
   });
 });

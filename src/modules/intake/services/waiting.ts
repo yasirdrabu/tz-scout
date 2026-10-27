@@ -1,4 +1,5 @@
 import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
+import { filterVisibleAccountIds } from '@/modules/accounts';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -8,7 +9,7 @@ import { arrival } from '../db/schema';
 import { normaliseDomain } from '../domain/normalise';
 import type { ResolutionInput, WaitingOn } from '../domain/normalise-arrival';
 import { rejectArrival } from './resolve';
-import { toView, type ArrivalView } from './status';
+import { toViews, type ArrivalView } from './status';
 import { findArrival, pageArrivals } from './visibility';
 
 type ArrivalRow = typeof arrival.$inferSelect;
@@ -21,6 +22,7 @@ const EXPIRY_DETAIL: Record<WaitingOn, string> = {
 };
 
 const waitingNow = and(eq(arrival.status, 'resolving'), isNotNull(arrival.waitingOn));
+const staleNow = and(waitingNow, lt(arrival.waitingSince, sql`now() - make_interval(days => ${WAITING_DAYS})`));
 const invalid = (title: string) => new ScoutError({ slug: 'validation', status: 400, title });
 
 /** Arrivals waiting for a person, newest first, optionally for one reason. */
@@ -33,7 +35,7 @@ export async function listWaiting(
     cursor: f.cursor,
     limit: f.limit,
   });
-  return { data: page.data.map(toView), nextCursor: page.nextCursor };
+  return { data: await toViews(ctx, page.data), nextCursor: page.nextCursor };
 }
 
 /**
@@ -45,17 +47,22 @@ async function resume(
   arrivalId: string,
   action: string,
   reasons: WaitingOn[],
-  input: (row: ArrivalRow) => ResolutionInput,
+  input: (row: ArrivalRow) => ResolutionInput | Promise<ResolutionInput>,
 ): Promise<void> {
-  const row = await findArrival(ctx, arrivalId);
-  if (!row) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That arrival was not found.' });
-  if (!row.waitingOn || row.status !== 'resolving' || !reasons.includes(row.waitingOn as WaitingOn)) {
+  if (!(await findArrival(ctx, arrivalId))) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That arrival was not found.' });
+  // Locked, so two answers add up and expiry can't reject an arrival that was just answered.
+  const [row] = await ctx.tx
+    .select()
+    .from(arrival)
+    .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.id, arrivalId)))
+    .for('update');
+  if (!row?.waitingOn || row.status !== 'resolving' || !reasons.includes(row.waitingOn as WaitingOn)) {
     throw new ScoutError({ slug: 'conflict', status: 409, title: 'That arrival is not waiting for this.' });
   }
-  const answer = input(row);
+  const answer = await input(row);
   await ctx.tx
     .update(arrival)
-    .set({ resolutionInput: { ...(row.resolutionInput as ResolutionInput | null), ...answer } })
+    .set({ resolutionInput: { ...(row.resolutionInput as ResolutionInput | null), ...answer }, waitingSince: new Date() })
     .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.id, arrivalId)));
   await audit(ctx, { action, subject: { type: 'arrival', id: arrivalId }, before: { waitingOn: row.waitingOn }, after: answer });
   await enqueueJob(ctx, resolveJob, { arrivalId });
@@ -96,10 +103,13 @@ export function chooseDuplicate(
   arrivalId: string,
   choice: { kind: 'same_as'; accountId: string } | { kind: 'new_company' },
 ): Promise<void> {
-  return resume(ctx, arrivalId, 'intake.arrival.choose_duplicate', ['possible_duplicate'], (row) => {
-    const candidates = (row.duplicateCandidates as { accountId: string }[] | null) ?? [];
-    if (choice.kind === 'same_as' && !candidates.some((c) => c.accountId === choice.accountId)) {
-      throw invalid('Choose one of the accounts Scout found.');
+  return resume(ctx, arrivalId, 'intake.arrival.choose_duplicate', ['possible_duplicate'], async (row) => {
+    if (choice.kind === 'same_as') {
+      const candidates = (row.duplicateCandidates as { accountId: string }[] | null) ?? [];
+      if (!candidates.some((c) => c.accountId === choice.accountId)) throw invalid('Choose one of the accounts Scout found.');
+      if ((await filterVisibleAccountIds(ctx, [choice.accountId])).length === 0) {
+        throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
+      }
     }
     return { duplicate: choice };
   });
@@ -126,14 +136,19 @@ export async function expireWaiting(ctx: ModuleContext): Promise<number> {
   const stale = await ctx.tx
     .select({ id: arrival.id, waitingOn: arrival.waitingOn })
     .from(arrival)
-    .where(
-      and(
-        eq(arrival.tenantId, ctx.tenantId),
-        waitingNow,
-        lt(arrival.waitingSince, sql`now() - make_interval(days => ${WAITING_DAYS})`),
-      ),
-    )
+    .where(and(eq(arrival.tenantId, ctx.tenantId), staleNow))
     .orderBy(arrival.waitingSince);
-  for (const s of stale) await rejectArrival(ctx, s.id, 'invalid', EXPIRY_DETAIL[s.waitingOn as WaitingOn]);
-  return stale.length;
+  let expired = 0;
+  for (const s of stale) {
+    // Locked and re-checked: an answer that arrived since the list was read refreshed `waiting_since`.
+    const [still] = await ctx.tx
+      .select({ waitingOn: arrival.waitingOn })
+      .from(arrival)
+      .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.id, s.id), staleNow))
+      .for('update');
+    if (!still) continue;
+    await rejectArrival(ctx, s.id, 'invalid', EXPIRY_DETAIL[still.waitingOn as WaitingOn]);
+    expired++;
+  }
+  return expired;
 }

@@ -74,7 +74,8 @@ function forAccounts(row: ArrivalRow, n: Normalised): ArrivalForAccounts {
 // ---- Row updates ----
 
 async function load(ctx: ModuleContext, id: string): Promise<ArrivalRow | undefined> {
-  const [row] = await ctx.tx.select().from(arrival).where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.id, id)));
+  // Locked: expiry, a person's answer and a resolve job can't each write an outcome.
+  const [row] = await ctx.tx.select().from(arrival).where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.id, id))).for('update');
   return row;
 }
 
