@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ScoringAccount, ScoringOffer, ScoringSignal } from '@/modules/scoring/contracts/types';
 import { matchTotal } from '@/modules/scoring/domain/combine';
-import { buildExplanation, summarySentence, wouldRaise, type Explanation } from '@/modules/scoring/domain/explain';
+import { buildExplanation, NO_OFFER_TEXT, summarySentence, wouldRaise, type Explanation } from '@/modules/scoring/domain/explain';
 import { fit } from '@/modules/scoring/domain/fit';
 import { intent } from '@/modules/scoring/domain/intent';
 import { priority } from '@/modules/scoring/domain/priority';
@@ -215,5 +215,11 @@ describe('wouldRaise', () => {
     const sigs = [signal({ id: 's', type: 'intent', title: 'x', value: 0.8 })];
     const { e } = explain(acc, off, sigs);
     expect(wouldRaise(e, off, acc)).toEqual(['Revenue on file', 'A signal for Big rule', 'A signal for Medium rule', 'A technical buyer on file']);
+  });
+
+  it('says there is no offer to match against when there is no best offer', () => {
+    const { off, acc, sigs } = exampleA();
+    const { e } = explain(acc, off, sigs);
+    expect(summarySentence({ ...e, bestOffer: null })).toBe(NO_OFFER_TEXT);
   });
 });

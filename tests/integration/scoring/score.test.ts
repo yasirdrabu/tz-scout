@@ -4,7 +4,7 @@ import '@/entry/compose';
 import { upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { account } from '@/modules/accounts/db/schema';
 import { getArrival, intakeSourceInfo, registerSource, submitArrival } from '@/modules/intake';
-import { approveOffer, archiveOffer, createOffer, createPractice, replaceSignalRules } from '@/modules/offers';
+import { approveOffer, archiveOffer, createOffer, createPractice, listApprovedOffers, replaceSignalRules } from '@/modules/offers';
 import { getMatches, getScore, getScoreHistory, scoreAccount } from '@/modules/scoring';
 import { accountScore, offerMatch, scoreChange } from '@/modules/scoring/db/schema';
 import type { ModuleContext } from '@/platform/context';
@@ -158,14 +158,40 @@ describe('scoreAccount results', () => {
     await approved(t, practice.id, 'One');
     await approved(t, practice.id, 'Two');
     const a = await seed(t);
-    await t.run((ctx) => ctx.tx.update(account).set({ excludedReasonKey: 'competitor' }).where(eq(account.id, a.accountId)));
+    await t.run((ctx) => ctx.tx.update(account).set({ excludedReasonKey: 'existing_customer' }).where(eq(account.id, a.accountId)));
     const r = await score(t, a.accountId);
     expect(r.score).toMatchObject({ tier: 'not_fit', priority: 0 });
     const rows = await t.run((ctx) => getMatches(ctx, a.accountId));
     expect(rows).toHaveLength(2);
-    const label = rows[0]!.disqualifiedReason;
-    expect(label).toEqual(expect.any(String));
-    for (const m of rows) expect(m).toMatchObject({ disqualifiedReason: label, fit: 0, tier: 'not_fit' });
+    for (const m of rows) expect(m).toMatchObject({ disqualifiedReason: 'Already a customer', fit: 0, tier: 'not_fit' });
+  });
+
+  it('an excluded account with the exclusion overridden scores normally', async () => {
+    const { t, practice } = await world();
+    await approved(t, practice.id, 'Lead');
+    const a = await seed(t);
+    await t.run((ctx) =>
+      ctx.tx.update(account).set({ excludedReasonKey: 'existing_customer', excludedOverride: true }).where(eq(account.id, a.accountId)),
+    );
+    const r = await score(t, a.accountId);
+    expect(r.score.priority).toBeGreaterThan(0);
+    const [m] = await t.run((ctx) => getMatches(ctx, a.accountId));
+    expect(m!.disqualifiedReason).toBeNull();
+  });
+
+  it('SCO-E5-S1: the same inputs the next day rescore, bump the version and publish nothing new', async () => {
+    const { t, practice } = await world();
+    await approved(t, practice.id, 'Lead');
+    const a = await seed(t);
+    const first = await score(t, a.accountId);
+    const nextDay = new Date(NOW.getTime() + 86_400_000);
+    const second = await t.run((ctx) => scoreAccount(ctx, a.accountId, 'manual_rescore', undefined, { now: nextDay }));
+    expect(second.changed).toBe(true);
+    expect(second.score.version).toBe(2);
+    expect(second.score.priority).toBe(first.score.priority);
+    expect(second.score.computedAt.getTime()).toBe(nextDay.getTime());
+    expect(await changes(t, a.accountId)).toHaveLength(1);
+    expect(await scoredEvents(t, a.accountId)).toHaveLength(1);
   });
 
   it('a merged id scores the survivor', async () => {
@@ -183,12 +209,40 @@ describe('scoreAccount results', () => {
     expect(await t.run((ctx) => ctx.tx.select().from(accountScore).where(eq(accountScore.accountId, merged.accountId)))).toHaveLength(0);
   });
 
-  it('uses preloaded offers when given', async () => {
+  it('uses preloaded offers, still limited to the account practices', async () => {
+    const { t, practice } = await world();
+    const other = await t.run((ctx) => createPractice(ctx, { name: 'Other Practice', slug: slug('o') }));
+    const mine = await approved(t, practice.id, 'Mine');
+    const elsewhere = await approved(t, other.id, 'Elsewhere');
+    const a = await seed(t);
+    await t.run((ctx) => ctx.tx.update(account).set({ practiceIds: [practice.id] }).where(eq(account.id, a.accountId)));
+    const offers = await t.run((ctx) => listApprovedOffers(ctx));
+    expect(offers.map((o) => o.id).sort()).toEqual([mine.id, elsewhere.id].sort());
+    const r = await t.run((ctx) => scoreAccount(ctx, a.accountId, 'manual_rescore', undefined, { now: NOW, offers }));
+    expect(r.score.bestOfferId).toBe(mine.id);
+    expect((await matchRows(t, a.accountId)).map((m) => m.offerId)).toEqual([mine.id]);
+    const none = await t.run((ctx) => scoreAccount(ctx, a.accountId, 'manual_rescore', undefined, { now: NOW, offers: [] }));
+    expect(none.score.bestOfferId).toBeNull();
+  });
+
+  it('a merge that commits after the id is resolved scores the survivor, not the merged-away id', async () => {
     const { t, practice } = await world();
     await approved(t, practice.id, 'Lead');
-    const a = await seed(t);
-    const r = await t.run((ctx) => scoreAccount(ctx, a.accountId, 'manual_rescore', undefined, { now: NOW, offers: [] }));
-    expect(r.score.bestOfferId).toBeNull();
+    const survivor = await seed(t);
+    const merged = await seed(t);
+    // Hold the lock on the old id so scoreAccount resolves it, waits, and only then sees the merge commit.
+    const holder = t.run(async (ctx) => {
+      await ctx.tx.execute(sql`select pg_advisory_xact_lock(hashtext(${ctx.tenantId} || ':scoring:' || ${merged.accountId}))`);
+      await sleep(400);
+      await ctx.tx.execute(
+        sql`insert into accounts.account_alias (tenant_id, account_id, kind, value) values (${ctx.tenantId}, ${survivor.accountId}, 'merged_id', ${merged.accountId})`,
+      );
+    });
+    await sleep(150);
+    const r = await score(t, merged.accountId);
+    await holder;
+    expect(r.score.accountId).toBe(survivor.accountId);
+    expect(await t.run((ctx) => ctx.tx.select().from(accountScore).where(eq(accountScore.accountId, merged.accountId)))).toHaveLength(0);
   });
 });
 

@@ -99,11 +99,18 @@ export async function scoreAccount(
   const now = opts.now ?? new Date();
   const resolved = await resolveAccountId(ctx, accountId);
   if (!resolved) throw notFound();
-  const id = resolved.id;
+  let id = resolved.id;
   await lockScoring(ctx, id);
 
-  const view = await getAccountForScoring(ctx, id);
+  let view = await getAccountForScoring(ctx, id);
   if (!view) throw notFound();
+  if (view.accountId !== id) {
+    // A merge committed between resolving and locking: lock and read the survivor instead, once.
+    id = view.accountId;
+    await lockScoring(ctx, id);
+    view = await getAccountForScoring(ctx, id);
+    if (!view || view.accountId !== id) throw notFound();
+  }
   const profile = opts.profile ?? (await getProfile(ctx));
   const loaded = opts.offers ?? (await listApprovedOffers(ctx, { practiceIds: view.practiceIds }));
   const offers = loaded.filter((o) => view.practiceIds.length === 0 || view.practiceIds.includes(o.practiceId));

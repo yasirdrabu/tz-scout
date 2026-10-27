@@ -164,6 +164,7 @@ export function wouldRaise(explanation: Explanation, offer: ScoringOffer, accoun
 }
 
 export function summarySentence(explanation: Explanation): string {
+  if (!explanation.bestOffer) return NO_OFFER_TEXT;
   const group = (g: ExplanationLine['group']) => explanation.lines.filter((l) => l.group === g);
   const capped = explanation.lines.find((l) => l.label === 'Hard miss' || l.label === 'Low fit');
   const fitPoints = capped?.points ?? group('fit').reduce((s, l) => s + (l.points ?? 0), 0);
@@ -173,6 +174,5 @@ export function summarySentence(explanation: Explanation): string {
   const warm = group('adjust').find((l) => l.label.startsWith('Warm intro'));
   if (warm) reasons.push(warm.label === 'Warm intro' ? 'a warm intro' : `a warm intro from ${warm.label.slice('Warm intro from '.length)}`);
   const list = reasons.length > 1 ? `${reasons.slice(0, -1).join(', ')}, and ${reasons[reasons.length - 1]}` : reasons[0];
-  if (!explanation.bestOffer) return NO_OFFER_TEXT;
   return `${TIER_TITLE[explanation.tier]} for ${explanation.bestOffer.name} (priority ${explanation.priority}): ${list}.`;
 }
