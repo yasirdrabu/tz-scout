@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedTarget, synonymMapping } from '@/modules/intake/import/synonyms';
+import { cleanMapping, isAllowedTarget, synonymMapping } from '@/modules/intake/import/synonyms';
 
 const targetOf = (headers: string[], header: string) =>
   synonymMapping({ headers, sampleRows: [] }).columns.find((c) => c.header === header)?.target;
@@ -31,5 +31,23 @@ describe('synonymMapping', () => {
       expect(isAllowedTarget(t)).toBe(true);
     }
     for (const t of ['account.password', 'people.email', 'research.', 'tenant_id', '']) expect(isAllowedTarget(t)).toBe(false);
+  });
+});
+
+describe('cleanMapping', () => {
+  const col = (header: string, target: string | null, confidence: number) => ({ header, target, confidence, reason: 'r' });
+
+  it('keeps only the highest confidence column per target, first header on a tie', () => {
+    const out = cleanMapping({
+      columns: [col('Company', 'account.name', 0.8), col('Account', 'account.name', 0.95), col('A', 'account.city', 0.7), col('B', 'account.city', 0.7)],
+    });
+    expect(out.columns.map((c) => c.target)).toEqual([null, 'account.name', 'account.city', null]);
+  });
+
+  it('keeps repeatable signal targets and later people groups', () => {
+    const out = cleanMapping({
+      columns: [col('A', 'signals[].title', 0.9), col('B', 'signals[].title', 0.9), col('C', 'people[1].email', 0.9)],
+    });
+    expect(out.columns.map((c) => c.target)).toEqual(['signals[].title', 'signals[].title', 'people[1].email']);
   });
 });

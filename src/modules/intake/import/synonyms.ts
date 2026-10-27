@@ -94,11 +94,23 @@ export function synonymMapping(input: MappingInput): MappingOutput {
   };
 }
 
-/** Nulls any target outside the allowed list, and leaves columns under the confidence floor unmapped. */
+/**
+ * Nulls any target outside the allowed list, and leaves columns under the confidence floor unmapped.
+ * A target takes one column: the highest confidence wins and a tie goes to the first header. The one
+ * exception is `signals[].*`, which is repeatable (each column can make its own signal), so it is not deduplicated.
+ * `people[n]` and `account.custom_fields.<key>` are single-valued per path.
+ */
 export function cleanMapping(out: MappingOutput): MappingOutput {
+  const ok = out.columns.map((c) => c.target !== null && isAllowedTarget(c.target) && c.confidence >= MIN_CONFIDENCE);
+  const winner = new Map<string, number>();
+  out.columns.forEach((c, i) => {
+    if (!ok[i] || c.target!.startsWith('signals[]')) return;
+    const w = winner.get(c.target!);
+    if (w === undefined || c.confidence > out.columns[w]!.confidence) winner.set(c.target!, i);
+  });
   return {
-    columns: out.columns.map((c) =>
-      c.target !== null && isAllowedTarget(c.target) && c.confidence >= MIN_CONFIDENCE ? c : { ...c, target: null },
+    columns: out.columns.map((c, i) =>
+      ok[i] && (c.target!.startsWith('signals[]') || winner.get(c.target!) === i) ? c : { ...c, target: null },
     ),
   };
 }

@@ -1,6 +1,7 @@
 import { defineTask, runTask } from '@/modules/ai-tasks';
 import type { ModuleContext } from '@/platform/context';
-import { ScoutError } from '@/platform/errors';
+import { log } from '@/platform/log';
+import { errorText } from '@/platform/scrub-error';
 import {
   cleanMapping,
   mappingInput,
@@ -42,7 +43,7 @@ export async function suggestMapping(
     const { output, mode } = await runTask(ctx, csvColumnMappingTask, input, { subject: { type: 'import', id: 'mapping' } });
     if (mode === 'live') return { mapping: cleanMapping(output).columns, origin: 'ai' };
   } catch (e) {
-    if (!(e instanceof ScoutError)) throw e;
+    log.warn({ err: errorText(e) }, 'csv_column_mapping: failed, using header synonyms');
   }
   return { mapping: cleanMapping(synonymMapping(input)).columns, origin: 'synonyms' };
 }

@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { defineTask, runTask } from '@/modules/ai-tasks';
 import type { ModuleContext } from '@/platform/context';
-import { ScoutError } from '@/platform/errors';
+import { log } from '@/platform/log';
+import { errorText } from '@/platform/scrub-error';
 
 const input = z.object({ industry: z.string().nullish(), relationship: z.string().nullish() });
 const output = z.object({ industryKey: z.string().nullable(), relationshipKey: z.string().nullable() });
@@ -33,7 +34,7 @@ export async function normaliseWithAi(ctx: ModuleContext, i: NormaliseInput): Pr
     const { output } = await runTask(ctx, arrivalNormaliseTask, i, { subject: { type: 'arrival', id: 'normalise' } });
     return output;
   } catch (e) {
-    if (e instanceof ScoutError) return NONE;
-    throw e;
+    log.warn({ err: errorText(e) }, 'arrival_normalise: failed, using no keys');
+    return NONE;
   }
 }
