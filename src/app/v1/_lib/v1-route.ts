@@ -97,7 +97,7 @@ export function assertSameSite(req: Request): void {
 
 export type V1Options = {
   permission?: Permission;
-  /** A POST with an `Idempotency-Key` header runs once per principal and key; repeats get the stored response. */
+  /** A POST with an `Idempotency-Key` header runs once per principal and key; repeats get the stored response. On for every POST unless set to false. */
   idempotent?: boolean;
   /** Refuse API keys and OAuth grants with 403. A string replaces the default copy. */
   peopleOnly?: boolean | string;
@@ -148,7 +148,7 @@ export function v1Route(opts: V1Options, handler: V1Handler): (req: Request) => 
         });
       }
       let key: string | undefined;
-      if (opts.idempotent && req.method === 'POST') {
+      if ((opts.idempotent ?? true) && req.method === 'POST') {
         key = req.headers.get(IDEMPOTENCY_KEY)?.trim() || undefined;
         if (key && key.length > MAX_KEY_LENGTH) {
           throw new ScoutError({ slug: 'validation', status: 400, title: 'The Idempotency-Key header is too long.' });

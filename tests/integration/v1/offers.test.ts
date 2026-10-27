@@ -28,11 +28,18 @@ beforeAll(async () => {
 });
 beforeEach(() => setPrincipalCacheTtl(0));
 
-const call = (h: (r: Request) => Promise<Response>, secret: string, path: string, method = 'GET', body?: unknown) =>
+const call = (
+  h: (r: Request) => Promise<Response>,
+  secret: string,
+  path: string,
+  method = 'GET',
+  body?: unknown,
+  extra: Record<string, string> = {},
+) =>
   h(
     new Request(`http://x/v1/${path}`, {
       method,
-      headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json', ...extra },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }),
   );
@@ -158,6 +165,36 @@ describe('case studies on /v1', () => {
 });
 
 describe('practices on /v1', () => {
+  it('lists as { data, next_cursor } and pages by limit and cursor', async () => {
+    for (const n of ['P1', 'P2', 'P3']) await t.run((ctx) => createPractice(ctx, { name: n }));
+    const one = await (await call(listPracticesRoute, readKey, 'practices?limit=2')).json();
+    expect(one.data).toHaveLength(2);
+    expect(typeof one.next_cursor).toBe('string');
+    const two = await (await call(listPracticesRoute, readKey, `practices?limit=2&cursor=${one.next_cursor}`)).json();
+    expect(ids(two.data)).not.toContain(one.data[0].id);
+    const all = await (await call(listPracticesRoute, readKey, 'practices')).json();
+    expect(all.next_cursor).toBeNull();
+    expect((await call(listPracticesRoute, readKey, 'practices?limit=0')).status).toBe(400);
+    for (const [h, path] of [[listOffersRoute, 'offers'], [listCasesRoute, 'case-studies']] as const) {
+      expect(await (await call(h, readKey, path)).json()).toMatchObject({ next_cursor: null });
+    }
+  });
+
+  it('a POST without the idempotent flag replays on a repeated Idempotency-Key', async () => {
+    const send = () =>
+      call(createPracticeRoute, manageKey, 'practices', 'POST', { name: 'Once' }, { 'idempotency-key': 'k-once' });
+    const first = await send();
+    const second = await send();
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(second.headers.get('idempotent-replayed')).toBe('true');
+    expect((await second.json()).id).toBe((await first.json()).id);
+  });
+
+  it('a malformed percent sequence in an id is a 404', async () => {
+    expect((await call(patchPractice, manageKey, 'practices/%E0%A4%A', 'PATCH', {})).status).toBe(404);
+  });
+
   it('lists, creates, edits and archives', async () => {
     const created = await call(createPracticeRoute, manageKey, 'practices', 'POST', { name: 'Second', keywords: ['two'] });
     expect(created.status).toBe(201);

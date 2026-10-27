@@ -37,3 +37,13 @@ export function page<T>(rows: T[], limit: number, cursorOf: (row: T) => Record<s
   const last = items[items.length - 1];
   return { items, nextCursor: rows.length > limit && last !== undefined ? encodeCursor(cursorOf(last)) : null };
 }
+
+/** `{ data, next_cursor }` for a small list already in memory. The cursor is the offset of the next row. */
+export function pageOfList<T>(req: Request, rows: T[]) {
+  const url = new URL(req.url);
+  const limit = pageLimit(url);
+  const raw = decodeCursor(url.searchParams.get('cursor'))?.offset;
+  const offset = typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : 0;
+  const { items, nextCursor } = page(rows.slice(offset, offset + limit + 1), limit, () => ({ offset: offset + limit }));
+  return { data: items, nextCursor };
+}
