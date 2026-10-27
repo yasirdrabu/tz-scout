@@ -8,3 +8,4 @@ import '@/modules/integrations/contracts/events';
 import '@/modules/integrations';
 import '@/modules/ai-tasks/contracts/events';
 import '@/modules/ai-tasks';
+import '@/modules/offers/contracts/events';

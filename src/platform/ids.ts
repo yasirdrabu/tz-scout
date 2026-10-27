@@ -18,7 +18,10 @@ export type IdPrefix =
   | 'sch'
   | 'ses'
   | 'oac'
-  | 'vrf';
+  | 'vrf'
+  | 'prc'
+  | 'off'
+  | 'cs';
 
 const ulid = monotonicFactory();
 

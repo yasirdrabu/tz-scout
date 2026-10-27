@@ -278,6 +278,21 @@ export async function userForCrmOwner(ctx: ModuleContext, crm: string, ownerId: 
   return row?.userId ?? null;
 }
 
+/** The user's role in this tenant (invited or active membership), or null. */
+export async function memberRole(ctx: ModuleContext, userId: string): Promise<Role | null> {
+  const [row] = await ctx.tx
+    .select({ role: membership.role })
+    .from(membership)
+    .where(
+      and(
+        eq(membership.tenantId, ctx.tenantId),
+        eq(membership.userId, userId),
+        inArray(membership.status, ['invited', 'active']),
+      ),
+    );
+  return (row?.role as Role | undefined) ?? null;
+}
+
 /**
  * People in the tenant (invited and active). `roles` narrows by role; `permission` keeps only people
  * whose effective permissions (role defaults plus extras) include it.

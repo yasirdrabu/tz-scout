@@ -4,6 +4,7 @@ export {
   addMember,
   changeMember,
   crmOwnerId,
+  memberRole,
   members,
   removeMember,
   setCrmOwnerIds,
