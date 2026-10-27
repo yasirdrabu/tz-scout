@@ -250,3 +250,54 @@ describe('ACC-E1-S2-AC3 convert a shell', () => {
     expect((await eventsOf(out.accountId, 'accounts.account.updated')).length).toBeGreaterThan(0);
   });
 });
+
+describe('primary contact', () => {
+  it('an arrival with two people gives exactly one primary, and a later arrival does not displace a pinned one', async () => {
+    const d = domain();
+    const out = await seed({
+      account: { name: 'Primary Co', domain: d },
+      people: [
+        { firstName: 'Ana', email: `ana@${d}`, title: 'Analyst' },
+        { firstName: 'Ben', email: `ben@${d}`, title: 'Chief Executive Officer', seniority: 'chief' },
+      ],
+    });
+    const [ana, ben] = out.personIds as [string, string];
+    let people = await t.run((ctx) => listPeople(ctx, out.accountId));
+    expect(people.filter((p) => p.isPrimary).map((p) => p.id)).toEqual([ben]);
+
+    await asPerson((ctx) => pinPrimary(ctx, out.accountId, ana));
+    await t.run((ctx) =>
+      upsertFromArrival(ctx, arrival({ people: [{ firstName: 'Cy', email: `cy@${d}`, title: 'President', seniority: 'owner' }] }), out.accountId),
+    );
+    people = await t.run((ctx) => listPeople(ctx, out.accountId));
+    expect(people.filter((p) => p.isPrimary).map((p) => p.id)).toEqual([ana]);
+    const [row] = await t.run((ctx) => ctx.tx.select().from(person).where(eq(person.id, ana)));
+    expect(row).toMatchObject({ primaryPinnedBy: 'usr_editor' });
+    expect(row!.primaryPinnedAt).toBeInstanceOf(Date);
+    const pinFacts = await t.run((ctx) => ctx.tx.select().from(fact).where(and(eq(fact.accountId, out.accountId), eq(fact.key, 'primary_person_id'))));
+    expect(pinFacts).toEqual([]);
+
+    // Pinning another person clears the first pin; null clears all.
+    await asPerson((ctx) => pinPrimary(ctx, out.accountId, ben));
+    expect((await t.run((ctx) => ctx.tx.select().from(person).where(eq(person.accountId, out.accountId)))).filter((p) => p.primaryPinnedAt)).toHaveLength(1);
+    await asPerson((ctx) => pinPrimary(ctx, out.accountId, null));
+    expect((await t.run((ctx) => ctx.tx.select().from(person).where(eq(person.accountId, out.accountId)))).filter((p) => p.primaryPinnedAt)).toHaveLength(0);
+  });
+});
+
+describe('editPerson guards', () => {
+  it('refuses an archived person and maps a duplicate email to 409', async () => {
+    const d = domain();
+    const out = await seed({
+      account: { name: 'Guard Co', domain: d },
+      people: [{ firstName: 'Ana', email: `ana@${d}` }, { firstName: 'Ben', email: `ben@${d}` }, { firstName: 'Cy' }],
+    });
+    const [, ben, cy] = out.personIds as [string, string, string];
+    await expect(asPerson((ctx) => editPerson(ctx, ben, { email: `ANA@${d}` }))).rejects.toMatchObject({
+      status: 409,
+      message: 'That email is already on another person at this account.',
+    });
+    await t.run((ctx) => ctx.tx.update(person).set({ archivedAt: new Date() }).where(eq(person.id, cy)));
+    await expect(asPerson((ctx) => editPerson(ctx, cy, { title: 'CTO' }))).rejects.toMatchObject({ status: 404 });
+  });
+});

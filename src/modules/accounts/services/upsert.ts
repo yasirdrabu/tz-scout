@@ -12,6 +12,7 @@ import { applyExclusion, type Exclusion } from './exclusion';
 import { ACCOUNT_COLUMNS, recordFacts, reproject, type FactInput } from './facts';
 import { lockAccount } from './lock';
 import { matchOrAddPerson, type PersonResult } from './people';
+import { repickPrimary } from './primary';
 import { setPractices } from './practices';
 import { storeSignal, type StoredSignal } from './signals';
 import { writeSummary } from './summary';
@@ -216,6 +217,7 @@ export async function upsertFromArrival(ctx: ModuleContext, a: ArrivalForAccount
     people.push(r);
     factIds.push(...r.factIds);
   }
+  if (people.length) await repickPrimary(ctx, id);
   // 5. Signals.
   const signals: StoredSignal[] = [];
   for (const s of a.signals) signals.push(await storeSignal(ctx, id, s, chain, a.arrivalId, a.receivedAt));

@@ -108,6 +108,8 @@ export const person = accounts.table(
     mobilePhone: text('mobile_phone'),
     linkedinUrl: text('linkedin_url'),
     isPrimary: boolean('is_primary').notNull().default(false),
+    primaryPinnedAt: at('primary_pinned_at'), // set when a person pins this contact as primary
+    primaryPinnedBy: text('primary_pinned_by'),
     decisionNote: text('decision_note'),
     archivedAt: at('archived_at'),
     createdAt: now('created_at'),

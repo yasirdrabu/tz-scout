@@ -1,22 +1,18 @@
-import { and, eq, inArray, isNull, notInArray } from 'drizzle-orm';
+import { and, eq, isNull, notInArray } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { accountExclusionChanged, accountUpdated, personUpdated } from '../contracts/events';
 import type { ArrivalAccountFields, ArrivalPerson, SourceChain } from '../contracts/types';
-import { account, accountAlias, fact, person, personRole, signal } from '../db/schema';
+import { account, accountAlias, person, personRole, signal } from '../db/schema';
 import { matchName } from '../domain/names';
-import { pickPrimary } from '../domain/primary';
 import { applyExclusion } from './exclusion';
 import { ACCOUNT_COLUMNS, PERSON_COLUMNS, recordFacts, reproject, type FactInput } from './facts';
 import { lockAccount } from './lock';
 import { resolveAccountId } from './match';
+import { repickPrimary } from './primary';
 import { writeSummary } from './summary';
-
-/** Fact key of a pinned primary contact; its value is the person id. */
-const PRIMARY_KEY = 'primary_person_id';
-const LIVE = ['current', 'candidate'];
 
 const subjectOf = (id: string) => ({ type: 'account', id });
 const notFound = (what: 'account' | 'person' | 'signal') => new ScoutError({ slug: 'not-found', status: 404, title: `That ${what} was not found.` });
@@ -73,13 +69,33 @@ export type PersonPatch = Pick<
   'firstName' | 'lastName' | 'title' | 'seniority' | 'email' | 'emailStatus' | 'phone' | 'mobilePhone' | 'linkedinUrl' | 'decisionNote' | 'roleKeys'
 >;
 
+/** SQLSTATE 23505 on the named index, whether the driver error is wrapped or not. */
+function isUniqueViolation(e: unknown, constraint: string): boolean {
+  const err = e as { code?: string; constraint_name?: string; cause?: { code?: string; constraint_name?: string } } | null;
+  return [err, err?.cause].some((x) => x?.code === '23505' && x.constraint_name === constraint);
+}
+
+/** Re-picks values; a person's email that another person at the account already has is a 409. */
+async function reprojectPerson(ctx: ModuleContext, accountId: string, keys: string[]): Promise<void> {
+  try {
+    await ctx.tx.transaction((tx) => reproject({ ...ctx, tx }, accountId, keys));
+  } catch (e) {
+    if (isUniqueViolation(e, 'person_tenant_account_email_uq')) {
+      throw new ScoutError({ slug: 'conflict', status: 409, title: 'That email is already on another person at this account.' });
+    }
+    throw e;
+  }
+}
+
 /**
  * Pins each given person field as a fact from the editor. `roleKeys` is the full set of roles the person should have;
  * roles added here are `set_by_person`. Re-picks the primary contact.
  */
 export async function editPerson(ctx: ModuleContext, personId: string, patch: PersonPatch): Promise<void> {
   const { userId, chain } = editor(ctx);
-  const [row] = await ctx.tx.select({ accountId: person.accountId }).from(person).where(and(eq(person.tenantId, ctx.tenantId), eq(person.id, personId)));
+  const [row] = await ctx.tx.select({ accountId: person.accountId })
+    .from(person)
+    .where(and(eq(person.tenantId, ctx.tenantId), eq(person.id, personId), isNull(person.archivedAt)));
   if (!row) throw notFound('person');
   const accountId = row.accountId;
   await lockAccount(ctx, accountId);
@@ -88,7 +104,7 @@ export async function editPerson(ctx: ModuleContext, personId: string, patch: Pe
   const changedKeys = facts.map((f) => f.key);
   if (facts.length) {
     await recordFacts(ctx, accountId, personId, facts, chain, undefined, userId);
-    await reproject(ctx, accountId, changedKeys);
+    await reprojectPerson(ctx, accountId, changedKeys);
   }
 
   let rolesChanged = false;
@@ -124,46 +140,9 @@ export async function editPerson(ctx: ModuleContext, personId: string, patch: Pe
   );
 }
 
-/**
- * Marks who to approach first: the pinned person if there is one, else the best by seniority and verified email.
- * Target titles come from the best offer, which arrives with R1b, so none are used yet. The caller holds the account lock.
- */
-async function repickPrimary(ctx: ModuleContext, accountId: string): Promise<void> {
-  const people = await ctx.tx
-    .select()
-    .from(person)
-    .where(and(eq(person.tenantId, ctx.tenantId), eq(person.accountId, accountId), isNull(person.archivedAt)));
-  const [pin] = await ctx.tx
-    .select({ value: fact.value })
-    .from(fact)
-    .where(
-      and(
-        eq(fact.tenantId, ctx.tenantId),
-        eq(fact.accountId, accountId),
-        eq(fact.key, PRIMARY_KEY),
-        inArray(fact.status, LIVE),
-        isNull(fact.personId),
-      ),
-    );
-  const pinned = typeof pin?.value === 'string' ? pin.value : null;
-  const primaryId = pickPrimary(
-    people.map((p) => ({ id: p.id, title: p.title, seniority: p.seniority, emailStatus: p.emailStatus, pinnedPrimary: p.id === pinned })),
-    [],
-  );
-  for (const p of people) {
-    const next = p.id === primaryId;
-    if (p.isPrimary !== next) {
-      await ctx.tx
-        .update(person)
-        .set({ isPrimary: next, updatedAt: new Date() })
-        .where(and(eq(person.tenantId, ctx.tenantId), eq(person.id, p.id)));
-    }
-  }
-}
-
 /** Pins a person as the one to approach first, or with `null` removes the pin so the pick is automatic again. */
 export async function pinPrimary(ctx: ModuleContext, accountId: string, personId: string | null): Promise<void> {
-  const { userId, chain } = editor(ctx);
+  const { userId } = editor(ctx);
   const id = await accountIdFor(ctx, accountId);
   await lockAccount(ctx, id);
   if (personId) {
@@ -174,12 +153,14 @@ export async function pinPrimary(ctx: ModuleContext, accountId: string, personId
     if (!row) throw notFound('person');
   }
   await ctx.tx
-    .update(fact)
-    .set({ status: 'archived' })
-    .where(and(eq(fact.tenantId, ctx.tenantId), eq(fact.accountId, id), eq(fact.key, PRIMARY_KEY), inArray(fact.status, LIVE)));
+    .update(person)
+    .set({ primaryPinnedAt: null, primaryPinnedBy: null })
+    .where(and(eq(person.tenantId, ctx.tenantId), eq(person.accountId, id)));
   if (personId) {
-    await recordFacts(ctx, id, null, [{ key: PRIMARY_KEY, value: personId }], chain, undefined, userId);
-    await reproject(ctx, id, [PRIMARY_KEY]);
+    await ctx.tx
+      .update(person)
+      .set({ primaryPinnedAt: new Date(), primaryPinnedBy: userId })
+      .where(and(eq(person.tenantId, ctx.tenantId), eq(person.id, personId)));
   }
   await repickPrimary(ctx, id);
   await publish(ctx, accountUpdated, { accountId: id, changedKeys: ['primary_person'] }, subjectOf(id));
