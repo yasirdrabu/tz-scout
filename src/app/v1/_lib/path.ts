@@ -1,0 +1,17 @@
+import { ScoutError } from '@/platform/errors';
+
+/**
+ * The id segment that follows `after` in the request path, split at ':' into id and action, for
+ * example `/v1/offers/off_01J:approve` gives `{ id: 'off_01J', action: 'approve' }`.
+ * A path without that segment is a 404.
+ */
+export function idAndAction(req: Request, after: string): { id: string; action: string | null } {
+  const parts = new URL(req.url).pathname.split('/').filter(Boolean);
+  const raw = parts[parts.indexOf(after) + 1];
+  if (!raw) throw notFound();
+  const [id, action, ...rest] = decodeURIComponent(raw).split(':');
+  if (!id || rest.length > 0) throw notFound();
+  return { id, action: action ?? null };
+}
+
+export const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'Not found.' });
