@@ -33,6 +33,8 @@ export type IdPrefix =
   | 'imp'
   | 'map'
   | 'wi'
+  | 'om'
+  | 'scc'
   | 'blob';
 
 const ulid = monotonicFactory();
