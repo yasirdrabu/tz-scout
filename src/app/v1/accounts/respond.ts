@@ -1,7 +1,8 @@
-import type { PersonView } from '@/modules/accounts';
+import { getAccount, getSignals, type PersonView } from '@/modules/accounts';
 import { getArrival, type InlineResult, type SubmitResult } from '@/modules/intake';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
+import { notFound } from '../_lib/path';
 import { created, type StatusResult } from '../_lib/v1-route';
 
 /** TEN-E3-S3-AC1: without people:read a person has no email, phone, mobile phone or LinkedIn page. */
@@ -32,3 +33,10 @@ export const objectBody = (raw: unknown): Record<string, unknown> => {
   }
   return raw as Record<string, unknown>;
 };
+
+/** An account with its people (contacts only with people:read) and live signals. A missing or hidden one is a 404. */
+export async function accountOf(ctx: ModuleContext, id: string, canReadPeople: boolean) {
+  const account = await getAccount(ctx, id);
+  if (!account) throw notFound();
+  return { ...account, mergedInto: account.mergedInto ?? null, people: account.people.map((p) => personFor(p, canReadPeople)), signals: await getSignals(ctx, account.id) };
+}

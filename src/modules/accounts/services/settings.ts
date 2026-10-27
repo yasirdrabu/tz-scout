@@ -23,6 +23,12 @@ export async function listExclusionRules(ctx: ModuleContext): Promise<ExclusionR
   return rows.map((r) => ({ key: r.key, label: r.label, kind: r.kind, enabled: r.enabled }));
 }
 
+/** The values on each exclusion list, by kind. */
+export async function listExclusionLists(ctx: ModuleContext): Promise<Record<string, string[]>> {
+  const rows = await ctx.tx.select().from(exclusionList).where(eq(exclusionList.tenantId, ctx.tenantId)).orderBy(exclusionList.value);
+  return Object.fromEntries(EXCLUSION_LIST_KINDS.map((kind) => [kind, rows.filter((r) => r.kind === kind).map((r) => r.value)]));
+}
+
 export async function setExclusionRule(ctx: ModuleContext, key: string, enabled: boolean): Promise<void> {
   requirePerson(ctx);
   const [rule] = await ctx.tx

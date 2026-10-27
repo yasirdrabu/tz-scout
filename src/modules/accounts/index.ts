@@ -41,7 +41,7 @@ export {
 export { exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';
 export { mergeAccounts } from './services/merge';
 export { search, type SearchQuery, type SearchRow, type SearchSort } from './services/search';
-export { listExclusionRules, setExclusionList, setExclusionRule, type ExclusionRuleView } from './services/settings';
+export { listExclusionLists, listExclusionRules, setExclusionList, setExclusionRule, type ExclusionRuleView } from './services/settings';
 export { filterVisibleAccountIds, visibleAccounts } from './services/visibility';
 export { setPractices } from './services/practices';
 export { upsertFromArrival, type UpsertResult } from './services/upsert';

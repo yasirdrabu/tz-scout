@@ -20,6 +20,7 @@ export { importRunJob, resolveJob, waitingExpireJob } from './contracts/jobs';
 export { intakeAccountMerged, intakeTenantDefaults } from './consumers';
 export { importRunHandler, resolveHandler, waitingExpireHandler } from './jobs';
 export { DEFAULT_VENDOR_SOURCES, RELATIONSHIP_DEFAULTS, seedIntakeDefaults } from './defaults';
+export { listRelationshipDefaults, setRelationshipDefault, type RelationshipDefaultView } from './services/settings';
 export { checkArrivalCap, type CapCheck } from './services/caps';
 export {
   SOURCE_KINDS,

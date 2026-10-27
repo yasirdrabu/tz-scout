@@ -10,6 +10,7 @@ import { claimKey, sha256, storeResponse } from '@/platform/idempotency';
 import { newId } from '@/platform/ids';
 import { boundedRequest, JSON_MAX_BYTES } from './intake';
 import { logFor } from '@/platform/log';
+import { idAndAction, notFound } from './path';
 
 const CORRELATION = 'x-correlation-id';
 const IDEMPOTENCY_KEY = 'idempotency-key';
@@ -32,6 +33,8 @@ export type StatusResult = { status: number; body: object; headers?: Record<stri
 
 export const created = (body: object): StatusResult => ({ status: 201, body });
 export const accepted = (body: object): StatusResult => ({ status: 202, body });
+/** 204 with no body, for a DELETE. */
+export const noContent = (): StatusResult => ({ status: 204, body: {} });
 
 export type V1Handler = (
   req: Request,
@@ -104,16 +107,16 @@ export type V1Options = {
   idempotent?: boolean;
   /** Refuse API keys and OAuth grants with 403. A string replaces the default copy. */
   peopleOnly?: boolean | string;
-  /** Refuse anyone who is not a platform admin. `can()` passes admins on every permission, so it cannot say this. */
-  platformAdminOnly?: boolean;
+  /** Refuse anyone who is not a platform admin. `can()` passes admins on every permission, so it cannot say this. A string replaces the default copy. */
+  platformAdminOnly?: boolean | string;
   /** Largest request body, 5 MB unless set. Checked while reading, before hashing or parsing: over it is a 413. */
   maxBytes?: number;
 };
 
 const json = (status: number, body: unknown, correlationId: string, extra: Record<string, string> = {}) =>
-  new Response(JSON.stringify(body), {
+  new Response(status === 204 ? null : JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', [CORRELATION]: correlationId, ...extra },
+    headers: { ...(status === 204 ? {} : { 'content-type': 'application/json' }), [CORRELATION]: correlationId, ...extra },
   });
 
 /**
@@ -142,7 +145,7 @@ export function v1Route(opts: V1Options, handler: V1Handler): (req: Request) => 
           slug: 'forbidden',
           status: 403,
           title: 'Forbidden',
-          detail: 'Only a platform admin can do this.',
+          detail: typeof opts.platformAdminOnly === 'string' ? opts.platformAdminOnly : 'Only a platform admin can do this.',
         });
       }
       if (opts.peopleOnly && principal.kind !== 'user') {
@@ -207,5 +210,24 @@ export function v1Route(opts: V1Options, handler: V1Handler): (req: Request) => 
       if (!(e instanceof ScoutError)) logFor({ correlationId }).error({ err: e }, 'unhandled /v1 error');
       return problem(e, correlationId);
     }
+  };
+}
+
+/**
+ * One route file for the `id:action` paths under `after`: runs the route registered for the action in the path.
+ * Each action is its own v1Route, so each has its own permission. An unknown action is a 404 (after sign-in).
+ */
+export function byAction(after: string, routes: Record<string, (req: Request) => Promise<Response>>): (req: Request) => Promise<Response> {
+  const unknown = v1Route({}, async () => {
+    throw notFound();
+  });
+  return (req) => {
+    let action: string | null = null;
+    try {
+      action = idAndAction(req, after).action;
+    } catch {
+      // A malformed path is handled by the 404 route.
+    }
+    return (action && Object.hasOwn(routes, action) ? routes[action]! : unknown)(req);
   };
 }

@@ -1,20 +1,14 @@
-import { editAccount, getAccount, getSignals } from '@/modules/accounts';
+import { z } from 'zod';
+import { convertShell, editAccount, mergeAccounts, overrideExclusion, pinPrimary } from '@/modules/accounts';
 import { submitArrival } from '@/modules/intake';
 import { can } from '@/modules/tenancy';
-import type { ModuleContext } from '@/platform/context';
 import { parseBody } from '../../_lib/body';
 import { idAndAction, notFound } from '../../_lib/path';
-import { v1Route } from '../../_lib/v1-route';
-import { personFor, arrivalOutcome } from '../respond';
+import { byAction, v1Route } from '../../_lib/v1-route';
+import { accountOf, arrivalOutcome } from '../respond';
 import { patchAccountBody, patchFacts } from '../schemas';
 
 export const dynamic = 'force-dynamic';
-
-async function accountOf(ctx: ModuleContext, id: string, canReadPeople: boolean) {
-  const account = await getAccount(ctx, id);
-  if (!account) throw notFound();
-  return { ...account, mergedInto: account.mergedInto ?? null, people: account.people.map((p) => personFor(p, canReadPeople)), signals: await getSignals(ctx, account.id) };
-}
 
 export const GET = v1Route({ permission: 'accounts:read' }, async (req, principal, ctx) => {
   const { id, action } = idAndAction(req, 'accounts');
@@ -37,4 +31,34 @@ export const PATCH = v1Route({ permission: 'accounts:write' }, async (req, princ
     { channel: 'api', inline: true, canDeclareWarmIntro: can(principal, 'warm_intro:declare') },
   );
   return arrivalOutcome(ctx, r);
+});
+
+const mergeBody = z.strictObject({ merged_id: z.string() });
+const pinBody = z.strictObject({ person_id: z.string().nullable() });
+const overrideBody = z.strictObject({ note: z.string() });
+const shellBody = z.strictObject({ name: z.string(), domain: z.string() });
+
+/** `POST /accounts/{id}:action`. All are people only; the service of each checks the data limit. */
+export const POST = byAction('accounts', {
+  merge: v1Route({ permission: 'accounts:write', peopleOnly: 'Only a person can merge accounts.' }, async (req, principal, ctx) => {
+    const { id } = idAndAction(req, 'accounts');
+    const { mergedId } = await parseBody<{ mergedId: string }>(req, mergeBody);
+    await mergeAccounts(ctx, id, mergedId);
+    return accountOf(ctx, id, can(principal, 'people:read'));
+  }),
+  'pin-primary': v1Route({ permission: 'accounts:write', peopleOnly: true }, async (req, principal, ctx) => {
+    const { id } = idAndAction(req, 'accounts');
+    await pinPrimary(ctx, id, (await parseBody<{ personId: string | null }>(req, pinBody)).personId);
+    return accountOf(ctx, id, can(principal, 'people:read'));
+  }),
+  'override-exclusion': v1Route({ permission: 'accounts:write', peopleOnly: true }, async (req, principal, ctx) => {
+    const { id } = idAndAction(req, 'accounts');
+    await overrideExclusion(ctx, id, (await parseBody<{ note: string }>(req, overrideBody)).note);
+    return accountOf(ctx, id, can(principal, 'people:read'));
+  }),
+  'convert-shell': v1Route({ permission: 'accounts:write', peopleOnly: true }, async (req, principal, ctx) => {
+    const { id } = idAndAction(req, 'accounts');
+    await convertShell(ctx, id, await parseBody<{ name: string; domain: string }>(req, shellBody));
+    return accountOf(ctx, id, can(principal, 'people:read'));
+  }),
 });
