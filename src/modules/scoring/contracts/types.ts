@@ -29,3 +29,84 @@ export const tierThresholdsSchema = z.object({
   goodFit: z.object({ fit: z.number() }),
 });
 export type TierThresholds = z.infer<typeof tierThresholdsSchema>;
+
+/** The tenant's scoring settings as the pure functions read them. */
+export type ScoringProfile = {
+  fitWeight: number;
+  intentWeight: number;
+  fitParts: FitParts;
+  halfLifeDays: number;
+  maxSignalAgeDays: number;
+  tierThresholds: TierThresholds;
+};
+
+export type ScoringPerson = { title: string | null; roleKeys: string[] };
+
+export type ScoringAccount = {
+  domain: string;
+  industry: string | null;
+  industryKey: string | null;
+  employees: number | null;
+  revenueCents: number | null;
+  country: string | null;
+  technologies: string[];
+  headcountGrowth6m: number | null;
+  /** Why this account is ruled out for every offer, when it is and no person has overridden that. */
+  excluded: { label: string } | null;
+  people: ScoringPerson[];
+};
+
+export type ScoringSignalKind = 'research' | 'trigger' | 'pain';
+
+export type ScoringSignal = {
+  id: string;
+  type: string | null;
+  kind: ScoringSignalKind;
+  title: string;
+  detail: string | null;
+  value: number | null;
+  occurredAt: Date | null;
+  recordedAt: Date;
+};
+
+/** One signal rule of an offer. `minValue` is a decimal such as 0.6 for a research score or 0.1 for growth. */
+export type ScoringRule = {
+  id: string;
+  type: string;
+  label: string;
+  weight: number;
+  match: string[];
+  minValue: number | null;
+  why: string | null;
+  enabled: boolean;
+};
+
+export type ScoringOffer = {
+  id: string;
+  industries: string[];
+  excludedCategories: string[];
+  excludedDomains: string[];
+  companySizeMin: number | null;
+  companySizeMax: number | null;
+  revenueMinCents: number | null;
+  revenueMaxCents: number | null;
+  regions: string[];
+  targetTitles: string[];
+  targetBuyingRoles: string[];
+  rules: ScoringRule[];
+};
+
+export type FitPartKey = keyof FitParts;
+export type FitPart = { key: FitPartKey; label: string; points: number; max: number; note: string };
+
+export type RuleHit = {
+  ruleId: string;
+  label: string;
+  type: string;
+  kind: ScoringSignalKind;
+  points: number;
+  max: number;
+  signalIds: string[];
+  matched: string[];
+  why: string | null;
+};
