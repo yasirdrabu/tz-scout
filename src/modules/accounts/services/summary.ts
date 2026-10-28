@@ -8,7 +8,7 @@ import { repickPrimary } from './primary';
 
 /**
  * Brings the account's search row up to date: `practice_ids`, `last_signal_at` and the union of
- * `source_ids`. Scoring, review and CRM columns are written by later plans.
+ * `source_ids`. Scoring columns come from `applyScore`, review columns from `applyReview`; CRM columns are R1c.
  */
 export async function writeSummary(ctx: ModuleContext, accountId: string, opts: { addSourceIds?: string[] } = {}): Promise<void> {
   const [acc] = await ctx.tx
