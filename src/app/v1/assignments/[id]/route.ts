@@ -7,7 +7,7 @@ import { byAction, v1Route } from '../../_lib/v1-route';
 export const dynamic = 'force-dynamic';
 
 const declineBody = z.strictObject({ reason_key: z.string().optional(), note: z.string().nullish() });
-const withdrawBody = z.strictObject({ reassign_to: z.string().optional() });
+const withdrawBody = z.strictObject({ reassign_to: z.string().min(1).optional() });
 
 const assignmentOf = async (req: Request, ctx: Parameters<typeof getAssignment>[0]) => {
   const row = await getAssignment(ctx, idAndAction(req, 'assignments').id);
@@ -17,7 +17,7 @@ const assignmentOf = async (req: Request, ctx: Parameters<typeof getAssignment>[
 
 /** `POST /assignments/{id}:action`. A seller acts on their own assignment (another seller's is a 404); each returns the assignment. */
 export const POST = byAction('assignments', {
-  accept: v1Route({ permission: 'assignments:respond' }, async (req, _principal, ctx) => {
+  accept: v1Route({ permission: 'assignments:respond', peopleOnly: true }, async (req, _principal, ctx) => {
     await accept(ctx, idAndAction(req, 'assignments').id);
     return assignmentOf(req, ctx);
   }),

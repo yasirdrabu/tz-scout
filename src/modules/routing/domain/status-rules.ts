@@ -1,8 +1,11 @@
+/** Only the reason "Other" needs a note. */
+export const reasonNeedsNote = (reasonKey: string): boolean => reasonKey === 'other';
+
 export type StatusDefRules = { isDeclined: boolean; returnsToSource: boolean };
 /** What is missing from an assignment decline: a reason from the assignment list, and a note for Other. */
 export function declineProblems(reason: { key: string } | undefined, note: string | null | undefined): string[] {
   if (!reason) return ['Pick a reason'];
-  return reason.key === 'other' && !note?.trim() ? ['Add a note for Other.'] : [];
+  return reasonNeedsNote(reason.key) && !note?.trim() ? ['Add a note for Other.'] : [];
 }
 
 export type ReasonDef = { key: string; appliesTo: 'review' | 'assignment' | 'both'; archivedAt: Date | null };
@@ -20,7 +23,7 @@ export function statusChangeProblems(
       (r) => r.key === reasonKey && r.archivedAt === null && (r.appliesTo === 'review' || r.appliesTo === 'both'),
     );
     if (!reason) problems.push('Pick a reason');
-    else if (reason.key === 'other' && !note) problems.push('Add a note for Other.');
+    else if (reasonNeedsNote(reason.key) && !note) problems.push('Add a note for Other.');
   }
   if (def.returnsToSource && !note) problems.push('Say what the source should fix');
   return problems;

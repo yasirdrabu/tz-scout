@@ -24,7 +24,7 @@ import { arrivedAccount, setSummary } from '../routing/helpers';
 import { inTenant, seedUser, uniqueSlug } from '../tenancy/helpers';
 import { call, freshTenant, keyFor, personAndAgent, SEND } from './intake-helpers';
 
-type Who = 'owner' | 'leader' | 'leader2' | 'seller' | 'seller2' | 'operator';
+type Who = 'owner' | 'leader' | 'leader2' | 'seller' | 'seller2' | 'operator' | 'limited';
 let tenantId: string;
 let slug: string;
 let owner: Awaited<ReturnType<typeof seedUser>>;
@@ -67,13 +67,15 @@ beforeAll(async () => {
   await adminDb.update(membership).set({ status: 'active' }).where(eq(membership.id, t.ownerMembershipId));
   tenantId = t.tenantId;
   await runOutbox(tenantId);
-  const [leader, leader2, seller, seller2, operator] = [await person('leader'), await person('leader'), await person('seller'), await person('seller'), await person('operator')];
-  cookies = { owner: await signIn(owner.id), leader: leader.cookie, leader2: leader2.cookie, seller: seller.cookie, seller2: seller2.cookie, operator: operator.cookie };
-  // The operator holds review:act (a grantable extra) but not assign:act.
-  await adminDb.update(membership).set({ extraPermissions: ['review:act'] }).where(and(eq(membership.tenantId, tenantId), eq(membership.userId, operator.id)));
-  ids = { owner: owner.id, leader: leader.id, leader2: leader2.id, seller: seller.id, seller2: seller2.id, operator: operator.id };
   ash = await personAndAgent(tenant(), 'Ash');
   bo = await personAndAgent(tenant(), 'Bo');
+  const [leader, leader2, seller, seller2, operator, limited] = [await person('leader'), await person('leader'), await person('seller'), await person('seller'), await person('operator'), await person('leader')];
+  cookies = { owner: await signIn(owner.id), leader: leader.cookie, leader2: leader2.cookie, seller: seller.cookie, seller2: seller2.cookie, operator: operator.cookie, limited: limited.cookie };
+  // A leader who sees only Bo's source: Ash's accounts exist but are hidden from them.
+  await adminDb.update(membership).set({ dataLimit: { kind: 'sources', ids: [bo.agentId] } }).where(and(eq(membership.tenantId, tenantId), eq(membership.userId, limited.id)));
+  // The operator holds review:act (a grantable extra) but not assign:act.
+  await adminDb.update(membership).set({ extraPermissions: ['review:act'] }).where(and(eq(membership.tenantId, tenantId), eq(membership.userId, operator.id)));
+  ids = { owner: owner.id, leader: leader.id, leader2: leader2.id, seller: seller.id, seller2: seller2.id, operator: operator.id, limited: limited.id };
 });
 beforeEach(() => setPrincipalCacheTtl(0));
 afterAll(closeDbs);
@@ -121,7 +123,28 @@ describe('review queue', () => {
     const filtered = await (await as('leader', queueRoute, `${path}&status=reviewed`)).json();
     expect(filtered.data).toEqual([]);
     expect((await as('leader', queueRoute, `${path}&limit=0`)).status).toBe(400);
-    expect((await as('leader', queueRoute, `${path}&cursor=!!`)).status).toBeGreaterThanOrEqual(400);
+    expect((await as('leader', queueRoute, `${path}&cursor=!!`)).status).toBe(400);
+  });
+
+  it('arrived_since narrows the queue and the count; an unparseable value is a 400', async () => {
+    const src = await personAndAgent(tenant(), 'Since');
+    const a = await account('Since Co', src.agentId);
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const ask = async (since: string) => {
+      const q = `source_id=${src.agentId}&arrived_since=${encodeURIComponent(since)}`;
+      return [(await (await as('leader', queueRoute, `review-queue?${q}`)).json()).data.map((r: { account_id: string }) => r.account_id), (await (await as('leader', countRoute, `review-queue/count?${q}`)).json()).count];
+    };
+    expect(await ask(day(-1))).toEqual([[a], 1]);
+    expect(await ask(new Date(Date.now() - 60_000).toISOString())).toEqual([[a], 1]);
+    expect(await ask(day(2))).toEqual([[], 0]);
+    expect(await ask(new Date(Date.now() + 3_600_000).toISOString())).toEqual([[], 0]);
+    for (const bad of ['yesterday', '2026-13-45', '2026-10-01 09:00']) {
+      for (const [handler, path] of [[queueRoute, 'review-queue'], [countRoute, 'review-queue/count']] as const) {
+        const res = await as('leader', handler, `${path}?arrived_since=${encodeURIComponent(bad)}`);
+        expect([bad, res.status]).toEqual([bad, 400]);
+        expect((await res.json()).errors[0].path).toBe('arrived_since');
+      }
+    }
   });
 
   it('shows a seller decline with its reason on the queue', async () => {
@@ -295,6 +318,20 @@ describe('assignment lists', () => {
     expect((await viaKey(await keyIn(['accounts:read']), listAssignmentsRoute, 'assignments')).status).toBe(403);
     expect((await as('leader', listAssignmentsRoute, 'assignments?limit=0')).status).toBe(400);
     expect((await as('leader', listAssignmentsRoute, 'assignments?cursor=zzz')).status).toBe(400);
+    const stamp = Buffer.from(JSON.stringify(['tomorrow', 'asg_x'])).toString('base64url');
+    expect((await as('leader', listAssignmentsRoute, `assignments?cursor=${stamp}`)).status).toBe(400);
+    expect((await as('leader', listAssignmentsRoute, 'assignments?status=bogus')).status).toBe(400);
+    for (const bad of ['yes', '', 'TRUE']) expect([bad, (await as('leader', listAssignmentsRoute, `assignments?mine=${bad}`)).status]).toEqual([bad, 400]);
+    expect((await as('seller', listAssignmentsRoute, 'assignments?mine=1')).status).toBe(200);
+    expect((await as('leader', listAssignmentsRoute, 'assignments?mine=0')).status).toBe(200);
+  });
+
+  it('an account that exists but is hidden by the data limit is a 404 on the list and on a write', async () => {
+    const a = await account();
+    expect((await as('leader', listAccountAssignments, `accounts/${a}/assignments`)).status).toBe(200);
+    expect((await as('limited', listAccountAssignments, `accounts/${a}/assignments`)).status).toBe(404);
+    expect((await as('limited', patchReviewStatus, `accounts/${a}/review-status`, 'PATCH', { to: 'reviewed' })).status).toBe(404);
+    expect((await as('limited', accountAction, `accounts/${a}:assign`, 'POST', { seller_user_id: ids.seller })).status).toBe(404);
   });
 
   it('lists the assignments of one account for assign:act; hidden or missing is 404', async () => {
@@ -393,10 +430,12 @@ describe('TEN-E3-S1-AC2: each data limit kind on the queue, count and status', (
     const [x, y] = [await personAndAgent(t, 'Xi'), await personAndAgent(t, 'Yu')];
     const mine = await arrivedAccount(t, { name: 'Xi Co', sourceChain: { agentSourceId: x.agentId } });
     const theirs = await arrivedAccount(t, { name: 'Yu Co', sourceChain: { agentSourceId: y.agentId } });
+    await setSummary(t, mine, { practiceIds: ['prc_in'] });
     const kinds: { name: string; limit: unknown; source?: string; x: boolean; y: boolean }[] = [
       { name: 'all', limit: { kind: 'all' }, x: true, y: true },
       { name: 'own_source', limit: { kind: 'own_source' }, source: x.agentId, x: true, y: false },
       { name: 'sources', limit: { kind: 'sources', ids: [y.agentId] }, x: false, y: true },
+      { name: 'practices (in)', limit: { kind: 'practices', ids: ['prc_in'] }, x: true, y: false },
       { name: 'practices (out)', limit: { kind: 'practices', ids: ['prc_none'] }, x: false, y: false },
       { name: 'own_accounts', limit: { kind: 'own_accounts' }, x: false, y: false },
       { name: 'any_of', limit: { kind: 'any_of', limits: [{ kind: 'own_source' }, { kind: 'sources', ids: [y.agentId] }] }, source: x.agentId, x: true, y: true },
@@ -436,7 +475,8 @@ describe('review settings', () => {
     expect((await (await as('owner', getSettings, 'settings/review')).json()).auto_accept_working_days).toBe(5);
     const off = await put({ auto_accept_working_days: null });
     expect((await off.json()).auto_accept_working_days).toBeNull();
-    const audited = await adminDb.select().from(auditLog).where(and(eq(auditLog.tenantId, tenantId), eq(auditLog.action, 'routing.settings.updated')));
+    const audited = await adminDb.select().from(auditLog).where(and(eq(auditLog.tenantId, tenantId), eq(auditLog.action, 'routing.settings.updated')))
+      .orderBy(auditLog.id);
     expect(audited.length).toBe(2);
     expect(audited[0]).toMatchObject({ before: { autoAcceptWorkingDays: 2 }, after: { autoAcceptWorkingDays: 5 } });
 

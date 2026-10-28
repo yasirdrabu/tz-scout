@@ -4,6 +4,7 @@ import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { declineReasonDef, reviewStatusDef, routingSetting } from '../db/schema';
 import { DEFAULT_AUTO_ACCEPT_WORKING_DAYS } from '../defaults';
+import { reasonNeedsNote } from '../domain/status-rules';
 import { requirePerson } from './review';
 
 export type ReviewSettings = {
@@ -41,7 +42,7 @@ export async function getReviewSettings(ctx: ModuleContext): Promise<ReviewSetti
       archived: !!s.archivedAt,
     })),
     // "Other" always needs a note (REV-E3-S2).
-    declineReasons: reasons.map((r) => ({ key: r.key, label: r.label, appliesTo: r.appliesTo, noteRequired: r.key === 'other', archived: !!r.archivedAt })),
+    declineReasons: reasons.map((r) => ({ key: r.key, label: r.label, appliesTo: r.appliesTo, noteRequired: reasonNeedsNote(r.key), archived: !!r.archivedAt })),
     autoAcceptWorkingDays: setting ? setting.days : DEFAULT_AUTO_ACCEPT_WORKING_DAYS,
   };
 }
@@ -51,9 +52,11 @@ export async function setAutoAcceptWorkingDays(ctx: ModuleContext, days: number 
   requirePerson(ctx);
   if (days !== null && (!Number.isInteger(days) || days < 1 || days > 10)) {
     const message = 'Pick 1 to 10 working days, or turn it off.';
-    throw new ScoutError({ slug: 'validation', status: 400, title: message, errors: [{ path: 'autoAcceptWorkingDays', message }] });
+    throw new ScoutError({ slug: 'validation', status: 400, title: message, errors: [{ path: 'auto_accept_working_days', message }] });
   }
-  const before = (await getReviewSettings(ctx)).autoAcceptWorkingDays;
+  // Locked, so two changes can't both audit the same "before".
+  const [current] = await ctx.tx.select({ days: routingSetting.autoAcceptWorkingDays }).from(routingSetting).where(eq(routingSetting.tenantId, ctx.tenantId)).for('update');
+  const before = current ? current.days : DEFAULT_AUTO_ACCEPT_WORKING_DAYS;
   await ctx.tx
     .insert(routingSetting)
     .values({ tenantId: ctx.tenantId, autoAcceptWorkingDays: days })

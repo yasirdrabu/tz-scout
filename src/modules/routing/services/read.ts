@@ -152,11 +152,12 @@ export type AssignmentRow = {
 };
 
 type Key = [string, string];
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}(:?\d{2})?)$/;
 const encode = (k: Key) => Buffer.from(JSON.stringify(k)).toString('base64url');
 function decode(cursor: string): Key {
   try {
     const v: unknown = JSON.parse(Buffer.from(cursor, 'base64url').toString());
-    if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && typeof v[1] === 'string' && !Number.isNaN(Date.parse(v[0]))) return [v[0], v[1]];
+    if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && typeof v[1] === 'string' && ISO_TIMESTAMP.test(v[0]) && !Number.isNaN(Date.parse(v[0]))) return [v[0], v[1]];
   } catch {
     // fall through
   }
