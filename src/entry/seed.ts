@@ -18,7 +18,7 @@ import {
 } from '@/modules/tenancy';
 import { seedAccountDefaults } from '@/modules/accounts';
 import { listSources, personSourceFor, registerSource, seedIntakeDefaults } from '@/modules/intake';
-import { seedOffers } from '@/modules/offers';
+import { seedMissingSignalRules, seedOffers } from '@/modules/offers';
 import { backfillReviews, seedRoutingDefaults } from '@/modules/routing';
 import { requestRescore, seedScoringDefaults } from '@/modules/scoring';
 
@@ -63,13 +63,14 @@ const TENANTS = [
 ] as const;
 
 /**
- * Brings a tenant built before R1b up to date: the scoring and routing defaults (with their schedules), a review row and
+ * Brings a tenant built before R1b up to date: the scoring and routing defaults (with their schedules), default signal rules for each offer that has none, a review row and
  * snapshot for each account that has none, and a rescore of every account. Safe to run again: the defaults and reviews
  * are added only when missing, and a repeat rescore changes no score. Background context only.
  */
 export async function backfillR1b(ctx: ModuleContext): Promise<void> {
   await seedScoringDefaults(ctx);
   await seedRoutingDefaults(ctx);
+  await seedMissingSignalRules(ctx);
   await backfillReviews(ctx);
   await requestRescore(ctx);
 }

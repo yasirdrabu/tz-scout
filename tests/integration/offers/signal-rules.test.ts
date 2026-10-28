@@ -46,6 +46,16 @@ const events = async (type: string) =>
   )) as unknown as { payload: { data: Record<string, unknown> } }[];
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+describe('OFF-E4 rules at creation', () => {
+  it('a created offer starts with its slug defaults, else the generic set, and publishes nothing for them', async () => {
+    const generic = await offerNamed('Fresh Offer');
+    expect((await t.run((ctx) => listSignalRules(ctx, generic.id))).map((r) => r.label)).toEqual(GENERIC_SIGNAL_RULES.map((r) => r.label));
+    const slug = Object.keys(DEFAULT_SIGNAL_RULES)[0]!;
+    const known = await offerNamed('Known Offer', { slug });
+    expect((await t.run((ctx) => listSignalRules(ctx, known.id))).map((r) => r.label)).toEqual(DEFAULT_SIGNAL_RULES[slug]!.map((r) => r.label));
+  });
+});
+
 describe('OFF-E4-S1 replace signal rules', () => {
   it('stores the rules in order and returns them', async () => {
     const o = await offerNamed('Ordered');
@@ -136,7 +146,7 @@ describe('listApprovedOffers', () => {
     expect(all.map((o) => o.id)).not.toContain(draft.id);
     expect(all[0]!.signalRules.map((r) => r.label)).toEqual(['On']);
     expect(all[0]).toMatchObject({ targetTitles: ['CTO'], industries: ['logistics'] });
-    expect(all[1]!.signalRules).toEqual([]);
+    expect(all[1]!.signalRules.map((r) => r.label)).toEqual(GENERIC_SIGNAL_RULES.map((r) => r.label));
 
     expect((await t2.run((ctx) => listApprovedOffers(ctx, { practiceIds: [] }))).map((o) => o.id)).toEqual(all.map((o) => o.id));
     expect((await t2.run((ctx) => listApprovedOffers(ctx, { practiceIds: [q] }))).map((o) => o.id)).toEqual([other.id]);

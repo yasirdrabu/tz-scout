@@ -4,7 +4,7 @@ import { backfillR1b } from '@/entry/seed';
 import { upsertFromArrival } from '@/modules/accounts';
 import { registerSource, submitArrival } from '@/modules/intake';
 import { arrival } from '@/modules/intake/db/schema';
-import { approveOffer, createOffer, createPractice } from '@/modules/offers';
+import { GENERIC_SIGNAL_RULES, approveOffer, createOffer, createPractice } from '@/modules/offers';
 import { accept, assign, getAccountStatus, listQueue, reviewChanged } from '@/modules/routing';
 import { stageChange } from '@/modules/routing/db/schema';
 import { explainScore, getScore, rescorePageJob } from '@/modules/scoring';
@@ -54,6 +54,7 @@ describe('R1b exit path', () => {
     // Scored and explained.
     const score = await asPerson(t, (ctx) => getScore(ctx, accountId));
     expect(score).not.toBeNull();
+    expect(score!.priority).toBeGreaterThan(0);
     expect((await asPerson(t, (ctx) => explainScore(ctx, accountId)))?.summary).toBeTruthy();
 
     // In the queue as Unvetted with its priority.
@@ -167,6 +168,22 @@ describe('backfillR1b', () => {
     await runOutbox(t.tenantId);
     // Only the rescore request is new; reviews, snapshots, scores and schedules stay as they were.
     expect(await counts(t.tenantId)).toEqual({ ...settled, rescorePages: settled.rescorePages + 1 });
+  }, 60_000);
+
+  it('gives each offer without rules its defaults, and a second run adds none', async () => {
+    const { t } = await r1aTenant(0);
+    const practice = await t.run((ctx) => createPractice(ctx, { name: 'Back Practice', slug: `back-${Date.now().toString(36)}` }));
+    const offer = await t.run((ctx) => createOffer(ctx, { name: 'Old Offer', practiceId: practice.id, ...completeOffer }));
+    // An R1a offer was made before rules existed.
+    await adminDb.execute(sql`delete from offers.signal_rule where tenant_id = ${t.tenantId}`);
+    const rules = async () => await count(sql`select count(*) n from offers.signal_rule where offer_id = ${offer.id}`);
+    expect(await rules()).toBe(0);
+
+    await t.run((ctx) => backfillR1b(ctx));
+    const seeded = await rules();
+    expect(seeded).toBe(GENERIC_SIGNAL_RULES.length);
+    await t.run((ctx) => backfillR1b(ctx));
+    expect(await rules()).toBe(seeded);
   }, 60_000);
 
   it('gives no review to an account without a resolved arrival, as the live flow would not', async () => {

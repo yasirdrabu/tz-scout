@@ -99,6 +99,21 @@ export async function seedSignalRules(ctx: ModuleContext, offerId: string, slug:
   await insertRules(ctx, offerId, defaultSignalRulesFor(slug).map((r) => ({ ...r, enabled: true })), 'default');
 }
 
+/** Gives every offer that has no rules its defaults (OFF-E4). Idempotent. Returns how many offers it seeded. */
+export async function seedMissingSignalRules(ctx: ModuleContext): Promise<number> {
+  const have = new Set(
+    (await ctx.tx.selectDistinct({ id: signalRule.offerId }).from(signalRule).where(eq(signalRule.tenantId, ctx.tenantId))).map((r) => r.id),
+  );
+  const offers = await ctx.tx.select({ id: offer.id, slug: offer.slug }).from(offer).where(eq(offer.tenantId, ctx.tenantId)).orderBy(asc(offer.id));
+  let seeded = 0;
+  for (const o of offers) {
+    if (have.has(o.id)) continue;
+    await seedSignalRules(ctx, o.id, o.slug);
+    seeded++;
+  }
+  return seeded;
+}
+
 /**
  * Approved offers with their fit criteria and enabled rules, oldest approval first. An empty or
  * missing `practiceIds` means every practice.

@@ -49,6 +49,7 @@ export {
   listSignalRules,
   replaceSignalRules,
   resetSignalRules,
+  seedMissingSignalRules,
   type ApprovedOffer,
   type SignalRule,
 } from './services/signal-rules';
