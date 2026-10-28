@@ -108,6 +108,9 @@ describe('scout CLI', () => {
   }, 30_000);
 
   it('seed twice leaves one scoring profile, one set of review statuses and the signal rules; backfill-r1b changes nothing more', async () => {
+    // Seeds here rather than relying on an earlier test having done it.
+    const seeded = await scout(['seed']).done;
+    expect(seeded.code, seeded.stderr).toBe(0);
     const id = ((await adminDb.execute(sql`select id from tenancy.tenant where slug = 'taazaa'`)) as unknown as { id: string }[])[0]!.id;
     const read = async () => {
       const n = async (q: ReturnType<typeof sql>) => Number(((await adminDb.execute(q)) as unknown as { n: string }[])[0]!.n);
