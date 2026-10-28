@@ -4,7 +4,7 @@ import { assignmentDeclined, statusChanged } from '@/modules/routing/contracts/e
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { seedIntakeDefaults } from './defaults';
-import { arrival, warmIntro } from './db/schema';
+import { arrival, sourceFeedback, warmIntro } from './db/schema';
 import { recordFeedback } from './services/feedback';
 
 /** Gives a new tenant its vendor sources, relationship defaults and waiting-expiry schedule. */
@@ -14,13 +14,14 @@ export const intakeTenantDefaults = defineConsumer({
   handle: async (_e, ctx) => seedIntakeDefaults(ctx),
 });
 
-/** After a merge, arrivals, warm intros and duplicate candidates that named the merged account name the survivor. */
+/** After a merge, arrivals, feedback, warm intros and duplicate candidates that named the merged account name the survivor. */
 export const intakeAccountMerged = defineConsumer({
   name: 'intake.account_merged',
   event: accountMerged,
   orderedBy: (e) => e.data.survivorId,
   handle: async ({ data: { survivorId, mergedId } }, ctx) => {
     await ctx.tx.update(arrival).set({ accountId: survivorId }).where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.accountId, mergedId)));
+    await ctx.tx.update(sourceFeedback).set({ accountId: survivorId }).where(and(eq(sourceFeedback.tenantId, ctx.tenantId), eq(sourceFeedback.accountId, mergedId)));
     await ctx.tx.update(warmIntro).set({ accountId: survivorId }).where(and(eq(warmIntro.tenantId, ctx.tenantId), eq(warmIntro.accountId, mergedId)));
     await ctx.tx.execute(sql`
       update intake.arrival set duplicate_candidates = (

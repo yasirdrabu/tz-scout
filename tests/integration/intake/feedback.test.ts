@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mergeAccounts } from '@/modules/accounts';
 import { accountSummary } from '@/modules/accounts/db/schema';
 import {
+  feedbackForArrival,
   getArrivalWithStatus,
   getBatch,
   intakeSourceAccess,
@@ -166,6 +167,22 @@ describe('feedback rows (SRC-E1-S4-AC1)', () => {
     expect(rows.map((r) => r.sourceId).sort()).toEqual(ALL_SOURCES());
     // The merged account's arrivals now belong to the survivor, so its last arrival is the pin.
     expect(rows.find((r) => r.sourceId === vendorId)!.arrivalId).toBe(two.arrivals[3]);
+  });
+
+  it('feedback given before a merge moves to the survivor and shows on its arrivals, and a replay changes nothing', async () => {
+    const one = await sharedAccount();
+    const two = await sharedAccount();
+    await t.run((ctx) => recordFeedback(ctx, { accountId: two.accountId, kind: 'declined_at_review', reasonKey: 'duplicate', note: null, causeEventId: newId('evt') }));
+    const merge = () => runOutbox(t.tenantId);
+    await t.run((ctx) =>
+      mergeAccounts({ ...ctx, access: { userId: 'usr_leader', sourceId: ash.personId, dataLimit: { kind: 'all' } } }, one.accountId, two.accountId),
+    );
+    await merge();
+    expect(await rowsFor(two.accountId)).toHaveLength(0);
+    expect(await rowsFor(one.accountId)).toHaveLength(5);
+    // The arrival that came in under the merged account now belongs to the survivor, and so does its feedback.
+    const shown = await t.run((ctx) => feedbackForArrival(ctx, two.arrivals[3]!));
+    expect(shown).toEqual([expect.objectContaining({ kind: 'declined_at_review', reasonKey: 'duplicate' })]);
   });
 
   it('a replay adds no rows and publishes nothing, even after a newer arrival', async () => {
