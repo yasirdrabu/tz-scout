@@ -118,7 +118,7 @@ export async function assign(ctx: ModuleContext, accountId: string, input: Assig
   if (p.open) {
     await endAssignment(ctx, p.open, 'replaced', by, id);
     // The new assignment is pending, so an accepted one going away takes the stage back to reviewed.
-    if (p.open.status === 'accepted') await moveStage(ctx, accountId, 'withdrawn', id);
+    if (p.open.status === 'accepted') await moveStage(ctx, accountId, 'withdrawn', `${p.open.id}:replaced`);
   }
   const values = {
     id,

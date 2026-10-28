@@ -1,4 +1,10 @@
 export type StatusDefRules = { isDeclined: boolean; returnsToSource: boolean };
+/** What is missing from an assignment decline: a reason from the assignment list, and a note for Other. */
+export function declineProblems(reason: { key: string } | undefined, note: string | null | undefined): string[] {
+  if (!reason) return ['Pick a reason'];
+  return reason.key === 'other' && !note?.trim() ? ['Add a note for Other.'] : [];
+}
+
 export type ReasonDef = { key: string; appliesTo: 'review' | 'assignment' | 'both'; archivedAt: Date | null };
 
 /** What is missing from a status change, in the words the person sees. Empty means it can go ahead. */

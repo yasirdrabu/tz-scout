@@ -16,6 +16,7 @@ import {
   withdraw,
 } from '@/modules/routing';
 import { accountReview, assignment, routingSetting } from '@/modules/routing/db/schema';
+import { tenant } from '@/modules/tenancy/db/schema';
 import { memberRemoved } from '@/modules/tenancy/contracts/events';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -96,11 +97,38 @@ describe('accept and decline (REV-E2-S2, REV-E2-S3)', () => {
     expect(queue.data.find((r) => r.accountId === a)?.flags.declinedBySeller?.reasonLabel).toBe('Not my territory');
   });
 
-  it('a decline after an accept, and an accept after a decline, are refused (Review Focus 4)', async () => {
+  it('a seller declines an accepted assignment: stage back to reviewed, flag set, back in the default queue', async () => {
     const first = await assigned();
     await asSeller((ctx) => accept(ctx, first.id));
-    expect(await rejects(asSeller((ctx) => decline(ctx, first.id, { reasonKey: 'not_a_fit' })))).toMatchObject({ status: 409 });
+    expect((await reviewOf(first.a)).stage).toBe('assigned');
+    await asSeller((ctx) => decline(ctx, first.id, { reasonKey: 'too_much_on_my_plate' }));
+    expect(await assignmentOf(first.id)).toMatchObject({ status: 'declined', acceptedHow: 'seller' });
+    expect(await reviewOf(first.a)).toMatchObject({ stage: 'reviewed', currentAssignmentId: null });
+    expect((await reviewOf(first.a)).flags.declinedBySeller?.reasonKey).toBe('too_much_on_my_plate');
+    await runOutbox(t.tenantId);
+    expect(await summaryOf(t, first.a)).toMatchObject({ ownerUserId: null, stage: 'reviewed' });
+    const queue = await asPerson(t, (ctx) => listQueue(ctx, {}));
+    expect(queue.data.some((r) => r.accountId === first.a)).toBe(true);
+  });
 
+  it('a stage move after reassigning an accepted assignment still happens when the new one is accepted', async () => {
+    const first = await assigned();
+    const other = await member(t, 'seller');
+    await asSeller((ctx) => accept(ctx, first.id));
+    const { reassigned } = await asPerson(t, (ctx) => withdraw(ctx, first.id, { reassignTo: other }));
+    expect((await reviewOf(first.a)).stage).toBe('reviewed');
+    await asSeller((ctx) => accept(ctx, reassigned!.id), other);
+    expect((await reviewOf(first.a)).stage).toBe('assigned');
+
+    const second = await assigned();
+    await asSeller((ctx) => accept(ctx, second.id));
+    const again = await asPerson(t, (ctx) => assign(ctx, second.a, { sellerUserId: other }));
+    expect((await reviewOf(second.a)).stage).toBe('reviewed');
+    await asSeller((ctx) => accept(ctx, again.id), other);
+    expect((await reviewOf(second.a)).stage).toBe('assigned');
+  });
+
+  it('an accept after a decline is refused (Review Focus 4)', async () => {
     const second = await assigned();
     await asSeller((ctx) => decline(ctx, second.id, { reasonKey: 'other', note: 'Not our region' }));
     expect(await rejects(asSeller((ctx) => accept(ctx, second.id)))).toMatchObject({ status: 409 });
@@ -191,6 +219,71 @@ describe('autoAccept (Ruling 6, REV-E2-S2-AC3)', () => {
     expect(await at.run((ctx) => autoAccept(ctx, now))).toBe(2);
   }, 120_000);
 
+  const stageOf = async (accountId: string) => (await at.run((ctx) => ctx.tx.select().from(accountReview).where(eq(accountReview.accountId, accountId))))[0]!.stage;
+  const sellerOf = <T,>(fn: Parameters<typeof asPerson<T>>[1]) => asPerson(at, fn, { userId: aSeller, dataLimit: { kind: 'own_accounts' } });
+
+  it('moves the stage to assigned when auto-accept takes a reassigned assignment', async () => {
+    await clear();
+    await days(1);
+    const { a, id } = await pendingAt('2026-01-05T10:00:00Z');
+    await asPerson(at, (ctx) => accept(ctx, id), { userId: aSeller, dataLimit: { kind: 'own_accounts' } });
+    await asPerson(at, (ctx) => withdraw(ctx, id, { reassignTo: aSeller }));
+    expect(await stageOf(a)).toBe('reviewed');
+    const [open] = await at.run((ctx) => ctx.tx.select().from(assignment).where(and(eq(assignment.accountId, a), eq(assignment.status, 'pending'))));
+    await at.run((ctx) => ctx.tx.update(assignment).set({ assignedAt: new Date('2026-01-05T10:00:00Z') }).where(eq(assignment.id, open!.id)));
+    expect(await at.run((ctx) => autoAccept(ctx, new Date('2026-02-02T00:00:00Z')))).toBe(1);
+    expect(await stageOf(a)).toBe('assigned');
+  });
+
+  it('one failing assignment does not stop the others', async () => {
+    await clear();
+    await days(1);
+    const bad = await at.run(async (ctx) => {
+      const accountId = 'acc_aaaa_bad'; // sorts first, so it is tried first
+      const id = newId('asg');
+      await ctx.tx.insert(accountReview).values({ tenantId: ctx.tenantId, accountId, statusKey: 'reviewed', stage: 'bogus', currentAssignmentId: id });
+      await ctx.tx.insert(assignment).values({ id, tenantId: ctx.tenantId, accountId, sellerUserId: aSeller, assignedBy: at.actor.id, assignedAt: new Date('2026-01-05T09:00:00Z') });
+      return id;
+    });
+    const one = await pendingAt('2026-01-05T10:00:00Z');
+    const two = await pendingAt('2026-01-05T11:00:00Z');
+    expect(await at.run((ctx) => autoAccept(ctx, new Date('2026-02-02T00:00:00Z')))).toBe(2);
+    expect((await statusOf(bad)).status).toBe('pending');
+    expect((await statusOf(one.id)).status).toBe('accepted');
+    expect((await statusOf(two.id)).status).toBe('accepted');
+  });
+
+  it('counts working days in the tenant timezone', async () => {
+    await clear();
+    await days(1);
+    await adminDb.update(tenant).set({ timezone: 'America/Los_Angeles' }).where(eq(tenant.id, at.tenantId));
+    try {
+      // Thursday 22:00 in Los Angeles; one working day later is Friday 22:00 there, Saturday 05:00 UTC.
+      const { id } = await pendingAt('2026-10-23T05:00:00Z');
+      expect(await at.run((ctx) => autoAccept(ctx, new Date('2026-10-24T04:59:00Z')))).toBe(0);
+      expect(await at.run((ctx) => autoAccept(ctx, new Date('2026-10-24T05:00:00Z')))).toBe(1);
+      expect((await statusOf(id)).status).toBe('accepted');
+    } finally {
+      await adminDb.update(tenant).set({ timezone: 'UTC' }).where(eq(tenant.id, at.tenantId));
+    }
+  });
+
+  it('an auto-accept after a committed decline accepts nothing; a decline after a committed auto-accept declines an accepted assignment', async () => {
+    await clear();
+    await days(1);
+    const first = await pendingAt('2026-01-05T10:00:00Z');
+    await sellerOf((ctx) => decline(ctx, first.id, { reasonKey: 'not_a_fit' }));
+    expect(await at.run((ctx) => autoAccept(ctx, new Date('2026-02-02T00:00:00Z')))).toBe(0);
+    expect((await statusOf(first.id)).status).toBe('declined');
+    expect(await rejects(sellerOf((ctx) => accept(ctx, first.id)))).toMatchObject({ status: 409 });
+
+    const second = await pendingAt('2026-01-05T10:00:00Z');
+    expect(await at.run((ctx) => autoAccept(ctx, new Date('2026-02-02T00:00:00Z')))).toBe(1);
+    await sellerOf((ctx) => decline(ctx, second.id, { reasonKey: 'not_a_fit' }));
+    expect(await statusOf(second.id)).toMatchObject({ status: 'declined', acceptedHow: 'auto_timeout' });
+    expect(await stageOf(second.a)).toBe('reviewed');
+  });
+
   it('a decline racing auto-accept ends in exactly one outcome (Review Focus 4)', async () => {
     await clear();
     await days(1);
@@ -201,17 +294,14 @@ describe('autoAccept (Ruling 6, REV-E2-S2-AC3)', () => {
         at.run((ctx) => autoAccept(ctx, new Date('2026-02-02T00:00:00Z'))),
       ]);
       const row = await statusOf(id);
-      expect(['accepted', 'declined']).toContain(row.status);
-      if (row.status === 'declined') {
-        expect(decl!.status).toBe('fulfilled');
-        expect(auto).toMatchObject({ status: 'fulfilled', value: 0 });
-        expect(row.acceptedHow).toBeNull();
-      } else {
-        expect(decl!.status).toBe('rejected');
-        expect(row.acceptedHow).toBe('auto_timeout');
-      }
+      // A decline takes a pending or an accepted assignment, so either order ends declined with the stage back at reviewed.
+      expect(decl!.status).toBe('fulfilled');
+      expect(row.status).toBe('declined');
+      if (row.acceptedHow === null) expect(auto).toMatchObject({ status: 'fulfilled', value: 0 });
+      expect(await stageOf(a)).toBe('reviewed');
       const events = (await published(at, a)).map((e) => e.type);
-      expect(events.filter((x) => x === assignmentAccepted.type).length + events.filter((x) => x === assignmentDeclined.type).length).toBe(1);
+      expect(events.filter((x) => x === assignmentDeclined.type)).toHaveLength(1);
+      expect(events.filter((x) => x === assignmentAccepted.type).length).toBe(row.acceptedHow === null ? 0 : 1);
       await clear();
     }
   });
@@ -248,6 +338,14 @@ describe('withdraw (REV-E2 Rules, REV-E2-S4)', () => {
     const made = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: seller }), { userId: leader });
     await asPerson(t, (ctx) => withdraw(ctx, made.id));
     expect((await assignmentOf(made.id)).status).toBe('withdrawn');
+  });
+
+  it('an account the actor cannot see is a 404', async () => {
+    const a = await arrivedAccount(t);
+    const made = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: seller }), { userId: leader });
+    await runOutbox(t.tenantId);
+    expect(await rejects(asPerson(t, (ctx) => withdraw(ctx, made.id), { userId: leader, dataLimit: { kind: 'own_accounts' } }))).toMatchObject({ status: 404 });
+    expect((await assignmentOf(made.id)).status).toBe('pending');
   });
 
   it('withdraw and reassign publishes withdrawn then created, with one snapshot', async () => {
@@ -309,6 +407,11 @@ describe('tenancy.member.removed', () => {
     expect([await snapshotCount(t, first.a), await snapshotCount(t, second.a)]).toEqual([before[0]! + 1, before[1]! + 1]);
     expect(await summaryOf(t, second.a)).toMatchObject({ ownerUserId: null, hasOpenAssignment: false });
     expect((await published(t, first.a)).find((e) => e.type === assignmentWithdrawn.type)!.data).toMatchObject({ by: t.actor.id, replacedBy: null });
+
+    // The event again: nothing is open any more, so nothing is written.
+    await publishTestEvent(t.tenantId, memberRemoved, { userId: gone, removedBy: t.actor.id });
+    await runOutbox(t.tenantId);
+    expect([await snapshotCount(t, first.a), await snapshotCount(t, second.a)]).toEqual([before[0]! + 1, before[1]! + 1]);
   });
 });
 

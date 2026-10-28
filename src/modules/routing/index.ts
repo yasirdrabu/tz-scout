@@ -30,7 +30,7 @@ export {
 export { routingAccountMerged, routingArrivalResolved, routingConsumers, routingMemberRemoved, routingTenantDefaults } from './consumers';
 export { DEFAULT_AUTO_ACCEPT_WORKING_DAYS, DEFAULT_REASONS, DEFAULT_STATUSES, seedRoutingDefaults } from './defaults';
 export { nextStage, type StageEvent } from './domain/stages';
-export { statusChangeProblems, type ReasonDef, type StatusDefRules } from './domain/status-rules';
+export { declineProblems, statusChangeProblems, type ReasonDef, type StatusDefRules } from './domain/status-rules';
 export { addWorkingDays } from './domain/working-days';
 export { autoAcceptHandler } from './jobs';
 export { publishReviewSnapshot } from './services/snapshot';

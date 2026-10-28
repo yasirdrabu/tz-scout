@@ -2,12 +2,13 @@ import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { members, tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
+import { logFor } from '@/platform/log';
 import { publish } from '@/platform/events/outbox';
 import { assignmentAccepted, assignmentDeclined } from '../contracts/events';
 import type { ReviewSnapshot } from '../contracts/types';
 import { accountReview, assignment, declineReasonDef, routingSetting } from '../db/schema';
 import { addWorkingDays } from '../domain/working-days';
-import { statusChangeProblems, type ReasonDef } from '../domain/status-rules';
+import { declineProblems } from '../domain/status-rules';
 import { assign, type AssignmentView } from './assign';
 import { checkLength, endAssignment, lockForWrite, lockRow, OPEN_STATUSES, openAssignment, requirePerson } from './review';
 import { currentReviewSnapshot, publishReviewSnapshot } from './snapshot';
@@ -51,7 +52,7 @@ async function acceptLocked(ctx: ModuleContext, a: Assignment, how: 'seller' | '
     .set({ status: 'accepted', acceptedHow: how, respondedAt: at })
     .where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.id, a.id)));
   await publish(ctx, assignmentAccepted, { assignmentId: a.id, accountId: a.accountId, sellerUserId: a.sellerUserId, acceptedHow: how });
-  await moveStage(ctx, a.accountId, 'assigned', a.id);
+  await moveStage(ctx, a.accountId, 'assigned', `${a.id}:accepted`);
 }
 
 /** The seller accepts their pending assignment (REV-E2-S2-AC1). */
@@ -66,21 +67,21 @@ export async function accept(ctx: ModuleContext, assignmentId: string): Promise<
 export type DeclineInput = { reasonKey: string; note?: string | null };
 
 /**
- * The seller declines their pending assignment with a reason from the assignment list; Other needs a
+ * The seller declines their open assignment (pending, or accepted by them or by timeout) with a reason from the assignment list; Other needs a
  * note (REV-E2-S3). The account goes back to the leader: status unchanged, stage `reviewed`, with the
  * `declinedBySeller` flag until it is assigned again (Ruling 15).
  */
 export async function decline(ctx: ModuleContext, assignmentId: string, input: DeclineInput): Promise<void> {
   const by = requirePerson(ctx);
   const { a, row } = await lockAssignment(ctx, assignmentId, by);
-  if (a.status !== 'pending') throw answered();
+  if (!OPEN_STATUSES.includes(a.status)) throw answered();
   const note = input.note?.trim() || null;
   checkLength(note, 'note');
 
   const defs = await ctx.tx.select().from(declineReasonDef).where(eq(declineReasonDef.tenantId, ctx.tenantId));
-  // The review rule's check, over the assignment list: a reason the list doesn't hold is "Pick a reason".
-  const reasonDefs: ReasonDef[] = defs.filter((d) => d.appliesTo !== 'review').map((d) => ({ key: d.key, appliesTo: 'both', archivedAt: d.archivedAt }));
-  const problems = statusChangeProblems({ isDeclined: true, returnsToSource: false }, { note, reasonKey: input.reasonKey, reasonDefs });
+  const reasonKey = input.reasonKey?.trim() ?? '';
+  const reason = defs.find((d) => d.key === reasonKey && d.appliesTo !== 'review' && !d.archivedAt);
+  const problems = declineProblems(reason, note);
   if (problems.length > 0) {
     throw new ScoutError({
       slug: 'validation',
@@ -89,19 +90,19 @@ export async function decline(ctx: ModuleContext, assignmentId: string, input: D
       errors: problems.map((message) => ({ path: message === 'Pick a reason' ? 'reason_key' : 'note', message })),
     });
   }
-  const reasonKey = input.reasonKey.trim();
-  const reasonLabel = defs.find((d) => d.key === reasonKey)!.label;
+  const reasonLabel = reason!.label;
+  const at = new Date();
   const sellerName = (await members(ctx)).find((m) => m.userId === a.sellerUserId)?.name ?? 'The seller';
 
   await ctx.tx
     .update(assignment)
-    .set({ status: 'declined', respondedAt: new Date(), declineReasonKey: reasonKey, declineNote: note })
+    .set({ status: 'declined', respondedAt: at, declineReasonKey: reasonKey, declineNote: note })
     .where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.id, a.id)));
   // "New from" belongs to the assignment, so it ends with it.
   const { newFrom: _ended, ...flags } = row.flags;
   await ctx.tx
     .update(accountReview)
-    .set({ currentAssignmentId: null, flags: { ...flags, declinedBySeller: { assignmentId: a.id, sellerUserId: a.sellerUserId, sellerName, reasonKey, reasonLabel, at: new Date().toISOString() } } })
+    .set({ currentAssignmentId: null, flags: { ...flags, declinedBySeller: { assignmentId: a.id, sellerUserId: a.sellerUserId, sellerName, reasonKey, reasonLabel, at: at.toISOString() } } })
     .where(reviewWhere(ctx, a.accountId));
   await publish(ctx, assignmentDeclined, { assignmentId: a.id, accountId: a.accountId, sellerUserId: a.sellerUserId, reasonKey, note });
   await moveStage(ctx, a.accountId, 'assignment_declined', `${a.id}:declined`);
@@ -153,9 +154,10 @@ export async function autoAccept(ctx: ModuleContext, now: Date): Promise<number>
   if (!days) return 0;
   const timezone = await tenantTimezone(ctx);
 
-  // Working days never pass faster than calendar days, so a younger assignment is not due. Due-ness only
+  // N working days is N calendar days later at the same local time, which is an hour less elapsed time where DST shortens a day;
+  // two hours of slack covers that, so a candidate is never missed. Due-ness only
   // grows with age, so the due ones are a prefix of the oldest-first list.
-  const cutoff = new Date(now.getTime() - days * 24 * 3_600_000);
+  const cutoff = new Date(now.getTime() - (days * 24 - 2) * 3_600_000);
   const candidates = await ctx.tx
     .select()
     .from(assignment)
@@ -170,9 +172,16 @@ export async function autoAccept(ctx: ModuleContext, now: Date): Promise<number>
     const row = await lockRow(ctx, c.accountId);
     const a = await loadAssignment(ctx, c.id);
     if (!row || row.mergedInto || !a || a.status !== 'pending' || a.accountId !== c.accountId) continue;
-    await acceptLocked(ctx, a, 'auto_timeout', now);
-    await publishReviewSnapshot(ctx, a.accountId);
-    accepted += 1;
+    try {
+      await ctx.tx.transaction(async (tx) => {
+        const sp = { ...ctx, tx };
+        await acceptLocked(sp, a, 'auto_timeout', now);
+        await publishReviewSnapshot(sp, a.accountId);
+      });
+      accepted += 1;
+    } catch (e) {
+      logFor(ctx).error({ assignmentId: a.id, err: (e as Error).message }, 'auto-accept failed for one assignment');
+    }
   }
   return accepted;
 }
