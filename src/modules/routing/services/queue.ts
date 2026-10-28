@@ -32,7 +32,6 @@ export type QueueRow = SearchRow & {
   flags: Omit<ReviewFlags, 'newFrom'> & { newFrom?: NonNullable<ReviewFlags['newFrom']> & { sourceName: string | null } };
 };
 
-/** The accounts search query for the filters. Data limits apply inside accounts. */
 /** The batch's accounts, or a 400 when there are more than the filter can take (it never quietly uses the first ones). */
 async function batchFilterIds(ctx: ModuleContext, batchId: string): Promise<string[]> {
   const { accountIds, overflow } = await batchAccountIds(ctx, batchId);
@@ -41,6 +40,7 @@ async function batchFilterIds(ctx: ModuleContext, batchId: string): Promise<stri
   throw new ScoutError({ slug: 'validation', status: 400, title: message, errors: [{ path: 'batch_id', message }] });
 }
 
+/** The accounts search query for the filters. Data limits apply inside accounts. */
 async function queryFor(ctx: ModuleContext, f: QueueFilters, statuses: StatusDef[]): Promise<SearchQuery> {
   const q: SearchQuery = {
     practiceId: f.practiceId,
