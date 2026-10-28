@@ -1,5 +1,5 @@
 {
-  "id": "245fc7b2-287a-4036-a5ab-43cd49a5fa56",
+  "id": "e45478f4-7dec-4691-9601-560720056a49",
   "prevId": "0dff7f1e-c34d-4f58-90b2-a587e8189da2",
   "version": "7",
   "dialect": "postgresql",
@@ -1103,12 +1103,6 @@
             },
             {
               "expression": "source_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "arrival_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

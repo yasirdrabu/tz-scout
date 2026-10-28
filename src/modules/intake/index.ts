@@ -20,7 +20,7 @@ export {
 export { normaliseDomain } from './domain/normalise';
 export { importRunJob, resolveJob, waitingExpireJob } from './contracts/jobs';
 export { intakeAccountMerged, intakeSellerDeclineFeedback, intakeStatusFeedback, intakeTenantDefaults } from './consumers';
-export { feedbackForArrival, listFeedback, recordFeedback, type FeedbackKind, type FeedbackView } from './services/feedback';
+export { feedbackForArrival, listFeedback, recordFeedback, type ArrivalFeedback, type FeedbackKind, type FeedbackView } from './services/feedback';
 export { importRunHandler, resolveHandler, waitingExpireHandler } from './jobs';
 export { DEFAULT_VENDOR_SOURCES, RELATIONSHIP_DEFAULTS, seedIntakeDefaults } from './defaults';
 export { listRelationshipDefaults, setRelationshipDefault, type RelationshipDefaultView } from './services/settings';

@@ -12,7 +12,7 @@ CREATE TABLE "intake"."source_feedback" (
 );
 --> statement-breakpoint
 ALTER TABLE "intake"."source_feedback" ADD CONSTRAINT "source_feedback_arrival_id_arrival_id_fk" FOREIGN KEY ("arrival_id") REFERENCES "intake"."arrival"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "source_feedback_cause_uq" ON "intake"."source_feedback" USING btree ("tenant_id","source_id","arrival_id","kind","cause_event_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "source_feedback_cause_uq" ON "intake"."source_feedback" USING btree ("tenant_id","source_id","kind","cause_event_id");--> statement-breakpoint
 CREATE INDEX "source_feedback_tenant_source_created_idx" ON "intake"."source_feedback" USING btree ("tenant_id","source_id","created_at","id");--> statement-breakpoint
 CREATE INDEX "source_feedback_tenant_arrival_idx" ON "intake"."source_feedback" USING btree ("tenant_id","arrival_id");--> statement-breakpoint
 ALTER TABLE "intake"."source_feedback" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint

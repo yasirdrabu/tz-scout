@@ -253,7 +253,7 @@ export const sourceFeedback = intake.table(
     createdAt: now('created_at'),
   },
   (t) => [
-    uniqueIndex('source_feedback_cause_uq').on(t.tenantId, t.sourceId, t.arrivalId, t.kind, t.causeEventId),
+    uniqueIndex('source_feedback_cause_uq').on(t.tenantId, t.sourceId, t.kind, t.causeEventId),
     index('source_feedback_tenant_source_created_idx').on(t.tenantId, t.sourceId, t.createdAt, t.id),
     index('source_feedback_tenant_arrival_idx').on(t.tenantId, t.arrivalId),
   ],

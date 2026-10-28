@@ -3,7 +3,7 @@ import { filterVisibleAccountIds, getSummaries, isKnownFactKey } from '@/modules
 import { members } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { arrival, batch } from '../db/schema';
-import { feedbackForArrival, type FeedbackView } from './feedback';
+import { feedbackForArrival, type ArrivalFeedback } from './feedback';
 import { chainInScope, keysetPage, pageArrivals, visibleArrivals } from './visibility';
 
 type ArrivalRow = typeof arrival.$inferSelect;
@@ -91,8 +91,8 @@ export type ArrivalWithStatus = ArrivalDetail & {
   reviewStatus: string | null;
   /** Null unless the caller may see it (`status:read`). */
   ownerName: string | null;
-  /** What the principal's own source was told about this arrival (SRC-E1-S4). */
-  feedback: FeedbackView[];
+  /** What the arrival's sources were told about its account (SRC-E1-S4). */
+  feedback: ArrivalFeedback[];
 };
 
 /**
