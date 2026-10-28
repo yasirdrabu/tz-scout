@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { editAccount, search, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
+import { countAccounts, editAccount, search, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { account, accountAlias, accountSummary } from '@/modules/accounts/db/schema';
 import { adminDb } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
@@ -126,6 +126,67 @@ describe('search', () => {
     await t.run((ctx) => editAccount({ ...ctx, access: { userId: 'usr_e', dataLimit: { kind: 'all' } } }, id, { name: 'After Edit Name' }));
     const r = await t.run((ctx) => search(ctx, { text: 'After Edit Name' }));
     expect(r.data.map((x) => x.accountId)).toEqual([id]);
+  });
+});
+
+describe('review queue filters and count', () => {
+  const setReview = (id: string, set: Partial<typeof accountSummary.$inferInsert>) =>
+    t.run((ctx) => ctx.tx.update(accountSummary).set(set).where(eq(accountSummary.accountId, id)));
+  const run = (q: Parameters<typeof search>[1]) => t.run((ctx) => search(ctx, q));
+  const idsOf = async (q: Parameters<typeof search>[1]) => (await run(q)).data.map((r) => r.accountId).sort();
+
+  it('filters on review status keys, review flags, arrival time and account ids', async () => {
+    const a = await seed({ name: 'Queue A' });
+    const b = await seed({ name: 'Queue B' });
+    const c = await seed({ name: 'Queue C' });
+    await setReview(a, { reviewStatusKey: 'unvetted', reviewFlags: ['new_from'] });
+    await setReview(b, { reviewStatusKey: 'needs_review', reviewFlags: ['declined_by_seller'] });
+    await setReview(c, { reviewStatusKey: 'reviewed', reviewFlags: [] });
+    const ids = [a, b, c];
+    expect(await idsOf({ accountIds: ids, reviewStatusKeys: ['unvetted', 'reviewed'] })).toEqual([a, c].sort());
+    expect(await idsOf({ accountIds: ids, reviewStatusKeys: [] })).toEqual([]);
+    expect(await idsOf({ accountIds: ids, reviewFlags: ['new_from', 'declined_by_seller'] })).toEqual([a, b].sort());
+    expect(await idsOf({ accountIds: ids, reviewFlags: ['new_from'] })).toEqual([a]);
+    expect(await idsOf({ accountIds: [a, c] })).toEqual([a, c].sort());
+    expect(await idsOf({ accountIds: [] })).toEqual([]);
+    await t.run((ctx) => ctx.tx.update(account).set({ createdAt: new Date('2020-01-01T00:00:00Z') }).where(eq(account.id, c)));
+    expect(await idsOf({ accountIds: ids, arrivedSince: new Date('2021-01-01T00:00:00Z') })).toEqual([a, b].sort());
+  });
+
+  it('rejects more than 1,000 account ids', async () => {
+    const tooMany = Array.from({ length: 1001 }, (_, i) => 'acc_' + i);
+    await expect(run({ accountIds: tooMany })).rejects.toMatchObject({ status: 400 });
+    await expect(t.run((ctx) => countAccounts(ctx, { accountIds: tooMany }))).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('queueDefault keeps unreviewed and seller-declined accounts without an open assignment', async () => {
+    const unreviewed = await seed({ name: 'Default Unreviewed' });
+    const declined = await seed({ name: 'Default Declined' });
+    const reviewed = await seed({ name: 'Default Reviewed' });
+    const assigned = await seed({ name: 'Default Assigned' });
+    const assignedUnreviewed = await seed({ name: 'Default Assigned Unreviewed' });
+    await setReview(unreviewed, { reviewStatusKey: 'unvetted' });
+    await setReview(declined, { reviewStatusKey: 'reviewed', reviewFlags: ['declined_by_seller'] });
+    await setReview(reviewed, { reviewStatusKey: 'reviewed' });
+    await setReview(assigned, { reviewStatusKey: 'reviewed', hasOpenAssignment: true, reviewFlags: ['declined_by_seller'] });
+    await setReview(assignedUnreviewed, { reviewStatusKey: 'unvetted', hasOpenAssignment: true });
+    const ids = [unreviewed, declined, reviewed, assigned, assignedUnreviewed];
+    const q = { accountIds: ids, queueDefault: true, unreviewedStatusKeys: ['unvetted', 'needs_review'] };
+    expect(await idsOf(q)).toEqual([unreviewed, declined].sort());
+    expect(await t.run((ctx) => countAccounts(ctx, q))).toBe(2);
+    expect(await idsOf({ accountIds: ids, queueDefault: true })).toEqual([declined]);
+  });
+
+  it('countAccounts matches the filters and respects a practices data limit', async () => {
+    const inside = await seed({ name: 'Count Inside' });
+    const outside = await seed({ name: 'Count Outside' });
+    await setReview(inside, { reviewStatusKey: 'needs_review', practiceIds: ['prc_in'] });
+    await setReview(outside, { reviewStatusKey: 'needs_review', practiceIds: ['prc_out'] });
+    const q = { accountIds: [inside, outside], reviewStatusKeys: ['needs_review'], limit: 1 };
+    expect(await t.run((ctx) => countAccounts(ctx, q))).toBe(2);
+    const limited = { userId: 'usr_p', dataLimit: { kind: 'practices' as const, ids: ['prc_in'] } };
+    expect(await t.run((ctx) => countAccounts({ ...ctx, access: limited }, q))).toBe(1);
+    expect((await t.run((ctx) => search({ ...ctx, access: limited }, q))).data.map((r) => r.accountId)).toEqual([inside]);
   });
 });
 

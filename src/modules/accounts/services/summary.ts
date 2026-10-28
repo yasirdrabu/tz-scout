@@ -1,4 +1,5 @@
 import { and, eq, isNull, lt, max, or, sql } from 'drizzle-orm';
+import type { ReviewSnapshot } from '@/modules/routing/contracts/types';
 import type { ModuleContext } from '@/platform/context';
 import { account, accountSummary, signal } from '../db/schema';
 import { lockAccount } from './lock';
@@ -77,4 +78,34 @@ export async function applyScore(ctx: ModuleContext, accountId: string, s: Score
     )
     .returning({ accountId: accountSummary.accountId });
   if (written.length > 0) await repickPrimary(ctx, accountId);
+}
+
+/**
+ * Overwrites the summary's review columns from a `routing.review.changed` snapshot when its version is newer
+ * than the stored one (the condition is in the update, so a stale or replayed event writes nothing). An id
+ * that was merged away or is unknown is ignored: routing publishes a snapshot for the survivor.
+ */
+export async function applyReview(ctx: ModuleContext, accountId: string, s: ReviewSnapshot, version: number): Promise<void> {
+  await lockAccount(ctx, accountId);
+  const resolved = await resolveAccountId(ctx, accountId);
+  if (!resolved || resolved.mergedInto) return;
+  await ctx.tx
+    .update(accountSummary)
+    .set({
+      reviewStatusKey: s.reviewStatusKey,
+      ownerUserId: s.ownerUserId,
+      ownerHistoryUserIds: s.ownerHistoryUserIds,
+      hasOpenAssignment: s.hasOpenAssignment,
+      stage: s.stage,
+      reviewFlags: s.reviewFlags,
+      reviewVersion: version,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(accountSummary.tenantId, ctx.tenantId),
+        eq(accountSummary.accountId, accountId),
+        or(isNull(accountSummary.reviewVersion), lt(accountSummary.reviewVersion, version)),
+      ),
+    );
 }

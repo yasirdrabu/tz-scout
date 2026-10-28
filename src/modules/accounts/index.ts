@@ -1,5 +1,5 @@
 // Public interface of the accounts module. Other modules import only this file or `contracts/*`.
-export { accountsSummaryOnScored, accountsTenantDefaults } from './consumers';
+export { accountsSummaryOnReviewChanged, accountsSummaryOnScored, accountsTenantDefaults } from './consumers';
 export { DEFAULT_BUYING_ROLES, DEFAULT_EXCLUSION_RULES, VENDOR_PHRASES, seedAccountDefaults } from './defaults';
 export {
   mergeGuard,
@@ -46,7 +46,7 @@ export {
 } from './services/read';
 export { exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';
 export { mergeAccounts } from './services/merge';
-export { search, type SearchQuery, type SearchRow, type SearchSort } from './services/search';
+export { countAccounts, search, type SearchQuery, type SearchRow, type SearchSort } from './services/search';
 export { listExclusionLists, listExclusionRules, setExclusionList, setExclusionRule, type ExclusionRuleView } from './services/settings';
 export { filterVisibleAccountIds, visibleAccounts } from './services/visibility';
 export { setPractices } from './services/practices';

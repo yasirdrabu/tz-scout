@@ -1,5 +1,5 @@
 import './registry';
-import { accountsSummaryOnScored, accountsTenantDefaults, exclusionsRecheckHandler } from '@/modules/accounts';
+import { accountsSummaryOnReviewChanged, accountsSummaryOnScored, accountsTenantDefaults, exclusionsRecheckHandler } from '@/modules/accounts';
 import { importRunHandler, intakeAccountMerged, intakeTenantDefaults, resolveHandler, waitingExpireHandler } from '@/modules/intake';
 import { credentialsCleanupHandler } from '@/modules/integrations';
 import { routingTenantDefaults } from '@/modules/routing';
@@ -11,7 +11,7 @@ import type { JobHandlerDef } from '@/platform/runtime/jobs';
 import { startWorker } from '@/platform/runtime/worker';
 
 /** Every consumer in the app. Modules add theirs here as they land. */
-export const consumers: ConsumerDef[] = [accountsTenantDefaults, accountsSummaryOnScored, intakeTenantDefaults, intakeAccountMerged, ...scoringConsumers, routingTenantDefaults];
+export const consumers: ConsumerDef[] = [accountsTenantDefaults, accountsSummaryOnReviewChanged, accountsSummaryOnScored, intakeTenantDefaults, intakeAccountMerged, ...scoringConsumers, routingTenantDefaults];
 
 /** Every job handler in the app. */
 export const jobs: JobHandlerDef[] = [pingHandler, credentialsCleanupHandler, exclusionsRecheckHandler, resolveHandler, waitingExpireHandler, importRunHandler, rescoreAccountsHandler, rescorePageHandler, ageingHandler];
