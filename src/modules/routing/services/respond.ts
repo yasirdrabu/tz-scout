@@ -6,6 +6,7 @@ import { logFor } from '@/platform/log';
 import { publish } from '@/platform/events/outbox';
 import { assignmentAccepted, assignmentDeclined } from '../contracts/events';
 import type { ReviewSnapshot } from '../contracts/types';
+import { DEFAULT_AUTO_ACCEPT_WORKING_DAYS } from '../defaults';
 import { accountReview, assignment, declineReasonDef, routingSetting } from '../db/schema';
 import { addWorkingDays } from '../domain/working-days';
 import { declineProblems } from '../domain/status-rules';
@@ -150,7 +151,8 @@ export async function withdraw(
  */
 export async function autoAccept(ctx: ModuleContext, now: Date): Promise<number> {
   const [setting] = await ctx.tx.select({ days: routingSetting.autoAcceptWorkingDays }).from(routingSetting).where(eq(routingSetting.tenantId, ctx.tenantId));
-  const days = setting?.days;
+  // No row means the default; a row with null days means off.
+  const days = setting ? setting.days : DEFAULT_AUTO_ACCEPT_WORKING_DAYS;
   if (!days) return 0;
   const timezone = await tenantTimezone(ctx);
 

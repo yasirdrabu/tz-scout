@@ -97,6 +97,24 @@ describe('accept and decline (REV-E2-S2, REV-E2-S3)', () => {
     expect(queue.data.find((r) => r.accountId === a)?.flags.declinedBySeller?.reasonLabel).toBe('Not my territory');
   });
 
+  it('a leader status change answers the seller decline: declined leaves the queue, a reopen shows by status rules only', async () => {
+    const { a, id } = await assigned();
+    await asSeller((ctx) => decline(ctx, id, { reasonKey: 'not_my_territory' }));
+    await runOutbox(t.tenantId);
+    expect((await asPerson(t, (ctx) => listQueue(ctx, {}))).data.map((r) => r.accountId)).toContain(a);
+
+    await asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'declined', reasonKey: 'duplicate' }));
+    await runOutbox(t.tenantId);
+    expect((await reviewOf(a)).flags.declinedBySeller).toBeUndefined();
+    expect((await asPerson(t, (ctx) => listQueue(ctx, {}))).data.map((r) => r.accountId)).not.toContain(a);
+
+    await asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'reviewed', note: 'Back on the table' }));
+    await runOutbox(t.tenantId);
+    const row = (await asPerson(t, (ctx) => listQueue(ctx, {}))).data.find((r) => r.accountId === a);
+    expect(row).toMatchObject({ reviewStatusKey: 'needs_review' });
+    expect(row?.flags.declinedBySeller).toBeUndefined();
+  });
+
   it('a seller declines an accepted assignment: stage back to reviewed, flag set, back in the default queue', async () => {
     const first = await assigned();
     await asSeller((ctx) => accept(ctx, first.id));
@@ -186,6 +204,20 @@ describe('autoAccept (Ruling 6, REV-E2-S2-AC3)', () => {
     expect(await at.run((ctx) => autoAccept(ctx, new Date('2026-10-27T14:59:00Z')))).toBe(0);
     expect(await at.run((ctx) => autoAccept(ctx, new Date('2026-10-27T15:00:00Z')))).toBe(1);
     expect((await statusOf(id)).acceptedHow).toBe('auto_timeout');
+  });
+
+  it('uses the default of 2 working days when the tenant has no setting row', async () => {
+    await clear();
+    const kept = (await at.run((ctx) => ctx.tx.select().from(routingSetting)))[0]!;
+    await at.run((ctx) => ctx.tx.delete(routingSetting).where(eq(routingSetting.tenantId, ctx.tenantId)));
+    try {
+      const { id } = await pendingAt('2026-10-19T10:00:00Z'); // Monday
+      expect(await at.run((ctx) => autoAccept(ctx, new Date('2026-10-21T09:59:00Z')))).toBe(0);
+      expect(await at.run((ctx) => autoAccept(ctx, new Date('2026-10-21T10:00:00Z')))).toBe(1);
+      expect((await statusOf(id)).acceptedHow).toBe('auto_timeout');
+    } finally {
+      await at.run((ctx) => ctx.tx.insert(routingSetting).values(kept));
+    }
   });
 
   it('does nothing when the setting is off', async () => {

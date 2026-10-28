@@ -2,7 +2,8 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { backfillR1b } from '@/entry/seed';
 import { upsertFromArrival } from '@/modules/accounts';
-import { submitArrival } from '@/modules/intake';
+import { registerSource, submitArrival } from '@/modules/intake';
+import { arrival } from '@/modules/intake/db/schema';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
 import { accept, assign, getAccountStatus, listQueue, reviewChanged } from '@/modules/routing';
 import { stageChange } from '@/modules/routing/db/schema';
@@ -83,11 +84,16 @@ describe('R1b exit path', () => {
 });
 
 describe('backfillR1b', () => {
-  /** A tenant as R1a left it: no routing or scoring defaults delivered, and accounts with no review row. */
-  async function r1aTenant(count: number) {
+  /**
+   * A tenant as R1a left it: no routing or scoring defaults delivered, and accounts with no review row. `count` accounts
+   * have a resolved arrival; `bare` more have none (the live flow never gives those a review).
+   */
+  async function r1aTenant(count: number, bare = 0) {
     const t = await bareTenant();
+    const vendor = await t.run((ctx) => registerSource(ctx, { kind: 'vendor', name: 'Backfill vendor' }));
     const ids: string[] = [];
-    for (let i = 0; i < count; i++) {
+    const bareIds: string[] = [];
+    for (let i = 0; i < count + bare; i++) {
       const r = await t.run((ctx) =>
         upsertFromArrival(ctx, {
           arrivalId: newId('evt').replace('evt_', 'arr_'),
@@ -102,9 +108,29 @@ describe('backfillR1b', () => {
           externalIds: [],
         }),
       );
+      if (i >= count) {
+        bareIds.push(r.accountId);
+        continue;
+      }
       ids.push(r.accountId);
+      await t.run((ctx) =>
+        ctx.tx.insert(arrival).values({
+          id: newId('evt').replace('evt_', 'arr_'),
+          tenantId: ctx.tenantId,
+          closestSourceId: vendor.id,
+          vendorSourceId: vendor.id,
+          principal: 'test',
+          channel: 'api',
+          payload: {},
+          payloadHash: newId('evt'),
+          status: 'resolved',
+          accountId: r.accountId,
+          resolution: 'created',
+          resolvedAt: new Date(),
+        }),
+      );
     }
-    return { t, ids };
+    return { t, ids, bareIds };
   }
 
   const count = async (text: ReturnType<typeof sql>) => Number(((await adminDb.execute(text)) as unknown as { n: string }[])[0]!.n);
@@ -141,6 +167,14 @@ describe('backfillR1b', () => {
     await runOutbox(t.tenantId);
     // Only the rescore request is new; reviews, snapshots, scores and schedules stay as they were.
     expect(await counts(t.tenantId)).toEqual({ ...settled, rescorePages: settled.rescorePages + 1 });
+  }, 60_000);
+
+  it('gives no review to an account without a resolved arrival, as the live flow would not', async () => {
+    const { t, ids, bareIds } = await r1aTenant(1, 1);
+    await t.run((ctx) => backfillR1b(ctx));
+    const reviewed = (await adminDb.execute(sql`select account_id from routing.account_review where tenant_id = ${t.tenantId}`)) as unknown as { account_id: string }[];
+    expect(reviewed.map((r) => r.account_id)).toEqual(ids);
+    expect(bareIds).toHaveLength(1);
   }, 60_000);
 
   it('starts a review at the status of the first resolved arrival', async () => {

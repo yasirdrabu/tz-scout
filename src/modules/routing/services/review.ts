@@ -228,7 +228,11 @@ export async function applyStatusChange(ctx: ModuleContext, row: ReviewRow, inpu
       await ctx.tx.update(accountReview).set({ currentAssignmentId: null }).where(reviewWhere(ctx, accountId));
     }
   }
-  await ctx.tx.update(accountReview).set({ statusKey: target.key, statusChangedAt: new Date(), statusChangedBy: by }).where(reviewWhere(ctx, accountId));
+  // Acting on a seller's decline answers it, so its flag goes with any status change.
+  await ctx.tx
+    .update(accountReview)
+    .set({ statusKey: target.key, statusChangedAt: new Date(), statusChangedBy: by, flags: sql`${accountReview.flags} - 'declinedBySeller'` })
+    .where(reviewWhere(ctx, accountId));
   await ctx.tx.insert(statusChange).values({ id: changeId, tenantId: ctx.tenantId, accountId, fromKey: row.statusKey, toKey: target.key, note, reasonKey: target.isDeclined ? reasonKey : null, by });
   const event = reopening ? 'reopened' : target.isDeclined ? 'declined' : target.countsAsReviewed ? 'reviewed' : null;
   if (event) await moveStage(ctx, accountId, event, changeId);
