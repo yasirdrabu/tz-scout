@@ -1,9 +1,10 @@
 import { accountMerged } from '@/modules/accounts/contracts/events';
 import { arrivalResolved } from '@/modules/intake/contracts/events';
-import { tenantCreated } from '@/modules/tenancy/contracts/events';
+import { memberRemoved, tenantCreated } from '@/modules/tenancy/contracts/events';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { seedRoutingDefaults } from './defaults';
 import { reviewOnArrival, reviewOnMerge } from './services/review';
+import { withdrawForRemovedMember } from './services/respond';
 
 /** Gives a new tenant its review statuses, decline reasons, auto-accept setting and hourly schedule. */
 export const routingTenantDefaults = defineConsumer({
@@ -29,5 +30,12 @@ export const routingAccountMerged = defineConsumer({
   handle: async (e, ctx) => reviewOnMerge(ctx, e.data.survivorId, e.data.mergedId, e.data.mergedBy, e.id),
 });
 
+/** A removed member's open assignments are withdrawn, so their accounts go back to the leader. */
+export const routingMemberRemoved = defineConsumer({
+  name: 'routing.member_removed',
+  event: memberRemoved,
+  handle: async (e, ctx) => withdrawForRemovedMember(ctx, e.data.userId, e.data.removedBy),
+});
+
 /** Every routing consumer, for the worker's list. */
-export const routingConsumers = [routingTenantDefaults, routingArrivalResolved, routingAccountMerged];
+export const routingConsumers = [routingTenantDefaults, routingArrivalResolved, routingAccountMerged, routingMemberRemoved];

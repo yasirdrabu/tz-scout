@@ -34,7 +34,7 @@ export function checkLength(text: string | null | undefined, path: string): void
 const reviewWhere = (ctx: ModuleContext, accountId: string) => and(eq(accountReview.tenantId, ctx.tenantId), eq(accountReview.accountId, accountId));
 
 /** Locks the account's review row. Null when there is none. */
-async function lockRow(ctx: ModuleContext, accountId: string): Promise<ReviewRow | null> {
+export async function lockRow(ctx: ModuleContext, accountId: string): Promise<ReviewRow | null> {
   const [row] = await ctx.tx.select().from(accountReview).where(reviewWhere(ctx, accountId)).for('update');
   return row ?? null;
 }
