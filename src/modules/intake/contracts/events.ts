@@ -105,3 +105,16 @@ export const batchCompleted = defineEvent(
       .optional(),
   }),
 );
+
+export const feedbackRecorded = defineEvent(
+  'intake.feedback.recorded',
+  1,
+  z.object({
+    sourceId: z.string(),
+    arrivalId: z.string(),
+    accountId: z.string(),
+    kind: z.enum(['conflict_lost', 'declined_at_review', 'sent_back', 'declined_by_seller', 'enrichment_declined']),
+    reasonKey: z.string().nullable(),
+    note: z.string().nullable(),
+  }),
+);

@@ -14,11 +14,13 @@ export {
   arrivalWaiting,
   batchCompleted,
   batchCreated,
+  feedbackRecorded,
   sourceTrustChanged,
 } from './contracts/events';
 export { normaliseDomain } from './domain/normalise';
 export { importRunJob, resolveJob, waitingExpireJob } from './contracts/jobs';
-export { intakeAccountMerged, intakeTenantDefaults } from './consumers';
+export { intakeAccountMerged, intakeSellerDeclineFeedback, intakeStatusFeedback, intakeTenantDefaults } from './consumers';
+export { feedbackForArrival, listFeedback, recordFeedback, type FeedbackKind, type FeedbackView } from './services/feedback';
 export { importRunHandler, resolveHandler, waitingExpireHandler } from './jobs';
 export { DEFAULT_VENDOR_SOURCES, RELATIONSHIP_DEFAULTS, seedIntakeDefaults } from './defaults';
 export { listRelationshipDefaults, setRelationshipDefault, type RelationshipDefaultView } from './services/settings';
@@ -65,12 +67,14 @@ export {
   accountForArrival,
   batchAccountIds,
   getArrival,
+  getArrivalWithStatus,
   getBatch,
   listArrivals,
   listBatchItems,
   listBatches,
   type ArrivalDetail,
   type ArrivalFilter,
+  type ArrivalWithStatus,
   type ArrivalView,
   type BatchDetail,
   type BatchView,

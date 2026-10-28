@@ -1,7 +1,9 @@
 import { and, desc, eq, gte, isNotNull, sql } from 'drizzle-orm';
-import { filterVisibleAccountIds, isKnownFactKey } from '@/modules/accounts';
+import { filterVisibleAccountIds, getSummaries, isKnownFactKey } from '@/modules/accounts';
+import { members } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { arrival, batch } from '../db/schema';
+import { feedbackForArrival, type FeedbackView } from './feedback';
 import { chainInScope, keysetPage, pageArrivals, visibleArrivals } from './visibility';
 
 type ArrivalRow = typeof arrival.$inferSelect;
@@ -83,6 +85,34 @@ export async function getArrival(ctx: ModuleContext, id: string): Promise<Arriva
   return r ? { ...(await toViews(ctx, [r]))[0]!, payload: r.payload, unusedKeys: unusedKeysOf(r) } : null;
 }
 
+export type ArrivalWithStatus = ArrivalDetail & {
+  /** Where the account stands in review, from Accounts. Null until the account has a summary the principal may see. */
+  stage: string | null;
+  reviewStatus: string | null;
+  /** Null unless the caller may see it (`status:read`). */
+  ownerName: string | null;
+  /** What the principal's own source was told about this arrival (SRC-E1-S4). */
+  feedback: FeedbackView[];
+};
+
+/**
+ * The arrival with its account's stage, review status and owner (Ruling 9: read from Accounts, never
+ * from a copy in intake) and the feedback for the principal's source. Null when the arrival is not theirs to see.
+ */
+export async function getArrivalWithStatus(ctx: ModuleContext, id: string, opts: { ownerName: boolean }): Promise<ArrivalWithStatus | null> {
+  const found = await getArrival(ctx, id);
+  if (!found) return null;
+  const [summary] = found.accountId ? await getSummaries(ctx, [found.accountId]) : [];
+  const owner = opts.ownerName && summary?.ownerUserId ? (await members(ctx)).find((m) => m.userId === summary.ownerUserId) : undefined;
+  return {
+    ...found,
+    stage: summary?.stage ?? null,
+    reviewStatus: summary?.reviewStatusKey ?? null,
+    ownerName: owner?.name ?? null,
+    feedback: await feedbackForArrival(ctx, id),
+  };
+}
+
 export type ArrivalFilter = {
   batchId?: string;
   accountId?: string;
@@ -148,6 +178,8 @@ export type BatchView = {
 export type BatchDetail = BatchView & {
   /** Items by stage; `waiting` items are the ones a person must act on. */
   stages: { received: number; resolving: number; waiting: number; resolved: number; rejected: number };
+  /** Resolved items by the stage of their account (SRC-E2-S3-AC1). Items whose account the principal can't see are left out. */
+  countsByStage: Record<string, number>;
   rejections: { arrivalId: string; externalRef: string | null; reason: string | null; detail: string | null }[];
 };
 
@@ -259,6 +291,18 @@ const rejectionOf = (r: { id: string; externalRef: string | null; payload: unkno
   detail: r.rejectDetail,
 });
 
+/** Resolved items by account stage. `items` maps each account to how many of the batch's items resolved to it. */
+async function stageCounts(ctx: ModuleContext, items: Map<string, number>): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  const ids = [...items.keys()];
+  for (let i = 0; i < ids.length; i += 1000) {
+    for (const s of await getSummaries(ctx, ids.slice(i, i + 1000))) {
+      if (s.stage) out[s.stage] = (out[s.stage] ?? 0) + (items.get(s.accountId) ?? 0);
+    }
+  }
+  return out;
+}
+
 /**
  * SRC-E2-S3-AC1: counts, counts by stage and the rejections. Null when the batch is hidden (SRC-E2-S3-AC3).
  * Seen only through account visibility, everything (item count included) covers just the visible items.
@@ -269,10 +313,15 @@ export async function getBatch(ctx: ModuleContext, id: string): Promise<BatchDet
   const stages = { received: 0, resolving: 0, waiting: 0, resolved: 0, rejected: 0 };
   if (!found.chainOk) {
     const rows = await visibleItems(ctx, id);
-    for (const r of rows) stages[r.status === 'resolving' && r.waitingOn ? 'waiting' : (r.status as keyof typeof stages)]++;
+    const accounts = new Map<string, number>();
+    for (const r of rows) {
+      stages[r.status === 'resolving' && r.waitingOn ? 'waiting' : (r.status as keyof typeof stages)]++;
+      if (r.status === 'resolved' && r.accountId) accounts.set(r.accountId, (accounts.get(r.accountId) ?? 0) + 1);
+    }
     return {
       ...narrowed(found.row, rows),
       stages,
+      countsByStage: await stageCounts(ctx, accounts),
       rejections: rows.filter((r) => r.status === 'rejected').reverse().map((r) => rejectionOf({ ...r, id: r.id })),
     };
   }
@@ -282,12 +331,18 @@ export async function getBatch(ctx: ModuleContext, id: string): Promise<BatchDet
     .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.batchId, id)))
     .groupBy(arrival.status, sql`${arrival.waitingOn} is not null`);
   for (const g of grouped) stages[g.status === 'resolving' && g.waiting ? 'waiting' : (g.status as keyof typeof stages)] += g.n;
+  const resolved = await ctx.tx
+    .select({ accountId: arrival.accountId, n: sql<number>`count(*)::int` })
+    .from(arrival)
+    .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.batchId, id), eq(arrival.status, 'resolved'), isNotNull(arrival.accountId)))
+    .groupBy(arrival.accountId);
+  const countsByStage = await stageCounts(ctx, new Map(resolved.map((r) => [r.accountId!, r.n])));
   const rejected = await ctx.tx
     .select({ id: arrival.id, externalRef: arrival.externalRef, payload: arrival.payload, rejectReason: arrival.rejectReason, rejectDetail: arrival.rejectDetail })
     .from(arrival)
     .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.batchId, id), eq(arrival.status, 'rejected')))
     .orderBy(arrival.receivedAt, arrival.id);
-  return { ...batchView(found.row), stages, rejections: rejected.map(rejectionOf) };
+  return { ...batchView(found.row), stages, countsByStage, rejections: rejected.map(rejectionOf) };
 }
 
 /** Every item of a batch the principal may see, newest first. Null when the batch is hidden. */

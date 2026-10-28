@@ -40,6 +40,7 @@ export type IdPrefix =
   | 'rsc'
   | 'stc'
   | 'drd'
+  | 'fb'
   | 'blob';
 
 const ulid = monotonicFactory();
