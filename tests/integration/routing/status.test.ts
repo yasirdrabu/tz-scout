@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { submitArrival } from '@/modules/intake';
+import { mergeAccounts } from '@/modules/accounts';
+import { rejectArrival, submitArrival } from '@/modules/intake';
 import { arrival } from '@/modules/intake/db/schema';
 import { accept, assign, changeStatus, decline, getAccountStatus, listAssignments } from '@/modules/routing';
 import { assignment, reviewStatusDef, statusChange } from '@/modules/routing/db/schema';
@@ -152,9 +153,30 @@ describe('account status edges (REV-E4-S2)', () => {
     expect(await asSource(t, mine.agentId, (ctx) => getAccountStatus(ctx, sent.arrivalId))).toMatchObject(expected);
     expect(await asSource(t, other.agentId, (ctx) => getAccountStatus(ctx, sent.arrivalId))).toBeNull();
   });
+
+  it('a rejected arrival with no account names the reason, else a plain fallback', async () => {
+    const { agentId } = await personAndAgent(t, 'Rejected');
+    const send = () => asSource(t, agentId, (ctx) => submitArrival(ctx, { account: { name: 'Nope Co', domain: domain() } }, { channel: 'api' }));
+    const one = await send();
+    const two = await send();
+    await t.run((ctx) => rejectArrival(ctx, one.arrivalId, 'invalid', 'secret detail'));
+    await t.run((ctx) => rejectArrival(ctx, two.arrivalId, 'excluded', 'Software vendor'));
+    expect((await asSource(t, agentId, (ctx) => getAccountStatus(ctx, one.arrivalId)))?.summary).toBe('Not accepted: the details were not valid.');
+    expect((await asSource(t, agentId, (ctx) => getAccountStatus(ctx, two.arrivalId)))?.summary).toBe('Not accepted.');
+  });
 });
 
 describe('assignment lists (REV-E2-S2)', () => {
+  it('a merged account id follows the survivor', async () => {
+    const survivor = await arrivedAccount(t);
+    const merged = await arrivedAccount(t);
+    const made = await asPerson(t, (ctx) => assign(ctx, merged, { sellerUserId: seller }));
+    await asPerson(t, (ctx) => mergeAccounts(ctx, survivor, merged));
+    await runOutbox(t.tenantId);
+    const page = await asPerson(t, (ctx) => listAssignments(ctx, { accountId: merged }));
+    expect(page.data.map((r) => [r.id, r.accountId])).toEqual([[made.id, survivor]]);
+  });
+
   it("mine with an account id lists the seller's own rows for it", async () => {
     const mineOnly = await member(t, 'seller');
     const a = await arrivedAccount(t);

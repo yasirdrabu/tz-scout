@@ -26,6 +26,13 @@ export type AccountStatus = {
   summary: string;
 };
 
+/** Copy for the fixed rejection reasons; the detail text stays out of it. */
+const REJECTED: Record<string, string> = {
+  invalid: 'Not accepted: the details were not valid.',
+  daily_cap_reached: 'Not accepted: daily limit reached.',
+  duplicate_in_batch: 'Not accepted: listed twice in the batch.',
+};
+
 const waiting = (summary: string): AccountStatus => ({
   accountId: null,
   name: null,
@@ -52,7 +59,7 @@ export async function getAccountStatus(ctx: ModuleContext, idOrArrivalId: string
   if (idOrArrivalId.startsWith('arr_')) {
     const arr = await getArrival(ctx, idOrArrivalId);
     if (!arr) return null;
-    if (!arr.accountId) return waiting(arr.status === 'rejected' ? 'Not accepted.' : 'Received. Matching it to an account.');
+    if (!arr.accountId) return waiting(arr.status === 'rejected' ? (REJECTED[arr.reason ?? ''] ?? 'Not accepted.') : 'Received. Matching it to an account.');
     asked = arr.accountId;
   }
   const accountId = asked ? (await resolveAccountId(ctx, asked))?.id : undefined;
