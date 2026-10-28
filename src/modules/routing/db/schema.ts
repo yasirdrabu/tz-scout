@@ -72,6 +72,8 @@ export const accountReview = routing.table(
     stageChangedAt: at('stage_changed_at').notNull().defaultNow(),
     flags: jsonb('flags').$type<ReviewFlags>().notNull().default({}), // newFrom, declinedBySeller
     version: integer('version').notNull().default(1),
+    /** Set when the account was merged into another; the row is then kept read-only, as a record. */
+    mergedInto: text('merged_into'),
     createdAt: at('created_at').notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.accountId] })],
@@ -110,6 +112,7 @@ export const assignment = routing.table(
     declineReasonKey: text('decline_reason_key'),
     declineNote: text('decline_note'),
     previousAssignmentId: text('previous_assignment_id'),
+    ownershipDecision: text('ownership_decision').notNull().default('assign'), // assign | keep (REV-E3-S1-AC2)
   },
   (t) => [
     // At most one open assignment per account.

@@ -62,6 +62,7 @@ export {
 } from './services/submit';
 export {
   accountForArrival,
+  batchAccountIds,
   getArrival,
   getBatch,
   listArrivals,

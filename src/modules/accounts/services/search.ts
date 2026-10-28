@@ -1,10 +1,11 @@
-import { and, asc, count, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { account, accountAlias, accountSummary, signal } from '../db/schema';
 import { overlaps, visibleAccounts } from './visibility';
 
-export type SearchSort = 'priority' | 'last_signal' | 'created' | 'name';
+/** `queue` is the review queue's order: priority, then newest first. */
+export type SearchSort = 'priority' | 'last_signal' | 'created' | 'name' | 'queue';
 
 /** Every ACC-E8 filter, plus the review queue's. Scoring columns come from scoring.account.scored and review columns from routing.review.changed; CRM columns stay empty until R1c, so filters on them match nothing for now. */
 export type SearchQuery = {
@@ -65,12 +66,13 @@ const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 const MAX_ACCOUNT_IDS = 1000;
 
-/** Each sort is one key plus the account id as tie-break. Nulls sort last. */
-const SORTS: Record<SearchSort, { expr: SQL; cast: 'int' | 'timestamptz' | 'text'; dir: 'asc' | 'desc' }> = {
+/** Each sort is one key plus the account id as tie-break, ascending unless `idDir` says so (ids are ULIDs, so descending is newest first). Nulls sort last. */
+const SORTS: Record<SearchSort, { expr: SQL; cast: 'int' | 'timestamptz' | 'text'; dir: 'asc' | 'desc'; idDir?: 'desc' }> = {
   priority: { expr: sql`${accountSummary.priority}`, cast: 'int', dir: 'desc' },
   last_signal: { expr: sql`${accountSummary.lastSignalAt}`, cast: 'timestamptz', dir: 'desc' },
   created: { expr: sql`${account.createdAt}`, cast: 'timestamptz', dir: 'desc' },
   name: { expr: sql`${account.name}`, cast: 'text', dir: 'asc' },
+  queue: { expr: sql`${accountSummary.priority}`, cast: 'int', dir: 'desc', idDir: 'desc' },
 };
 
 /** The sort key travels as text so timestamps keep their microseconds. */
@@ -100,8 +102,8 @@ function decodeCursor(raw: string, sort: SearchSort): Cursor {
 
 /** Rows strictly after the cursor in the sort order (nulls come last). */
 function afterCursor(sort: SearchSort, c: Cursor): SQL {
-  const { expr, cast, dir } = SORTS[sort];
-  const idAfter = sql`${account.id} > ${c.id}`;
+  const { expr, cast, dir, idDir } = SORTS[sort];
+  const idAfter = idDir === 'desc' ? sql`${account.id} < ${c.id}` : sql`${account.id} > ${c.id}`;
   if (c.key === null) return and(sql`${expr} is null`, idAfter) as SQL;
   const key = sql`${c.key}::${sql.raw(cast)}`;
   const past = dir === 'desc' ? sql`${expr} < ${key}` : sql`${expr} > ${key}`;
@@ -245,7 +247,7 @@ export async function search(ctx: ModuleContext, q: SearchQuery = {}): Promise<{
         cursor ? afterCursor(sort, cursor) : undefined,
       ),
     )
-    .orderBy(keyOrder, asc(account.id))
+    .orderBy(keyOrder, spec.idDir === 'desc' ? desc(account.id) : asc(account.id))
     .limit(limit + 1);
 
   const page = rows.slice(0, limit);

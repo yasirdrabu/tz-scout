@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNotNull, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds, isKnownFactKey } from '@/modules/accounts';
 import type { ModuleContext } from '@/platform/context';
 import { arrival, batch } from '../db/schema';
@@ -110,6 +110,20 @@ export async function listArrivals(ctx: ModuleContext, f: ArrivalFilter = {}): P
 export async function accountForArrival(ctx: ModuleContext, arrivalId: string): Promise<string | null> {
   const { data } = await pageArrivals(ctx, { where: [eq(arrival.id, arrivalId)], limit: 1 });
   return data[0]?.accountId ?? null;
+}
+
+/**
+ * The accounts a batch's items resolved to, at most 1,000, for the review queue's batch filter. Not
+ * narrowed by visibility: the caller passes them to accounts `search`, which applies the data limits.
+ */
+export async function batchAccountIds(ctx: ModuleContext, batchId: string): Promise<string[]> {
+  const rows = await ctx.tx
+    .selectDistinct({ accountId: arrival.accountId })
+    .from(arrival)
+    .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.batchId, batchId), isNotNull(arrival.accountId)))
+    .orderBy(arrival.accountId)
+    .limit(1000);
+  return rows.map((r) => r.accountId!);
 }
 
 // ---- Batches ----

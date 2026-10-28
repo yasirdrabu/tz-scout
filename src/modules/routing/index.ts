@@ -27,7 +27,7 @@ export {
   type ReviewSnapshot,
   type Stage,
 } from './contracts/types';
-export { routingTenantDefaults } from './consumers';
+export { routingAccountMerged, routingArrivalResolved, routingConsumers, routingTenantDefaults } from './consumers';
 export { DEFAULT_AUTO_ACCEPT_WORKING_DAYS, DEFAULT_REASONS, DEFAULT_STATUSES, seedRoutingDefaults } from './defaults';
 export { nextStage, type StageEvent } from './domain/stages';
 export { statusChangeProblems, type ReasonDef, type StatusDefRules } from './domain/status-rules';
@@ -35,3 +35,6 @@ export { addWorkingDays } from './domain/working-days';
 export { publishReviewSnapshot } from './services/snapshot';
 export { moveStage } from './services/stage';
 export { routingReviewStatusValidator } from './services/status-validator';
+export { assign, bulk, MAX_BULK, previewAssign, type AssignInput, type AssignmentView, type AssignPreview, type BulkAction, type BulkResult } from './services/assign';
+export { countQueue, listQueue, type QueueFilters, type QueueRow } from './services/queue';
+export { changeStatus, ensureReview, setInsights, type InsightsView, type StatusChangeInput } from './services/review';
