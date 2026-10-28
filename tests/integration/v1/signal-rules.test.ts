@@ -55,9 +55,10 @@ const rule = (over: Record<string, unknown> = {}) => ({
 describe('signal rules on /v1', () => {
   it('AC0: PUT needs scoring:manage', async () => {
     const o = await draft('Locked');
+    const before = await t.run((ctx) => listSignalRules(ctx, o.id));
     expect((await call(putRules, readKey, `offers/${o.id}/signal-rules`, 'PUT', { rules: [rule()] })).status).toBe(403);
     expect((await call(putRules, manageKey, `offers/${o.id}/signal-rules`, 'PUT', { rules: [rule()] })).status).toBe(403);
-    expect(await t.run((ctx) => listSignalRules(ctx, o.id))).toEqual([]);
+    expect(await t.run((ctx) => listSignalRules(ctx, o.id))).toEqual(before);
   });
 
   it('PUT replaces the rules and GET shows them in snake_case', async () => {
