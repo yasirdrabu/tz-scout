@@ -1,6 +1,7 @@
 // Tier of one offer match, and the floors applied to the account's tier (SCO-E3).
 
 import { TIERS, type ScoringProfile, type Tier, type TierReason } from '../contracts/types';
+import { dateText } from './explain';
 
 const DAY_MS = 86_400_000;
 const WARM_INTRO_MIN_FIT = 40;
@@ -51,7 +52,7 @@ export function applyFloors(
     const recent = input.researchSignalAt !== null && (now.getTime() - input.researchSignalAt.getTime()) / DAY_MS <= profile.researchFloorDays;
     const floor: Tier = input.researchTier === 'A' ? (recent ? 'act_now' : 'good_fit') : input.researchTier === 'B' ? 'good_fit' : 'watch';
     if (higher(tier, floor)) {
-      const since = input.researchSignalAt ? ` with a signal from ${input.researchSignalAt.toISOString().slice(0, 10)}` : '';
+      const since = input.researchSignalAt ? ` with a signal from ${dateText(input.researchSignalAt)}` : '';
       tier = floor;
       tierReason = 'research_floor';
       text = `Researcher rated ${input.researchTier}${since}: ${TIER_LABEL[floor]}`;

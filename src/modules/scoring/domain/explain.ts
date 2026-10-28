@@ -61,7 +61,7 @@ export type ExplanationInput = {
 
 const oneDecimal = (n: number) => Math.round(n * 10) / 10;
 const ago = (days: number) => (days === 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`);
-const dateText = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+export const dateText = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 
 /** Unknown parts earned a middle share, so the most they can move is the larger side of it. The name comes from the note ("Headcount unknown."). */
 export function missingInputs(parts: FitResult['parts']): string[] {

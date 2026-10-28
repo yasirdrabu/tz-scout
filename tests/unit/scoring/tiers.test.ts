@@ -44,7 +44,7 @@ describe('applyFloors', () => {
 
   it('SCO-E3-S3-AC1: tier A with a signal 30 days old lifts watch to act now', () => {
     const r = applyFloors('watch', { ...base, researchTier: 'A', researchSignalAt: daysAgo(30) }, profile, NOW);
-    expect(r).toEqual({ tier: 'act_now', tierReason: 'research_floor', text: 'Researcher rated A with a signal from 2026-09-14: act now' });
+    expect(r).toEqual({ tier: 'act_now', tierReason: 'research_floor', text: 'Researcher rated A with a signal from Sep 14, 2026: act now' });
   });
   it('SCO-E3-S3-AC2: tier A with a signal 200 days old floors at good fit', () => {
     const r = applyFloors('watch', { ...base, researchTier: 'A', researchSignalAt: daysAgo(200) }, profile, NOW);

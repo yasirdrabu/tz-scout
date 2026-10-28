@@ -101,12 +101,16 @@ export const rescoreOnOfferApproved = defineConsumer({
   },
 });
 
-/** Accounts that hold a match for an archived offer lose it. */
+/**
+ * Accounts that hold a match for an archived offer lose it. The practice page covers a rescore that loaded its offers
+ * before the archive and has not committed yet: its matches are invisible to the first page, but its accounts are listed here.
+ */
 export const rescoreOnOfferArchived = defineConsumer({
   name: 'scoring.rescore_offer_archived',
   event: offerArchived,
   handle: async (e, ctx) => {
     await startRescore(ctx, { offerId: e.data.offerId }, 'offer_changed');
+    await startRescore(ctx, practiceAndUnassigned(e.data.practiceId), 'offer_changed');
   },
 });
 

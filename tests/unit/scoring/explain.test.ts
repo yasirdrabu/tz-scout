@@ -149,7 +149,7 @@ describe('buildExplanation', () => {
     const { e } = explain(account(), off, [], { researchTier: 'A' });
     expect(e.tier).toBe('act_now');
     expect(e.tierReason).toBe('research_floor');
-    expect(e.lines.some((l) => l.text === 'Researcher rated A with a signal from 2026-09-14: act now')).toBe(true);
+    expect(e.lines.some((l) => l.text === 'Researcher rated A with a signal from Sep 14, 2026: act now')).toBe(true);
   });
 
   it('SCO-E3-S3-AC4: a disqualified account stays not a fit and names the exclusion', () => {

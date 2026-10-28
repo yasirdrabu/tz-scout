@@ -20,7 +20,7 @@ import { account } from '@/modules/accounts/db/schema';
 import { accountUpdated, signalRecorded } from '@/modules/accounts/contracts/events';
 import { getArrival, intakeSourceInfo, registerSource, submitArrival } from '@/modules/intake';
 import { arrivalRejected, arrivalResolved, sourceTrustChanged } from '@/modules/intake/contracts/events';
-import { approveOffer, archiveOffer, createOffer, createPractice } from '@/modules/offers';
+import { approveOffer, archiveOffer, createOffer, createPractice, listApprovedOffers } from '@/modules/offers';
 import { offerChanged } from '@/modules/offers/contracts/events';
 import { getScore, requestRescore, scoreAccount, updateProfile } from '@/modules/scoring';
 import { accountScore, offerMatch, scoreChange } from '@/modules/scoring/db/schema';
@@ -217,6 +217,27 @@ describe('fan-out on offers (SCO-E5-S2)', () => {
     expect((orphan!.explanation as { lines: { text?: string }[] }).lines.map((l) => l.text)).toContain('No approved offer to match against.');
     expect((await scoredEvents(t, onlyOffer.accountId)).pop()).toMatchObject({ previousBestOfferId: best.id, bestOfferId: null });
   });
+
+  it('Review Focus 2 under concurrency: a rescore that loaded offers before the archive and commits after it does not keep the archived best offer', async () => {
+    const { t, practice } = await world();
+    const best = await approved(t, practice.id, 'Best');
+    await runOutbox(t.tenantId);
+    const a = await seed(t, [practice.id]);
+    const stale = await t.run((ctx) => listApprovedOffers(ctx));
+    expect(stale.map((o) => o.id)).toContain(best.id);
+    await t.run((ctx) => archiveOffer(ctx, best.id));
+
+    // The slow job scores with the list it loaded before the archive and has not committed when the archive is delivered.
+    let delivered: Promise<void> = Promise.resolve();
+    await t.run(async (ctx) => {
+      await scoreAccount(ctx, a.accountId, 'manual_rescore', undefined, { now: NOW, offers: stale });
+      delivered = runOutbox(t.tenantId);
+      await new Promise((r) => setTimeout(r, 1500));
+    });
+    await delivered;
+    expect((await current(t, a.accountId))!.bestOfferId).not.toBe(best.id);
+    expect((await matchRows(t, a.accountId)).map((m) => m.offerId)).not.toContain(best.id);
+  }, 30_000);
 
   it('offer.changed rescores only when it affects matching, and skips the practice page once the offer is not approved', async () => {
     const { t, practice } = await world();
