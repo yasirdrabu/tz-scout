@@ -110,6 +110,16 @@ export async function loadSource(ctx: ModuleContext, id: string): Promise<Row | 
   return row;
 }
 
+/** Each given source's name, by id, in the context's tenant; unknown ids are left out. */
+export async function sourceNames(ctx: ModuleContext, ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const rows = await ctx.tx
+    .select({ id: source.id, name: source.name })
+    .from(source)
+    .where(and(eq(source.tenantId, ctx.tenantId), inArray(source.id, ids)));
+  return new Map(rows.map((r) => [r.id, r.name]));
+}
+
 const isUniqueViolation = (e: unknown): boolean => {
   const err = (e as { code?: string; cause?: { code?: string } } | null) ?? {};
   return err.code === '23505' || err.cause?.code === '23505';

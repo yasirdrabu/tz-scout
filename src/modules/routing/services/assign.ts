@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getSummaries } from '@/modules/accounts';
 import { getOffer } from '@/modules/offers';
 import { members } from '@/modules/tenancy';
@@ -18,6 +18,7 @@ import {
   lockForWrite,
   openAssignment,
   requirePerson,
+  visibleReview,
   type StatusChangeInput,
 } from './review';
 import { publishReviewSnapshot } from './snapshot';
@@ -81,8 +82,8 @@ async function plan(ctx: ModuleContext, row: { accountId: string; statusKey: str
 
 /** What the assign dialog shows before submit: the preflight, the approval and the assignment it replaces. */
 export async function previewAssign(ctx: ModuleContext, accountId: string, sellerUserId: string): Promise<AssignPreview> {
-  // The same checks as a write (visible, live review row); the lock only lasts this read.
-  const row = await lockForWrite(ctx, accountId);
+  requirePerson(ctx);
+  const row = await visibleReview(ctx, accountId, { lock: false });
   const { open: _open, ...preview } = await plan(ctx, row, sellerUserId);
   return preview;
 }
@@ -138,11 +139,11 @@ export async function assign(ctx: ModuleContext, accountId: string, input: Assig
     throw e;
   }
 
-  const { declinedBySeller: _cleared, ...flags } = row.flags;
   const leadOfferOverrideId = input.leadOfferId ?? row.leadOfferOverrideId;
+  // In SQL, so the "New from" that ending the replaced assignment cleared stays cleared.
   await ctx.tx
     .update(accountReview)
-    .set({ currentAssignmentId: id, flags, leadOfferOverrideId })
+    .set({ currentAssignmentId: id, flags: sql`${accountReview.flags} - 'declinedBySeller'`, leadOfferOverrideId })
     .where(and(eq(accountReview.tenantId, ctx.tenantId), eq(accountReview.accountId, accountId)));
   const offerId = leadOfferOverrideId ?? (await getSummaries(ctx, [accountId]))[0]?.bestOfferId ?? null;
   await publish(ctx, assignmentCreated, {

@@ -1,6 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { countAccounts, search, type SearchQuery, type SearchRow } from '@/modules/accounts';
-import { batchAccountIds } from '@/modules/intake';
+import { batchAccountIds, sourceNames } from '@/modules/intake';
 import type { ModuleContext } from '@/platform/context';
 import type { ReviewFlags } from '../contracts/types';
 import { accountReview } from '../db/schema';
@@ -27,8 +27,8 @@ export type QueueRow = SearchRow & {
   insights: string | null;
   insightsBy: string | null;
   insightsAt: Date | null;
-  /** The flag details: who declined and why, where a new arrival came from. */
-  flags: ReviewFlags;
+  /** The flag details: who declined and why, which source a new arrival came from ("New from <source>"). */
+  flags: Omit<ReviewFlags, 'newFrom'> & { newFrom?: NonNullable<ReviewFlags['newFrom']> & { sourceName: string | null } };
 };
 
 /** The accounts search query for the filters. Data limits apply inside accounts. */
@@ -63,16 +63,18 @@ export async function listQueue(ctx: ModuleContext, f: QueueFilters = {}): Promi
     : [];
   const byId = new Map(reviews.map((r) => [r.accountId, r]));
   const labels = new Map(statuses.map((s) => [s.key, s.label]));
+  const names = await sourceNames(ctx, [...new Set(reviews.flatMap((r) => (r.flags.newFrom ? [r.flags.newFrom.sourceId] : [])))]);
   return {
     data: page.data.map((r) => {
       const review = byId.get(r.accountId);
+      const { newFrom, ...flags } = review?.flags ?? {};
       return {
         ...r,
         reviewStatusLabel: r.reviewStatusKey ? (labels.get(r.reviewStatusKey) ?? null) : null,
         insights: review?.insights ?? null,
         insightsBy: review?.insightsBy ?? null,
         insightsAt: review?.insightsAt ?? null,
-        flags: review?.flags ?? {},
+        flags: newFrom ? { ...flags, newFrom: { ...newFrom, sourceName: names.get(newFrom.sourceId) ?? null } } : flags,
       };
     }),
     nextCursor: page.nextCursor,

@@ -35,6 +35,7 @@ export {
   listSources,
   personSourceFor,
   registerSource,
+  sourceNames,
   updateSource,
   type RegisterSourceInput,
   type SourceKind,

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds, resolveAccountId } from '@/modules/accounts';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -8,7 +8,7 @@ import { assignmentWithdrawn, statusChanged } from '../contracts/events';
 import type { ReviewSnapshot } from '../contracts/types';
 import { accountReview, assignment, declineReasonDef, reviewStatusDef, stageChange, statusChange } from '../db/schema';
 import { statusChangeProblems, type ReasonDef } from '../domain/status-rules';
-import { publishReviewSnapshot } from './snapshot';
+import { currentReviewSnapshot, publishReviewSnapshot } from './snapshot';
 import { moveStage } from './stage';
 
 export const OPEN_STATUSES = ['pending', 'accepted'];
@@ -44,20 +44,33 @@ async function lockRow(ctx: ModuleContext, accountId: string): Promise<ReviewRow
  * review row, which is locked. A merged account's row is read-only, so it is not found either.
  */
 export async function lockForWrite(ctx: ModuleContext, accountId: string): Promise<ReviewRow> {
+  return visibleReview(ctx, accountId, { lock: true });
+}
+
+/** The same checks as `lockForWrite`, with or without the row lock (reads go without). */
+export async function visibleReview(ctx: ModuleContext, accountId: string, opts: { lock: boolean }): Promise<ReviewRow> {
   if ((await filterVisibleAccountIds(ctx, [accountId])).length === 0) throw notFound();
-  const row = await lockRow(ctx, accountId);
+  const row = opts.lock ? await lockRow(ctx, accountId) : (await ctx.tx.select().from(accountReview).where(reviewWhere(ctx, accountId)))[0];
   if (!row || row.mergedInto) throw notFound();
   return row;
 }
 
+type CopiedFields = Partial<Pick<ReviewRow, 'stage' | 'insights' | 'insightsBy' | 'insightsAt' | 'leadOfferOverrideId'>>;
+
 /**
  * Creates the account's review row when it has none (insert or nothing, so the arrival consumer and the
- * backfill can't both create one), then locks it. The caller publishes the snapshot.
+ * backfill can't both create one), then locks it. A merge passes the merged row's stage, insights and
+ * lead offer to start from. The caller publishes the snapshot.
  */
-export async function ensureReview(ctx: ModuleContext, accountId: string, statusKey: string): Promise<{ row: ReviewRow; created: boolean }> {
+export async function ensureReview(
+  ctx: ModuleContext,
+  accountId: string,
+  statusKey: string,
+  copy: CopiedFields = {},
+): Promise<{ row: ReviewRow; created: boolean }> {
   const inserted = await ctx.tx
     .insert(accountReview)
-    .values({ tenantId: ctx.tenantId, accountId, statusKey, stage: 'arrived' })
+    .values({ tenantId: ctx.tenantId, accountId, statusKey, stage: 'arrived', ...copy })
     .onConflictDoNothing()
     .returning({ accountId: accountReview.accountId });
   return { row: (await lockRow(ctx, accountId))!, created: inserted.length > 0 };
@@ -76,7 +89,10 @@ export async function openAssignment(ctx: ModuleContext, accountId: string) {
   return open ?? null;
 }
 
-/** Ends an open assignment as withdrawn or replaced and publishes `routing.assignment.withdrawn`. */
+/**
+ * Ends an open assignment as withdrawn or replaced and publishes `routing.assignment.withdrawn`.
+ * "New from" belongs to the assignment, so it ends with it.
+ */
 export async function endAssignment(
   ctx: ModuleContext,
   open: { id: string; accountId: string },
@@ -85,6 +101,7 @@ export async function endAssignment(
   replacedBy: string | null,
 ): Promise<void> {
   await ctx.tx.update(assignment).set({ status, respondedAt: new Date() }).where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.id, open.id)));
+  await ctx.tx.update(accountReview).set({ flags: sql`${accountReview.flags} - 'newFrom'` }).where(reviewWhere(ctx, open.accountId));
   await publish(ctx, assignmentWithdrawn, { assignmentId: open.id, accountId: open.accountId, by, replacedBy });
 }
 
@@ -128,12 +145,20 @@ export async function reviewOnMerge(ctx: ModuleContext, survivorId: string, merg
   for (const id of [survivorId, mergedId].sort()) locked.set(id, await lockRow(ctx, id));
   const merged = locked.get(mergedId);
   if (!merged || merged.mergedInto) return;
-  const { created } = await ensureReview(ctx, survivorId, merged.statusKey);
+  const { row: survivor, created } = await ensureReview(ctx, survivorId, merged.statusKey, {
+    stage: merged.stage,
+    insights: merged.insights,
+    insightsBy: merged.insightsBy,
+    insightsAt: merged.insightsAt,
+    leadOfferOverrideId: merged.leadOfferOverrideId,
+  });
 
+  // The assignment moves only to a survivor with none open that can be assigned (not declined, Ruling 14).
   const moving = await openAssignment(ctx, mergedId);
   const kept = created ? null : await openAssignment(ctx, survivorId);
+  const survivorDeclined = (await loadStatuses(ctx)).find((s) => s.key === survivor.statusKey)?.isDeclined ?? false;
   let moved: typeof moving = null;
-  if (moving && kept) await endAssignment(ctx, moving, 'withdrawn', by, null);
+  if (moving && (kept || survivorDeclined)) await endAssignment(ctx, moving, 'withdrawn', by, null);
   else moved = moving;
 
   const repoint = { accountId: survivorId };
@@ -159,12 +184,16 @@ export type StatusChangeInput = { to: string; note?: string | null; reasonKey?: 
 export async function changeStatus(ctx: ModuleContext, accountId: string, input: StatusChangeInput): Promise<ReviewSnapshot> {
   const by = requirePerson(ctx);
   const row = await lockForWrite(ctx, accountId);
-  await applyStatusChange(ctx, row, input, by);
+  if (!(await applyStatusChange(ctx, row, input, by))) return currentReviewSnapshot(ctx, accountId);
   return publishReviewSnapshot(ctx, accountId);
 }
 
-/** The status change itself, on a locked row, without the snapshot (the calling write publishes it). `assign` uses it for "Approve and assign". */
-export async function applyStatusChange(ctx: ModuleContext, row: ReviewRow, input: StatusChangeInput, by: string): Promise<void> {
+/**
+ * The status change itself, on a locked row, without the snapshot (the calling write publishes it).
+ * `assign` uses it for "Approve and assign". Returns false, having written nothing, when the account
+ * already has that status.
+ */
+export async function applyStatusChange(ctx: ModuleContext, row: ReviewRow, input: StatusChangeInput, by: string): Promise<boolean> {
   const note = input.note?.trim() || null;
   const reasonKey = input.reasonKey?.trim() || null;
   checkLength(note, 'note');
@@ -178,6 +207,7 @@ export async function applyStatusChange(ctx: ModuleContext, row: ReviewRow, inpu
     if (!note) throw invalid("Add a note saying why you're reopening it.", 'note');
     target = statuses.find((s) => s.key === 'needs_review' && !s.archivedAt) ?? statuses.find((s) => !s.archivedAt && !s.countsAsReviewed) ?? target;
   }
+  if (target.key === row.statusKey) return false;
   const reasonDefs = (await ctx.tx.select().from(declineReasonDef).where(eq(declineReasonDef.tenantId, ctx.tenantId))) as ReasonDef[];
   const problems = statusChangeProblems(target, { note, reasonKey, reasonDefs });
   if (problems.length > 0) {
@@ -213,6 +243,7 @@ export async function applyStatusChange(ctx: ModuleContext, row: ReviewRow, inpu
     reasonKey: target.isDeclined ? reasonKey : null,
     by,
   });
+  return true;
 }
 
 export type InsightsView = { insights: string | null; insightsBy: string | null; insightsAt: Date | null };

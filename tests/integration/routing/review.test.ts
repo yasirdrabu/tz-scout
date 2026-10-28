@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mergeAccounts } from '@/modules/accounts';
-import { assign, changeStatus, reviewChanged, setInsights, statusChanged } from '@/modules/routing';
+import { assign, changeStatus, reviewChanged, routingAccountMerged, setInsights, statusChanged } from '@/modules/routing';
 import { accountReview, assignment, reviewStatusDef, stageChange, statusChange } from '@/modules/routing/db/schema';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -177,5 +177,81 @@ describe('merge', () => {
     expect(rows.find((r) => r.id === dropped.id)?.status).toBe('withdrawn');
     expect((await events('routing.assignment.withdrawn', merged)).map((e) => e.assignmentId)).toEqual([dropped.id]);
     expect(await summaryOf(t, survivor)).toMatchObject({ ownerUserId: seller });
+  });
+
+  it('withdraws the merged account open assignment when the survivor is declined (Ruling 14)', async () => {
+    const survivor = await arrivedAccount(t, { name: 'Declined Survivor' });
+    const merged = await arrivedAccount(t, { name: 'Assigned Merged' });
+    await asPerson(t, (ctx) => changeStatus(ctx, survivor, { to: 'declined', reasonKey: 'duplicate' }));
+    const made = await asPerson(t, (ctx) => assign(ctx, merged, { sellerUserId: seller }));
+    await t.run((ctx) => ctx.tx.update(assignment).set({ status: 'accepted', acceptedHow: 'seller' }).where(eq(assignment.id, made.id)));
+    const before = { s: (await events(reviewChanged.type, survivor)).length, m: (await events(reviewChanged.type, merged)).length };
+    await asPerson(t, (ctx) => mergeAccounts(ctx, survivor, merged));
+    await runOutbox(t.tenantId);
+    expect((await assignmentsOf(survivor)).filter((r) => r.status === 'pending' || r.status === 'accepted')).toEqual([]);
+    expect((await events('routing.assignment.withdrawn', merged)).map((e) => e.assignmentId)).toEqual([made.id]);
+    expect(await reviewOf(survivor)).toMatchObject({ statusKey: 'declined', stage: 'declined', currentAssignmentId: null });
+    expect(await summaryOf(t, survivor)).toMatchObject({ ownerUserId: null, hasOpenAssignment: false });
+    // One snapshot per account for the merge.
+    expect((await events(reviewChanged.type, survivor)).length - before.s).toBe(1);
+    expect((await events(reviewChanged.type, merged)).length - before.m).toBe(1);
+
+    // A redelivery of the merge changes nothing.
+    const versions = { s: (await reviewOf(survivor)).version, m: (await reviewOf(merged)).version };
+    const outboxBefore = (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId))).length;
+    const envelope = {
+      id: newId('evt'),
+      type: 'accounts.account.merged',
+      schemaVersion: 1,
+      tenantId: t.tenantId,
+      occurredAt: new Date().toISOString(),
+      actor: t.actor,
+      correlationId: newId('cor'),
+      data: { survivorId: survivor, mergedId: merged, mergedBy: t.actor.id },
+    };
+    await t.run((ctx) => routingAccountMerged.handle(envelope, ctx));
+    expect({ s: (await reviewOf(survivor)).version, m: (await reviewOf(merged)).version }).toEqual(versions);
+    expect((await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId))).length).toBe(outboxBefore);
+  });
+
+  it('a survivor with no review row starts from the merged row: status, stage, insights and lead offer', async () => {
+    const merged = await arrivedAccount(t, { name: 'Row Source' });
+    await asPerson(t, (ctx) => changeStatus(ctx, merged, { to: 'reviewed' }));
+    await asPerson(t, (ctx) => setInsights(ctx, merged, 'Met them at a conference'));
+    await t.run((ctx) => ctx.tx.update(accountReview).set({ leadOfferOverrideId: 'off_lead' }).where(eq(accountReview.accountId, merged)));
+    const survivor = await arrivedAccount(t, { name: 'No Row Yet' });
+    await t.run((ctx) => ctx.tx.delete(accountReview).where(eq(accountReview.accountId, survivor)));
+    await asPerson(t, (ctx) => mergeAccounts(ctx, survivor, merged));
+    await runOutbox(t.tenantId);
+    expect(await reviewOf(survivor)).toMatchObject({
+      statusKey: 'reviewed',
+      stage: 'reviewed',
+      insights: 'Met them at a conference',
+      insightsBy: t.actor.id,
+      leadOfferOverrideId: 'off_lead',
+    });
+  });
+});
+
+describe('"New from" and unchanged status', () => {
+  it('"New from" ends with the assignment (declining withdraws it)', async () => {
+    const a = await arrivedAccount(t);
+    await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: seller }));
+    await resolved(t, a, { sourceChain: { agentSourceId: 'src_agent' } });
+    expect((await reviewOf(a)).flags.newFrom).toBeDefined();
+    await asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'declined', reasonKey: 'duplicate' }));
+    expect((await reviewOf(a)).flags).toEqual({});
+    await runOutbox(t.tenantId);
+    expect((await summaryOf(t, a)).reviewFlags).toEqual([]);
+  });
+
+  it('changing to the current status writes nothing and returns the current state', async () => {
+    const a = await arrivedAccount(t);
+    const before = await reviewOf(a);
+    const snap = await asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'unvetted' }));
+    expect(snap).toMatchObject({ reviewStatusKey: 'unvetted', stage: 'arrived' });
+    expect((await reviewOf(a)).version).toBe(before.version);
+    expect(await t.run((ctx) => ctx.tx.select().from(statusChange).where(eq(statusChange.accountId, a)))).toEqual([]);
+    expect(await events(statusChanged.type, a)).toEqual([]);
   });
 });

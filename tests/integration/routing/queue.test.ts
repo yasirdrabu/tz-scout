@@ -8,7 +8,7 @@ import { closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { runOutbox } from '../helpers/run-outbox';
 import { asSource, personAndAgent } from '../intake/helpers';
-import { arrivedAccount, asPerson, domain, member, routingTenant, setSummary, type Tenant } from './helpers';
+import { arrivedAccount, asPerson, domain, member, resolved, routingTenant, setSummary, type Tenant } from './helpers';
 
 let t: Tenant;
 let seller: string;
@@ -22,6 +22,15 @@ afterAll(closeDbs);
 const ids = (page: { data: { accountId: string }[] }) => page.data.map((r) => r.accountId);
 
 describe('the queue (REV-E1-S1)', () => {
+  it('shows "New from" with the source name', async () => {
+    const { agentId } = await personAndAgent(t, 'Newsy');
+    const a = await arrivedAccount(t, { sourceChain: { agentSourceId: agentId } });
+    await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: seller }));
+    await resolved(t, a, { sourceChain: { agentSourceId: agentId } });
+    const page = await asPerson(t, (ctx) => listQueue(ctx, { sourceId: agentId, statusKeys: ['reviewed'] }));
+    expect(page.data[0]?.flags.newFrom).toMatchObject({ sourceId: agentId, sourceName: 'Newsy agent' });
+  });
+
   it('an account from an agent arrival shows as Unvetted (AC1)', async () => {
     const { agentId } = await personAndAgent(t, 'Yasir');
     const sent = await asSource(t, agentId, (ctx) => submitArrival(ctx, { account: { name: 'Agent Co', domain: domain() } }, { channel: 'api' }));

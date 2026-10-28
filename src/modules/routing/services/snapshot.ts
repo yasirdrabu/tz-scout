@@ -22,7 +22,23 @@ export async function publishReviewSnapshot(ctx: ModuleContext, accountId: strin
     .where(and(eq(accountReview.tenantId, ctx.tenantId), eq(accountReview.accountId, accountId)))
     .returning();
   if (!review) throw new Error(`publishReviewSnapshot: no review for account ${accountId}`);
+  const snapshot = await buildSnapshot(ctx, review);
+  await publish(ctx, reviewChanged, { accountId, version: review.version, snapshot });
+  return snapshot;
+}
 
+/** The snapshot as it stands, without a version bump or an event, for a call that changed nothing. */
+export async function currentReviewSnapshot(ctx: ModuleContext, accountId: string): Promise<ReviewSnapshot> {
+  const [review] = await ctx.tx
+    .select()
+    .from(accountReview)
+    .where(and(eq(accountReview.tenantId, ctx.tenantId), eq(accountReview.accountId, accountId)));
+  if (!review) throw new Error(`currentReviewSnapshot: no review for account ${accountId}`);
+  return buildSnapshot(ctx, review);
+}
+
+async function buildSnapshot(ctx: ModuleContext, review: typeof accountReview.$inferSelect): Promise<ReviewSnapshot> {
+  const accountId = review.accountId;
   const assignments = await ctx.tx
     .select({ sellerUserId: assignment.sellerUserId, status: assignment.status, acceptedHow: assignment.acceptedHow })
     .from(assignment)
@@ -35,7 +51,7 @@ export async function publishReviewSnapshot(ctx: ModuleContext, accountId: strin
   if (review.flags.declinedBySeller) reviewFlags.push('declined_by_seller');
   if (review.flags.newFrom) reviewFlags.push('new_from');
 
-  const snapshot: ReviewSnapshot = {
+  return {
     reviewStatusKey: review.statusKey,
     ownerUserId: open?.sellerUserId ?? null,
     ownerHistoryUserIds: past,
@@ -43,6 +59,4 @@ export async function publishReviewSnapshot(ctx: ModuleContext, accountId: strin
     stage: stageSchema.parse(review.stage),
     reviewFlags,
   };
-  await publish(ctx, reviewChanged, { accountId, version: review.version, snapshot });
-  return snapshot;
 }

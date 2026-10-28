@@ -1,13 +1,13 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
-import { assign, assignmentCreated, bulk, changeStatus, previewAssign, registerOwnershipPreflight } from '@/modules/routing';
+import { assign, assignmentCreated, bulk, changeStatus, previewAssign, registerOwnershipPreflight, reviewChanged } from '@/modules/routing';
 import { accountReview, assignment } from '@/modules/routing/db/schema';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
 import { runOutbox } from '../helpers/run-outbox';
 import { completeOffer } from '../offers/helpers';
-import { arrivedAccount, asPerson, member, routingTenant, summaryOf, type Tenant } from './helpers';
+import { arrivedAccount, asPerson, member, routingTenant, setSummary, summaryOf, type Tenant } from './helpers';
 
 let t: Tenant;
 let seller: string;
@@ -27,6 +27,10 @@ const events = async (accountId: string) =>
   (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId)).orderBy(outbox.seq))
     .map((r) => r.payload as { type: string; data: Record<string, unknown> })
     .filter((e) => e.data.accountId === accountId && e.type.startsWith('routing.assignment.'));
+const snapshots = async (accountId: string) =>
+  (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId)))
+    .map((r) => r.payload as { type: string; data: { accountId?: string } })
+    .filter((e) => e.type === reviewChanged.type && e.data.accountId === accountId);
 const rejects = async (p: Promise<unknown>) => p.then(() => null, (e: { status?: number; message: string }) => ({ status: e.status, title: e.message }));
 
 describe('assign (REV-E2-S1)', () => {
@@ -47,8 +51,17 @@ describe('assign (REV-E2-S1)', () => {
       ownershipDecision: 'assign',
       previousAssignmentId: null,
     });
+    expect(await snapshots(a)).toHaveLength(2); // creation, then one for the approve-and-assign write
     await runOutbox(t.tenantId);
     expect(await summaryOf(t, a)).toMatchObject({ reviewStatusKey: 'reviewed', ownerUserId: seller, hasOpenAssignment: true });
+  });
+
+  it('the preview needs a person and takes no lock', async () => {
+    const a = await arrivedAccount(t);
+    expect(await rejects(t.run((ctx) => previewAssign(ctx, a, seller)))).toMatchObject({ status: 403 });
+    const preview = await asPerson(t, (ctx) => previewAssign(ctx, a, seller));
+    expect(preview.approvesTo?.key).toBe('reviewed');
+    expect(await snapshots(a)).toHaveLength(1);
   });
 
   it('a stop from the preflight is a 409 with its message, unless the leader keeps their owner (AC2)', async () => {
@@ -144,13 +157,36 @@ describe('bulk (REV-E2-S1-AC3)', () => {
       ctx.tx.select().from(assignment).where(and(inArray(assignment.accountId, accounts), eq(assignment.status, 'pending'))),
     );
     expect(open.map((r) => r.accountId).sort()).toEqual([accounts[0], accounts[2]].sort());
+    // One snapshot per account that changed (each has its creation snapshot first); none for the refused one.
+    expect((await snapshots(accounts[0]!)).length).toBe(2);
+    expect((await snapshots(accounts[1]!)).length).toBe(2); // creation and the decline
+    expect((await snapshots(accounts[2]!)).length).toBe(2);
   });
 
   it('sets a status on many accounts', async () => {
     const accounts = [await arrivedAccount(t), await arrivedAccount(t)];
     const results = await asPerson(t, (ctx) => bulk(ctx, accounts, { kind: 'status', to: 'declined', reasonKey: 'wrong_timing' }));
     expect(results.every((r) => r.ok)).toBe(true);
-    for (const a of accounts) expect((await reviewOf(a)).statusKey).toBe('declined');
+    for (const a of accounts) {
+      expect((await reviewOf(a)).statusKey).toBe('declined');
+      expect((await snapshots(a)).length).toBe(2);
+    }
+  });
+
+  it('reports 404 for an account the person cannot see and still does the rest', async () => {
+    const seen = await arrivedAccount(t);
+    const hidden = await arrivedAccount(t);
+    await setSummary(t, seen, { practiceIds: ['prc_bulk'] });
+    await setSummary(t, hidden, { practiceIds: ['prc_hidden'] });
+    const results = await asPerson(t, (ctx) => bulk(ctx, [hidden, seen], { kind: 'assign', sellerUserId: seller }), {
+      dataLimit: { kind: 'practices', ids: ['prc_bulk'] },
+    });
+    expect(results).toEqual([
+      { accountId: hidden, ok: false, status: 404, message: 'That account was not found.' },
+      { accountId: seen, ok: true },
+    ]);
+    expect(await assignmentsOf(hidden)).toEqual([]);
+    expect((await assignmentsOf(seen)).map((r) => r.status)).toEqual(['pending']);
   });
 
   it('refuses more than 50 accounts', async () => {
