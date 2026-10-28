@@ -33,6 +33,7 @@ export {
   checkExclusion,
   getAccount,
   getAccountForScoring,
+  accountNames,
   getAccounts,
   getFacts,
   getPerson,

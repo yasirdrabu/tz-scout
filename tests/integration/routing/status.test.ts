@@ -2,9 +2,9 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { submitArrival } from '@/modules/intake';
 import { arrival } from '@/modules/intake/db/schema';
-import { accept, assign, changeStatus, getAccountStatus, listAssignments } from '@/modules/routing';
-import { assignment, reviewStatusDef } from '@/modules/routing/db/schema';
-import { user } from '@/modules/tenancy/db/schema';
+import { accept, assign, changeStatus, decline, getAccountStatus, listAssignments } from '@/modules/routing';
+import { assignment, reviewStatusDef, statusChange } from '@/modules/routing/db/schema';
+import { tenant, user } from '@/modules/tenancy/db/schema';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { runOutbox } from '../helpers/run-outbox';
@@ -47,6 +47,7 @@ describe('account status (REV-E4-S2)', () => {
       ownerName: 'Ash Eskandari',
       lastActivityAt: null,
       declinedReason: null,
+      declinedNote: null,
       sendBackNote: null,
       summary: 'Assigned to Ash on Oct 22.',
     });
@@ -77,6 +78,7 @@ describe('account status (REV-E4-S2)', () => {
       stage: 'declined',
       reviewStatus: 'declined',
       declinedReason: 'Duplicate',
+      declinedNote: null,
       sendBackNote: null,
       summary: 'Declined: Duplicate.',
     });
@@ -95,7 +97,122 @@ describe('account status (REV-E4-S2)', () => {
   });
 });
 
+describe('account status edges (REV-E4-S2)', () => {
+  it('a decline with Other carries its note', async () => {
+    const a = await arrivedAccount(t);
+    await asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'declined', reasonKey: 'other', note: 'Out of business' }));
+    expect(await asPerson(t, (ctx) => getAccountStatus(ctx, a))).toMatchObject({ declinedReason: 'Other', declinedNote: 'Out of business', summary: 'Declined: Other.' });
+  });
+
+  it('falls back to Declined. when the move kept no reason', async () => {
+    const a = await arrivedAccount(t);
+    await asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'declined', reasonKey: 'duplicate' }));
+    await t.run((ctx) => ctx.tx.update(statusChange).set({ reasonKey: null }).where(eq(statusChange.accountId, a)));
+    expect(await asPerson(t, (ctx) => getAccountStatus(ctx, a))).toMatchObject({ declinedReason: null, declinedNote: null, summary: 'Declined.' });
+  });
+
+  it("a person limited to their own accounts gets null on someone else's account", async () => {
+    const a = await arrivedAccount(t);
+    const stranger = await member(t, 'seller');
+    expect(await asSeller((ctx) => getAccountStatus(ctx, a), stranger)).toBeNull();
+  });
+
+  it('a seller decline stays hidden from the source', async () => {
+    const { agentId } = await personAndAgent(t, 'Hidden');
+    const sent = await sentBy(agentId);
+    const made = await asPerson(t, (ctx) => assign(ctx, sent.accountId, { sellerUserId: seller }));
+    await asSeller((ctx) => decline(ctx, made.id, { reasonKey: 'not_a_fit' }));
+    expect(await asSource(t, agentId, (ctx) => getAccountStatus(ctx, sent.arrivalId))).toMatchObject({
+      reviewStatus: 'reviewed',
+      ownerName: null,
+      declinedReason: null,
+      declinedNote: null,
+      summary: 'Reviewed. Waiting for a seller.',
+    });
+  });
+
+  it('formats the assigned date in the tenant timezone', async () => {
+    const a = await arrivedAccount(t);
+    const made = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: seller }));
+    await setAssignedAt(made.id, '2026-10-23T02:00:00Z'); // still Oct 22 in New York
+    await adminDb.update(tenant).set({ timezone: 'America/New_York' }).where(eq(tenant.id, t.tenantId));
+    try {
+      expect((await asPerson(t, (ctx) => getAccountStatus(ctx, a)))?.summary).toBe('Assigned to Ash on Oct 22.');
+    } finally {
+      await adminDb.update(tenant).set({ timezone: 'UTC' }).where(eq(tenant.id, t.tenantId));
+    }
+    expect((await asPerson(t, (ctx) => getAccountStatus(ctx, a)))?.summary).toBe('Assigned to Ash on Oct 23.');
+  });
+
+  it('an arrival of the caller with no account yet is received; another source gets null', async () => {
+    const mine = await personAndAgent(t, 'Early');
+    const other = await personAndAgent(t, 'Late');
+    const sent = await asSource(t, mine.agentId, (ctx) => submitArrival(ctx, { account: { name: 'Early Co', domain: domain() } }, { channel: 'api' }));
+    const expected = { accountId: null, name: null, stage: 'arrived', reviewStatus: null, summary: 'Received. Matching it to an account.' };
+    expect(await asSource(t, mine.agentId, (ctx) => getAccountStatus(ctx, sent.arrivalId))).toMatchObject(expected);
+    expect(await asSource(t, other.agentId, (ctx) => getAccountStatus(ctx, sent.arrivalId))).toBeNull();
+  });
+});
+
 describe('assignment lists (REV-E2-S2)', () => {
+  it("mine with an account id lists the seller's own rows for it", async () => {
+    const mineOnly = await member(t, 'seller');
+    const a = await arrivedAccount(t);
+    const made = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: mineOnly }));
+    const page = await asSeller((ctx) => listAssignments(ctx, { mine: true, accountId: a }), mineOnly);
+    expect(page.data.map((r) => r.id)).toEqual([made.id]);
+    await expect(asPerson(t, (ctx) => listAssignments(ctx, { accountId: 'acc_nope' }))).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("a past owner sees the newer seller's assignment on the account they can still see", async () => {
+    const first = await member(t, 'seller');
+    const second = await member(t, 'seller');
+    const a = await arrivedAccount(t);
+    const one = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: first }));
+    await asSeller((ctx) => accept(ctx, one.id), first);
+    await runOutbox(t.tenantId);
+    const two = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: second }));
+    await runOutbox(t.tenantId);
+    const page = await asSeller((ctx) => listAssignments(ctx, { accountId: a }), first);
+    expect(page.data.map((r) => r.id).sort()).toEqual([one.id, two.id].sort());
+  });
+
+  it('a restricted seller with many hidden assignments gets a short page and a cursor that reaches their rows', async () => {
+    const t2 = await routingTenant();
+    const me = await member(t2, 'seller');
+    const limited = { userId: me, dataLimit: { kind: 'own_accounts' } } as const;
+    const a = await arrivedAccount(t2);
+    const mine = await asPerson(t2, (ctx) => assign(ctx, a, { sellerUserId: me }));
+    await asPerson(t2, (ctx) => accept(ctx, mine.id), limited);
+    await runOutbox(t2.tenantId);
+    const other = await member(t2, 'seller');
+    await t2.run((ctx) =>
+      ctx.tx.insert(assignment).values(
+        Array.from({ length: 520 }, (_, i) => ({
+          id: newId('asg'),
+          tenantId: ctx.tenantId,
+          accountId: `hidden-${i}`,
+          sellerUserId: other,
+          assignedBy: other,
+          assignedAt: new Date('2027-01-01T00:00:00Z'),
+          status: 'declined',
+        })),
+      ),
+    );
+    const run = (cursor?: string) => asPerson(t2, (ctx) => listAssignments(ctx, { limit: 5, cursor }), limited);
+    const first = await run();
+    expect(first.data).toEqual([]);
+    expect(first.nextCursor).not.toBeNull();
+    let found: string[] = [];
+    let cursor: string | null = first.nextCursor;
+    for (let i = 0; i < 5 && cursor && found.length === 0; i++) {
+      const page = await run(cursor);
+      found = page.data.map((r) => r.id);
+      cursor = page.nextCursor;
+    }
+    expect(found).toEqual([mine.id]);
+  });
+
   it('a seller lists their pending assignments, and only theirs (AC1)', async () => {
     const other = await member(t, 'seller');
     const mineOnly = await member(t, 'seller');

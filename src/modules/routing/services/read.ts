@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import { filterVisibleAccountIds, getAccounts, getSummaries, resolveAccountId } from '@/modules/accounts';
-import { accountForArrival } from '@/modules/intake';
+import { accountNames, filterVisibleAccountIds, getSummaries, resolveAccountId } from '@/modules/accounts';
+import { getArrival } from '@/modules/intake';
 import { members, tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -8,8 +8,9 @@ import { accountReview, assignment, declineReasonDef, statusChange } from '../db
 import { OPEN_STATUSES, loadStatuses, requirePerson } from './review';
 
 export type AccountStatus = {
-  accountId: string;
-  name: string;
+  /** Null while the caller's own arrival has no account yet. */
+  accountId: string | null;
+  name: string | null;
   stage: string;
   reviewStatus: string | null;
   tier: string | null;
@@ -18,10 +19,26 @@ export type AccountStatus = {
   lastActivityAt: Date | null;
   /** The review decline reason's label, only while the account holds a declined status. A seller's decline stays internal. */
   declinedReason: string | null;
+  /** The note on the move to the declined status the account holds. */
+  declinedNote: string | null;
   /** The note on the move to a status that returns the account to its source. */
   sendBackNote: string | null;
   summary: string;
 };
+
+const waiting = (summary: string): AccountStatus => ({
+  accountId: null,
+  name: null,
+  stage: 'arrived',
+  reviewStatus: null,
+  tier: null,
+  ownerName: null,
+  lastActivityAt: null,
+  declinedReason: null,
+  declinedNote: null,
+  sendBackNote: null,
+  summary,
+});
 
 const monthDay = (d: Date, timeZone: string) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone }).format(d);
 
@@ -31,12 +48,18 @@ const monthDay = (d: Date, timeZone: string) => new Intl.DateTimeFormat('en-US',
  * an arrival that isn't theirs, is null (the route answers 404, never 403).
  */
 export async function getAccountStatus(ctx: ModuleContext, idOrArrivalId: string): Promise<AccountStatus | null> {
-  const asked = idOrArrivalId.startsWith('arr_') ? await accountForArrival(ctx, idOrArrivalId) : idOrArrivalId;
+  let asked: string | null | undefined = idOrArrivalId;
+  if (idOrArrivalId.startsWith('arr_')) {
+    const arr = await getArrival(ctx, idOrArrivalId);
+    if (!arr) return null;
+    if (!arr.accountId) return waiting(arr.status === 'rejected' ? 'Not accepted.' : 'Received. Matching it to an account.');
+    asked = arr.accountId;
+  }
   const accountId = asked ? (await resolveAccountId(ctx, asked))?.id : undefined;
   if (!accountId) return null;
+  const name = (await accountNames(ctx, [accountId])).get(accountId);
+  if (name === undefined) return null;
   const [summary] = await getSummaries(ctx, [accountId]);
-  const [acc] = await getAccounts(ctx, [accountId]);
-  if (!summary || !acc) return null;
 
   const [review] = await ctx.tx.select().from(accountReview).where(and(eq(accountReview.tenantId, ctx.tenantId), eq(accountReview.accountId, accountId)));
   const status = review ? (await loadStatuses(ctx)).find((s) => s.key === review.statusKey) : undefined;
@@ -64,6 +87,7 @@ export async function getAccountStatus(ctx: ModuleContext, idOrArrivalId: string
           .where(and(eq(declineReasonDef.tenantId, ctx.tenantId), eq(declineReasonDef.key, moved.reasonKey)))
       : [];
   const declinedReason = reason?.label ?? null;
+  const declinedNote = status?.isDeclined ? (moved?.note ?? null) : null;
   const sendBackNote = status?.returnsToSource ? (moved?.note ?? null) : null;
 
   const timeZone = await tenantTimezone(ctx);
@@ -81,13 +105,14 @@ export async function getAccountStatus(ctx: ModuleContext, idOrArrivalId: string
 
   return {
     accountId,
-    name: acc.name,
+    name,
     stage: review?.stage ?? 'arrived',
     reviewStatus: review?.statusKey ?? null,
-    tier: summary.tier,
+    tier: summary?.tier ?? null,
     ownerName,
     lastActivityAt: null,
     declinedReason,
+    declinedNote,
     sendBackNote,
     summary: summaryText,
   };
@@ -131,21 +156,32 @@ function decode(cursor: string): Key {
   throw new ScoutError({ slug: 'invalid-cursor', status: 400, title: 'Invalid cursor' });
 }
 
+/** Chunks one call reads before it hands back what it has and a cursor, so a restricted principal never scans a whole tenant. */
+const MAX_CHUNKS = 10;
+
 /**
  * Assignments, newest first (REV-E2-S2-AC1, AC3). `mine` is the actor's own. Otherwise a row shows when
  * the caller can see its account (or it is theirs), so a seller limited to their own accounts sees only
- * those and a leader sees how each was accepted.
+ * those and a leader sees how each was accepted. A page can be short with a cursor when
+ * the rows scanned were mostly hidden; following the cursor continues the scan.
  */
 export async function listAssignments(ctx: ModuleContext, f: AssignmentFilters = {}): Promise<{ data: AssignmentRow[]; nextCursor: string | null }> {
   const me = requirePerson(ctx);
-  if (f.accountId && !f.mine && (await filterVisibleAccountIds(ctx, [f.accountId])).length === 0) {
-    throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
+  let accountId = f.accountId;
+  if (accountId) {
+    const resolved = (await resolveAccountId(ctx, accountId))?.id;
+    if (!resolved || (!f.mine && (await filterVisibleAccountIds(ctx, [resolved])).length === 0)) {
+      throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
+    }
+    accountId = resolved;
   }
   const limit = Math.min(Math.max(f.limit ?? 50, 1), 200);
   const size = Math.max(limit + 1, 50);
   let after = f.cursor ? decode(f.cursor) : null;
   const kept: { row: typeof assignment.$inferSelect; key: Key }[] = [];
-  for (;;) {
+  let scannedTo: Key | null = null;
+  let exhausted = false;
+  for (let chunk = 0; chunk < MAX_CHUNKS; chunk++) {
     const rows = await ctx.tx
       .select({ row: assignment, atText: sql<string>`${assignment.assignedAt}::text` })
       .from(assignment)
@@ -154,7 +190,7 @@ export async function listAssignments(ctx: ModuleContext, f: AssignmentFilters =
           eq(assignment.tenantId, ctx.tenantId),
           f.mine ? eq(assignment.sellerUserId, me) : undefined,
           f.status ? eq(assignment.status, f.status) : undefined,
-          f.accountId ? eq(assignment.accountId, f.accountId) : undefined,
+          accountId ? eq(assignment.accountId, accountId) : undefined,
           after ? sql`(${assignment.assignedAt}, ${assignment.id}) < (${after[0]}::timestamptz, ${after[1]})` : undefined,
         ),
       )
@@ -162,15 +198,20 @@ export async function listAssignments(ctx: ModuleContext, f: AssignmentFilters =
       .limit(size);
     const visible = f.mine ? null : new Set(await filterVisibleAccountIds(ctx, [...new Set(rows.map((r) => r.row.accountId))]));
     for (const r of rows) {
+      scannedTo = [r.atText, r.row.id];
       if (visible && !visible.has(r.row.accountId) && r.row.sellerUserId !== me) continue;
       kept.push({ row: r.row, key: [r.atText, r.row.id] });
       if (kept.length > limit) break;
     }
-    if (kept.length > limit || rows.length < size) break;
+    if (kept.length > limit) break;
+    if (rows.length < size) {
+      exhausted = true;
+      break;
+    }
     after = [rows[rows.length - 1]!.atText, rows[rows.length - 1]!.row.id];
   }
   const page = kept.slice(0, limit);
-  const accounts = new Map((await getAccounts(ctx, [...new Set(page.map((p) => p.row.accountId))])).map((a) => [a.id, a.name]));
+  const accounts = await accountNames(ctx, [...new Set(page.map((p) => p.row.accountId))]);
   const names = new Map((await members(ctx)).map((m) => [m.userId, m.name]));
   return {
     data: page.map(({ row: a }) => ({
@@ -187,6 +228,6 @@ export async function listAssignments(ctx: ModuleContext, f: AssignmentFilters =
       notes: a.notes,
       declineReasonKey: a.declineReasonKey,
     })),
-    nextCursor: kept.length > limit ? encode(page[limit - 1]!.key) : null,
+    nextCursor: kept.length > limit ? encode(page[limit - 1]!.key) : !exhausted && scannedTo ? encode(scannedTo) : null,
   };
 }

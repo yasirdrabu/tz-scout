@@ -302,6 +302,14 @@ export async function activeAccountIds(ctx: ModuleContext, ids: string[]): Promi
   return ids.filter((id) => ok.has(id));
 }
 
+/** Names of the accounts the principal can see, one read. Ids that are hidden, missing or merged away are left out. */
+export async function accountNames(ctx: ModuleContext, ids: string[]): Promise<Map<string, string>> {
+  const ok = await filterVisibleAccountIds(ctx, ids);
+  if (ok.length === 0) return new Map();
+  const rows = await ctx.tx.select({ id: account.id, name: account.name }).from(account).where(and(eq(account.tenantId, ctx.tenantId), inArray(account.id, ok)));
+  return new Map(rows.map((r) => [r.id, r.name]));
+}
+
 export type AccountSummaryView = {
   accountId: string;
   stage: string | null;
