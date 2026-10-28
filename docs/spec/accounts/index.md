@@ -39,7 +39,7 @@ calls ACC); ACC's endpoints below are routed to SRC by the API layer, not by ACC
 | `buying_role` | `tenant_id`, `key`, `label`, `sort`, `archived` | Configurable list, seeded with defaults |
 | `exclusion_rule` | `tenant_id`, `key`, `label`, `kind`, `params`, `enabled` | ACC-E7 |
 | `exclusion_list` | `tenant_id`, `kind` (`vendor_keyword`, `parent_domain`, `parent_name`, `do_not_contact_domain`), `value` | The lists the exclusion rules read; editing one queues `accounts.exclusions.recheck` |
-| `account_summary` | `account_id`, `priority`, `fit`, `intent`, `tier`, `best_offer_id`, `practice_id`, `review_status_key`, `owner_user_id`, `stage`, `source_ids[]`, `last_signal_at`, `updated_at` | Read model for search, built from SCO, REV, SRC and CRM events |
+| `account_summary` | `account_id`, `priority`, `fit`, `intent`, `tier`, `best_offer_id`, `practice_id`, `review_status_key`, `owner_user_id`, `stage`, `source_ids[]`, `last_signal_at`, `updated_at` | Read model for search, built from SCO, REV, SRC and CRM events. Also `score_version` and `review_version` (a scoring or routing snapshot applies only when its version is newer), `owner_history_user_ids[]` (current and past owners, for `own_accounts`), `review_flags[]` and `has_open_assignment` |
 
 New id prefix: `cfl_` (conflict).
 
@@ -48,7 +48,7 @@ New id prefix: `cfl_` (conflict).
 - **TEN** for context and data limits. **OFF** (synchronous, read) for an offer's target buying roles
   and titles when computing committee coverage.
 - **Events consumed:** `intake.arrival.resolved` (source links in `account_summary`),
-  `scoring.account.scored`, `routing.status.changed`, `routing.assignment.accepted`,
+  `scoring.account.scored` and `routing.review.changed` (the summary's score and review columns, each applied only when its `version` is newer than the stored one),
   `crm.handoff.completed`, `crm.deal.changed` (for `crm_status` and stage), `intake.source.trust_changed`
   (re-pick current values that depend on trust).
 
@@ -77,23 +77,28 @@ New id prefix: `cfl_` (conflict).
 | `setPractices(accountId, practiceIds, actor)` | SRC (from `practice_hint`), web | Adds or (person only) removes practices; publishes `accounts.account.updated` with `changedKeys: ["practice_ids"]` |
 | `getAccountForScoring(accountId)` | SCO | One read with everything scoring needs: `practice_ids`, current facts (with source chain ids), people with buying-role keys and seniority, non-archived signals with fine type, kind, date, value and source chain ids, `research_tier` with `research_tier_signal_at`, and the exclusion flag (`excluded_reason_key`, `excluded_override`) |
 | `getCommittee(accountId, offerId)` | PLB, MCP | coverage and gaps (ACC-E2) |
-| `search(query)` | MCP, web | paged account summaries within data limits |
+| `search(query)` | MCP, web, REV | paged account summaries within data limits. R1b filters: `reviewStatusKeys`, `arrivedSince` (the account's first arrival), `accountIds` (at most 1,000), `reviewFlags` (any of), `queueDefault` (the review queue's default view) |
+| `countAccounts(query)` | REV | The count for the same filters |
+| `getSummaries(ctx, ids)` | SRC, REV | Summary rows (stage, review status, owner, priority, tier, best offer) for at most 1,000 ids the principal can see |
+| `listAccountIds(ctx, opts)` | SCO, REV | Background only: a page of active account ids, for rescoring and the backfill |
 
 ## Events published
 
 | Event | `data` |
 |---|---|
 | `accounts.account.created` | `accountId`, `name`, `domain`, `isShell`, `arrivalId?` |
-| `accounts.account.updated` | `accountId`, `changedKeys[]` |
+| `accounts.account.updated` | `accountId`, `changedKeys[]`, `arrivalId?` |
 | `accounts.account.archived` | `accountId`, `reason` |
 | `accounts.account.merged` | `survivorId`, `mergedId`, `mergedBy` |
-| `accounts.account.exclusion_changed` | `accountId`, `excludedReasonKey?`, `override` |
+| `accounts.account.exclusion_changed` | `accountId`, `excludedReasonKey?`, `override`, `arrivalId?` |
 | `accounts.person.added` | `accountId`, `personId`, `roleKeys[]`, `arrivalId?` |
-| `accounts.person.updated` | `accountId`, `personId`, `changedKeys[]`, `roleKeys[]` |
-| `accounts.fact.recorded` | `accountId`, `personId?`, `factId`, `key`, `kind`, `sourceChain`, `becameCurrent` |
-| `accounts.signal.recorded` | `accountId`, `signalId`, `type` (fine type or null), `kind` (`research`, `trigger`, `pain`), `occurredAt`, `value?`, `confidence?`, `sourceChain` |
+| `accounts.person.updated` | `accountId`, `personId`, `changedKeys[]`, `roleKeys[]`, `arrivalId?` |
+| `accounts.fact.recorded` | `accountId`, `personId?`, `factId`, `key`, `kind`, `sourceChain`, `becameCurrent`, `arrivalId?` |
+| `accounts.signal.recorded` | `accountId`, `signalId`, `type` (fine type or null), `kind` (`research`, `trigger`, `pain`), `occurredAt`, `value?`, `confidence?`, `sourceChain`, `arrivalId?` |
 | `accounts.conflict.detected` | `conflictId`, `accountId`, `personId?`, `key`, `factIds[]`, `sourceIds[]` |
 | `accounts.conflict.resolved` | `conflictId`, `accountId`, `key`, `keptFactId`, `archivedFactIds[]`, `winningSourceIds[]`, `losingSourceIds[]`, `resolvedBy`, `note?` |
+
+`arrivalId` is set when an arrival caused the event, so scoring can score that arrival once. The primary contact re-pick reads the best offer's target titles from Offers, so every caller gets the same answer.
 
 ## API endpoints
 

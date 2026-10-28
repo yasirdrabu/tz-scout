@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-10-27: Taazaa Scout R1b scoring and review
+
+Every account is now scored and explained, lands in a review queue, and can be approved, assigned, accepted or declined by a person, and the agent that sent it can read where it stands. This release has the `/v1` API only; screens come later.
+
+**What was built**
+- **Scoring**: fit and intent per approved offer, priority, tiers, best offer, warm-intro and trust adjustments, a plain-words explanation, score history, a weights profile (`GET/PUT /v1/scoring/profile`, reset), signal rules per offer, rescoring of the whole workspace or a practice or source (`POST /v1/rescore`, 202 with a job id) and a nightly ageing rescore.
+- **Review and routing**: review statuses and decline reasons, the review queue with its filters and counts, leader insights, status changes (send back, decline, reopen), assignments with an ownership preflight, accept, decline and withdraw, hourly auto-acceptance after the workspace's working days, and stage tracking (arrived, reviewed, assigned, declined).
+- **Status for agents**: `GET /v1/accounts/{id}/status` takes an account or an arrival id and returns the stage, review status, tier, owner name, declined reason and note, send-back note and a one-sentence summary.
+- **Source feedback and counts by stage**: a source is told when its arrival was declined, sent back, declined by a seller or lost a conflict, once for each source in the chain; batches show counts by stage.
+- **Backfill**: `scout backfill-r1b <tenant-slug>` gives a workspace built before R1b its scoring and routing defaults, a review row for every account without one, and a rescore. `scout seed` runs it for its tenants. Running either twice changes nothing.
+- **Exit test**: an agent sends an account, it is scored and explained, it shows in the queue as Unvetted with its priority, a leader approves and assigns, the seller accepts, the agent reads the status as assigned with the owner's name, and the stage history shows arrived, reviewed, assigned.
+
+**Decisions to know about**
+- A withdrawn assignment returns the stage to reviewed, like a decline. A seller may decline an assignment they have already accepted, not only a pending one; that also returns the stage to reviewed.
+- A new score cause, `ageing`, marks the nightly rescore, so score history does not blame a new signal for a score that only moved with time.
+- Past owners (for the `own_accounts` data limit) are the sellers of assignments that were accepted and later ended. A declined or replaced pending assignment is not ownership.
+- "New from <source>" on an assigned account ends with the assignment.
+- "Arrived since" means the account's first arrival; a later arrival from another source shows through "New from".
+- A source gets one piece of feedback for each distinct source in the chain, for each cause. Arrival detail shows its feedback to anyone who may see the arrival; the feed is limited to the caller's own source.
+- A seller's decline reaches the sending source as feedback with the reason and note, but `get_account_status` does not show it: the status call tells the agent about leader decisions only. The two channels differ on purpose.
+- `GET /v1/accounts/{id}/score` returns the `explain_score` object and adds `offer_id`, `summary` and the full explanation.
+- An agent that asks about its own arrival before it resolves gets stage arrived and "Received. Matching it to an account."; a rejected one gets "Not accepted: ...".
+- Only the person who assigned an account or an owner can withdraw the assignment, though anyone who may assign can still end it by assigning the account to someone else.
+- Rescore progress (SCO-E5-S4-AC1) waits for R2 with the weights screen.
+
 ## 2026-10-27: Taazaa Scout R1a accounts and intake
 
 Every account now enters Scout through one path and lands as an account with people, facts, signals and its sources recorded. This release has the `/v1` API only; screens come later.

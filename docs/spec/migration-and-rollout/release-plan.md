@@ -62,7 +62,17 @@ R1a status (Accounts and intake, updated 2026-10-27). The `/v1` API only; screen
 - [x] One-path test: the same company from a single arrival, a batch item, a CSV row and an inline arrival is one account with four sources.
 - [ ] CI `images` job builds and its migrate step creates the `offers`, `accounts` and `intake` tables. Pending: needs a push.
 
-Moved to later plans: R1b has scoring, signal rules, review statuses and their validation, source feedback, counts by stage, the primary re-pick on best-offer change, and "New from <source>" on assigned accounts. R1c has CRM, HubSpot qualified leads, `crm_status` consumers, a registered `MergeGuard` and the cross-module merge test. R1d has the MCP tools, Apollo and Vibe pulls, usage caps through INT `checkCap`, per-minute rate limits, OpenAPI, the v1 data migration and the 500-a-minute throughput test.
+R1b status (Scoring and review, updated 2026-10-27). The `/v1` API only; screens come from the front end.
+
+- [x] Scoring: profile, fit and intent, priority, tiers, best offer, explanations, score history, signal rules, rescore jobs and the nightly ageing job (new score cause `ageing`).
+- [x] Review and routing: review statuses and decline reasons with their validation, the review queue, insights, status changes, assignments with the ownership preflight, accept, decline and withdraw, auto-acceptance, stage tracking and account status for agents.
+- [x] Source feedback and counts by stage, the primary re-pick on best-offer change, and "New from <source>" on assigned accounts.
+- [x] Backfill and seed: `scout backfill-r1b <tenant-slug>` adds the scoring and routing defaults and schedules, a review row and snapshot for each account without one, and a rescore; seed runs it for its tenants.
+- [x] R1b exit test: send, score, queue as Unvetted, approve and assign, accept, status as assigned with the owner's name, stage history arrived, reviewed, assigned.
+- [ ] Rescore progress (SCO-E5-S4-AC1 "progress is visible") moved to R2 with the weights screen. In R1b `POST /v1/rescore` returns 202 with a job id.
+- [ ] CI `images` job's migrate step creates the `scoring` and `routing` tables. Pending: needs a push.
+
+Moved to later plans: R1c has CRM, HubSpot qualified leads, `crm_status` consumers, a registered `MergeGuard` and the cross-module merge test. R1d has the MCP tools, Apollo and Vibe pulls, usage caps through INT `checkCap`, per-minute rate limits, OpenAPI, the v1 data migration and the 500-a-minute throughput test.
 
 ## R2 ABM
 

@@ -33,6 +33,7 @@ export { nextStage, type StageEvent } from './domain/stages';
 export { declineProblems, reasonNeedsNote, statusChangeProblems, type ReasonDef, type StatusDefRules } from './domain/status-rules';
 export { addWorkingDays } from './domain/working-days';
 export { autoAcceptHandler } from './jobs';
+export { backfillReviews } from './services/backfill';
 export { publishReviewSnapshot } from './services/snapshot';
 export { moveStage } from './services/stage';
 export { routingReviewStatusValidator } from './services/status-validator';

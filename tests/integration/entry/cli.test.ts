@@ -107,6 +107,32 @@ describe('scout CLI', () => {
     expect(vendors.length).toBeGreaterThan(0);
   }, 30_000);
 
+  it('seed twice leaves one scoring profile, one set of review statuses and the signal rules; backfill-r1b changes nothing more', async () => {
+    const id = ((await adminDb.execute(sql`select id from tenancy.tenant where slug = 'taazaa'`)) as unknown as { id: string }[])[0]!.id;
+    const read = async () => {
+      const n = async (q: ReturnType<typeof sql>) => Number(((await adminDb.execute(q)) as unknown as { n: string }[])[0]!.n);
+      return {
+        profiles: await n(sql`select count(*) n from scoring.scoring_profile where tenant_id = ${id}`),
+        statuses: await n(sql`select count(*) n from routing.review_status_def where tenant_id = ${id}`),
+        reasons: await n(sql`select count(*) n from routing.decline_reason_def where tenant_id = ${id}`),
+        settings: await n(sql`select count(*) n from routing.routing_setting where tenant_id = ${id}`),
+        rules: await n(sql`select count(*) n from offers.signal_rule where tenant_id = ${id}`),
+        schedules: await n(sql`select count(*) n from platform.schedule where tenant_id = ${id}`),
+      };
+    };
+    const before = await read();
+    expect(before).toMatchObject({ profiles: 1, statuses: 4, settings: 1 });
+    expect(before.schedules).toBeGreaterThanOrEqual(2);
+    expect(before.rules).toBeGreaterThan(0);
+    const r = await scout(['backfill-r1b', 'taazaa']).done;
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stdout).toContain('Workspace taazaa is up to date.');
+    expect(await read()).toEqual(before);
+    const missing = await scout(['backfill-r1b', 'nowhere']).done;
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain('No workspace with the slug "nowhere".');
+  }, 90_000);
+
   it('import taazaa research-a.csv exits 0 and prints the batch', async () => {
     const r = await scout(['import', 'taazaa', 'tests/fixtures/imports/research-a.csv']).done;
     expect(r.code, r.stderr).toBe(0);

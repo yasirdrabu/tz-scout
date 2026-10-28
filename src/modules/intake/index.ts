@@ -69,6 +69,7 @@ export {
   getArrival,
   getArrivalWithStatus,
   getBatch,
+  initialReviewStatusKeys,
   listArrivals,
   listBatchItems,
   listBatches,

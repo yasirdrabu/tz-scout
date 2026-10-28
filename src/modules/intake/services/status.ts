@@ -1,9 +1,10 @@
-import { and, desc, eq, gte, isNotNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds, getSummaries, isKnownFactKey } from '@/modules/accounts';
 import { members } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
-import { arrival, batch } from '../db/schema';
+import { arrival, batch, source } from '../db/schema';
 import { feedbackForArrival, type ArrivalFeedback } from './feedback';
+import { DEFAULT_REVIEW_STATUS, type SourceKind } from './sources';
 import { chainInScope, keysetPage, pageArrivals, visibleArrivals } from './visibility';
 
 type ArrivalRow = typeof arrival.$inferSelect;
@@ -154,6 +155,21 @@ export async function batchAccountIds(ctx: ModuleContext, batchId: string): Prom
     .orderBy(arrival.accountId)
     .limit(1000);
   return rows.map((r) => r.accountId!);
+}
+
+/**
+ * The review status each account would have started at: the one its first resolved arrival's closest source names
+ * (else that kind's default). Accounts with no resolved arrival are left out. For the R1b backfill.
+ */
+export async function initialReviewStatusKeys(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, string>> {
+  if (accountIds.length === 0) return new Map();
+  const rows = await ctx.tx
+    .selectDistinctOn([arrival.accountId], { accountId: arrival.accountId, key: source.initialReviewStatusKey, kind: source.kind })
+    .from(arrival)
+    .innerJoin(source, eq(source.id, arrival.closestSourceId))
+    .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.status, 'resolved'), inArray(arrival.accountId, accountIds)))
+    .orderBy(arrival.accountId, arrival.resolvedAt, arrival.id);
+  return new Map(rows.map((r) => [r.accountId!, r.key ?? DEFAULT_REVIEW_STATUS[r.kind as SourceKind] ?? 'unvetted']));
 }
 
 // ---- Batches ----

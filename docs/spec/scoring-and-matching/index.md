@@ -17,8 +17,8 @@ status. People decide (D6).
 |---|---|---|
 | `scoring_profile` | `tenant_id`, `fit_weight` (0.55), `intent_weight` (0.45), `fit_parts` (json: maxes per part), `half_life_days` (45), `max_signal_age_days` (365), `tier_thresholds` (json), `warm_intro_cap` (20), `trust_modifier_max` (5), `trust_neutral` (0.6), `research_floor_days` (180), `version`, `updated_by`, `updated_at` | One row per tenant. Every change bumps `version` and publishes `scoring.rules.changed`. |
 | `offer_match` | `id`, `tenant_id`, `account_id`, `offer_id`, `fit`, `intent`, `match_total`, `tier`, `fit_parts` (json), `rule_hits` (json), `disqualified_reason`, `profile_version`, `computed_at` | One row per account per approved offer. Replaced on each scoring. |
-| `account_score` | `account_id` (pk with tenant), `best_offer_id`, `practice_id`, `fit`, `intent`, `match_total`, `warm_points`, `warm_introducer_id`, `trust`, `trust_modifier`, `priority`, `tier`, `tier_reason` (`computed` or `research_floor` or `warm_intro_floor`), `revenue_potential_cents`, `revenue_band` (`low`, `medium`, `high`), `explanation` (json, see explain-score.md), `inputs_hash`, `profile_version`, `computed_at` | Current score for the account. The one every other module reads. |
-| `score_change` | `id`, `tenant_id`, `account_id`, `from_priority`, `to_priority`, `from_tier`, `to_tier`, `from_offer_id`, `to_offer_id`, `cause` (`new_signal`, `new_fact`, `rules_changed`, `offer_changed`, `trust_changed`, `warm_intro`, `manual_rescore`), `cause_event_id`, `at` | History, so "why did this move" has an answer. Kept 2 years. |
+| `account_score` | `account_id` (pk with tenant), `version`, `best_offer_id`, `practice_id`, `fit`, `intent`, `match_total`, `warm_points`, `warm_introducer_id`, `trust`, `trust_modifier`, `priority`, `tier`, `tier_reason` (`computed` or `research_floor` or `warm_intro_floor`), `revenue_potential_cents`, `revenue_band` (`low`, `medium`, `high`), `explanation` (json, see explain-score.md), `inputs_hash`, `profile_version`, `computed_at` | Current score for the account. The one every other module reads. |
+| `score_change` | `id`, `tenant_id`, `account_id`, `from_priority`, `to_priority`, `from_tier`, `to_tier`, `from_offer_id`, `to_offer_id`, `cause` (`new_signal`, `new_fact`, `rules_changed`, `offer_changed`, `trust_changed`, `warm_intro`, `manual_rescore`, `ageing`), `cause_event_id`, `at` | History, so "why did this move" has an answer. Kept 2 years. A row is written only when priority, tier or best offer moved. `ageing` is the nightly time-only rescore. |
 
 Signal rules are owned by Offers and practices (they are per offer). Warm-intro points and source trust
 are owned by Sources and intake. Scoring reads them through those modules' public interfaces.
@@ -45,7 +45,7 @@ are owned by Sources and intake. Scoring reads them through those modules' publi
 
 | Event | Data |
 |---|---|
-| `scoring.account.scored` | `accountId`, `priority`, `fit`, `intent`, `tier`, `previousTier` (null on first), `bestOfferId`, `previousBestOfferId`, `practiceId`, `revenueBand`, `cause`, `profileVersion` |
+| `scoring.account.scored` | `accountId`, `priority`, `fit`, `intent`, `tier`, `previousTier` (null on first), `bestOfferId`, `previousBestOfferId`, `practiceId`, `revenueBand`, `cause`, `profileVersion`, `version` (`account_score.version`) |
 | `scoring.rules.changed` | `profileVersion`, `changed` (list of field names), `changedBy` |
 
 `scoring.account.scored` is published only when priority, tier or best offer changed, or on the first
@@ -56,15 +56,15 @@ score, so a rescore that changes nothing is quiet.
 | Event | Does | Ordered by account |
 |---|---|---|
 | `intake.arrival.resolved` | score the account | yes |
-| `accounts.account.created` / `.updated` / `.merged` | rescore (merged: score survivor, delete loser's rows) | yes |
-| `accounts.fact.recorded`, `accounts.signal.recorded`, `accounts.person.added`, `accounts.person.updated` | rescore that account | yes |
+| `intake.arrival.rejected` | with an `accountId` (rejected as excluded): score the account | yes |
+| `accounts.account.created` / `.updated` / `.merged` | rescore (merged: score survivor, delete loser's rows). Events that carry an `arrivalId` are skipped, because `intake.arrival.resolved` scores the account | yes |
+| `accounts.fact.recorded`, `accounts.signal.recorded`, `accounts.person.added`, `accounts.person.updated`, `accounts.account.exclusion_changed` | rescore that account (skipped when the event carries an `arrivalId`) | yes |
 | `accounts.conflict.resolved` | rescore that account | yes |
 | `offers.offer.approved` / `.archived` / `.changed` | enqueue rescore for accounts in that offer's practice | no |
 | `scoring.rules.changed` | enqueue rescore for every account in the tenant | no |
 | `intake.source.trust_changed` | enqueue rescore for accounts with an arrival from that source | no |
 
-Rescoring of many accounts runs as `scout.<tenant>.jobs.rescore.accounts` jobs, 500 account
-ids per message.
+Rescoring of many accounts runs as `scoring.rescore.page` jobs, which queue `scoring.rescore.accounts` messages of at most 200 account ids each (a smaller page than 500 shortens how long account locks are held). Each account is scored in its own savepoint; the profile and approved offers are loaded once per message. A nightly `scoring.ageing` job (02:00 UTC, one schedule per tenant) rescores accounts with a young signal whose score is over 20 hours old.
 
 ## API endpoints
 
@@ -72,11 +72,12 @@ JSON field names are snake_case (data-conventions.md).
 
 | Method and path | Scope | Does |
 |---|---|---|
-| `GET /v1/accounts/{id}/score` | `accounts:read` | Priority, fit, intent, tier, best offer, factor breakdown and reasons |
+| `GET /v1/accounts/{id}/score` | `accounts:read` | The `explain_score` object (`account_id`, `offer`, `priority`, `fit`, `intent`, `tier`, `factors[]`, `warm_intro_points`, `would_raise[]`) plus `offer_id`, `summary` and the full explanation. 404 until the account is first scored |
 | `GET /v1/accounts/{id}/matches` | `accounts:read` | Every offer match for the account |
 | `GET /v1/accounts/{id}/score/history` | `accounts:read` | Score changes with causes |
-| `GET /v1/scoring/profile`, `PUT /v1/scoring/profile` | `scoring:manage` | Read or update weights and thresholds; PUT returns 202, rescoring runs in the background |
-| `POST /v1/rescore` | `scoring:manage` | Rescore the tenant or a filter (practice, source); 202 with job id |
+| `GET /v1/scoring/profile`, `PUT /v1/scoring/profile` | `scoring:manage` | Read or update weights and thresholds, with validation, ranges and an audit entry; PUT returns 202, rescoring runs in the background. The weights screen and preview are R2 |
+| `POST /v1/scoring/profile/reset` | `scoring:manage` | Back to the defaults; 202, it starts a rescore |
+| `POST /v1/rescore` | `scoring:manage` | Rescore the tenant or a filter (practice, source); 202 with job id. Progress is visible from R2 (SCO-E5-S4-AC1) |
 
 ## MCP tools
 

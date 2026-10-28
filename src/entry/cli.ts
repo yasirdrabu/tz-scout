@@ -27,6 +27,7 @@ One-shot commands
   migrate             Bootstrap (when DATABASE_SUPERUSER_URL is set), then apply migrations
   seed                Local development data (refuses production)
   import <slug> <file>  Import a CSV or XLSX list into a workspace, as the platform admin's person source
+  backfill-r1b <slug>   Give a workspace built before R1b its scoring and routing defaults, a review row for each account, and a rescore
   keys:create         --tenant <slug> --name <name> --scopes a,b [--test]
   tenants:create      --slug <s> --name <n> --currency <USD> --timezone <zone> --owner-email <email>
                       Operator command: run it on the server. It acts as a system platform admin.
@@ -125,6 +126,22 @@ async function importFile(slug: string, file: string): Promise<number> {
   return 0;
 }
 
+/** Brings a workspace built before R1b up to date (see backfillR1b). Safe to run again. */
+async function backfillTenant(slug: string): Promise<number> {
+  const { backfillR1b } = await import('./seed');
+  const { ensurePlatformAdmin, listTenants } = await import('@/modules/tenancy');
+  const { withTenant } = await import('@/platform/db/tenant');
+  const { newId } = await import('@/platform/ids');
+  const tenant = (await listTenants()).find((t) => t.slug === slug);
+  if (!tenant) throw new Error(`No workspace with the slug "${slug}".`);
+  const adminId = await ensurePlatformAdmin('system@scout.local');
+  await withTenant(tenant.id, (tx) =>
+    backfillR1b({ tenantId: tenant.id, actor: { kind: 'system', id: adminId }, correlationId: newId('cor'), tx }),
+  );
+  console.log(`Workspace ${slug} is up to date. Scores will refresh as the worker runs.`);
+  return 0;
+}
+
 /** Runs one command. Returns the exit code. */
 export async function run(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
@@ -158,6 +175,13 @@ export async function run(argv: string[]): Promise<number> {
 
 ${USAGE}`);
       return importFile(slug, file);
+    }
+    case 'backfill-r1b': {
+      const [slug] = rest;
+      if (!slug) throw new Error(`Usage: scout backfill-r1b <tenant-slug>
+
+${USAGE}`);
+      return backfillTenant(slug);
     }
     case 'keys:create': {
       const { values } = parseArgs({

@@ -88,6 +88,8 @@ higher module implements it; the composition root (`apps/worker`, `apps/web`) wi
 | `SourceValidator` | TEN | SRC | Checking a key's or grant's `source_id` exists |
 | `SourceInfoProvider` | ACC | SRC | Trust for picking current fact values; sources for an account |
 | `MergeGuard` | ACC | CRM | Refusing merges of accounts linked to different CRM companies |
+| `ReviewStatusValidator` | SRC | REV | Checking that a source's `initial_review_status_key` names an active review status. With none registered, any key is accepted |
+| `OwnershipPreflight` | REV | CRM (R1c) | Checking an assignment against the CRM. Results: `new` (not in the CRM; the default, with the message "New in the CRM"), `assign` (the seller can take it; says who had it), `stop` (open deal, customer or an owner we may not take over; only "keep their owner" goes ahead) and `blocked` (the seller has no CRM owner). R1c may keep the port or replace it with a direct call |
 
 A module with no implementation registered (tests, stripped builds) falls back to a safe default
 documented with the interface.
