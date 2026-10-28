@@ -2,6 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { countAccounts, search, type SearchQuery, type SearchRow } from '@/modules/accounts';
 import { batchAccountIds, sourceNames } from '@/modules/intake';
 import type { ModuleContext } from '@/platform/context';
+import { ScoutError } from '@/platform/errors';
 import type { ReviewFlags } from '../contracts/types';
 import { accountReview } from '../db/schema';
 import { loadStatuses, type StatusDef } from './review';
@@ -32,6 +33,14 @@ export type QueueRow = SearchRow & {
 };
 
 /** The accounts search query for the filters. Data limits apply inside accounts. */
+/** The batch's accounts, or a 400 when there are more than the filter can take (it never quietly uses the first ones). */
+async function batchFilterIds(ctx: ModuleContext, batchId: string): Promise<string[]> {
+  const { accountIds, overflow } = await batchAccountIds(ctx, batchId);
+  if (!overflow) return accountIds;
+  const message = 'This batch has more than 1,000 accounts. Filter the queue another way.';
+  throw new ScoutError({ slug: 'validation', status: 400, title: message, errors: [{ path: 'batch_id', message }] });
+}
+
 async function queryFor(ctx: ModuleContext, f: QueueFilters, statuses: StatusDef[]): Promise<SearchQuery> {
   const q: SearchQuery = {
     practiceId: f.practiceId,
@@ -40,7 +49,7 @@ async function queryFor(ctx: ModuleContext, f: QueueFilters, statuses: StatusDef
     tier: f.tier,
     arrivedSince: f.arrivedSince,
     reviewFlags: f.flag ? [f.flag] : undefined,
-    accountIds: f.batchId ? await batchAccountIds(ctx, f.batchId) : undefined,
+    accountIds: f.batchId ? await batchFilterIds(ctx, f.batchId) : undefined,
   };
   if (f.statusKeys?.length) q.reviewStatusKeys = f.statusKeys;
   else {

@@ -143,18 +143,25 @@ export async function accountForArrival(ctx: ModuleContext, arrivalId: string): 
   return data[0]?.accountId ?? null;
 }
 
+/** The most accounts the review queue's batch filter can take (accounts `search` accepts 1,000 ids). */
+export const BATCH_FILTER_LIMIT = 1000;
+
 /**
- * The accounts a batch's items resolved to, at most 1,000, for the review queue's batch filter. Not
- * narrowed by visibility: the caller passes them to accounts `search`, which applies the data limits.
+ * The accounts a batch's items resolved to, at most `limit` (1,000), for the review queue's batch filter, and whether the
+ * batch has more. Not narrowed by visibility: the caller passes them to accounts `search`, which applies the data limits.
  */
-export async function batchAccountIds(ctx: ModuleContext, batchId: string): Promise<string[]> {
+export async function batchAccountIds(
+  ctx: ModuleContext,
+  batchId: string,
+  limit: number = BATCH_FILTER_LIMIT,
+): Promise<{ accountIds: string[]; overflow: boolean }> {
   const rows = await ctx.tx
     .selectDistinct({ accountId: arrival.accountId })
     .from(arrival)
     .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.batchId, batchId), isNotNull(arrival.accountId)))
     .orderBy(arrival.accountId)
-    .limit(1000);
-  return rows.map((r) => r.accountId!);
+    .limit(limit + 1);
+  return { accountIds: rows.slice(0, limit).map((r) => r.accountId!), overflow: rows.length > limit };
 }
 
 /**
