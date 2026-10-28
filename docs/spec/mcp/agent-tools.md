@@ -127,9 +127,19 @@ Output:
   "owner_name": "Ashkan Eskandari",
   "last_activity_at": "2026-10-24T15:10:00Z",
   "declined_reason": null,
+  "declined_note": null,
+  "send_back_note": null,
   "summary": "Assigned to Ashkan on Oct 22. First email sent Oct 24."
 }
 ```
+`declined_reason` and `declined_note` are set only while the account holds a declined status, and `send_back_note` only
+while it holds a status that returns it to its source; otherwise they are null. A seller's decline is not shown here:
+it reaches the sending source as feedback (`GET /v1/feedback`), and the account is back with a leader.
+
+With an `arrival_id` that has not resolved to an account yet, only `summary` and `stage` carry meaning (`account_id`
+and `name` are null): "Received. Matching it to an account." while it waits, or "Not accepted: <reason>." when it was
+rejected (for example "Not accepted: daily limit reached."). Once it resolves, the same `arr_` id returns the account's
+status as above.
 Scopes: `status:read`.
 
 ### find_accounts

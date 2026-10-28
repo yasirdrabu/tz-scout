@@ -110,7 +110,8 @@ JSON field names are snake_case.
 
 ## Rules fixed in R1b
 
-- The default queue view is accounts with no open assignment and either a status that does not count as reviewed or the `declined_by_seller` flag; the flag clears when the account is assigned again.
+- The default queue view is accounts with no open assignment and either a status that does not count as reviewed or the `declined_by_seller` flag; the flag clears when the account is assigned again, and when a leader changes its review status (acting on a seller's decline answers it, so a leader's decline or reopen takes the account out of that view and leaves it to the status rules).
+- The queue's batch filter takes batches of up to 1,000 accounts. A larger batch answers 400 ("This batch has more than 1,000 accounts. Filter the queue another way.", path `batch_id`) for the list and the count, rather than using part of it.
 - Assigning a declined account is refused (409 "Reopen it before assigning."). "Approve and assign" uses the first status by order that counts as reviewed and is not declined. Changing to a declined status first withdraws an open assignment. Changing to the current status does nothing.
 - Auto-acceptance counts working days as Monday to Friday in the tenant's timezone, holidays ignored; from a weekend it counts from the next working day's midnight.
 - The ownership preflight is a port (`OwnershipPreflight`); with no CRM it answers `new` ("New in the CRM"). Its results are `new`, `assign`, `stop` and `blocked`.

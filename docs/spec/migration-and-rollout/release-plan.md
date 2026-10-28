@@ -67,7 +67,8 @@ R1b status (Scoring and review, updated 2026-10-27). The `/v1` API only; screens
 - [x] Scoring: profile, fit and intent, priority, tiers, best offer, explanations, score history, signal rules, rescore jobs and the nightly ageing job (new score cause `ageing`).
 - [x] Review and routing: review statuses and decline reasons with their validation, the review queue, insights, status changes, assignments with the ownership preflight, accept, decline and withdraw, auto-acceptance, stage tracking and account status for agents.
 - [x] Source feedback and counts by stage, the primary re-pick on best-offer change, and "New from <source>" on assigned accounts.
-- [x] Backfill and seed: `scout backfill-r1b <tenant-slug>` adds the scoring and routing defaults and schedules, a review row and snapshot for each account without one, and a rescore; seed runs it for its tenants.
+- [x] Backfill and seed: `scout backfill-r1b <tenant-slug>` adds the scoring and routing defaults and schedules, default signal rules for each offer that has none, a review row and snapshot for each account with a resolved arrival and no review, and a rescore; seed runs it for its tenants.
+- [x] Limit: the review queue's batch filter takes batches of up to 1,000 accounts; a larger batch answers 400 and the queue is filtered another way (by source, for example).
 - [x] R1b exit test: send, score, queue as Unvetted, approve and assign, accept, status as assigned with the owner's name, stage history arrived, reviewed, assigned.
 - [ ] Rescore progress (SCO-E5-S4-AC1 "progress is visible") moved to R2 with the weights screen. In R1b `POST /v1/rescore` returns 202 with a job id.
 - [ ] CI `images` job's migrate step creates the `scoring` and `routing` tables. Pending: needs a push.
