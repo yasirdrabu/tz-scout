@@ -39,5 +39,6 @@ export { routingReviewStatusValidator } from './services/status-validator';
 export { assign, bulk, MAX_BULK, previewAssign, type AssignInput, type AssignmentView, type AssignPreview, type BulkAction, type BulkResult } from './services/assign';
 export { accept, autoAccept, decline, markSeen, MAX_AUTO_ACCEPT, withdraw, type DeclineInput } from './services/respond';
 export { countQueue, listQueue, type QueueFilters, type QueueRow } from './services/queue';
-export { getAccountStatus, listAssignments, type AccountStatus, type AssignmentFilters, type AssignmentRow } from './services/read';
+export { getAccountStatus, getAssignment, listAssignments, type AccountStatus, type AssignmentFilters, type AssignmentRow } from './services/read';
 export { changeStatus, ensureReview, setInsights, type InsightsView, type StatusChangeInput } from './services/review';
+export { getReviewSettings, setAutoAcceptWorkingDays, type ReviewSettings } from './services/settings';

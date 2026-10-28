@@ -163,6 +163,37 @@ function decode(cursor: string): Key {
   throw new ScoutError({ slug: 'invalid-cursor', status: 400, title: 'Invalid cursor' });
 }
 
+/** The rows with account and seller names. */
+async function assignmentRows(ctx: ModuleContext, rows: (typeof assignment.$inferSelect)[]): Promise<AssignmentRow[]> {
+  const accounts = await accountNames(ctx, [...new Set(rows.map((a) => a.accountId))]);
+  const names = new Map((await members(ctx)).map((m) => [m.userId, m.name]));
+  return rows.map((a) => ({
+    id: a.id,
+    accountId: a.accountId,
+    accountName: accounts.get(a.accountId) ?? null,
+    sellerUserId: a.sellerUserId,
+    sellerName: names.get(a.sellerUserId) ?? null,
+    assignedBy: a.assignedBy,
+    assignedAt: a.assignedAt,
+    status: a.status,
+    respondedAt: a.respondedAt,
+    acceptedHow: a.acceptedHow,
+    notes: a.notes,
+    declineReasonKey: a.declineReasonKey,
+  }));
+}
+
+/**
+ * One assignment, for the seller it belongs to or anyone who can see its account; null otherwise
+ * (the route answers 404). Used to return the assignment after accept, decline or withdraw.
+ */
+export async function getAssignment(ctx: ModuleContext, id: string): Promise<AssignmentRow | null> {
+  const me = requirePerson(ctx);
+  const [a] = await ctx.tx.select().from(assignment).where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.id, id)));
+  if (!a || (a.sellerUserId !== me && (await filterVisibleAccountIds(ctx, [a.accountId])).length === 0)) return null;
+  return (await assignmentRows(ctx, [a]))[0]!;
+}
+
 /** Chunks one call reads before it hands back what it has and a cursor, so a restricted principal never scans a whole tenant. */
 const MAX_CHUNKS = 10;
 
@@ -218,23 +249,8 @@ export async function listAssignments(ctx: ModuleContext, f: AssignmentFilters =
     after = [rows[rows.length - 1]!.atText, rows[rows.length - 1]!.row.id];
   }
   const page = kept.slice(0, limit);
-  const accounts = await accountNames(ctx, [...new Set(page.map((p) => p.row.accountId))]);
-  const names = new Map((await members(ctx)).map((m) => [m.userId, m.name]));
   return {
-    data: page.map(({ row: a }) => ({
-      id: a.id,
-      accountId: a.accountId,
-      accountName: accounts.get(a.accountId) ?? null,
-      sellerUserId: a.sellerUserId,
-      sellerName: names.get(a.sellerUserId) ?? null,
-      assignedBy: a.assignedBy,
-      assignedAt: a.assignedAt,
-      status: a.status,
-      respondedAt: a.respondedAt,
-      acceptedHow: a.acceptedHow,
-      notes: a.notes,
-      declineReasonKey: a.declineReasonKey,
-    })),
+    data: await assignmentRows(ctx, page.map((p) => p.row)),
     nextCursor: kept.length > limit ? encode(page[limit - 1]!.key) : !exhausted && scannedTo ? encode(scannedTo) : null,
   };
 }
