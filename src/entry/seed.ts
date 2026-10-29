@@ -18,7 +18,9 @@ import {
 } from '@/modules/tenancy';
 import { seedAccountDefaults } from '@/modules/accounts';
 import { listSources, personSourceFor, registerSource, seedIntakeDefaults } from '@/modules/intake';
-import { seedOffers } from '@/modules/offers';
+import { seedMissingSignalRules, seedOffers } from '@/modules/offers';
+import { backfillReviews, seedRoutingDefaults } from '@/modules/routing';
+import { requestRescore, seedScoringDefaults } from '@/modules/scoring';
 
 export const ADMIN_EMAIL = 'yasir@taazaa.com';
 const PLATFORM_TENANT = 't_platform';
@@ -59,6 +61,19 @@ const TENANTS = [
     sellers: [],
   },
 ] as const;
+
+/**
+ * Brings a tenant built before R1b up to date: the scoring and routing defaults (with their schedules), default signal rules for each offer that has none, a review row and
+ * snapshot for each account that has none, and a rescore of every account. Safe to run again: the defaults and reviews
+ * are added only when missing, and a repeat rescore changes no score. Background context only.
+ */
+export async function backfillR1b(ctx: ModuleContext): Promise<void> {
+  await seedScoringDefaults(ctx);
+  await seedRoutingDefaults(ctx);
+  await seedMissingSignalRules(ctx);
+  await backfillReviews(ctx);
+  await requestRescore(ctx);
+}
 
 /**
  * Local development data: one platform admin, two tenants, a few people, a person source for each, a development agent and a dev API key bound to it. Safe to
@@ -105,6 +120,7 @@ export async function seed(): Promise<{ devApiKey: string }> {
       if (t.slug === 'taazaa') await seedOffers(ctx(tx));
       // Existing tenants never got the tenant.created event, so call the intake defaults directly.
       await seedIntakeDefaults(ctx(tx));
+      await backfillR1b(ctx(tx));
     });
     // Sources come after the first transaction commits, so the sellers' users exist.
     const emails = [ADMIN_EMAIL, t.ownerEmail, ...t.sellers.map((s) => s.email)];

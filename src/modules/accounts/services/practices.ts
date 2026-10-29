@@ -18,7 +18,7 @@ export async function setPractices(
   accountId: string,
   practiceIds: string[],
   by: 'hint' | 'person',
-  opts: { publish?: boolean } = {},
+  opts: { publish?: boolean; arrivalId?: string } = {},
 ): Promise<string[]> {
   if (by === 'person' && (await filterVisibleAccountIds(ctx, [accountId])).length === 0) {
     throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
@@ -37,6 +37,6 @@ export async function setPractices(
     .set({ practiceIds: next, updatedAt: new Date() })
     .where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
   await writeSummary(ctx, accountId);
-  if (opts.publish !== false) await publish(ctx, accountUpdated, { accountId, changedKeys: ['practice_ids'] }, { type: 'account', id: accountId });
+  if (opts.publish !== false) await publish(ctx, accountUpdated, { accountId, changedKeys: ['practice_ids'], ...(opts.arrivalId ? { arrivalId: opts.arrivalId } : {}) }, { type: 'account', id: accountId });
   return next;
 }

@@ -1,8 +1,16 @@
-import { approveOffer, archiveOffer, getOffer, listCaseStudies, updateOffer, type OfferPatch } from '@/modules/offers';
+import {
+  approveOffer,
+  archiveOffer,
+  getOffer,
+  listCaseStudies,
+  resetSignalRules,
+  updateOffer,
+  type OfferPatch,
+} from '@/modules/offers';
 import { can } from '@/modules/tenancy';
 import { parseBody } from '../../_lib/body';
 import { idAndAction, notFound } from '../../_lib/path';
-import { v1Route } from '../../_lib/v1-route';
+import { byAction, v1Route } from '../../_lib/v1-route';
 import { patchOfferBody } from '../schemas';
 
 export const dynamic = 'force-dynamic';
@@ -24,10 +32,11 @@ export const PATCH = v1Route({ permission: 'offers:manage' }, async (req, _princ
   return warning ? { ...offer, warning } : offer;
 });
 
-// POST /v1/offers/{id}:approve and /v1/offers/{id}:archive
-export const POST = v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) => {
-  const { id, action } = idAndAction(req, 'offers');
-  if (action === 'approve') return approveOffer(ctx, id);
-  if (action === 'archive') return archiveOffer(ctx, id);
-  throw notFound();
+// POST /v1/offers/{id}:approve, :archive and :reset-signal-rules
+export const POST = byAction('offers', {
+  approve: v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) => approveOffer(ctx, idAndAction(req, 'offers').id)),
+  archive: v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) => archiveOffer(ctx, idAndAction(req, 'offers').id)),
+  'reset-signal-rules': v1Route({ permission: 'scoring:manage' }, async (req, _principal, ctx) => ({
+    data: await resetSignalRules(ctx, idAndAction(req, 'offers').id),
+  })),
 });

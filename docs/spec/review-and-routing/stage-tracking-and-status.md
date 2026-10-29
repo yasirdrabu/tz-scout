@@ -22,8 +22,10 @@ Stages and what moves them (from `architecture/event-catalog.md`):
 | `lost` (exit) | deal lost |
 | `declined` (exit) | status changed to a declined status |
 
-- Stages only move forward, except: decline of an assignment returns to `reviewed`; reopening a
-  declined account returns to `arrived`; a new open deal after `lost` returns to `opportunity`.
+- Stages only move forward, except: a decline of an assignment returns to `reviewed`, whether the
+  seller declines it pending or after accepting it; a withdrawn assignment returns to `reviewed` too (the
+  leader must act on the account again, as after a decline); reopening a declined account returns to
+  `arrived`; a new open deal after `lost` returns to `opportunity`.
 - Every move writes `stage_change` and publishes `routing.stage.changed`, which Analytics uses for the
   funnel and Sources and intake uses for status replies to agents.
 - The tracker on the account page shows: Arrived, Reviewed, Assigned, In CRM, Engaged, Opportunity,
@@ -47,4 +49,8 @@ happened.
   source.
 - REV-E4-S2-AC3 Accounts outside the principal's data scope return "not found".
 - REV-E4-S2-AC4 If the account was declined or sent back, the reason and note are included so the
-  agent can learn.
+  agent can learn: `declined_reason` and `declined_note` for a declined status, `send_back_note` for a
+  send back. A seller's decline of an assignment is not shown here; it reaches the source as feedback
+  (SRC), so the two channels differ on purpose.
+- REV-E4-S2-AC5 An agent that asks about its own arrival before it has an account gets stage `arrived`
+  and "Received. Matching it to an account."; a rejected arrival gets "Not accepted: <reason>."

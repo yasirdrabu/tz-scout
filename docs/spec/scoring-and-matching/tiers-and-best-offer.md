@@ -60,7 +60,7 @@ As a leader, I want one offer chosen for each account, so that the brief and pla
 ### SCO-E3-S3 Research and warm-intro floors
 - SCO-E3-S3-AC1 Given research tier A with a signal 30 days old and a computed tier of watch, the
   account tier is act now with `tier_reason` research_floor, and the explanation says "Researcher
-  rated A with a signal from <date>: act now".
+  rated A with a signal from <Mon D, YYYY>: act now".
 - SCO-E3-S3-AC2 Given research tier A with a signal 200 days old, the floor is good fit.
 - SCO-E3-S3-AC3 Given research tier B and a computed act now, the tier stays act now.
 - SCO-E3-S3-AC4 Given a disqualified account with research tier A, the tier stays not a fit and the

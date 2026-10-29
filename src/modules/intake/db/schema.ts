@@ -18,7 +18,7 @@ import {
 /**
  * Intake schema. Every table here is a tenant table: `tenant_id` not null, row level security
  * enabled and forced with the standard `tenant_isolation` policy (added by hand in the migration,
- * with the arrival immutability trigger). Trust history, outcomes and feedback arrive in R3.
+ * with the arrival immutability trigger). Trust history and outcomes arrive in R3.
  */
 export const intake = pgSchema('intake');
 
@@ -234,4 +234,27 @@ export const relationshipDefault = intake.table(
     points: integer('points').notNull(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.relationshipKey] })],
+);
+
+export const sourceFeedback = intake.table(
+  'source_feedback',
+  {
+    id: text('id').primaryKey(), // fb_
+    tenantId: text('tenant_id').notNull(),
+    sourceId: text('source_id').notNull(),
+    arrivalId: text('arrival_id')
+      .notNull()
+      .references(() => arrival.id),
+    accountId: text('account_id').notNull(),
+    kind: text('kind').notNull(), // conflict_lost | declined_at_review | sent_back | declined_by_seller | enrichment_declined
+    reasonKey: text('reason_key'),
+    note: text('note'),
+    causeEventId: text('cause_event_id').notNull(), // the event that caused it, so a replay adds nothing
+    createdAt: now('created_at'),
+  },
+  (t) => [
+    uniqueIndex('source_feedback_cause_uq').on(t.tenantId, t.sourceId, t.kind, t.causeEventId),
+    index('source_feedback_tenant_source_created_idx').on(t.tenantId, t.sourceId, t.createdAt, t.id),
+    index('source_feedback_tenant_arrival_idx').on(t.tenantId, t.arrivalId),
+  ],
 );

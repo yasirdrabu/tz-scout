@@ -1,5 +1,5 @@
 // Public interface of the accounts module. Other modules import only this file or `contracts/*`.
-export { accountsTenantDefaults } from './consumers';
+export { accountsSummaryOnReviewChanged, accountsSummaryOnScored, accountsTenantDefaults } from './consumers';
 export { DEFAULT_BUYING_ROLES, DEFAULT_EXCLUSION_RULES, VENDOR_PHRASES, seedAccountDefaults } from './defaults';
 export {
   mergeGuard,
@@ -12,6 +12,7 @@ export {
   type SourceAccessProvider,
   type SourceInfoProvider,
 } from './contracts/ports';
+export { SIGNAL_TYPES, type SignalType } from './domain/signals';
 export { FACT_KEYS, isKnownFactKey } from './contracts/types';
 export {
   archiveSignal,
@@ -28,20 +29,25 @@ export type { Exclusion } from './services/exclusion';
 export { matchName, splitName, trigramSimilarity } from './domain/names';
 export { findMatches, resolveAccountId, type AccountMatch, type MatchCandidate, type MatchConfidence } from './services/match';
 export {
+  activeAccountIds,
   checkExclusion,
   getAccount,
   getAccountForScoring,
+  accountNames,
   getAccounts,
   getFacts,
   getPerson,
   getSignal,
   getSignals,
+  getSummaries,
+  listAccountIds,
   listPeople,
+  type AccountSummaryView,
   type ScoringView,
 } from './services/read';
 export { exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';
 export { mergeAccounts } from './services/merge';
-export { search, type SearchQuery, type SearchRow, type SearchSort } from './services/search';
+export { countAccounts, search, type SearchQuery, type SearchRow, type SearchSort } from './services/search';
 export { listExclusionLists, listExclusionRules, setExclusionList, setExclusionRule, type ExclusionRuleView } from './services/settings';
 export { filterVisibleAccountIds, visibleAccounts } from './services/visibility';
 export { setPractices } from './services/practices';

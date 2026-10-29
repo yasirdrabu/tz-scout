@@ -33,6 +33,12 @@ Import a list into a workspace, as the platform admin (the worker then processes
 npm run scout -- import taazaa tests/fixtures/imports/research-a.csv
 ```
 
+Bring a workspace built before R1b up to date (scoring and routing defaults and schedules, a review row and queue entry for every account that has none, and a rescore of every account). Seed does this for its own tenants; it is safe to run again:
+
+```bash
+npm run scout -- backfill-r1b taazaa
+```
+
 Send an arrival with the development key that seed printed (it is bound to the Local development agent):
 
 ```bash
@@ -41,7 +47,7 @@ curl -X POST http://localhost:4240/v1/arrivals \
   -d @tests/fixtures/imports/miami-dade-arrival.json
 ```
 
-The answer has a `status_url`. Fetch it with the same key until `status` is `resolved` and it shows an `account_id`.
+The answer has a `status_url`. Fetch it with the same key until `status` is `resolved` and it shows an `account_id`. With the worker running, read the explained score at `GET /v1/accounts/{account_id}/score` and where it stands at `GET /v1/accounts/{account_id}/status` (it reads "Waiting for review." until a person approves and assigns it).
 
 Check it: `curl -H "Authorization: Bearer <key from seed>" http://localhost:4240/v1/me` returns the tenant.
 Sign in with the developer sign-in form (needs `AUTH_DEV_SIGNIN=true`, never in production). In Admin,
@@ -63,7 +69,7 @@ npm run e2e       # Playwright; starts its own server on 4240 and a throwaway da
 
 ```bash
 npm run build     # Next.js standalone build plus dist/cli.js
-node dist/cli.js <migrate | seed | worker | relay | scheduler | all-background | web>
+node dist/cli.js <migrate | seed | backfill-r1b | worker | relay | scheduler | all-background | web>
 ```
 
 The container image (`infra/docker/`) runs the same CLI; the role is picked by the command.

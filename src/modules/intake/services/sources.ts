@@ -1,10 +1,11 @@
-import { and, asc, eq, gte, inArray, or, sql } from 'drizzle-orm';
-import type { SourceAccessProvider, SourceInfoProvider } from '@/modules/accounts';
+import { and, asc, eq, gt, gte, inArray, isNotNull, or, sql } from 'drizzle-orm';
+import { activeAccountIds, type SourceAccessProvider, type SourceChain, type SourceInfoProvider } from '@/modules/accounts';
 import { members, revokeKeysForSource, type SourceValidator } from '@/modules/tenancy';
 import type { DataLimit } from '@/platform/access';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
+import { reviewStatusValidator } from '../contracts/ports';
 import { arrival, source } from '../db/schema';
 
 export const SOURCE_KINDS = ['person', 'agent', 'vendor', 'partner', 'crm', 'web_form', 'scheduled_pull'] as const;
@@ -64,6 +65,11 @@ export type SourcePatch = {
 const invalid = (title: string) => new ScoutError({ slug: 'validation', status: 400, title });
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That source was not found.' });
 
+/** A starting status the tenant picked must be one of its active review statuses (once routing is registered). */
+async function checkReviewStatus(ctx: ModuleContext, key: string | undefined): Promise<void> {
+  if (key && !(await reviewStatusValidator().exists(ctx, key))) throw invalid('Pick a review status from your list.');
+}
+
 type Row = typeof source.$inferSelect;
 
 function view(r: Row): SourceView {
@@ -104,6 +110,16 @@ export async function loadSource(ctx: ModuleContext, id: string): Promise<Row | 
   return row;
 }
 
+/** Each given source's name, by id, in the context's tenant; unknown ids are left out. */
+export async function sourceNames(ctx: ModuleContext, ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const rows = await ctx.tx
+    .select({ id: source.id, name: source.name })
+    .from(source)
+    .where(and(eq(source.tenantId, ctx.tenantId), inArray(source.id, ids)));
+  return new Map(rows.map((r) => [r.id, r.name]));
+}
+
 const isUniqueViolation = (e: unknown): boolean => {
   const err = (e as { code?: string; cause?: { code?: string } } | null) ?? {};
   return err.code === '23505' || err.cause?.code === '23505';
@@ -114,6 +130,7 @@ export async function registerSource(ctx: ModuleContext, input: RegisterSourceIn
   if (!SOURCE_KINDS.includes(input.kind)) throw invalid('Pick a kind of source.');
   const name = checkName(input.name)!;
   checkCap(input.dailyArrivalCap);
+  await checkReviewStatus(ctx, input.initialReviewStatusKey?.trim());
 
   const needs = PARENT_KIND[input.kind];
   if (needs) {
@@ -167,6 +184,7 @@ export async function updateSource(ctx: ModuleContext, id: string, patch: Source
   }
   const initialReviewStatusKey = patch.initialReviewStatusKey?.trim();
   if (patch.initialReviewStatusKey !== undefined && !initialReviewStatusKey) throw invalid('Pick a starting review status.');
+  await checkReviewStatus(ctx, initialReviewStatusKey);
 
   const [row] = await ctx.tx
     .update(source)
@@ -321,6 +339,75 @@ export const intakeSourceInfo: SourceInfoProvider = {
     return [...new Set(rows.flatMap((r) => [r.person, r.agent, r.vendor]).filter((id): id is string => !!id))];
   },
 };
+
+/** The distinct source chains of the resolved arrivals for these accounts. */
+export async function chainsForAccount(ctx: ModuleContext, accountIds: string[]): Promise<SourceChain[]> {
+  if (accountIds.length === 0) return [];
+  const rows = await ctx.tx
+    .selectDistinct({ person: arrival.personSourceId, agent: arrival.agentSourceId, vendor: arrival.vendorSourceId })
+    .from(arrival)
+    .where(and(eq(arrival.tenantId, ctx.tenantId), inArray(arrival.accountId, accountIds), eq(arrival.status, 'resolved')))
+    .orderBy(asc(arrival.personSourceId), asc(arrival.agentSourceId), asc(arrival.vendorSourceId));
+  return rows.map((r) => ({
+    ...(r.person ? { personSourceId: r.person } : {}),
+    ...(r.agent ? { agentSourceId: r.agent } : {}),
+    ...(r.vendor ? { vendorSourceId: r.vendor } : {}),
+  }));
+}
+
+/** The highest trust over the accounts' chains, with the closest source (agent, else person, else vendor) of the winning chain. */
+export async function bestTrustForAccounts(
+  ctx: ModuleContext,
+  accountIds: string[],
+): Promise<{ trust: number; sourceId: string; sourceName: string } | null> {
+  let best: { trust: number; sourceId: string } | null = null;
+  for (const chain of await chainsForAccount(ctx, accountIds)) {
+    // A chain with no source at all cannot be named, so the next-best chain wins instead.
+    const sourceId = chain.agentSourceId ?? chain.personSourceId ?? chain.vendorSourceId;
+    if (!sourceId) continue;
+    const trust = await intakeSourceInfo.getTrust(ctx, chain);
+    if (!best || trust > best.trust) best = { trust, sourceId };
+  }
+  if (!best) return null;
+  const row = await loadSource(ctx, best.sourceId);
+  return { trust: best.trust, sourceId: best.sourceId, sourceName: row?.name ?? best.sourceId };
+}
+
+/** Accounts with a resolved arrival from the source or any source below it, in id order, `limit` (at most 200) at a time. */
+export async function accountIdsForSource(
+  ctx: ModuleContext,
+  sourceId: string,
+  opts: { afterId?: string; limit?: number } = {},
+): Promise<{ ids: string[]; nextAfterId: string | null }> {
+  const limit = opts.limit ?? 200;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw invalid('Ask for 1 to 200 accounts at a time.');
+  const sources = [sourceId, ...(await childSources(ctx, [sourceId]))];
+  const found: string[] = [];
+  let cursor = opts.afterId;
+  // Archived and merged-away accounts are dropped, so read candidates in chunks until the page is full.
+  for (;;) {
+    const rows = await ctx.tx
+      .selectDistinct({ id: arrival.accountId })
+      .from(arrival)
+      .where(
+        and(
+          eq(arrival.tenantId, ctx.tenantId),
+          eq(arrival.status, 'resolved'),
+          isNotNull(arrival.accountId),
+          cursor ? gt(arrival.accountId, cursor) : undefined,
+          or(inArray(arrival.personSourceId, sources), inArray(arrival.agentSourceId, sources), inArray(arrival.vendorSourceId, sources)),
+        ),
+      )
+      .orderBy(asc(arrival.accountId))
+      .limit(1000);
+    const candidates = rows.map((r) => r.id!);
+    found.push(...(await activeAccountIds(ctx, candidates)));
+    if (found.length > limit || candidates.length < 1000) break;
+    cursor = candidates[candidates.length - 1];
+  }
+  const ids = found.slice(0, limit);
+  return { ids, nextAfterId: found.length > limit ? ids[ids.length - 1]! : null };
+}
 
 /** Accounts' `SourceAccessProvider`. */
 export const intakeSourceAccess: SourceAccessProvider = { childSources, personSourceFor: ensurePersonSource };

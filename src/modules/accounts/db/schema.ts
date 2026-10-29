@@ -265,9 +265,14 @@ export const accountSummary = accounts.table(
     tier: text('tier'),
     bestOfferId: text('best_offer_id'),
     practiceId: text('practice_id'),
+    scoreVersion: integer('score_version'),
     practiceIds: textArray('practice_ids'),
     reviewStatusKey: text('review_status_key'),
     ownerUserId: text('owner_user_id'),
+    ownerHistoryUserIds: textArray('owner_history_user_ids'),
+    reviewVersion: integer('review_version'),
+    reviewFlags: textArray('review_flags'),
+    hasOpenAssignment: boolean('has_open_assignment').notNull().default(false),
     stage: text('stage'),
     sourceIds: textArray('source_ids'),
     lastSignalAt: at('last_signal_at'),
@@ -277,6 +282,7 @@ export const accountSummary = accounts.table(
   (t) => [
     index('account_summary_source_ids_idx').using('gin', t.sourceIds),
     index('account_summary_practice_ids_idx').using('gin', t.practiceIds),
+    index('account_summary_owner_history_idx').using('gin', t.ownerHistoryUserIds),
     index('account_summary_priority_idx').on(t.tenantId, t.priority.desc().nullsLast(), t.createdAt),
   ],
 );

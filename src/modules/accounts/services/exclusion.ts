@@ -12,7 +12,7 @@ export type Exclusion = { key: string; label: string; override: boolean };
  * Re-evaluates the exclusion rules (ACC-E7) and writes `excluded_reason_key`. Publishes
  * `accounts.account.exclusion_changed` when the result changes. The caller holds the account lock.
  */
-export async function applyExclusion(ctx: ModuleContext, accountId: string): Promise<Exclusion | null> {
+export async function applyExclusion(ctx: ModuleContext, accountId: string, opts: { arrivalId?: string } = {}): Promise<Exclusion | null> {
   const [acc] = await ctx.tx.select().from(account).where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
   if (!acc) return null;
   const rules = await ctx.tx.select().from(exclusionRule).where(eq(exclusionRule.tenantId, ctx.tenantId));
@@ -53,7 +53,7 @@ export async function applyExclusion(ctx: ModuleContext, accountId: string): Pro
     await publish(
       ctx,
       accountExclusionChanged,
-      { accountId, ...(key ? { excludedReasonKey: key } : {}), override: acc.excludedOverride },
+      { accountId, ...(key ? { excludedReasonKey: key } : {}), override: acc.excludedOverride, ...(opts.arrivalId ? { arrivalId: opts.arrivalId } : {}) },
       { type: 'account', id: accountId },
     );
   }

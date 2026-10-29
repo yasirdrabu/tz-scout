@@ -1,12 +1,13 @@
-import { and, asc, eq, exists, gte, ilike, isNotNull, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { account, accountAlias, accountSummary, signal } from '../db/schema';
-import { visibleAccounts } from './visibility';
+import { overlaps, visibleAccounts } from './visibility';
 
-export type SearchSort = 'priority' | 'last_signal' | 'created' | 'name';
+/** `queue` is the review queue's order: priority, then newest first. */
+export type SearchSort = 'priority' | 'last_signal' | 'created' | 'name' | 'queue';
 
-/** Every ACC-E8 filter. Scoring, review and CRM columns stay empty until R1b and R1c, so filters on them match nothing for now. */
+/** Every ACC-E8 filter, plus the review queue's. Scoring columns come from scoring.account.scored and review columns from routing.review.changed; CRM columns stay empty until R1c, so filters on them match nothing for now. */
 export type SearchQuery = {
   text?: string;
   /** Exact, already normalised: the account's domain or one of its domain aliases. */
@@ -30,6 +31,17 @@ export type SearchQuery = {
   signalKind?: string;
   signalSince?: Date;
   excluded?: boolean;
+  /** Any of these review statuses. */
+  reviewStatusKeys?: string[];
+  /** Accounts created at or after this time. */
+  arrivedSince?: Date;
+  /** Only these accounts; at most 1,000. */
+  accountIds?: string[];
+  /** Accounts carrying any of these review flags. */
+  reviewFlags?: string[];
+  /** The default queue view: no open assignment and (a status in unreviewedStatusKeys, or the declined_by_seller flag). Accounts doesn't know which statuses count as reviewed, so the caller passes the ones that don't. */
+  queueDefault?: boolean;
+  unreviewedStatusKeys?: string[];
   sort?: SearchSort;
   limit?: number;
   cursor?: string;
@@ -52,13 +64,15 @@ export type SearchRow = {
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+const MAX_ACCOUNT_IDS = 1000;
 
-/** Each sort is one key plus the account id as tie-break. Nulls sort last. */
-const SORTS: Record<SearchSort, { expr: SQL; cast: 'int' | 'timestamptz' | 'text'; dir: 'asc' | 'desc' }> = {
+/** Each sort is one key plus the account id as tie-break, ascending unless `idDir` says so (ids are ULIDs, so descending is newest first). Nulls sort last. */
+const SORTS: Record<SearchSort, { expr: SQL; cast: 'int' | 'timestamptz' | 'text'; dir: 'asc' | 'desc'; idDir?: 'desc' }> = {
   priority: { expr: sql`${accountSummary.priority}`, cast: 'int', dir: 'desc' },
   last_signal: { expr: sql`${accountSummary.lastSignalAt}`, cast: 'timestamptz', dir: 'desc' },
   created: { expr: sql`${account.createdAt}`, cast: 'timestamptz', dir: 'desc' },
   name: { expr: sql`${account.name}`, cast: 'text', dir: 'asc' },
+  queue: { expr: sql`${accountSummary.priority}`, cast: 'int', dir: 'desc', idDir: 'desc' },
 };
 
 /** The sort key travels as text so timestamps keep their microseconds. */
@@ -88,8 +102,8 @@ function decodeCursor(raw: string, sort: SearchSort): Cursor {
 
 /** Rows strictly after the cursor in the sort order (nulls come last). */
 function afterCursor(sort: SearchSort, c: Cursor): SQL {
-  const { expr, cast, dir } = SORTS[sort];
-  const idAfter = sql`${account.id} > ${c.id}`;
+  const { expr, cast, dir, idDir } = SORTS[sort];
+  const idAfter = idDir === 'desc' ? sql`${account.id} < ${c.id}` : sql`${account.id} > ${c.id}`;
   if (c.key === null) return and(sql`${expr} is null`, idAfter) as SQL;
   const key = sql`${c.key}::${sql.raw(cast)}`;
   const past = dir === 'desc' ? sql`${expr} < ${key}` : sql`${expr} > ${key}`;
@@ -99,6 +113,9 @@ function afterCursor(sort: SearchSort, c: Cursor): SQL {
 const likePattern = (text: string) => `%${text.replace(/[\\%_]/g, '\\$&')}%`;
 
 function filters(ctx: ModuleContext, q: SearchQuery): (SQL | undefined)[] {
+  if ((q.accountIds?.length ?? 0) > MAX_ACCOUNT_IDS) {
+    throw new ScoutError({ slug: 'validation', status: 400, title: 'Ask for at most 1,000 accounts at a time.' });
+  }
   const like = q.text?.trim() ? likePattern(q.text.trim()) : undefined;
   return [
     like
@@ -157,8 +174,42 @@ function filters(ctx: ModuleContext, q: SearchQuery): (SQL | undefined)[] {
             ),
         )
       : undefined,
+    q.reviewStatusKeys ? (q.reviewStatusKeys.length ? inArray(accountSummary.reviewStatusKey, q.reviewStatusKeys) : sql`false`) : undefined,
+    q.arrivedSince ? gte(account.createdAt, q.arrivedSince) : undefined,
+    q.accountIds ? (q.accountIds.length ? inArray(account.id, q.accountIds) : sql`false`) : undefined,
+    q.reviewFlags ? (q.reviewFlags.length ? overlaps(accountSummary.reviewFlags, q.reviewFlags) : sql`false`) : undefined,
+    q.queueDefault
+      ? and(
+          eq(accountSummary.hasOpenAssignment, false),
+          or(
+            q.unreviewedStatusKeys?.length ? inArray(accountSummary.reviewStatusKey, q.unreviewedStatusKeys) : undefined,
+            sql`${accountSummary.reviewFlags} @> ARRAY['declined_by_seller']::text[]`,
+          ),
+        )
+      : undefined,
     q.excluded === undefined ? undefined : q.excluded ? and(isNotNull(account.excludedReasonKey), eq(account.excludedOverride, false)) : or(isNull(account.excludedReasonKey), eq(account.excludedOverride, true)),
   ];
+}
+
+/** The conditions search and countAccounts share: tenant, not archived, the principal's data limits, then every filter. */
+async function baseWhere(ctx: ModuleContext, q: SearchQuery): Promise<(SQL | undefined)[]> {
+  return [
+    eq(accountSummary.tenantId, ctx.tenantId),
+    eq(account.tenantId, ctx.tenantId),
+    isNull(account.archivedAt),
+    await visibleAccounts(ctx),
+    ...filters(ctx, q),
+  ];
+}
+
+/** How many accounts `search` would match across all pages: same filters, same data limits. */
+export async function countAccounts(ctx: ModuleContext, q: SearchQuery = {}): Promise<number> {
+  const [row] = await ctx.tx
+    .select({ n: count() })
+    .from(accountSummary)
+    .innerJoin(account, eq(account.id, accountSummary.accountId))
+    .where(and(...(await baseWhere(ctx, q))));
+  return row?.n ?? 0;
 }
 
 /**
@@ -192,15 +243,11 @@ export async function search(ctx: ModuleContext, q: SearchQuery = {}): Promise<{
     .innerJoin(account, eq(account.id, accountSummary.accountId))
     .where(
       and(
-        eq(accountSummary.tenantId, ctx.tenantId),
-        eq(account.tenantId, ctx.tenantId),
-        isNull(account.archivedAt),
-        await visibleAccounts(ctx),
-        ...filters(ctx, q),
+        ...(await baseWhere(ctx, q)),
         cursor ? afterCursor(sort, cursor) : undefined,
       ),
     )
-    .orderBy(keyOrder, asc(account.id))
+    .orderBy(keyOrder, spec.idDir === 'desc' ? desc(account.id) : asc(account.id))
     .limit(limit + 1);
 
   const page = rows.slice(0, limit);

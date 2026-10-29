@@ -5,7 +5,7 @@ import { sourceAccessProvider } from '../contracts/ports';
 import { accountSummary } from '../db/schema';
 
 const textArrayOf = (values: string[]) => sql`ARRAY[${sql.join(values.map((v) => sql`${v}`), sql`, `)}]::text[]`;
-const overlaps = (column: SQL | typeof accountSummary.sourceIds, values: string[]): SQL =>
+export const overlaps = (column: SQL | typeof accountSummary.sourceIds, values: string[]): SQL =>
   values.length === 0 ? sql`false` : sql`${column} && ${textArrayOf(values)}`;
 
 async function limitCondition(ctx: ModuleContext, limit: DataLimit): Promise<SQL> {
@@ -29,6 +29,7 @@ async function limitCondition(ctx: ModuleContext, limit: DataLimit): Promise<SQL
     case 'own_accounts': {
       const mine: (SQL | undefined)[] = [
         access?.userId ? eq(accountSummary.ownerUserId, access.userId) : undefined,
+        access?.userId ? overlaps(accountSummary.ownerHistoryUserIds, [access.userId]) : undefined,
         access?.sourceId ? overlaps(accountSummary.sourceIds, [access.sourceId]) : undefined,
       ];
       return or(...mine) ?? sql`false`;

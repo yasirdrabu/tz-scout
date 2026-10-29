@@ -187,6 +187,7 @@ export async function archiveSignal(ctx: ModuleContext, signalId: string, reason
     .where(and(eq(signal.tenantId, ctx.tenantId), eq(signal.id, signalId)));
   await audit(ctx, { action: 'accounts.signal.archive', subject: { type: 'signal', id: signalId }, after: { accountId: row.accountId, reason } });
   await writeSummary(ctx, row.accountId);
+  await publish(ctx, accountUpdated, { accountId: row.accountId, changedKeys: ['signals'] }, subjectOf(row.accountId));
 }
 
 async function setOverride(ctx: ModuleContext, accountId: string, on: boolean, note?: string): Promise<void> {

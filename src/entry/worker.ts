@@ -1,7 +1,9 @@
 import './registry';
-import { accountsTenantDefaults, exclusionsRecheckHandler } from '@/modules/accounts';
-import { importRunHandler, intakeAccountMerged, intakeTenantDefaults, resolveHandler, waitingExpireHandler } from '@/modules/intake';
+import { accountsSummaryOnReviewChanged, accountsSummaryOnScored, accountsTenantDefaults, exclusionsRecheckHandler } from '@/modules/accounts';
+import { importRunHandler, intakeAccountMerged, intakeSellerDeclineFeedback, intakeStatusFeedback, intakeTenantDefaults, resolveHandler, waitingExpireHandler } from '@/modules/intake';
 import { credentialsCleanupHandler } from '@/modules/integrations';
+import { autoAcceptHandler, routingConsumers } from '@/modules/routing';
+import { ageingHandler, rescoreAccountsHandler, rescorePageHandler, scoringConsumers } from '@/modules/scoring';
 import { pingHandler } from '@/platform/diagnostics';
 import { log } from '@/platform/log';
 import type { ConsumerDef } from '@/platform/runtime/consumers';
@@ -9,10 +11,10 @@ import type { JobHandlerDef } from '@/platform/runtime/jobs';
 import { startWorker } from '@/platform/runtime/worker';
 
 /** Every consumer in the app. Modules add theirs here as they land. */
-export const consumers: ConsumerDef[] = [accountsTenantDefaults, intakeTenantDefaults, intakeAccountMerged];
+export const consumers: ConsumerDef[] = [accountsTenantDefaults, accountsSummaryOnReviewChanged, accountsSummaryOnScored, intakeTenantDefaults, intakeAccountMerged, intakeStatusFeedback, intakeSellerDeclineFeedback, ...scoringConsumers, ...routingConsumers];
 
 /** Every job handler in the app. */
-export const jobs: JobHandlerDef[] = [pingHandler, credentialsCleanupHandler, exclusionsRecheckHandler, resolveHandler, waitingExpireHandler, importRunHandler];
+export const jobs: JobHandlerDef[] = [pingHandler, credentialsCleanupHandler, exclusionsRecheckHandler, resolveHandler, waitingExpireHandler, importRunHandler, rescoreAccountsHandler, rescorePageHandler, ageingHandler, autoAcceptHandler];
 
 /** Worker role: consumers and job handlers. Runs until SIGINT or SIGTERM. */
 export async function main(): Promise<void> {

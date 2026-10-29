@@ -22,6 +22,7 @@ export type IdPrefix =
   | 'prc'
   | 'off'
   | 'cs'
+  | 'sr'
   | 'acc'
   | 'per'
   | 'fct'
@@ -32,6 +33,14 @@ export type IdPrefix =
   | 'imp'
   | 'map'
   | 'wi'
+  | 'om'
+  | 'scc'
+  | 'asg'
+  | 'rsd'
+  | 'rsc'
+  | 'stc'
+  | 'drd'
+  | 'fb'
   | 'blob';
 
 const ulid = monotonicFactory();

@@ -30,7 +30,7 @@ checks, caps and trust only work if every arrival goes through here. That includ
 | `warm_intro` | `id` (`wi_`), `arrival_id`, `account_id`, `introducer_user_id`, `introducer_name`, `introducer_email`, `relationship_text`, `relationship_key`, `note`, `points`, `effective_points` (what counts: half of `points`, rounded down, until confirmed), `confirmed`, `confirmed_by` | One per arrival that declares an intro |
 | `warm_intro_rule` | `tenant_id`, `introducer_user_id` or `introducer_email`, `relationship_key`, `points` | Points per introducer and relationship |
 | `arrival_outcome` | `arrival_id`, `account_id`, source chain ids, `max_stage`, `declined`, `conflicts_lost`, `updated_at` | Read model for trust, built from events |
-| `source_feedback` | `id`, `source_id`, `arrival_id`, `account_id`, `kind`, `note`, `created_at` | What a source is told about its arrivals |
+| `source_feedback` | `id` (`fb_`), `source_id`, `arrival_id`, `account_id`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`), `reason_key`, `note`, `cause`, `created_at` | What a source is told about its arrivals. One row (and one event) per distinct source in the chain for each cause, pinned to that source's latest resolved arrival: unique on (tenant, source, kind, cause). A seller's decline carries the seller's reason key and note |
 
 New id prefixes this module introduces: `imp_` (file import), `map_` (column mapping), `wi_` (warm
 intro).
@@ -69,6 +69,9 @@ ACC (`getTrust(ctx, chain)`, `sourcesForAccount(ctx, accountId)`, used to pick c
 The composition root registers SRC's implementations, so neither TEN nor ACC imports SRC.
 | `getWarmIntro(ctx, accountId)` | SCO, PLB | The strongest warm intro on the account: introducer (user id or name), relationship key, points 0 to 20, confirmed; or none |
 | `accountForArrival(ctx, arrivalId)` | REV (`get_account_status`), API, MCP | The arrival's account id once resolved, its status and `waiting_on` otherwise |
+| `initialReviewStatusKeys(ctx, accountIds)` | REV (R1b backfill) | The review status each account would have started at: its first resolved arrival's source status, else that source kind's default |
+
+**Defines for REV (inverted interface):** `ReviewStatusValidator`, implemented by routing, checks a source's `initial_review_status_key` when it is created or changed; with none registered, any key is accepted. SRC also consumes `routing.status.changed` (send-back and decline notes) and `routing.assignment.declined` (seller decline, with the reason key and note) to record feedback, and counts accounts by stage for batches from the account summary.
 
 An account is **sent by** a source if any of that source's arrivals resolved to it. This is the
 definition behind the `own_source` data limit.
@@ -96,7 +99,7 @@ definition behind the `own_source` data limit.
 | `intake.batch.completed` | `batchId`, `counts {resolved, rejected, newAccounts, alreadyKnown}`, `reportedCost? {credits, costCents, currency}` |
 | `intake.source.trust_changed` | `sourceId`, `level` (`person`, `agent`, `vendor`), `from`, `to`, `sampleSize`, `cause` (`outcomes`, `conflict_lost`, `warm_intro_points`) |
 | `intake.warm_intro.confirmed` | `warmIntroId`, `arrivalId`, `accountId`, `points`, `confirmedBy` |
-| `intake.feedback.recorded` | `sourceId`, `arrivalId`, `accountId`, `kind` (`conflict_lost`, `declined_at_review`, `declined_by_seller`, `enrichment_declined`), `note` |
+| `intake.feedback.recorded` | `sourceId`, `arrivalId`, `accountId`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`), `reasonKey`, `note` |
 
 ## API endpoints
 
@@ -107,7 +110,7 @@ As fixed in [public-api/index.md](../public-api/index.md):
 | `GET /v1/sources` | `arrivals:read` | Sources visible to the principal (its own and children), with trust |
 | `POST /v1/sources` | `sources:manage` | Create a person, agent or vendor source |
 | `POST /v1/arrivals` | `arrivals:write` | One account. `202` with `arrival_id`, `status_url` |
-| `GET /v1/arrivals/{id}` | `arrivals:read` | Status, `waiting_on`, reason, account id, stage, feedback |
+| `GET /v1/arrivals/{id}` | `arrivals:read` | Status, `waiting_on`, reason, account id, stage, feedback. The arrival's feedback (account and chain sources, one per cause) is shown to anyone who may see the arrival; the feedback feed shows the caller's own source only |
 | `GET /v1/arrivals?batch_id=&status=&since=&cursor=` | `arrivals:read` | Within the principal's data limit |
 | `POST /v1/batches` | `arrivals:write` | Batch fields plus 1 to 1,000 items |
 | `POST /v1/batches/{id}/files` | `arrivals:write` | Up to 25 MB per file, 10 per batch |

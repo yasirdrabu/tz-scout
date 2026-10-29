@@ -19,7 +19,9 @@
   `cst_` cost line, `evt_` event, `run_` AI run, `con_` integration connection, `enr_` enrichment
   request, `hbt_` handoff batch, `mts_` message test, `stm_` statement, `scn_` funnel scenario,
   `mtg_` meeting, `tch_` meeting touch, `imp_` file import, `map_` saved column mapping, `wi_` warm
-  intro, `cfl_` conflict, `srch_` saved search.
+  intro, `cfl_` conflict, `srch_` saved search, `sr_` signal rule, `om_` offer match, `scc_` score
+  change, `rsd_` review status definition, `rsc_` review status change, `stc_` stage change, `drd_`
+  decline reason definition, `fb_` source feedback.
 - API JSON uses `snake_case` field names; TypeScript code uses camelCase and converts at the edge.
 - Outside systems' ids are stored as `(system, external_id)` pairs, never as our primary key.
 

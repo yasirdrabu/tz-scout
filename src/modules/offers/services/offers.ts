@@ -10,6 +10,7 @@ import { offer, offerCaseStudy, practice } from '../db/schema';
 import { BUYER_DEFINITION_WARNING, affectsMatching, approvalProblems } from '../domain/approval';
 import { slugify } from '../domain/slug';
 import { rethrowTaken, slugTaken } from './practices';
+import { seedSignalRules } from './signal-rules';
 
 export type Offer = typeof offer.$inferSelect;
 /** Every field a person can set on an offer. */
@@ -68,6 +69,8 @@ export async function createOffer(ctx: ModuleContext, input: OfferInput): Promis
     .returning()
     .catch(rethrowTaken);
   await audit(ctx, { action: 'offers.offer.created', subject: { type: 'offer', id: row!.id }, after: { slug, name } });
+  // Every offer starts with rules (OFF-E4): its slug's defaults, else the generic set.
+  await seedSignalRules(ctx, row!.id, slug);
   return row!;
 }
 

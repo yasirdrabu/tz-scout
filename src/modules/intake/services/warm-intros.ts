@@ -1,4 +1,4 @@
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import { memberRole, userIdForEmail } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { newId } from '@/platform/ids';
@@ -101,12 +101,14 @@ export async function recordWarmIntro(
   return view((await stored())!);
 }
 
-/** The strongest warm intro on the account (the highest effective points; intros never add up), or null. */
-export async function getWarmIntro(ctx: ModuleContext, accountId: string): Promise<WarmIntroView | null> {
+/** The strongest warm intro across the given accounts (the highest effective points; intros never add up), or null. */
+export async function getWarmIntro(ctx: ModuleContext, accountIds: string | string[]): Promise<WarmIntroView | null> {
+  const ids = Array.isArray(accountIds) ? accountIds : [accountIds];
+  if (ids.length === 0) return null;
   const rows = await ctx.tx
     .select()
     .from(warmIntro)
-    .where(and(eq(warmIntro.tenantId, ctx.tenantId), eq(warmIntro.accountId, accountId)))
+    .where(and(eq(warmIntro.tenantId, ctx.tenantId), inArray(warmIntro.accountId, ids)))
     .orderBy(warmIntro.createdAt);
   const best = strongest(rows);
   return best ? view(best) : null;
