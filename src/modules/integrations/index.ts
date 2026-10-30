@@ -6,6 +6,7 @@ export {
   NOT_LIVE_YET,
   SAMPLE_ONLY,
   TEST_FIRST,
+  connectionId,
   connectionSettings,
   connectionStatus,
   listConnections,

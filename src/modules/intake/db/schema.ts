@@ -103,6 +103,7 @@ export const arrival = intake.table(
     steps: text('steps').array().notNull().default(sql`'{}'::text[]`), // pipeline steps already done
     warmIntroId: text('warm_intro_id'),
     canDeclareWarmIntro: boolean('can_declare_warm_intro').notNull().default(false), // the sender held warm_intro:declare
+    externalIds: jsonb('external_ids'), // outside ids sent beside the body, not part of arrival.v1 (Ruling 13)
     resolvedAt: at('resolved_at'),
   },
   (t) => [
@@ -257,4 +258,15 @@ export const sourceFeedback = intake.table(
     index('source_feedback_tenant_source_created_idx').on(t.tenantId, t.sourceId, t.createdAt, t.id),
     index('source_feedback_tenant_arrival_idx').on(t.tenantId, t.arrivalId),
   ],
+);
+
+/** How far the qualified-lead poll has read, per CRM connection (Ruling 14). */
+export const crmLeadPoll = intake.table(
+  'crm_lead_poll',
+  {
+    tenantId: text('tenant_id').notNull(),
+    connectionId: text('connection_id').notNull(),
+    polledUntil: at('polled_until').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.connectionId] })],
 );

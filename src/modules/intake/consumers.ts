@@ -1,11 +1,13 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { accountMerged } from '@/modules/accounts/contracts/events';
+import { leadQualified } from '@/modules/crm/contracts/events';
 import { assignmentDeclined, statusChanged } from '@/modules/routing/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { seedIntakeDefaults } from './defaults';
 import { arrival, sourceFeedback, warmIntro } from './db/schema';
 import { recordFeedback } from './services/feedback';
+import { takeQualifiedLead } from './services/qualified-leads';
 
 /** Gives a new tenant its vendor sources, relationship defaults and waiting-expiry schedule. */
 export const intakeTenantDefaults = defineConsumer({
@@ -51,4 +53,12 @@ export const intakeSellerDeclineFeedback = defineConsumer({
   orderedBy: (e) => e.data.accountId,
   handle: async ({ id, data }, ctx) =>
     void (await recordFeedback(ctx, { accountId: data.accountId, kind: 'declined_by_seller', reasonKey: data.reasonKey, note: data.note, causeEventId: id })),
+});
+
+/** A contact the CRM's webhook says is qualified is read and submitted, the same as the poll does (Ruling 15). */
+export const intakeLeadQualified = defineConsumer({
+  name: 'intake.lead_qualified',
+  event: leadQualified,
+  orderedBy: (e) => e.data.contactId,
+  handle: async (e, ctx) => takeQualifiedLead(ctx, e.data.connectionId, e.data.contactId),
 });

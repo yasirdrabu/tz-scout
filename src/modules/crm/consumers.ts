@@ -1,11 +1,13 @@
 import { getAccount } from '@/modules/accounts';
-import { accountCreated, accountMerged, accountUpdated, personAdded } from '@/modules/accounts/contracts/events';
+import { accountCreated, accountMerged, accountUpdated, personAdded, personUpdated } from '@/modules/accounts/contracts/events';
 import { assignmentCreated, assignmentDeclined, assignmentWithdrawn } from '@/modules/routing/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
+import type { ModuleContext } from '@/platform/context';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { seedCrmDefaults } from './defaults';
 import { queueCompanyCheck } from './services/checks';
 import { queueHandoff } from './services/handoff';
+import { linkExternalIds } from './services/links';
 import { moveCrmToSurvivor } from './services/merge';
 import { queuePersonPush } from './services/push';
 import { requestUndo } from './services/undo';
@@ -17,20 +19,28 @@ export const crmTenantDefaults = defineConsumer({
   handle: async (_e, ctx) => seedCrmDefaults(ctx),
 });
 
-/** A new account with a domain is checked against the CRM before review (Ruling 11). */
+/** Links the account or person to the CRM ids that arrived with it (CRM-E6-S2). */
+const linkIds = (ctx: ModuleContext, data: { accountId: string; personId?: string; externalIds?: { system: string; id: string }[] }) =>
+  data.externalIds?.length ? linkExternalIds(ctx, { accountId: data.accountId, personId: data.personId, externalIds: data.externalIds }) : Promise.resolve();
+
+/** A new account is linked to the CRM ids it arrived with, and one with a domain is checked against the CRM before review (Ruling 11). */
 export const crmAccountCreated = defineConsumer({
   name: 'crm.account_created',
   event: accountCreated,
   orderedBy: (e) => e.data.accountId,
-  handle: async (e, ctx) => queueCompanyCheck(ctx, e.data.accountId, e.data.domain),
+  handle: async (e, ctx) => {
+    await linkIds(ctx, e.data);
+    await queueCompanyCheck(ctx, e.data.accountId, e.data.domain);
+  },
 });
 
-/** A changed domain is checked again. */
+/** New CRM ids are linked; a changed domain is checked again. */
 export const crmAccountUpdated = defineConsumer({
   name: 'crm.account_updated',
   event: accountUpdated,
   orderedBy: (e) => e.data.accountId,
   handle: async (e, ctx) => {
+    await linkIds(ctx, e.data);
     if (!e.data.changedKeys.includes('domain')) return;
     const account = await getAccount(ctx, e.data.accountId);
     if (account) await queueCompanyCheck(ctx, account.id, account.domain, { domainChanged: true });
@@ -62,12 +72,23 @@ export const crmAssignmentWithdrawn = defineConsumer({
   handle: async (e, ctx) => requestUndo(ctx, { assignmentId: e.data.assignmentId, kind: 'withdrawn', reasonLabel: null, by: e.data.by }),
 });
 
-/** A person added to a handed-off account goes to the CRM too (Ruling 22). */
+/** A new person is linked to the CRM ids they arrived with; one added to a handed-off account goes to the CRM too (Ruling 22). */
 export const crmPersonAdded = defineConsumer({
   name: 'crm.person_added',
   event: personAdded,
   orderedBy: (e) => e.data.accountId,
-  handle: async (e, ctx) => queuePersonPush(ctx, e.data.accountId, e.data.personId),
+  handle: async (e, ctx) => {
+    await linkIds(ctx, e.data);
+    await queuePersonPush(ctx, e.data.accountId, e.data.personId);
+  },
+});
+
+/** A known person who arrives with new CRM ids is linked to them. */
+export const crmPersonUpdated = defineConsumer({
+  name: 'crm.person_updated',
+  event: personUpdated,
+  orderedBy: (e) => e.data.accountId,
+  handle: async (e, ctx) => linkIds(ctx, e.data),
 });
 
 /** Links, handoffs, deals, activities and checks follow an account merge to the survivor. */
@@ -88,4 +109,5 @@ export const crmConsumers = [
   crmAssignmentDeclined,
   crmAssignmentWithdrawn,
   crmPersonAdded,
+  crmPersonUpdated,
 ];

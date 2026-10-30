@@ -18,10 +18,19 @@ export {
   sourceTrustChanged,
 } from './contracts/events';
 export { normaliseDomain } from './domain/normalise';
-export { importRunJob, resolveJob, waitingExpireJob } from './contracts/jobs';
-export { intakeAccountMerged, intakeSellerDeclineFeedback, intakeStatusFeedback, intakeTenantDefaults } from './consumers';
+export { importRunJob, qualifiedLeadsPollJob, resolveJob, waitingExpireJob } from './contracts/jobs';
+export { intakeAccountMerged, intakeLeadQualified, intakeSellerDeclineFeedback, intakeStatusFeedback, intakeTenantDefaults } from './consumers';
 export { feedbackForArrival, listFeedback, recordFeedback, type ArrivalFeedback, type FeedbackKind, type FeedbackView } from './services/feedback';
-export { importRunHandler, resolveHandler, waitingExpireHandler } from './jobs';
+export { importRunHandler, qualifiedLeadsPollHandler, resolveHandler, waitingExpireHandler } from './jobs';
+export {
+  FIRST_POLL_LOOKBACK_MS,
+  SAMPLE_LEAD_EMAIL,
+  leadRef,
+  pollQualifiedLeads,
+  simulateQualifiedLead,
+  submitQualifiedLead,
+  takeQualifiedLead,
+} from './services/qualified-leads';
 export { DEFAULT_VENDOR_SOURCES, RELATIONSHIP_DEFAULTS, seedIntakeDefaults } from './defaults';
 export { listRelationshipDefaults, setRelationshipDefault, type RelationshipDefaultView } from './services/settings';
 export { checkArrivalCap, type CapCheck } from './services/caps';
@@ -58,6 +67,7 @@ export {
   isStrictChannel,
   submitArrival,
   submitBatch,
+  type ArrivalExternalIds,
   type BatchItemResult,
   type Channel,
   type SubmitOptions,

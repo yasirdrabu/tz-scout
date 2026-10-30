@@ -38,7 +38,11 @@ export type SubmitOptions = {
   vendorSourceId?: string;
   /** Inline only: the facts are about this person at the target account (set by routes, never read from a body). */
   targetPersonId?: string;
+  /** CRM ids for the account and for people by index, stored on the arrival beside the body (Ruling 13). Set by Scout's own senders, never read from a body. */
+  externalIds?: ArrivalExternalIds;
 };
+
+export type ArrivalExternalIds = { account?: { system: string; id: string }[]; people?: { index: number; system: string; id: string }[] };
 
 export type SubmitResult = {
   arrivalId: string;
@@ -161,6 +165,7 @@ type Row = {
   externalRef: string | null;
   targetAccountId?: string | null;
   canDeclareWarmIntro?: boolean;
+  externalIds?: ArrivalExternalIds;
   rejected?: { reason: 'invalid' | 'daily_cap_reached' | 'duplicate_in_batch'; detail: string };
 };
 
@@ -184,6 +189,7 @@ async function store(ctx: ModuleContext, r: Row): Promise<string | null> {
       externalRef: r.rejected ? null : r.externalRef,
       targetAccountId: r.targetAccountId ?? null,
       canDeclareWarmIntro: r.canDeclareWarmIntro ?? false,
+      externalIds: r.externalIds ?? null,
       ...(r.rejected ? { status: 'rejected', rejectReason: r.rejected.reason, rejectDetail: r.rejected.detail } : {}),
     })
     .onConflictDoNothing()
@@ -265,6 +271,7 @@ export async function submitArrival(ctx: ModuleContext, body: unknown, opts: Sub
     externalRef,
     targetAccountId,
     canDeclareWarmIntro: opts.canDeclareWarmIntro,
+    externalIds: opts.externalIds,
   });
   if (!id) return (await duplicate())!;
   if (opts.inline) return { arrivalId: id, duplicateOfRequest: false, ...(await resolveInline(ctx, id, { targetPersonId: opts.targetPersonId })) };

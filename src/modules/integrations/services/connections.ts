@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, isNull, sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import { config } from '@/platform/config';
 import type { ModuleContext } from '@/platform/context';
+import { withTenant } from '@/platform/db/tenant';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
@@ -258,6 +259,27 @@ export async function connectionSettings(ctx: ModuleContext, provider: string): 
     .from(connection)
     .where(and(eq(connection.tenantId, ctx.tenantId), eq(connection.provider, provider)));
   return (row?.settings ?? {}) as Record<string, unknown>;
+}
+
+/**
+ * The id of the tenant's connection for `provider`, creating the default row when there is none. The row is created in
+ * its own transaction, as the gateway does, so calls that log against it see it.
+ */
+export async function connectionId(ctx: ModuleContext, provider: string): Promise<string> {
+  requireProvider(provider);
+  const find = async () =>
+    (
+      await ctx.tx
+        .select({ id: connection.id })
+        .from(connection)
+        .where(and(eq(connection.tenantId, ctx.tenantId), eq(connection.provider, provider)))
+        .orderBy(asc(connection.createdAt), asc(connection.id))
+        .limit(1)
+    )[0]?.id;
+  const found = await find();
+  if (found) return found;
+  await withTenant(ctx.tenantId, (tx) => ensureConnection(tx, ctx.tenantId, provider, ctx.actor.id));
+  return (await find())!;
 }
 
 /** Shallow-merges `patch` into the connection's settings (a key set to a new value replaces the old one) and returns the result. */

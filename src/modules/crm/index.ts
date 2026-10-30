@@ -43,6 +43,7 @@ export {
   crmAssignmentWithdrawn,
   crmConsumers,
   crmPersonAdded,
+  crmPersonUpdated,
   crmTenantDefaults,
 } from './consumers';
 export { activityPollHandler, companyCheckHandler, dealsPollHandler, crmJobHandlers, syncHandler, handoffPushHandler, handoffUndoHandler, ownersSyncHandler, personPushHandler } from './jobs';
@@ -88,4 +89,5 @@ export { registerHubspotAdapter } from './adapters/hubspot/register';
 export { seedMockCrm } from './fixtures';
 export { DEALS_FIRST_LOOKBACK_MS, DEALS_OVERLAP_MS, applyDeals, companyLifecycle, pollDeals } from './services/deals';
 export { handleCrmWebhook } from './services/webhook';
+export { LEADS_POLL_LIMIT, fetchQualifiedLead, listQualifiedLeads } from './services/leads';
 export { SIGNATURE_MAX_AGE_MS, parseHubSpotWebhook, verifyHubSpotV3, type SignedRequest, type WebhookEvent } from './domain/webhook';

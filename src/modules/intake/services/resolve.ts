@@ -30,6 +30,7 @@ import {
 } from '../domain/normalise-arrival';
 import { normaliseWithAi } from '../tasks/arrival-normalise';
 import { DEFAULT_REVIEW_STATUS, intakeSourceInfo, loadSource, type SourceKind } from './sources';
+import type { ArrivalExternalIds } from './submit';
 import { recordWarmIntro, type DeclaredBy, type WarmIntroView } from './warm-intros';
 
 export type RejectReason = 'invalid' | 'excluded' | 'daily_cap_reached' | 'duplicate_in_batch';
@@ -56,18 +57,22 @@ async function normalise(ctx: ModuleContext, a: ArrivalV1, opts: { ai: boolean }
 }
 
 function forAccounts(row: ArrivalRow, n: Normalised): ArrivalForAccounts {
+  const ext = (row.externalIds ?? {}) as ArrivalExternalIds;
   return {
     arrivalId: row.id,
     receivedAt: row.receivedAt,
     sourceChain: chainOf(row),
     account: n.account,
-    people: n.people,
+    people: n.people.map((p, i) => {
+      const ids = ext.people?.filter((x) => x.index === i).map(({ system, id }) => ({ system, id })) ?? [];
+      return ids.length ? { ...p, externalIds: ids } : p;
+    }),
     signals: n.signals,
     facts: n.facts,
     research: n.research,
     ...(n.practiceHint ? { practiceHint: n.practiceHint } : {}),
     soleProprietor: n.soleProprietor,
-    externalIds: [],
+    externalIds: ext.account ?? [],
   };
 }
 

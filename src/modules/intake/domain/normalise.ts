@@ -8,13 +8,15 @@ countries.registerLocale(en);
 /**
  * The registrable domain of a domain, URL or host, in the form accounts stores it (lowercase,
  * no `www.`, no path or port). Null for an email, an IP address, a free mail provider or anything
- * that is not a real public domain.
+ * that is not a real public domain. The reserved `.example` names (RFC 2606) count, so the sample CRM's
+ * companies (`qualified.example`) come in through intake on a laptop.
  */
 export function normaliseDomain(input: string | null | undefined): string | null {
   const text = input?.trim();
   if (!text || /\s/.test(text) || /^mailto:/i.test(text) || text.includes('@')) return null;
   const r = parse(text);
-  if (r.isIp || !r.isIcann || !r.domain) return null;
+  const sample = r.publicSuffix?.toLowerCase() === 'example';
+  if (r.isIp || !(r.isIcann || sample) || !r.domain) return null;
   const domain = r.domain.toLowerCase();
   return isFreeEmailDomain(domain) ? null : domain;
 }
