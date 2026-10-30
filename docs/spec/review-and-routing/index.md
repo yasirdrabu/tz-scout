@@ -77,9 +77,7 @@ A stage move's `cause_event_id` is suffixed by the action (`<id>:accepted`, `:de
 | `crm.handoff.completed` / `.failed` / `.needs_decision` / `.cancelled` | set the handoff flag (`sending` on assignment, then `in_crm`, `failed`, `needs_decision` or `cancelled`); `needs_decision` and `failed` also go to the review summary as `handoff_needs_decision` and `handoff_failed` | yes |
 | `crm.activity.observed` | an activity by the open pending assignment's seller accepts it (`acceptedHow` `crm_activity`); a reply or meeting from anyone moves the stage to Engaged | yes |
 | `crm.deal.changed` | status `open` moves the stage to Opportunity, `won` to Won, `lost` to Lost | yes |
-| `crm.activity.observed` | implicit acceptance (REV-E2); stage engaged on reply or meeting | yes |
 | `playbooks.outcome.recorded` | stage engaged on reply or meeting | yes |
-| `crm.deal.changed` | stage opportunity, won, lost | yes |
 | `accounts.account.merged` | move review, assignments and history to the survivor | yes |
 | `tenancy.member.removed` | open assignments of that seller go back to the assigner as `withdrawn` | no |
 | `jobs.history.republish` | re-publish stored status, assignment and stage events with `replay: true` (events-and-async.md) | no |
@@ -116,7 +114,7 @@ JSON field names are snake_case.
 - The queue's batch filter takes batches of up to 1,000 accounts. A larger batch answers 400 ("This batch has more than 1,000 accounts. Filter the queue another way.", path `batch_id`) for the list and the count, rather than using part of it.
 - Assigning a declined account is refused (409 "Reopen it before assigning."). "Approve and assign" uses the first status by order that counts as reviewed and is not declined. Changing to a declined status first withdraws an open assignment. Changing to the current status does nothing.
 - Auto-acceptance counts working days as Monday to Friday in the tenant's timezone, holidays ignored; from a weekend it counts from the next working day's midnight.
-- The ownership preflight is a port (`OwnershipPreflight`); with no CRM it answers `new` ("New in the CRM"). Its results are `new`, `assign`, `stop` and `blocked`.
+- The ownership preflight is a port (`OwnershipPreflight`); with no CRM it answers `new` ("New in the CRM"). Its results are `new`, `assign`, `stop` and `blocked`. It takes an optional `{ fresh }` (default true): a single assign and the assign preview ask the CRM now; a bulk assign passes `fresh: false`, so a stored check under 24 hours old is used (the push checks ownership again). When HubSpot does not answer, the preflight is a 503 ("HubSpot didn't answer. Try again in a minute."), so in a bulk only that account fails.
 - "Arrived since" in the queue means the account's first arrival; a later arrival surfaces through "New from".
 - The low-trust flag is R3.
 

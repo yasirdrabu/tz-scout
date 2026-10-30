@@ -44,6 +44,17 @@ An assigned account now lands in HubSpot with its note and tasks, the rep's repl
 - The Playbooks handoff package is not built yet. With no provider registered, the note holds the Accounts sections only and the tasks use the plain defaults; Playbooks is the next plan.
 - The live HubSpot connector has not run against a real portal. The gated contract run (`SCOUT_LIVE_HUBSPOT_TOKEN`) is needed before cutover.
 
+**Final review fixes**
+- The activity poll is a fan-out: it stamps `follow_through.sync_queued_at` on up to 200 due accounts and queues one `crm.sync` each (timeout 120 seconds), with no account lock and no CRM call of its own. An account whose sync keeps failing goes to the back.
+- Consumers of different event types are not ordered. A decline or withdrawal handled before the assignment's `created` stores a `cancelled` handoff, so nothing is pushed; a reassign's `created` first requests the undo of the replaced assignment.
+- The ownership preflight answers 503 ("HubSpot didn't answer. Try again in a minute.") when HubSpot does not answer, so one account of a bulk fails alone; a bulk uses stored checks under 24 hours old.
+- Handoff batches show only the handoffs inside the reader's data limit; a batch with any hidden handoff has no name and withheld message texts (`restricted`).
+- The deal poll reads at most 1,000 deals a run and, after a full page, continues from the last deal's modified time. Webhooks about unseen deals queue at most one deal poll per 5 minutes (`setting.deals_poll_requested_at`).
+- The lifecycle lead rule counts a contact already past the stage.
+- Push and person-push retries wait 30 seconds, 2, 10 and 30 minutes, then an hour.
+- A give-up undo publishes `crm.handoff.cancelled` for the handoffs it cancels.
+- The inbound webhook refuses a malformed or disabled connection with a logged 401.
+
 ## 2026-10-27: Taazaa Scout R1b scoring and review
 
 Every account is now scored and explained, lands in a review queue, and can be approved, assigned, accepted or declined by a person, and the agent that sent it can read where it stands. This release has the `/v1` API only; screens come later.

@@ -12,6 +12,11 @@ per task, and the leader needs one place (Sent) to see what went to whom and whe
 - Handoffs created within the same leader action (a bulk assign) share one `crm.handoff_batch`.
   A single assignment makes its own batch.
 - Batch name: "<Mon D> · <n> to <first name>, <n> to <first name>" (as today, `batchName`).
+- A reader sees only the handoffs of accounts inside their data limit, in the list, the detail, the
+  follow-through counts and Not sent yet. The name and messages name every account, so when any handoff
+  of a batch is outside the reader's limit the batch has no name (`name` null) and each message has
+  `text` null with `restricted` true. A batch with nothing the reader can see is left out of the list
+  and is not found.
 - One message per seller per batch, written by a pure function (carried from `src/lib/handoff.ts`):
   greeting, numbered accounts with offer, first buyer and CRM link, what's in the CRM, and the ask
   (first touch within two working days, mark tasks done). Signed with the leader's first name.

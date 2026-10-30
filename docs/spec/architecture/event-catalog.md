@@ -85,13 +85,13 @@ Jobs travel the same way as events, as `jobs.<name>` messages. Each module spec 
 | `routing.assignments.auto_accept` | REV | Hourly, per tenant: accepts pending assignments that waited out the workspace's working days (at most 500 per run) |
 | `intake.qualified_leads.poll` | SRC | Every 15 minutes, per tenant: reads HubSpot contacts that became qualified since the last poll (at most 200 a run, oldest first, 5 minutes of overlap) and submits each as an arrival |
 | `crm.company.check` | CRM | Checks one account's company in the CRM before review; enqueued when an account is created or its domain changes, and by the R1c backfill |
-| `crm.handoff.push` | CRM | Pushes one handoff. Delivered up to 7 times: the first 6 runs are push attempts (retryable errors are rethrown), the 7th only marks a handoff `failed` if the job died. Timeout 120 seconds |
+| `crm.handoff.push` | CRM | Pushes one handoff. Delivered up to 7 times: the first 6 runs are push attempts (retryable errors are rethrown), the 7th only marks a handoff `failed` if the job died. Retries wait 30 seconds, 2, 10 and 30 minutes, then an hour (HubSpot's search index lags, so a quick retry could create a second company). Timeout 120 seconds |
 | `crm.handoff.undo` | CRM | Undoes a handoff after a decline or withdrawal: closes Scout's open tasks, returns ownership, adds a short note |
-| `crm.person.push` | CRM | Pushes one person added after the handoff, when the tenant setting is on |
-| `crm.activity.poll` | CRM | Every 15 minutes, per tenant: reads follow-through and activity for up to 200 handed-off accounts (latest handoff completed within 180 days, least recently checked first) |
-| `crm.deals.poll` | CRM | Hourly, per tenant: reads deals changed since the last poll and keeps those on linked companies |
+| `crm.person.push` | CRM | Pushes one person added after the handoff, when the tenant setting is on. Retries back off as `crm.handoff.push` does |
+| `crm.activity.poll` | CRM | Every 15 minutes, per tenant: picks up to 200 handed-off accounts (latest handoff completed within 180 days, least recently checked or queued first), stamps `follow_through.sync_queued_at` and queues one `crm.sync` each. It takes no account lock and makes no CRM call itself, and an account whose sync keeps failing goes to the back |
+| `crm.deals.poll` | CRM | Hourly, per tenant: reads deals changed since the last poll (at most 1,000, oldest change first) and keeps those on linked companies. After a full page the cursor moves to the last deal's modified time, not to now. A webhook about a deal Scout has not seen queues one at most every 5 minutes |
 | `crm.owners.sync` | CRM | Daily at 05:00 UTC, per tenant: reads the CRM's owner roster (up to 2,000 owners) |
-| `crm.sync` | CRM | Reads one account's follow-through, activity and deals now (from a webhook or "Check follow-through") |
+| `crm.sync` | CRM | Reads one account's follow-through, activity and deals now (from the activity poll, a webhook or "Check follow-through"), under the account lock. Timeout 120 seconds |
 
 ## Versions and arrival ids
 

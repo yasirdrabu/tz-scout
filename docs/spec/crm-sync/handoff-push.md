@@ -102,7 +102,7 @@ As a rep, I want dated tasks in my CRM, so that I know what to do when.
 ### CRM-E3-S5 Retries and failures people can see
 As a leader, I want to know when a push failed and why, so that no assigned account silently sits
 outside the CRM.
-- CRM-E3-S5-AC1 Retryable errors (timeouts, 429, 5xx, and transient database errors) are rethrown and retry with the platform backoff; each run counts an attempt on the handoff before it takes the account lock. The job is delivered up to 7 times (`maxDeliver` 7) and the first 6 deliveries are push attempts; the 7th only marks a handoff `failed` when the job died, so a handoff never stays `running`.
+- CRM-E3-S5-AC1 Retryable errors (timeouts, 429, 5xx, and transient database errors) are rethrown and retry after 30 seconds, 2, 10 and 30 minutes, then an hour (a create that timed out may still land in HubSpot, whose search index lags); each run counts an attempt on the handoff before it takes the account lock. The job is delivered up to 7 times (`maxDeliver` 7) and the first 6 deliveries are push attempts; the 7th only marks a handoff `failed` when the job died, so a handoff never stays `running`.
 - CRM-E3-S5-AC2 After the last attempt (attempt 6), or on a non-retryable error (bad token, missing scope,
   an answer Scout could not read, a seller with no CRM owner, an account with no website), status is `failed`, `crm.handoff.failed` is published, and the account page and Sent
   view show the reason in plain words with a Retry button.
