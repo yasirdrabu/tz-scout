@@ -1,10 +1,10 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { getAccount, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
-import { handoffCancelled, hubspotMock, runPush, runUndo, seedMockCrm, syncOwners } from '@/modules/crm';
+import { RETRIES_FAILED, handoffCancelled, hubspotMock, runPush, runUndo, seedMockCrm, syncOwners } from '@/modules/crm';
 import { handoff, mockCompany, mockNote, mockPerson, mockTask } from '@/modules/crm/db/schema';
-import { mockAddDeal, mockCompleteTask } from '@/modules/crm/fixtures';
+import { mockAddDeal, mockCompleteTask, setMockFailure } from '@/modules/crm/fixtures';
 import { callLog } from '@/modules/integrations/db/schema';
 import { assign, decline, withdraw } from '@/modules/routing';
 import { addMember, members, tenantTimezone } from '@/modules/tenancy';
@@ -121,7 +121,8 @@ describe('undo on decline (CRM-E3-S7)', () => {
     expect(after.status).toBe('completed');
     expect(after.undone).toMatchObject({ ownerReturnedTo: vijay, tasksLeftDone: [] });
     expect([...after.undone!.tasksClosed].sort()).toEqual(tasks.map((x) => x.externalId).sort());
-    expect(await events(handoffCancelled.type, a)).toHaveLength(0);
+    // The handoff stays completed, and crm.handoff.cancelled is published once so Routing stops showing "in CRM".
+    expect(await events(handoffCancelled.type, a)).toHaveLength(1);
   });
 
   it('gives inactive-owner.example back to the assigner, not the inactive previous owner', async () => {
@@ -175,7 +176,7 @@ describe('undo on decline (CRM-E3-S7)', () => {
   });
 
   it('running the undo twice changes nothing', async () => {
-    const { asg, d, h } = await pushed();
+    const { a, asg, d, h } = await pushed();
     await declineAs(ash, asg);
     await runOutbox(t.tenantId);
     const co = await companyAt(d);
@@ -185,27 +186,107 @@ describe('undo on decline (CRM-E3-S7)', () => {
     expect(await callCount()).toBe(calls);
     expect((await handoffOf(asg)).undone).toEqual(first.undone);
     expect(await notesOf(co.externalId)).toHaveLength(2);
+    expect(await events(handoffCancelled.type, a)).toHaveLength(1);
   });
 });
 
-describe('a decline during or before the push (Review Focus 1, CRM-E3-S7-AC4)', () => {
-  const MOCK_LOCK = () => `crm-mock:${t.tenantId}`;
-  /** True once a session waits on the mock CRM's id lock (the push, inside its person write). */
-  const pushWaitsOnMock = async () => {
-    const rows = await adminDb.execute(sql`
-      select 1 from pg_locks
-      where locktype = 'advisory' and not granted and objsubid = 1
-        and objid::bigint = (hashtext(${MOCK_LOCK()})::bigint & 4294967295)`);
-    return rows.length > 0;
-  };
-  const until = async (check: () => Promise<boolean>) => {
-    for (let i = 0; i < 200; i++) {
-      if (await check()) return;
-      await new Promise((r) => setTimeout(r, 25));
+/** Runs the outbox until a run stops throwing, at most `times` runs. Returns how many threw. */
+async function runThroughFailures(times: number): Promise<number> {
+  let failed = 0;
+  for (let i = 0; i < times; i++) {
+    try {
+      await runOutbox(t.tenantId);
+      return failed;
+    } catch {
+      failed++;
     }
-    throw new Error('timed out waiting');
-  };
+  }
+  return failed;
+}
 
+describe('an undo that fails and is retried (fix round 1)', () => {
+  it('a 500 on a person write: the retry returns both people and the company and lists the tasks it closed', async () => {
+    const d = domain();
+    await crmCompany(d, vijay);
+    const { asg } = await pushed({ domain: d, people: [person(6), person(7)] });
+    await t.run((ctx) => setMockFailure(ctx, 'upsertPerson', '500', 1));
+    await declineAs(ash, asg);
+    expect(await runThroughFailures(4)).toBe(1);
+    const co = await companyAt(d);
+    expect(co.ownerExternalId).toBe(vijay);
+    const people = await peopleOf(co.externalId);
+    expect(people).toHaveLength(2);
+    expect(people.every((p) => p.ownerExternalId === vijay)).toBe(true);
+    const undone = (await handoffOf(asg)).undone!;
+    expect(undone).toMatchObject({ ownerReturnedTo: vijay, tasksLeftDone: [] });
+    expect(undone.tasksClosed).toHaveLength(4);
+    expect(undone.failed).toBeUndefined();
+  });
+
+  it('a 500 on the note after the company went back: the retry still records whom it went to, with one note', async () => {
+    const d = domain();
+    await crmCompany(d, vijay);
+    const { asg } = await pushed({ domain: d, people: [person(8)] });
+    await t.run((ctx) => setMockFailure(ctx, 'upsertNote', '500', 1));
+    await declineAs(ash, asg);
+    expect(await runThroughFailures(4)).toBe(1);
+    const co = await companyAt(d);
+    expect(co.ownerExternalId).toBe(vijay);
+    expect((await peopleOf(co.externalId))[0]!.ownerExternalId).toBe(vijay);
+    const undone = (await handoffOf(asg)).undone!;
+    expect(undone).toMatchObject({ ownerReturnedTo: vijay, tasksLeftDone: [] });
+    expect(undone.tasksClosed).toHaveLength(4);
+    expect(await notesOf(co.externalId)).toHaveLength(2);
+  });
+
+  it('the last run records the failure in undone, with what was done, and publishes cancelled once', async () => {
+    const { a, asg, d } = await pushed();
+    await t.run((ctx) => setMockFailure(ctx, 'upsertNote', '500', 6));
+    await declineAs(ash, asg);
+    expect(await runThroughFailures(8)).toBe(5);
+    const h = await handoffOf(asg);
+    expect(h.undoAttempts).toBe(6);
+    expect(h.undone).toMatchObject({ failed: true, reason: RETRIES_FAILED, noteExternalId: null });
+    expect(h.undone!.tasksClosed).toHaveLength(4);
+    expect((await tasksOf((await companyAt(d)).externalId)).every((x) => x.status === 'completed')).toBe(true);
+    expect(await events(handoffCancelled.type, a)).toHaveLength(1);
+  });
+});
+
+const MOCK_LOCK = () => `crm-mock:${t.tenantId}`;
+/** True once a session waits on the mock CRM's id lock (a push, inside a write that makes a new record). */
+const pushWaitsOnMock = async () => {
+  const rows = await adminDb.execute(sql`
+    select 1 from pg_locks
+    where locktype = 'advisory' and not granted and objsubid = 1
+      and objid::bigint = (hashtext(${MOCK_LOCK()})::bigint & 4294967295)`);
+  return rows.length > 0;
+};
+const until = async (check: () => Promise<boolean>) => {
+  for (let i = 0; i < 200; i++) {
+    if (await check()) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error('timed out waiting');
+};
+
+/** Holds the mock CRM's id lock until `release`, so a push blocks in its first write that makes a new record. */
+async function holdMock(): Promise<{ release: () => void; done: Promise<void> }> {
+  let release!: () => void;
+  let held!: () => void;
+  const isHeld = new Promise<void>((r) => (held = r));
+  const done = adminDb.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${MOCK_LOCK()}))`);
+    held();
+    await new Promise<void>((r) => (release = r));
+  });
+  await isHeld;
+  return { release, done };
+}
+
+const unsentJobs = (name: string) => and(eq(outbox.tenantId, t.tenantId), isNull(outbox.sentAt), sql`${outbox.payload}->>'type' = ${`jobs.${name}`}`);
+
+describe('a decline during or before the push (Review Focus 1, CRM-E3-S7-AC4)', () => {
   it('a decline while the push is held after its company write stops the push with cancelled; the undo returns what was written', async () => {
     // Deterministic hold: the test holds the mock CRM's id lock, so the push writes the (existing) company,
     // then waits inside its first person write, which must create a contact. The decline lands then.
@@ -215,18 +296,10 @@ describe('a decline during or before the push (Review Focus 1, CRM-E3-S7-AC4)', 
     const made = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: ash }), { userId: leader });
     await runOutbox(t.tenantId, { until: async () => !!(await t.run((ctx) => ctx.tx.select().from(handoff).where(eq(handoff.accountId, a))))[0] });
     // The test runs the push itself; the queued job is marked delivered so the outbox doesn't run it alongside.
-    await adminDb.update(outbox).set({ sentAt: new Date() }).where(and(eq(outbox.tenantId, t.tenantId), isNull(outbox.sentAt), sql`${outbox.payload}->>'type' = 'jobs.crm.handoff.push'`));
+    await adminDb.update(outbox).set({ sentAt: new Date() }).where(unsentJobs('crm.handoff.push'));
     const h = await handoffOf(made.id);
 
-    let release!: () => void;
-    let held!: () => void;
-    const isHeld = new Promise<void>((r) => (held = r));
-    const hold = adminDb.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${MOCK_LOCK()}))`);
-      held();
-      await new Promise<void>((r) => (release = r));
-    });
-    await isHeld;
+    const hold = await holdMock();
     const push = t.run((ctx) => runPush(ctx, h.id));
     let delivered: Promise<void> = Promise.resolve();
     try {
@@ -236,8 +309,8 @@ describe('a decline during or before the push (Review Focus 1, CRM-E3-S7-AC4)', 
       delivered = runOutbox(t.tenantId); // the undo job waits for the push's account lock
       await until(async () => !!(await handoffOf(made.id)).cancelRequestedAt);
     } finally {
-      release();
-      await hold;
+      hold.release();
+      await hold.done;
       await push;
       await delivered;
     }
@@ -298,5 +371,36 @@ describe('a reassign (withdrawn with replacedBy)', () => {
     const notes = await notesOf(co.externalId);
     const line = `Withdrawn by ${await nameOf(leader)} on ${await today()}`;
     expect(notes.filter((n) => n.html.includes(line))).toHaveLength(1);
+  });
+
+  it("a reassign while Ash's push is stopped after its company write: Mike pushes first, and his later decline returns the company to Vijay, not Ash", async () => {
+    // Ash's push is left mid-flight by a timeout on its first person write (a lock hold can't be used: the push
+    // holds the account's company_check row, which the reassign's preflight writes, so withdraw would wait on it).
+    const d = 'owned-elsewhere.example';
+    const a = await account({ domain: d, people: [person(9)] });
+    await t.run((ctx) => setMockFailure(ctx, 'upsertPerson', 'timeout', 1));
+    const made = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: ash }), { userId: leader });
+    expect(await runThroughFailures(1)).toBe(1);
+    expect(await handoffOf(made.id)).toMatchObject({ status: 'running', takenFromOwner: vijay });
+    expect((await companyAt(d)).ownerExternalId).toBe(ownerOf(ash));
+    const [ashPush] = await adminDb.update(outbox).set({ sentAt: new Date() }).where(unsentJobs('crm.handoff.push')).returning({ seq: outbox.seq });
+    await asPerson(t, (ctx) => withdraw(ctx, made.id, { reassignTo: mike }), { userId: leader });
+    // One round delivers withdrawn and created; Ash's undo job is then held back so Mike's push runs first.
+    await runOutbox(t.tenantId, { until: async () => true });
+    const [undoJob] = await adminDb.update(outbox).set({ sentAt: new Date() }).where(unsentJobs('crm.handoff.undo')).returning({ seq: outbox.seq });
+    expect(undoJob).toBeTruthy();
+    await runOutbox(t.tenantId); // Mike's push
+    const [mikes] = (await t.run((ctx) => ctx.tx.select().from(handoff).where(eq(handoff.accountId, a)))).filter((x) => x.sellerUserId === mike);
+    expect(mikes).toMatchObject({ status: 'completed', takenFromOwner: vijay });
+    expect((await companyAt(d)).ownerExternalId).toBe(ownerOf(mike));
+    await adminDb.update(outbox).set({ sentAt: null }).where(inArray(outbox.seq, [ashPush!.seq, undoJob!.seq]));
+    await runOutbox(t.tenantId); // Ash's push redelivered (stops: cancel requested), then Ash's undo: the company is Mike's now, so it stays
+    expect((await handoffOf(made.id)).status).toBe('cancelled');
+    expect((await companyAt(d)).ownerExternalId).toBe(ownerOf(mike));
+
+    await declineAs(mike, mikes!.assignmentId);
+    await runOutbox(t.tenantId);
+    expect((await companyAt(d)).ownerExternalId).toBe(vijay);
+    expect((await handoffOf(mikes!.assignmentId)).undone).toMatchObject({ ownerReturnedTo: vijay });
   });
 });

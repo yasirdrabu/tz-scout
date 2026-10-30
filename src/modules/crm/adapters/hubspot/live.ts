@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { RateLimitedError, type LiveCredentials, type TestResult } from '@/modules/integrations';
 import { webhookEventSchema, type CrmAdapter, type CrmDeal, type QualifiedLead } from '../../contracts/adapter';
 import { noteFingerprint } from '../../domain/fingerprint';
+import { esc } from '../../domain/note';
 
 // Live HubSpot over the CRM v3/v4 REST API with a private app token, ported from v1 and held to the same
 // ownership rules as the mock. Scopes used: companies and contacts read/write (notes and tasks ride on
@@ -466,7 +467,7 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
         // The body a person may have edited is kept; the note goes after it.
         const task = await call(objSchema, 'GET', `/crm/v3/objects/tasks/${externalId}?properties=hs_task_body`);
         const body = text(task.properties.hs_task_body);
-        properties.hs_task_body = body ? `${body}<br><br>${note}` : note;
+        properties.hs_task_body = body ? `${body}<br><br>${esc(note)}` : esc(note);
       }
       await call(anySchema, 'PATCH', `/crm/v3/objects/tasks/${externalId}`, { properties });
       return { status: 'completed' as const };

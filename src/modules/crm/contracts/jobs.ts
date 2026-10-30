@@ -11,11 +11,14 @@ export const PUSH_MAX_ATTEMPTS = 6;
  */
 export const handoffPushJob = defineJob('crm.handoff.push', z.object({ handoffId: z.string() }), { maxDeliver: PUSH_MAX_ATTEMPTS + 1, timeoutMs: 120_000 });
 
+/** Runs of an undo that may do CRM work; one delivery more is kept for giving up, as for the push. */
+export const UNDO_MAX_ATTEMPTS = 6;
+
 /** Undoes what a handoff wrote after a decline or withdrawal (Ruling 7). */
 export const handoffUndoJob = defineJob(
   'crm.handoff.undo',
   z.object({ handoffId: z.string(), kind: z.enum(['declined', 'withdrawn']), reasonLabel: z.string().nullable(), by: z.string().nullable() }),
-  { timeoutMs: 120_000 },
+  { maxDeliver: UNDO_MAX_ATTEMPTS + 1, timeoutMs: 120_000 },
 );
 
 /** Pushes a person added after the handoff (Ruling 22). */

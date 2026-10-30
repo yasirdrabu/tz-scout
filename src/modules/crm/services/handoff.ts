@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { getAccount, getFacts, type PersonView } from '@/modules/accounts';
 import { gateway } from '@/modules/integrations';
@@ -41,7 +41,7 @@ export const byId = (ctx: ModuleContext, id: string) => and(eq(handoff.tenantId,
 export const OPEN = ['queued', 'running'];
 
 /** The handler's transaction was closed under it (time limit): stop now, record nothing; the platform redelivers. */
-const transactionClosed = (e: unknown): boolean =>
+export const transactionClosed = (e: unknown): boolean =>
   e instanceof TransactionClosedError || (e as { cause?: unknown } | null)?.cause instanceof TransactionClosedError;
 
 /** Queues one handoff per assignment (CRM-E3-S1-AC1) and its push job. */
@@ -181,7 +181,7 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
     return;
   }
   const take = re.decision.action === 'assign';
-  const takenFrom = re.decision.action === 'assign' ? re.decision.takenFrom : null;
+  const takenFrom = re.decision.action === 'assign' ? await originalOwner(ctx, h, re.decision.takenFrom) : null;
   // Recorded before the first write, so the undo of a push stopped midway knows whom to give the company back to (Ruling 7).
   if (takenFrom) await withTenant(ctx.tenantId, (tx) => tx.update(handoff).set({ takenFromOwner: takenFrom }).where(byId(ctx, h.id)));
 
@@ -332,6 +332,24 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
     true,
   );
   if (outcome === 'cancelled') throw new Cancelled();
+}
+
+/**
+ * Whom the company was really taken from. When its owner is the seller of an earlier handoff of this account
+ * whose undo was requested (a reassign, Ruling 7), that handoff's own previous owner is the one to return to.
+ */
+async function originalOwner(ctx: ModuleContext, h: Handoff, takenFrom: string | null): Promise<string | null> {
+  if (!takenFrom) return null;
+  const earlier = await ctx.tx
+    .select()
+    .from(handoff)
+    .where(and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.accountId, h.accountId), ne(handoff.id, h.id), isNotNull(handoff.cancelRequestedAt)))
+    .orderBy(desc(handoff.queuedAt), desc(handoff.id));
+  for (const e of earlier) {
+    const owner = e.ownerExternalId ?? (e.sellerUserId ? await crmOwnerId(ctx, e.sellerUserId, h.system) : null);
+    if (owner === takenFrom) return e.takenFromOwner;
+  }
+  return takenFrom;
 }
 
 /** What the company already had before the handoff, so follow-through counts only what came after. */

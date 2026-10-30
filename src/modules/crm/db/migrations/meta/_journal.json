@@ -36,6 +36,13 @@
       "when": 1793330981076,
       "tag": "0004_crm_mock_auth_failures",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793333548495,
+      "tag": "0005_crm_undo_attempts",
+      "breakpoints": true
     }
   ]
 }

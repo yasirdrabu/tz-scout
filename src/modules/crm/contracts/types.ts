@@ -27,6 +27,9 @@ export type HandoffUndone = {
   noteExternalId: string | null;
   /** `Owner left as is: <assigner> has no HubSpot owner` when the owner could not go back; else null. */
   ownerNote: string | null;
+  /** Set when the undo job gave up; the other fields say what it had done by then. */
+  failed?: boolean;
+  reason?: string;
   at: string;
 };
 

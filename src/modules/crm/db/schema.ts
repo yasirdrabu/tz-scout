@@ -66,6 +66,8 @@ export const handoff = crm.table(
     lastError: text('last_error'),
     cancelRequestedAt: at('cancel_requested_at'),
     undone: jsonb('undone').$type<HandoffUndone>(),
+    /** Runs of the undo job, counted before its lock like `attempts` (Ruling 4's pattern). */
+    undoAttempts: integer('undo_attempts').notNull().default(0),
     queuedAt: at('queued_at').notNull().defaultNow(),
     completedAt: at('completed_at'),
   },
