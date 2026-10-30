@@ -1,11 +1,12 @@
 import { getAccount } from '@/modules/accounts';
-import { accountCreated, accountUpdated, personAdded } from '@/modules/accounts/contracts/events';
+import { accountCreated, accountMerged, accountUpdated, personAdded } from '@/modules/accounts/contracts/events';
 import { assignmentCreated, assignmentDeclined, assignmentWithdrawn } from '@/modules/routing/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { seedCrmDefaults } from './defaults';
 import { queueCompanyCheck } from './services/checks';
 import { queueHandoff } from './services/handoff';
+import { moveCrmToSurvivor } from './services/merge';
 import { queuePersonPush } from './services/push';
 import { requestUndo } from './services/undo';
 
@@ -69,11 +70,20 @@ export const crmPersonAdded = defineConsumer({
   handle: async (e, ctx) => queuePersonPush(ctx, e.data.accountId, e.data.personId),
 });
 
+/** Links, handoffs, deals, activities and checks follow an account merge to the survivor. */
+export const crmAccountMerged = defineConsumer({
+  name: 'crm.account_merged',
+  event: accountMerged,
+  orderedBy: (e) => e.data.survivorId,
+  handle: async (e, ctx) => moveCrmToSurvivor(ctx, e.data.survivorId, e.data.mergedId),
+});
+
 /** Every CRM consumer, for the worker's list. */
 export const crmConsumers = [
   crmTenantDefaults,
   crmAccountCreated,
   crmAccountUpdated,
+  crmAccountMerged,
   crmAssignmentCreated,
   crmAssignmentDeclined,
   crmAssignmentWithdrawn,

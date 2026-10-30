@@ -1,5 +1,5 @@
 import './registry';
-import { accountsSummaryOnReviewChanged, accountsSummaryOnScored, accountsTenantDefaults, exclusionsRecheckHandler } from '@/modules/accounts';
+import { accountsCrmStatusConsumers, accountsSummaryOnReviewChanged, accountsSummaryOnScored, accountsTenantDefaults, exclusionsRecheckHandler } from '@/modules/accounts';
 import { importRunHandler, intakeAccountMerged, intakeSellerDeclineFeedback, intakeStatusFeedback, intakeTenantDefaults, resolveHandler, waitingExpireHandler } from '@/modules/intake';
 import { crmConsumers, crmJobHandlers } from '@/modules/crm';
 import { credentialsCleanupHandler } from '@/modules/integrations';
@@ -12,7 +12,7 @@ import type { JobHandlerDef } from '@/platform/runtime/jobs';
 import { startWorker } from '@/platform/runtime/worker';
 
 /** Every consumer in the app. Modules add theirs here as they land. */
-export const consumers: ConsumerDef[] = [accountsTenantDefaults, accountsSummaryOnReviewChanged, accountsSummaryOnScored, intakeTenantDefaults, intakeAccountMerged, intakeStatusFeedback, intakeSellerDeclineFeedback, ...scoringConsumers, ...routingConsumers, ...crmConsumers];
+export const consumers: ConsumerDef[] = [accountsTenantDefaults, accountsSummaryOnReviewChanged, accountsSummaryOnScored, ...accountsCrmStatusConsumers, intakeTenantDefaults, intakeAccountMerged, intakeStatusFeedback, intakeSellerDeclineFeedback, ...scoringConsumers, ...routingConsumers, ...crmConsumers];
 
 /** Every job handler in the app. */
 export const jobs: JobHandlerDef[] = [pingHandler, credentialsCleanupHandler, exclusionsRecheckHandler, resolveHandler, waitingExpireHandler, importRunHandler, rescoreAccountsHandler, rescorePageHandler, ageingHandler, autoAcceptHandler, ...crmJobHandlers];

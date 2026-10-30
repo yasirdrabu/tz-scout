@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
 import { accountExclusionChanged } from '../contracts/events';
@@ -59,4 +59,19 @@ export async function applyExclusion(ctx: ModuleContext, accountId: string, opts
   }
   if (!key) return null;
   return { key, label: rules.find((r) => r.key === key)?.label ?? key, override: acc.excludedOverride };
+}
+
+/**
+ * Sets `crm_status` from a CRM event when `observedAt` is newer than the stored `crm_status_at` (Ruling 12), then
+ * re-evaluates exclusions as an edit does. The caller holds the account lock. Returns whether anything changed.
+ */
+export async function applyCrmStatus(ctx: ModuleContext, accountId: string, status: CrmStatus, observedAt: Date): Promise<boolean> {
+  const written = await ctx.tx
+    .update(account)
+    .set({ crmStatus: status, crmStatusAt: observedAt, updatedAt: new Date() })
+    .where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId), or(isNull(account.crmStatusAt), lt(account.crmStatusAt, observedAt))))
+    .returning({ id: account.id });
+  if (written.length === 0) return false;
+  await applyExclusion(ctx, accountId);
+  return true;
 }

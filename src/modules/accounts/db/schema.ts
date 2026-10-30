@@ -60,6 +60,8 @@ export const account = accounts.table(
     excludedReasonKey: text('excluded_reason_key'),
     excludedOverride: boolean('excluded_override').notNull().default(false),
     crmStatus: text('crm_status').notNull().default('none'), // none | open_deal | customer
+    /** When the CRM event behind `crm_status` was observed; an older event never replaces it. */
+    crmStatusAt: at('crm_status_at'),
     archivedAt: at('archived_at'),
     createdAt: now('created_at'),
     updatedAt: now('updated_at'),

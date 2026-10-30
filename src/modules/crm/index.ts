@@ -36,6 +36,7 @@ export {
 export { capabilitiesSchema, crmOperations, type CrmAdapter, type CrmCapabilities, type CrmDeal, type QualifiedLead } from './contracts/adapter';
 export {
   crmAccountCreated,
+  crmAccountMerged,
   crmAccountUpdated,
   crmAssignmentCreated,
   crmAssignmentDeclined,
@@ -58,6 +59,7 @@ export {
   type QualifiedLeadRule,
 } from './services/settings';
 export { MAX_ATTEMPTS, queueHandoff, runPush } from './services/handoff';
+export { crmMergeGuard } from './services/merge';
 export { requestUndo, runUndo, type UndoReason } from './services/undo';
 export { batchFor, getBatch, listBatches, markCopied, refreshBatch, type BatchView } from './services/batches';
 export { batchName } from './domain/batch';
