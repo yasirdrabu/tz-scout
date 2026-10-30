@@ -3,7 +3,7 @@ import type { PgColumn } from 'drizzle-orm/pg-core';
 import { RateLimitedError } from '@/modules/integrations';
 import type { ModuleContext } from '@/platform/context';
 import { withTenant, type Tx } from '@/platform/db/tenant';
-import { webhookEventSchema, type CrmAdapter, type CrmDeal } from '../../contracts/adapter';
+import { DEALS_PAGE_LIMIT, webhookEventSchema, type CrmAdapter, type CrmDeal } from '../../contracts/adapter';
 import { mockActivity, mockCompany, mockDeal, mockFailure, mockNote, mockOwner, mockPerson, mockProperty, mockTask } from '../../db/schema';
 import { noteFingerprint } from '../../domain/fingerprint';
 
@@ -78,6 +78,7 @@ const dealOut = (d: typeof mockDeal.$inferSelect): CrmDeal => ({
   currency: d.currency,
   openedAt: iso(d.openedAt),
   closedAt: iso(d.closedAt),
+  modifiedAt: iso(d.updatedAt),
 });
 
 export function hubspotMock(ctx: ModuleContext): CrmAdapter {
@@ -357,7 +358,8 @@ ${note}` : note) : task.body;
           .select()
           .from(mockDeal)
           .where(and(eq(mockDeal.tenantId, tenantId), gte(mockDeal.updatedAt, new Date(input.changedSince))))
-          .orderBy(asc(mockDeal.externalId));
+          .orderBy(asc(mockDeal.updatedAt), asc(mockDeal.externalId))
+          .limit(DEALS_PAGE_LIMIT);
         return rows.map(dealOut);
       }),
 

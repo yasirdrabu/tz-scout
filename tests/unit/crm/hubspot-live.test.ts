@@ -285,16 +285,18 @@ describe('hubspotLive activities, deals and leads', () => {
     expect(filters).toContainEqual({ propertyName: 'hs_timestamp', operator: 'GTE', value: String(Date.parse('2026-03-01T00:00:00Z')) });
   });
 
-  it('lists deals changed since a time with their company, and drops deals with no company', async () => {
-    const dealProps = { dealname: 'D', dealstage: 'closedwon', amount: '10', hs_is_closed: 'true', hs_is_closed_won: 'true', closedate: '2026-04-01T00:00:00Z' };
+  it('lists deals changed since a time with their company and modified time; a deal with no company comes back with none, so the page count is true', async () => {
+    const dealProps = { dealname: 'D', dealstage: 'closedwon', amount: '10', hs_is_closed: 'true', hs_is_closed_won: 'true', closedate: '2026-04-01T00:00:00Z', hs_lastmodifieddate: '2026-04-02T00:00:00Z' };
     const f = fake(
       on('POST', '/crm/v3/objects/deals/search', { body: { results: [obj('d1', dealProps), obj('d2', dealProps)] } }),
       on('POST', '/crm/v4/associations/deals/companies/batch/read', { body: { results: [{ from: { id: 'd1' }, to: [{ toObjectId: 11 }] }] } }),
     );
     const out = await adapter(f).listDeals({ changedSince: '2026-03-01T00:00:00Z' });
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ externalId: 'd1', companyExternalId: '11', status: 'won', amountCents: 1000, closedAt: '2026-04-01T00:00:00.000Z' });
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ externalId: 'd1', companyExternalId: '11', status: 'won', amountCents: 1000, closedAt: '2026-04-01T00:00:00.000Z', modifiedAt: '2026-04-02T00:00:00.000Z' });
+    expect(out[1]).toMatchObject({ externalId: 'd2', companyExternalId: null });
     expect(f.calls[0]!.body!.filterGroups[0].filters[0]).toMatchObject({ propertyName: 'hs_lastmodifieddate', operator: 'GTE' });
+    expect(f.calls[0]!.body!.properties).toContain('hs_lastmodifieddate');
   });
 
   it('lists qualified leads by the rule with their company, and reads one back', async () => {

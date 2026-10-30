@@ -20,8 +20,18 @@ export const dealSchema = z.object({
   currency: z.string().nullable(),
   openedAt: iso.nullable(),
   closedAt: iso.nullable(),
+  /** When the deal last changed in the CRM; the deals poll moves its cursor to it after a full page. */
+  modifiedAt: iso.nullable().optional(),
 });
 export type CrmDeal = z.infer<typeof dealSchema>;
+
+/**
+ * Most deals one `listDeals({ changedSince })` returns, oldest change first. A full page may have more after it
+ * (HubSpot's search stops at 1,000), so the poll then moves its cursor only to the last deal returned.
+ */
+export const DEALS_PAGE_LIMIT = 1000;
+/** A listed deal; one with no company is still returned (with none), so a full page can be told apart. */
+export type ListedDeal = Omit<CrmDeal, 'companyExternalId'> & { companyExternalId: string | null };
 
 export const findCompanyInput = z.object({ domain: z.string().min(1) });
 export const findCompanyOutput = z
@@ -129,7 +139,7 @@ export const listActivitiesOutput = z.array(
 );
 
 export const listDealsInput = z.union([z.object({ companyExternalId: id }), z.object({ changedSince: iso })]);
-export const listDealsOutput = z.array(dealSchema);
+export const listDealsOutput = z.array(dealSchema.extend({ companyExternalId: id.nullable() }));
 
 export const qualifiedRuleSchema = z.object({ property: z.string().min(1), value: z.string().min(1) });
 

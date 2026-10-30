@@ -3,13 +3,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { upsertFromArrival } from '@/modules/accounts';
 import { checkCompany, companyChecked, dealChanged, hubspotMock, pollDeals, recordLink, refreshCheck, seedMockCrm, syncAccount } from '@/modules/crm';
-import { deal, link } from '@/modules/crm/db/schema';
+import { crmSetting, deal, link, mockDeal } from '@/modules/crm/db/schema';
 import { mockAddDeal, mockSetDeal } from '@/modules/crm/fixtures';
 import { recentCalls } from '@/modules/integrations';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
 import { newId } from '@/platform/ids';
 import { domain, routingTenant, type Tenant } from '../routing/helpers';
+import { DEALS_PAGE_LIMIT } from '@/modules/crm/contracts/adapter';
 
 let t: Tenant;
 beforeAll(async () => {
@@ -142,5 +143,28 @@ describe('deals (CRM-E5-S3)', () => {
     const dealOps = calls.map((c) => c.operation).filter((o) => /deal/i.test(o));
     expect(dealOps.length).toBeGreaterThan(0);
     expect(dealOps.every((o) => o === 'listDeals')).toBe(true);
+  });
+});
+
+describe('the deals poll past a full page (final review I4)', () => {
+  it('a full page moves the cursor to the last deal read, not to now; the next poll reads the rest', async () => {
+    const t2 = await routingTenant();
+    await t2.run((ctx) => seedMockCrm(ctx));
+    const now = new Date();
+    const base = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+    const at = (i: number) => new Date(base.getTime() + i * 1000);
+    const n = DEALS_PAGE_LIMIT + 1;
+    await t2.run((ctx) =>
+      ctx.tx.insert(mockDeal).values(
+        Array.from({ length: n }, (_, i) => ({ tenantId: ctx.tenantId, externalId: `mock-dl-bulk-${String(i).padStart(5, '0')}`, companyExternalId: 'mock-co-none', name: `D${i}`, updatedAt: at(i) })),
+      ),
+    );
+    await t2.run((ctx) => ctx.tx.update(crmSetting).set({ dealsPolledUntil: new Date(base.getTime() - 60_000) }).where(eq(crmSetting.tenantId, ctx.tenantId)));
+    const until = async () => (await t2.run((ctx) => ctx.tx.select({ u: crmSetting.dealsPolledUntil }).from(crmSetting).where(eq(crmSetting.tenantId, ctx.tenantId))))[0]!.u!;
+
+    await t2.run((ctx) => pollDeals(ctx, now));
+    expect((await until()).getTime()).toBe(at(DEALS_PAGE_LIMIT - 1).getTime());
+    await t2.run((ctx) => pollDeals(ctx, now));
+    expect((await until()).getTime()).toBe(now.getTime());
   });
 });

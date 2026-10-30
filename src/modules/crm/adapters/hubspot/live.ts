@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { RateLimitedError, type LiveCredentials, type TestResult } from '@/modules/integrations';
-import { webhookEventSchema, type CrmAdapter, type CrmDeal, type QualifiedLead } from '../../contracts/adapter';
+import { DEALS_PAGE_LIMIT, webhookEventSchema, type CrmAdapter, type CrmDeal, type ListedDeal, type QualifiedLead } from '../../contracts/adapter';
 import { noteFingerprint } from '../../domain/fingerprint';
 import { esc } from '../../domain/note';
 
@@ -58,7 +58,7 @@ const tokenInfoSchema = z.object({ scopes: z.array(z.string()), hubId: z.coerce.
 type Filter = { propertyName: string; operator: string; value: string };
 
 const COMPANY_PROPS = ['name', 'domain', 'website', 'city', 'state', 'country', 'numberofemployees', 'description', 'hubspot_owner_id', 'lifecyclestage'];
-const DEAL_PROPS = ['dealname', 'dealstage', 'amount', 'deal_currency_code', 'createdate', 'closedate', 'hs_is_closed', 'hs_is_closed_won'];
+const DEAL_PROPS = ['dealname', 'dealstage', 'amount', 'deal_currency_code', 'createdate', 'closedate', 'hs_is_closed', 'hs_is_closed_won', 'hs_lastmodifieddate'];
 const CONTACT_PROPS = ['firstname', 'lastname', 'email', 'jobtitle', 'phone', 'mobilephone', 'hs_linkedin_url', 'associatedcompanyid', 'lifecyclestage', 'lastmodifieddate', 'createdate', 'hubspot_owner_id'];
 
 /** The date HubSpot sets when a contact enters the rule's lifecycle stage; null for a rule on any other property. */
@@ -81,7 +81,9 @@ const toInt = (v: string | null | undefined): number | null => {
   return Number.isNaN(n) ? null : n;
 };
 
-function dealOut(o: Obj, companyExternalId: string): CrmDeal {
+function dealOut(o: Obj, companyExternalId: string): CrmDeal;
+function dealOut(o: Obj, companyExternalId: string | null): ListedDeal;
+function dealOut(o: Obj, companyExternalId: string | null): ListedDeal {
   const p = o.properties;
   const closed = p.hs_is_closed === 'true' || p.dealstage === 'closedwon' || p.dealstage === 'closedlost';
   const won = p.hs_is_closed_won === 'true' || p.dealstage === 'closedwon';
@@ -97,6 +99,7 @@ function dealOut(o: Obj, companyExternalId: string): CrmDeal {
     currency: text(p.deal_currency_code),
     openedAt: toIso(p.createdate),
     closedAt: status === 'open' ? null : toIso(p.closedate),
+    modifiedAt: toIso(p.hs_lastmodifieddate),
   };
 }
 
@@ -528,19 +531,17 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
 
     async listDeals(input) {
       if ('companyExternalId' in input) return dealsForCompany(input.companyExternalId);
-      const rows = await searchAll('deals', [{ propertyName: 'hs_lastmodifieddate', operator: 'GTE', value: toMs(input.changedSince) }], DEAL_PROPS, MAX_SEARCH_RESULTS, [
+      const rows = await searchAll('deals', [{ propertyName: 'hs_lastmodifieddate', operator: 'GTE', value: toMs(input.changedSince) }], DEAL_PROPS, DEALS_PAGE_LIMIT, [
         { propertyName: 'hs_lastmodifieddate', direction: 'ASCENDING' },
       ]);
-      // A deal belongs to its first associated company; one with no company cannot be linked to an account.
+      // A deal belongs to its first associated company. One with no company cannot be linked to an account, but is
+      // still returned (with none), so a full page reads as full.
       const companyOf = new Map<string, string>();
       for (let i = 0; i < rows.length; i += 100) {
         const r = await call(dealAssocSchema, 'POST', '/crm/v4/associations/deals/companies/batch/read', { inputs: rows.slice(i, i + 100).map((d) => ({ id: d.id })) }, true);
         for (const x of r.results) if (x.to[0]) companyOf.set(x.from.id, x.to[0].toObjectId);
       }
-      return rows.flatMap((d) => {
-        const companyId = companyOf.get(d.id);
-        return companyId ? [dealOut(d, companyId)] : [];
-      });
+      return rows.map((d) => dealOut(d, companyOf.get(d.id) ?? null));
     },
 
     // Pages on the stage date for the lifecycle rule, else on the last edit; the lead's `cursorAt` is that time.

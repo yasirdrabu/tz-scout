@@ -3,7 +3,8 @@ import { gateway } from '@/modules/integrations';
 import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
-import type { CrmAdapter, CrmDeal } from '../contracts/adapter';
+import { log } from '@/platform/log';
+import { DEALS_PAGE_LIMIT, type CrmAdapter, type CrmDeal, type ListedDeal } from '../contracts/adapter';
 import { dealChanged } from '../contracts/events';
 import type { CompanyLifecycle } from '../contracts/types';
 import { companyCheck, crmSetting, deal, link } from '../db/schema';
@@ -35,6 +36,8 @@ export async function companyLifecycle(
   const cached = await ctx.tx.select({ status: deal.status }).from(deal).where(and(eq(deal.tenantId, ctx.tenantId), eq(deal.accountId, accountId)));
   return lifecycleOf(fresh ? fresh.crmLifecycle : (check?.crmLifecycle ?? null), fresh?.freshDeals ?? cached);
 }
+
+const withCompany = (deals: ListedDeal[]): CrmDeal[] => deals.filter((d): d is CrmDeal => d.companyExternalId !== null);
 
 /**
  * Records deals read from the CRM (Ruling 18). A deal whose company has no `account` link is ignored. A new deal
@@ -117,7 +120,9 @@ export async function applyDeals(ctx: ModuleContext, deals: CrmDeal[], now: Date
 /**
  * The `crm.deals.poll` job (Ruling 18): one `listDeals({ changedSince })` call from the last high-water mark
  * (`crm.setting.deals_polled_until`, less a 5 minute overlap; a day back the first time), then `applyDeals`.
- * The mark moves to `now` only when the whole poll succeeded. Returns how many events were published.
+ * The mark moves to `now` only when the whole poll succeeded. A full page (`DEALS_PAGE_LIMIT`) may have more after it, so
+ * the mark then moves only to the last deal's modified time, and the next poll reads on from there (final review I4).
+ * Returns how many events were published.
  */
 export async function pollDeals(ctx: ModuleContext, now: Date): Promise<number> {
   const system = await crmSystem(ctx);
@@ -127,11 +132,14 @@ export async function pollDeals(ctx: ModuleContext, now: Date): Promise<number> 
     module: 'crm',
     requestSummary: { changedSince: from.toISOString() },
   });
-  const published = await applyDeals(ctx, found, now, system);
+  const published = await applyDeals(ctx, withCompany(found), now, system);
+  const last = found.length >= DEALS_PAGE_LIMIT ? found[found.length - 1]?.modifiedAt : null;
+  const until = last ? new Date(last) : now;
+  if (last) log.warn({ tenantId: ctx.tenantId, read: found.length, until: last }, 'crm: deals poll read a full page; the rest comes next poll');
   await ctx.tx
     .insert(crmSetting)
-    .values({ tenantId: ctx.tenantId, dealsPolledUntil: now })
-    .onConflictDoUpdate({ target: crmSetting.tenantId, set: { dealsPolledUntil: now, updatedAt: now } });
+    .values({ tenantId: ctx.tenantId, dealsPolledUntil: until })
+    .onConflictDoUpdate({ target: crmSetting.tenantId, set: { dealsPolledUntil: until, updatedAt: now } });
   return published;
 }
 
@@ -141,5 +149,5 @@ export async function syncDeals(ctx: ModuleContext, system: string, companyExter
     module: 'crm',
     requestSummary: { companyExternalId },
   });
-  return applyDeals(ctx, found, now, system);
+  return applyDeals(ctx, withCompany(found), now, system);
 }
