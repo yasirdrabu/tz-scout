@@ -1,5 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { getAccount } from '@/modules/accounts';
 import { accountAlias, personAlias } from '@/modules/accounts/db/schema';
@@ -9,6 +9,7 @@ import { mockQualifyPerson } from '@/modules/crm/fixtures';
 import { leadRef, pollQualifiedLeads, simulateQualifiedLead } from '@/modules/intake';
 import { arrivalResolved } from '@/modules/intake/contracts/events';
 import { arrival, crmLeadPoll, source } from '@/modules/intake/db/schema';
+import { qualifiedLeadTestHooks } from '@/modules/intake/services/qualified-leads';
 import { SAMPLE_ONLY, ensureConnectionId } from '@/modules/integrations';
 import { callLog, connection } from '@/modules/integrations/db/schema';
 import { assign } from '@/modules/routing';
@@ -181,6 +182,78 @@ describe('HubSpot qualified leads in (SRC-E6-S1, CRM-E6)', () => {
     expect(row!.polledUntil.toISOString()).toBe(later.toISOString());
     // A new qualified date is a new arrival.
     expect(await arrivalsFor((await mockContact(PAT)).externalId)).toHaveLength(2);
+  });
+});
+
+describe('the poll cursor under load and failures (fix round 2)', () => {
+  let u: Tenant;
+  let uConn: string;
+  const P = new Date(Math.floor(Date.now() / 1000) * 1000);
+  const tag = newId('acc').slice(-6).toLowerCase();
+
+  beforeAll(async () => {
+    u = await routingTenant();
+    uConn = await u.run((ctx) => ensureConnectionId(ctx, 'hubspot'));
+    await u.run((ctx) => ctx.tx.insert(crmLeadPoll).values({ tenantId: u.tenantId, connectionId: uConn, polledUntil: P }));
+  });
+  afterEach(() => {
+    qualifiedLeadTestHooks.beforeSubmit = undefined;
+  });
+
+  /** Qualified contacts with no company, one per time given; returns their ids. */
+  async function contacts(name: string, times: Date[]): Promise<string[]> {
+    const rows = times.map((qualifiedAt, i) => ({
+      tenantId: u.tenantId,
+      externalId: `mock-ct-${name}${i}-${tag}`,
+      name: `Lead ${name}${i}`,
+      email: `lead@${name}${i}-${tag}.com`,
+      lifecycle: 'marketingqualifiedlead',
+      qualifiedAt,
+    }));
+    await withTenant(u.tenantId, (tx) => tx.insert(mockPerson).values(rows));
+    return rows.map((r) => r.externalId);
+  }
+  const uPoll = () => u.run((ctx) => pollQualifiedLeads(ctx));
+  const cursor = async () => (await u.run((ctx) => ctx.tx.select().from(crmLeadPoll).where(eq(crmLeadPoll.connectionId, uConn))))[0]!.polledUntil.getTime();
+  const arrived = async (contactId: string) =>
+    (await u.run((ctx) => ctx.tx.select({ id: arrival.id }).from(arrival).where(sql`${arrival.externalRef} like ${`hubspot:${contactId}:%`}`))).length;
+  const at = (ms: number) => new Date(P.getTime() + ms);
+
+  it('a full page inside the overlap is followed by a read from the cursor, so later leads come in and it advances', async () => {
+    await contacts('in', Array.from({ length: 200 }, (_, i) => at(-4 * 60_000 + i)));
+    const after = await contacts('after', [at(1000), at(2000), at(3000)]);
+    await uPoll();
+    for (const id of after) expect(await arrived(id)).toBe(1);
+    expect(await cursor()).toBe(at(3000).getTime());
+    await uPoll();
+    for (const id of after) expect(await arrived(id)).toBe(1);
+    expect(await cursor()).toBe(at(3000).getTime());
+  }, 120_000);
+
+  it('a lead that fails with a plain error is logged and the cursor moves past it', async () => {
+    const [bad, good] = await contacts('plain', [at(10_000), at(20_000)]);
+    qualifiedLeadTestHooks.beforeSubmit = (lead) => {
+      if (lead.contact.externalId === bad) throw new Error('boom');
+    };
+    await uPoll();
+    expect(await arrived(bad!)).toBe(0);
+    expect(await arrived(good!)).toBe(1);
+    expect(await cursor()).toBe(at(20_000).getTime());
+  });
+
+  it('a lead that fails for a transient reason holds the cursor until it goes in', async () => {
+    const [busy, next] = await contacts('busy', [at(30_000), at(40_000)]);
+    qualifiedLeadTestHooks.beforeSubmit = (lead) => {
+      if (lead.contact.externalId === busy) throw Object.assign(new Error('Service unavailable'), { status: 503 });
+    };
+    await uPoll();
+    expect(await arrived(busy!)).toBe(0);
+    expect(await arrived(next!)).toBe(1);
+    expect(await cursor()).toBe(at(20_000).getTime());
+    qualifiedLeadTestHooks.beforeSubmit = undefined;
+    await uPoll();
+    expect(await arrived(busy!)).toBe(1);
+    expect(await cursor()).toBe(at(40_000).getTime());
   });
 });
 

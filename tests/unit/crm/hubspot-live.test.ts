@@ -356,6 +356,14 @@ describe('hubspotLive activities, deals and leads', () => {
     expect(f.calls[0]!.body!.sorts).toEqual([{ propertyName: 'lastmodifieddate', direction: 'ASCENDING' }]);
     expect(f.calls[0]!.body!.properties).toContain('lead_grade');
   });
+
+  it('a contact missing the paging date keeps the cursor at the time the list paged from', async () => {
+    const rule = { property: 'lifecyclestage', value: 'marketingqualifiedlead' };
+    const contact = obj('41', { firstname: 'Kim', lifecyclestage: 'marketingqualifiedlead', lastmodifieddate: '2026-06-03T00:00:00Z', associatedcompanyid: null });
+    const f = fake(on('POST', '/crm/v3/objects/contacts/search', { body: { results: [contact] } }));
+    const [lead] = await adapter(f).listQualifiedLeads({ changedSince: '2026-06-01T00:00:00Z', rule });
+    expect(lead).toMatchObject({ qualifiedAt: '2026-06-03T00:00:00.000Z', cursorAt: '2026-06-01T00:00:00.000Z' });
+  });
 });
 
 describe('hubspotLive webhooks', () => {

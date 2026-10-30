@@ -245,12 +245,14 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
     );
   }
 
-  function leadOut(contact: Obj, company: Obj | undefined, rule: { property: string; value: string }): QualifiedLead {
+  /** `since`: the time a list paged from; a contact missing the paging date keeps the cursor there instead of jumping it to now. */
+  function leadOut(contact: Obj, company: Obj | undefined, rule: { property: string; value: string }, since?: string): QualifiedLead {
     const p = contact.properties;
     const cp = company?.properties ?? {};
     // The lifecycle rule has a date for the stage; any other rule only has the last edit, the best known time.
     const pagedOn = qualifiedDateProp(rule) ?? 'lastmodifieddate';
-    const at = toIso(p[pagedOn]) ?? toIso(p.lastmodifieddate) ?? toIso(p.createdate) ?? new Date().toISOString();
+    const paged = toIso(p[pagedOn]);
+    const at = paged ?? toIso(p.lastmodifieddate) ?? toIso(p.createdate) ?? new Date().toISOString();
     const name = [p.firstname, p.lastname].filter(Boolean).join(' ').trim();
     return {
       contact: {
@@ -274,7 +276,7 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
         : null,
       lifecycleStage: p.lifecyclestage ?? '',
       qualifiedAt: at,
-      cursorAt: at,
+      cursorAt: paged ?? (since ? new Date(since).toISOString() : at),
       raw: Object.fromEntries(Object.entries(p).filter(([, v]) => v != null)),
     };
   }
@@ -284,10 +286,10 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
     return [...new Set([...CONTACT_PROPS, rule.property, ...(dateProp ? [dateProp] : [])])];
   };
 
-  async function withCompanies(contacts: Obj[], rule: { property: string; value: string }): Promise<QualifiedLead[]> {
+  async function withCompanies(contacts: Obj[], rule: { property: string; value: string }, since?: string): Promise<QualifiedLead[]> {
     const ids = [...new Set(contacts.map((c) => c.properties.associatedcompanyid).filter((id): id is string => !!id))];
     const companies = ids.length ? await readBatch('companies', ids, COMPANY_PROPS) : new Map<string, Obj>();
-    return contacts.map((c) => leadOut(c, companies.get(c.properties.associatedcompanyid ?? ''), rule));
+    return contacts.map((c) => leadOut(c, companies.get(c.properties.associatedcompanyid ?? ''), rule, since));
   }
 
   async function activitiesOf(object: 'emails' | 'calls' | 'meetings', companyId: string, since: string) {
@@ -554,7 +556,7 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
         200,
         [{ propertyName: pagedOn, direction: 'ASCENDING' }],
       );
-      return withCompanies(contacts, rule);
+      return withCompanies(contacts, rule, changedSince);
     },
 
     async readQualifiedLead({ contactId, rule }) {

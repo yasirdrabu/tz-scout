@@ -1,5 +1,14 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
-import { fetchQualifiedLead, getCrmSettings, listQualifiedLeads, seedMockCrm, type QualifiedLead, type QualifiedLeadRule } from '@/modules/crm';
+import {
+  LEADS_POLL_LIMIT,
+  classifyPushError,
+  fetchQualifiedLead,
+  getCrmSettings,
+  listQualifiedLeads,
+  seedMockCrm,
+  type QualifiedLead,
+  type QualifiedLeadRule,
+} from '@/modules/crm';
 import { SAMPLE_ONLY, connectionStatus, ensureConnectionId } from '@/modules/integrations';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -20,6 +29,9 @@ export const FIRST_POLL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Each poll reads again from this long before `polled_until`, for leads the CRM makes visible late; refs dedupe them. */
 export const LEADS_OVERLAP_MS = 5 * 60 * 1000;
+
+/** Tests only: runs before each polled lead is submitted, so a test can fail one. */
+export const qualifiedLeadTestHooks: { beforeSubmit?: (lead: QualifiedLead) => void | Promise<void> } = {};
 
 /** The tenant's `hubspot_qualified` source (from intake defaults). */
 async function leadSource(ctx: ModuleContext) {
@@ -90,14 +102,13 @@ export async function takeQualifiedLead(ctx: ModuleContext, connection: string, 
   }
 }
 
-/** A refusal that sending again would not change (validation, a paused source). Caps (429) are not permanent. */
-const isPermanent = (err: unknown) => err instanceof ScoutError && err.status >= 400 && err.status < 500 && err.status !== 429;
-
 /**
  * The 15-minute poll (Ruling 14): reads contacts from 5 minutes before `polled_until` (at most 200, by `cursorAt`)
- * and submits each in its own savepoint. `polled_until` moves to the latest `cursorAt` handled (submitted, already
- * sent or permanently refused), never past a lead that failed and will be read again. Stops at the source's daily cap,
- * so the rest are read next time. Skips a paused source and a connection that is off or not set up.
+ * and submits each in its own savepoint. `polled_until` moves to the latest `cursorAt` handled, never past a lead
+ * that failed for a transient reason (CRM `classifyPushError`: 429, 5xx, network, transient Postgres); any other
+ * failure is logged and counts as handled. A full page still inside the overlap is followed by a read from
+ * `polled_until`. Stops at the source's daily cap or when the source is paused meanwhile, so the rest are read next
+ * time. Skips a paused source and a connection that is off or not set up.
  */
 export async function pollQualifiedLeads(ctx: ModuleContext): Promise<{ submitted: number }> {
   const sender = await leadSource(ctx);
@@ -113,20 +124,40 @@ export async function pollQualifiedLeads(ctx: ModuleContext): Promise<{ submitte
   const since = row ? new Date(row.polledUntil.getTime() - LEADS_OVERLAP_MS) : new Date(Date.now() - FIRST_POLL_LOOKBACK_MS);
   let until = row?.polledUntil ?? since;
   let held = false;
+  let stopped = false;
   let submitted = 0;
-  for (const lead of await listQualifiedLeads(ctx, conn, since)) {
-    try {
-      const r = await ctx.tx.transaction((tx) => submitQualifiedLead({ ...ctx, tx }, lead));
-      if (!r.duplicateOfRequest) submitted++;
-    } catch (err) {
-      if (err instanceof ScoutError && err.slug === 'cap-reached') break;
-      log.warn({ err, tenantId: ctx.tenantId, contactId: lead.contact.externalId }, 'intake: a qualified lead could not be submitted');
-      // Read again next time: the cursor stays before it.
-      if (!isPermanent(err)) held = true;
-      continue;
+
+  const handle = async (leads: QualifiedLead[]) => {
+    for (const lead of leads) {
+      try {
+        await qualifiedLeadTestHooks.beforeSubmit?.(lead);
+        const r = await ctx.tx.transaction((tx) => submitQualifiedLead({ ...ctx, tx }, lead));
+        if (!r.duplicateOfRequest) submitted++;
+      } catch (err) {
+        // The daily cap, or the source paused meanwhile: stop, and read the rest next time.
+        if (err instanceof ScoutError && (err.slug === 'cap-reached' || err.status === 403)) {
+          stopped = true;
+          return;
+        }
+        if (classifyPushError(err).retryable) {
+          log.warn({ err, tenantId: ctx.tenantId, contactId: lead.contact.externalId }, 'intake: a qualified lead failed for now; read again next poll');
+          held = true;
+          continue;
+        }
+        // Sending it again would fail the same way: it counts as handled, so the cursor moves on.
+        log.error({ err, tenantId: ctx.tenantId, contactId: lead.contact.externalId }, 'intake: a qualified lead could not be submitted');
+      }
+      const at = new Date(lead.cursorAt);
+      if (!held && at > until) until = at;
     }
-    const at = new Date(lead.cursorAt);
-    if (!held && at > until) until = at;
+  };
+
+  const first = await listQualifiedLeads(ctx, conn, since);
+  await handle(first);
+  // A full page that never got past the cursor (all inside the overlap) would be read forever: read on from the cursor.
+  const lastAt = Math.max(...first.map((l) => Date.parse(l.cursorAt)));
+  if (!stopped && row && first.length >= LEADS_POLL_LIMIT && lastAt <= row.polledUntil.getTime()) {
+    await handle(await listQualifiedLeads(ctx, conn, row.polledUntil));
   }
   await ctx.tx
     .insert(crmLeadPoll)
