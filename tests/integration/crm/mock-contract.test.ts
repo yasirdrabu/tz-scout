@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import '@/entry/registry';
 import { hubspotMock, noteFingerprint, seedMockCrm, type CrmAdapter } from '@/modules/crm';
+import { hubspotLive } from '@/modules/crm/adapters/hubspot/live';
 import { mockCompany, mockOwner } from '@/modules/crm/db/schema';
 import { mockAddActivity, mockAddDeal, mockCompleteTask, mockEditNote, mockQualifyPerson, mockSetDeal, setMockFailure } from '@/modules/crm/fixtures';
 import { gateway, RateLimitedError } from '@/modules/integrations';
@@ -34,11 +35,9 @@ beforeAll(async () => {
 afterAll(closeDbs);
 
 runAdapterContract(() => mock(), { name: 'mock HubSpot' });
-// The live run needs a real token. The live adapter arrives with Task 3, which replaces this factory.
+// The live run needs a real token, so it is skipped without one.
 runAdapterContract(
-  () => {
-    throw new Error('The live HubSpot adapter is not built yet.');
-  },
+  () => hubspotLive({ kind: 'private_app_token', value: process.env.SCOUT_LIVE_HUBSPOT_TOKEN ?? '', settings: {} }),
   { name: 'live HubSpot', skip: !process.env.SCOUT_LIVE_HUBSPOT_TOKEN },
 );
 

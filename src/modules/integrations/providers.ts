@@ -33,7 +33,8 @@ export const DEMO_PROVIDER = 'demo';
 export const isKnownProvider = (key: string): boolean => key === DEMO_PROVIDER || PROVIDERS.some((p) => p.key === key);
 export const providerName = (key: string): string => PROVIDERS.find((p) => p.key === key)?.name ?? key;
 
-export type TestResult = { ok: boolean; message: string; missingPermissions?: string[] };
+/** `facts` are non-secret details a passing test learned (HubSpot: `portal_id`, `portal_name`); they are merged into `connection.settings`. */
+export type TestResult = { ok: boolean; message: string; missingPermissions?: string[]; facts?: Record<string, string> };
 
 /** Every adapter can test itself. Provider-specific methods are typed by the module that owns the capability. */
 export type Adapter = { test(): Promise<TestResult> };

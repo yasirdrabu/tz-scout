@@ -10,6 +10,7 @@ export {
   listConnections,
   recentCalls,
   saveCredential,
+  setConnectionSettings,
   setDisabled,
   setMode,
   testConnection,

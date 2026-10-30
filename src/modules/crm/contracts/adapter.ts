@@ -171,7 +171,14 @@ export const existingPropertiesOutput = z.array(z.string());
 export const setUpPropertiesInput = z.object({
   groupName: z.string().min(1),
   properties: z.array(
-    z.object({ name: z.string().min(1), label: z.string().min(1), type: z.enum(['string', 'number', 'date', 'enumeration']), description: z.string().optional() }),
+    z.object({
+      name: z.string().min(1),
+      label: z.string().min(1),
+      type: z.enum(['string', 'number', 'date', 'enumeration']),
+      fieldType: z.enum(['text', 'textarea', 'number', 'select', 'date']).optional(),
+      options: z.array(z.string()).optional(),
+      description: z.string().optional(),
+    }),
   ),
 });
 export const setUpPropertiesOutput = z.object({ created: z.array(z.string()) });
