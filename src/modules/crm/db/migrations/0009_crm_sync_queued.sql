@@ -1,0 +1,1 @@
+ALTER TABLE "crm"."follow_through" ADD COLUMN "sync_queued_at" timestamp with time zone;

@@ -24,10 +24,10 @@ export const handoffUndoJob = defineJob(
 /** Pushes a person added after the handoff (Ruling 22). */
 export const personPushJob = defineJob('crm.person.push', z.object({ accountId: z.string(), personId: z.string() }), {});
 
-/** Reads one account's follow-through, activities and deals now (Ruling 18). */
-export const syncJob = defineJob('crm.sync', z.object({ accountId: z.string() }), {});
+/** Reads one account's follow-through, activities and deals now (Ruling 18); the activity poll queues one per account. A live sync makes about 6 HubSpot calls. */
+export const syncJob = defineJob('crm.sync', z.object({ accountId: z.string() }), { timeoutMs: 120_000 });
 
-/** Every 15 minutes, one schedule per tenant (Ruling 17). */
+/** Every 15 minutes, one schedule per tenant (Ruling 17): queues a `crm.sync` per due account. */
 export const activityPollJob = defineJob('crm.activity.poll', z.object({}), {});
 
 /** Hourly, one schedule per tenant. */

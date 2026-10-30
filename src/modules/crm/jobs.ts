@@ -40,7 +40,7 @@ export const personPushHandler = defineJobHandler(personPushJob, async (e, ctx) 
   await runPersonPush(ctx, e.data.accountId, e.data.personId);
 });
 
-/** Every 15 minutes: reads follow-through and activity for handed-off accounts (Ruling 17). */
+/** Every 15 minutes: queues a sync for each handed-off account due a check (Ruling 17). */
 export const activityPollHandler = defineJobHandler(activityPollJob, async (_e, ctx) => {
   await pollActivity(ctx, new Date());
 });

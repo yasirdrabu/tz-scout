@@ -1,11 +1,10 @@
-import { and, desc, eq, gte, max, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, max, ne, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds } from '@/modules/accounts';
 import { gateway } from '@/modules/integrations';
 import { userForCrmOwner } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { enqueueJob, publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
-import { log } from '@/platform/log';
 import type { CrmAdapter } from '../contracts/adapter';
 import { activityObserved } from '../contracts/events';
 import { syncJob } from '../contracts/jobs';
@@ -13,7 +12,7 @@ import type { ActivityKind } from '../contracts/types';
 import { activity, followThrough as followThroughTable, handoff, link, taskLink } from '../db/schema';
 import { countsOfRow, type FollowThroughCounts } from '../domain/follow-through';
 import { syncDeals } from './deals';
-import { lockAccount, transactionClosed } from './handoff';
+import { lockAccount } from './handoff';
 import { crmSystem } from './owners';
 
 type Handoff = typeof handoff.$inferSelect;
@@ -141,9 +140,11 @@ async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternal
 }
 
 /**
- * The `crm.activity.poll` job (Ruling 17): the accounts whose latest completed handoff is under 180 days old, least
- * recently checked first, at most `limit`. One account failing does not stop the rest; it keeps its old check time and
- * is tried again next run. Returns how many were read.
+ * The `crm.activity.poll` job (Ruling 17, final review C1): a fan-out. It picks the accounts whose latest completed
+ * handoff is under 180 days old, least recently checked or queued first, at most `limit`, stamps `sync_queued_at` on
+ * them and queues one `crm.sync` per account. It takes no account lock and makes no CRM call: each sync runs in its own
+ * job, with its own time limit. An account whose sync keeps failing moves to the back, since its queue stamp is newer
+ * than the others' checks. Returns how many were queued.
  */
 export async function pollActivity(ctx: ModuleContext, now: Date, limit: number = POLL_LIMIT): Promise<number> {
   const latest = ctx.tx
@@ -153,23 +154,22 @@ export async function pollActivity(ctx: ModuleContext, now: Date, limit: number 
     .orderBy(handoff.accountId, desc(handoff.completedAt), desc(handoff.id))
     .as('latest');
   const due = await ctx.tx
-    .select({ accountId: latest.accountId })
+    .select({ accountId: latest.accountId, handoffId: latest.handoffId })
     .from(latest)
     .leftJoin(followThroughTable, and(eq(followThroughTable.tenantId, ctx.tenantId), eq(followThroughTable.handoffId, latest.handoffId)))
     .where(gte(latest.completedAt, new Date(now.getTime() - POLL_WINDOW_MS)))
-    .orderBy(sql`${followThroughTable.checkedAt} asc nulls first`, latest.accountId)
+    .orderBy(
+      sql`greatest(coalesce(${followThroughTable.checkedAt}, '-infinity'), coalesce(${followThroughTable.syncQueuedAt}, '-infinity')) asc`,
+      latest.accountId,
+    )
     .limit(limit);
-  let read = 0;
-  for (const { accountId } of due) {
-    try {
-      await syncAccount(ctx, accountId, now);
-      read++;
-    } catch (e) {
-      if (transactionClosed(e)) throw e;
-      log.warn({ err: e, tenantId: ctx.tenantId, accountId }, 'crm: follow-through check failed');
-    }
-  }
-  return read;
+  if (due.length === 0) return 0;
+  await ctx.tx
+    .update(followThroughTable)
+    .set({ syncQueuedAt: now })
+    .where(and(eq(followThroughTable.tenantId, ctx.tenantId), inArray(followThroughTable.handoffId, due.map((d) => d.handoffId))));
+  for (const { accountId } of due) await enqueueJob(ctx, syncJob, { accountId });
+  return due.length;
 }
 
 /** "Check follow-through" (CRM-E5-S1-AC2): the job reads the account now. */

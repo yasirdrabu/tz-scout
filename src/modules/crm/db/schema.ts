@@ -158,6 +158,8 @@ export const followThrough = crm.table(
     latest: jsonb('latest').$type<Record<string, number>>().notNull().default({}),
     tasks: jsonb('tasks').$type<{ id: string; status: string; due: string | null }[]>().notNull().default([]),
     checkedAt: at('checked_at'),
+    /** When the activity poll last queued a `crm.sync` for it, so an account that keeps failing goes to the back. */
+    syncQueuedAt: at('sync_queued_at'),
     stage: text('stage'),
     ownerExternalId: text('owner_external_id'),
   },

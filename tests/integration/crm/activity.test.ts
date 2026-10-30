@@ -1,10 +1,11 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { upsertFromArrival } from '@/modules/accounts';
 import { activityObserved, checkFollowThrough, followThrough, hubspotMock, pollActivity, seedMockCrm, syncAccount, syncJob, syncOwners } from '@/modules/crm';
 import { activity, followThrough as followThroughTable, handoff, link } from '@/modules/crm/db/schema';
-import { mockAddActivity, mockCompleteTask } from '@/modules/crm/fixtures';
+import { mockAddActivity, mockCompleteTask, setMockFailure } from '@/modules/crm/fixtures';
+import { callLog } from '@/modules/integrations/db/schema';
 import { assign } from '@/modules/routing';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -84,7 +85,9 @@ describe('follow-through and activity (CRM-E5-S1, S2)', () => {
     const h = await handoffOf(a);
     const ext = await addActivity(h.companyExternalId!, 'call');
     await t.run((ctx) => pollActivity(ctx, new Date()));
+    await runOutbox(t.tenantId); // the syncs it queued
     await t.run((ctx) => pollActivity(ctx, new Date()));
+    await runOutbox(t.tenantId);
     await sync(a);
     expect((await rows(a)).filter((r) => r.externalId === ext)).toHaveLength(1);
     expect((await observed(a)).filter((e) => e.externalId === ext)).toHaveLength(1);
@@ -152,8 +155,53 @@ describe('the activity poll (Ruling 17)', () => {
     expect(await t2.run((ctx) => pollActivity(ctx, new Date(Date.now() + 181 * DAY), 2))).toBe(0);
 
     expect(await t2.run((ctx) => pollActivity(ctx, new Date(), 2))).toBe(2);
+    await runOutbox(t2.tenantId); // the syncs it queued
     expect((await checkedAt(b)).getTime()).toBeGreaterThan(before);
     expect((await checkedAt(c)).getTime()).toBeGreaterThan(before);
     expect((await checkedAt(a)).getTime()).toBeLessThan(before);
   });
+
+  it('queues one crm.sync per due account and makes no CRM call itself (final review C1)', async () => {
+    const t3 = await routingTenant();
+    const s3 = await member(t3, 'seller');
+    await t3.run((ctx) => seedMockCrm(ctx));
+    await t3.run((ctx) => syncOwners(ctx));
+    const [a, b] = [await handedOff(t3, s3), await handedOff(t3, s3)];
+    const calls = async () => (await adminDb.select({ id: callLog.id }).from(callLog).where(eq(callLog.tenantId, t3.tenantId))).length;
+    const before = await calls();
+    expect(await t3.run((ctx) => pollActivity(ctx, new Date()))).toBe(2);
+    expect(await calls()).toBe(before);
+    expect((await unsentSyncs(t3)).sort()).toEqual([a, b].sort());
+  });
+
+  it('an account whose sync keeps failing does not stay first (final review C1)', async () => {
+    const t4 = await routingTenant();
+    const s4 = await member(t4, 'seller');
+    await t4.run((ctx) => seedMockCrm(ctx));
+    await t4.run((ctx) => syncOwners(ctx));
+    const [a, b] = [await handedOff(t4, s4), await handedOff(t4, s4)];
+    for (const [acc, ago] of [[a, 3], [b, 1]] as const) {
+      await t4.run(async (ctx) => {
+        const [h] = await ctx.tx.select().from(handoff).where(eq(handoff.accountId, acc));
+        await ctx.tx.update(followThroughTable).set({ checkedAt: new Date(Date.now() - ago * DAY) }).where(eq(followThroughTable.handoffId, h!.id));
+      });
+    }
+    const nextQueued = async () => {
+      await t4.run((ctx) => pollActivity(ctx, new Date(), 1));
+      const queued = await unsentSyncs(t4);
+      await adminDb.update(outbox).set({ sentAt: new Date() }).where(and(eq(outbox.tenantId, t4.tenantId), isNull(outbox.sentAt)));
+      return queued;
+    };
+    expect(await nextQueued()).toEqual([a]);
+    await t4.run((ctx) => setMockFailure(ctx, 'readFollowThrough', '500', 5));
+    await expect(t4.run((ctx) => syncAccount(ctx, a, new Date()))).rejects.toThrow();
+    expect(await nextQueued()).toEqual([b]);
+  });
 });
+
+/** The account ids of the tenant's crm.sync jobs not yet delivered, in outbox order. */
+const unsentSyncs = async (tenant: Tenant) =>
+  (await adminDb.select().from(outbox).where(and(eq(outbox.tenantId, tenant.tenantId), isNull(outbox.sentAt))).orderBy(outbox.seq))
+    .map((r) => r.payload as { type: string; data: { accountId?: string } })
+    .filter((e) => e.type === `jobs.${syncJob.name}`)
+    .map((e) => e.data.accountId);
