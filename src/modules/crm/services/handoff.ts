@@ -16,11 +16,12 @@ import { handoffCancelled, handoffCompleted, handoffFailed, handoffNeedsDecision
 import { handoffPushJob, PUSH_MAX_ATTEMPTS } from '../contracts/jobs';
 import { handoffPackageProvider } from '../contracts/ports';
 import { DEFAULT_FOLLOW_UP_DAYS } from '../contracts/types';
-import { crmSetting, fieldMapping, followThrough, handoff, handoffBatch } from '../db/schema';
+import { crmSetting, fieldMapping, followThrough, handoff } from '../db/schema';
 import { propertyValues } from '../domain/fields';
 import { buildNote } from '../domain/note';
 import { classifyPushError, NO_CRM_OWNER, NO_DOMAIN, NotPushable, OWNER_INACTIVE, REASON_LIMIT, RETRIES_FAILED } from '../domain/push-errors';
 import { buildTasks } from '../domain/tasks';
+import { batchFor, refreshBatch } from './batches';
 import { getLinks, recordLink } from './links';
 import { isOwnerActive } from './owners';
 import { recheckOwnership, stopReason } from './preflight';
@@ -42,21 +43,6 @@ const OPEN = ['queued', 'running'];
 /** The handler's transaction was closed under it (time limit): stop now, record nothing; the platform redelivers. */
 const transactionClosed = (e: unknown): boolean =>
   e instanceof TransactionClosedError || (e as { cause?: unknown } | null)?.cause instanceof TransactionClosedError;
-
-/** The handoff batch for a bulk run, found or made; a null key makes a batch of its own (Ruling 8). */
-export async function batchFor(ctx: ModuleContext, bulkKey: string | null, createdBy: string): Promise<string> {
-  const id = newId('hbt');
-  await ctx.tx.insert(handoffBatch).values({ id, tenantId: ctx.tenantId, bulkKey, createdBy }).onConflictDoNothing();
-  if (!bulkKey) return id;
-  const [row] = await ctx.tx
-    .select({ id: handoffBatch.id })
-    .from(handoffBatch)
-    .where(and(eq(handoffBatch.tenantId, ctx.tenantId), eq(handoffBatch.bulkKey, bulkKey)));
-  return row!.id;
-}
-
-/** Rewrites the batch name and the per-seller messages. Task 8 fills it in; until then it does nothing. */
-export async function refreshBatch(_ctx: ModuleContext, _batchId: string): Promise<void> {}
 
 /** Queues one handoff per assignment (CRM-E3-S1-AC1) and its push job. */
 export async function queueHandoff(ctx: ModuleContext, e: Created): Promise<void> {

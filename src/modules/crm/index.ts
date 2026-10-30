@@ -36,7 +36,10 @@ export {
 export { capabilitiesSchema, crmOperations, type CrmAdapter, type CrmCapabilities, type CrmDeal, type QualifiedLead } from './contracts/adapter';
 export { crmAccountCreated, crmAccountUpdated, crmAssignmentCreated, crmConsumers, crmTenantDefaults } from './consumers';
 export { companyCheckHandler, crmJobHandlers, handoffPushHandler, ownersSyncHandler } from './jobs';
-export { MAX_ATTEMPTS, batchFor, queueHandoff, refreshBatch, runPush } from './services/handoff';
+export { MAX_ATTEMPTS, queueHandoff, runPush } from './services/handoff';
+export { batchFor, getBatch, listBatches, markCopied, refreshBatch, type BatchView } from './services/batches';
+export { batchName, followThroughCounts } from './domain/batch';
+export { handoffMessage, handoffMessages, replyBy, type HandoffAccount, type HandoffMessage } from './domain/message';
 export { NO_CRM_OWNER, OWNER_INACTIVE, RETRIES_FAILED, SOMETHING_WRONG, TOKEN_REFUSED, UNREADABLE_ANSWER, classifyPushError } from './domain/push-errors';
 export { companyLink, getLinks, linkExternalIds, recordLink, type AccountLinks, type LinkRow, type RecordLink } from './services/links';
 export { CHECK_TTL_MS, checkCompany, companyChecks, lookupCompany, queueCompanyCheck, refreshCheck, type CompanyCheck } from './services/checks';

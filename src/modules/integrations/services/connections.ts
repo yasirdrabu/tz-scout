@@ -250,6 +250,16 @@ export async function testConnection(ctx: ModuleContext, provider: string): Prom
   return result;
 }
 
+/** The connection's settings (non-secret: HubSpot `portal_id`, the qualified-lead rule), `{}` when it has no row yet. */
+export async function connectionSettings(ctx: ModuleContext, provider: string): Promise<Record<string, unknown>> {
+  requireProvider(provider);
+  const [row] = await ctx.tx
+    .select({ settings: connection.settings })
+    .from(connection)
+    .where(and(eq(connection.tenantId, ctx.tenantId), eq(connection.provider, provider)));
+  return (row?.settings ?? {}) as Record<string, unknown>;
+}
+
 /** Shallow-merges `patch` into the connection's settings (a key set to a new value replaces the old one) and returns the result. */
 export async function setConnectionSettings(
   ctx: ModuleContext,
