@@ -4,7 +4,7 @@ import '@/entry/compose';
 import '@/entry/registry';
 import { hubspotMock, noteFingerprint, seedMockCrm, type CrmAdapter } from '@/modules/crm';
 import { mockCompany, mockOwner } from '@/modules/crm/db/schema';
-import { mockAddActivity, mockAddDeal, mockCompleteTask, mockEditNote, mockSetDeal, setMockFailure } from '@/modules/crm/fixtures';
+import { mockAddActivity, mockAddDeal, mockCompleteTask, mockEditNote, mockQualifyPerson, mockSetDeal, setMockFailure } from '@/modules/crm/fixtures';
 import { gateway, RateLimitedError } from '@/modules/integrations';
 import { callLog } from '@/modules/integrations/db/schema';
 import { addMember } from '@/modules/tenancy';
@@ -34,12 +34,12 @@ beforeAll(async () => {
 afterAll(closeDbs);
 
 runAdapterContract(() => mock(), { name: 'mock HubSpot' });
-// The live connector arrives with Task 3; until then this run stays skipped even with a token.
+// The live run needs a real token. The live adapter arrives with Task 3, which replaces this factory.
 runAdapterContract(
   () => {
     throw new Error('The live HubSpot adapter is not built yet.');
   },
-  { name: 'live HubSpot', skip: true },
+  { name: 'live HubSpot', skip: !process.env.SCOUT_LIVE_HUBSPOT_TOKEN },
 );
 
 describe('seedMockCrm', () => {
@@ -123,6 +123,19 @@ describe('mock HubSpot rules (CRM-E1-S3-AC2)', () => {
     expect(pat?.company?.domain).toBe('qualified.example');
     expect(await mock().listQualifiedLeads({ changedSince: EARLY, rule: { property: 'lifecyclestage', value: 'customer' } })).toEqual([]);
     expect((await mock().readQualifiedLead({ contactId: pat!.contact.externalId, rule }))?.contact.email).toBe('pat.lee@qualified.example');
+  });
+
+  it('returns a contact qualified after it was created when changedSince falls between the two', async () => {
+    const a = mock();
+    const co = await a.upsertCompany(company(`later-${Date.now()}.example`));
+    const email = `later-${Date.now()}@later.example`;
+    await a.upsertPerson({ name: 'Later Lee', email, ownerExternalId: null, takeOverOwner: false, companyExternalId: co.externalId });
+    const between = new Date(Date.now() + 1000);
+    const rule = { property: 'lifecyclestage', value: 'marketingqualifiedlead' };
+    expect((await a.listQualifiedLeads({ changedSince: EARLY, rule })).some((l) => l.contact.email === email)).toBe(false);
+    await mockQualifyPerson(detached(), email, new Date(between.getTime() + 1000));
+    const leads = await a.listQualifiedLeads({ changedSince: between.toISOString(), rule });
+    expect(leads.find((l) => l.contact.email === email)?.qualifiedAt).toBe(new Date(between.getTime() + 1000).toISOString());
   });
 
   it('429 gives RateLimitedError, 500 throws with status 500, a timeout throws, each the set number of times', async () => {

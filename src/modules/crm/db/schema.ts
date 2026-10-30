@@ -297,6 +297,8 @@ export const mockPerson = crm.table(
     linkedin: text('linkedin'),
     ownerExternalId: text('owner_external_id'),
     lifecycle: text('lifecycle'),
+    /** When the contact reached the lifecycle the qualified-lead rule looks for. */
+    qualifiedAt: at('qualified_at'),
     createdAt: at('created_at').notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.externalId] }), index('mock_person_email_idx').on(t.tenantId, t.email)],
@@ -388,4 +390,17 @@ export const mockFailure = crm.table(
     remaining: integer('remaining').notNull(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.operation] }), check('mock_failure_kind_valid', sql`${t.kind} in ('429', '500', 'timeout')`)],
+);
+
+/** Company properties the mock has "created" (Set up HubSpot fields). */
+export const mockProperty = crm.table(
+  'mock_property',
+  {
+    tenantId: text('tenant_id').notNull(),
+    name: text('name').notNull(),
+    label: text('label').notNull(),
+    groupName: text('group_name').notNull(),
+    createdAt: at('created_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.name] })],
 );

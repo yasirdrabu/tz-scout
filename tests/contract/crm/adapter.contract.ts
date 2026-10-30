@@ -126,12 +126,15 @@ export function runAdapterContract(make: () => CrmAdapter, opts: Opts): void {
       expect(check('readQualifiedLead', await adapter.readQualifiedLead({ contactId: 'no-such-contact', rule }))).toBeNull();
     });
 
-    it('sets up properties once and lists them', async () => {
-      const wanted = [{ name: 'taazaa_tier', label: 'Tier', type: 'string' as const }];
+    it('sets up a property once and lists it afterwards', async () => {
+      const name = `scout_contract_${slug.replace(/[^a-z0-9]/g, '_')}`;
+      const wanted = [{ name, label: 'Contract', type: 'string' as const }];
       check('existingProperties', await adapter.existingProperties({}));
-      check('setUpProperties', await adapter.setUpProperties({ groupName: 'scout_buyer_signals', properties: wanted }));
+      const first = check('setUpProperties', await adapter.setUpProperties({ groupName: 'scout_buyer_signals', properties: wanted })) as { created: string[] };
       const second = check('setUpProperties', await adapter.setUpProperties({ groupName: 'scout_buyer_signals', properties: wanted })) as { created: string[] };
+      expect(first.created).toEqual([name]);
       expect(second.created).toEqual([]);
+      expect(check('existingProperties', await adapter.existingProperties({}))).toContain(name);
     });
 
     it('verifies and parses webhooks', async () => {

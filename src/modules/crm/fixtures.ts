@@ -64,7 +64,7 @@ export async function seedMockCrm(ctx: ModuleContext): Promise<{ rahul: string; 
     const [hasLead] = await tx.select().from(mockPerson).where(and(eq(mockPerson.tenantId, tenantId), eq(mockPerson.email, 'pat.lee@qualified.example')));
     if (!hasLead) {
       const externalId = await nextMockId(tx, tenantId, mockPerson, ID_PREFIX.person);
-      await tx.insert(mockPerson).values({ tenantId, externalId, companyExternalId: qualified, name: 'Pat Lee', title: 'VP Engineering', email: 'pat.lee@qualified.example', lifecycle: QUALIFIED_RULE_VALUE });
+      await tx.insert(mockPerson).values({ tenantId, externalId, companyExternalId: qualified, name: 'Pat Lee', title: 'VP Engineering', email: 'pat.lee@qualified.example', lifecycle: QUALIFIED_RULE_VALUE, qualifiedAt: new Date() });
     }
     return { rahul, vijay };
   });
@@ -160,5 +160,15 @@ export async function mockSetDeal(
         updatedAt: now,
       })
       .where(and(eq(mockDeal.tenantId, ctx.tenantId), eq(mockDeal.externalId, externalId))),
+  );
+}
+
+/** Moves a contact to the qualified lifecycle at `at` (now by default), as a person would in HubSpot. */
+export async function mockQualifyPerson(ctx: ModuleContext, email: string, at: Date = new Date()): Promise<void> {
+  await withTenant(ctx.tenantId, (tx) =>
+    tx
+      .update(mockPerson)
+      .set({ lifecycle: QUALIFIED_RULE_VALUE, qualifiedAt: at })
+      .where(and(eq(mockPerson.tenantId, ctx.tenantId), eq(mockPerson.email, email))),
   );
 }

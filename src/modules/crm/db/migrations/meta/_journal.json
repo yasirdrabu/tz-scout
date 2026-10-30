@@ -8,6 +8,13 @@
       "when": 1793326032694,
       "tag": "0000_crm_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793327056715,
+      "tag": "0001_crm_mock_property",
+      "breakpoints": true
     }
   ]
 }

@@ -4,8 +4,7 @@ import { RateLimitedError } from '@/modules/integrations';
 import type { ModuleContext } from '@/platform/context';
 import { withTenant, type Tx } from '@/platform/db/tenant';
 import { webhookEventSchema, type CrmAdapter, type CrmDeal } from '../../contracts/adapter';
-import { mockActivity, mockCompany, mockDeal, mockFailure, mockNote, mockOwner, mockPerson, mockTask } from '../../db/schema';
-import { DEFAULT_FIELD_MAPPINGS } from '../../defaults';
+import { mockActivity, mockCompany, mockDeal, mockFailure, mockNote, mockOwner, mockPerson, mockProperty, mockTask } from '../../db/schema';
 import { noteFingerprint } from '../../domain/fingerprint';
 
 // The Postgres-backed HubSpot stand-in (Ruling 2). Every write is its own transaction, like a CRM that does
@@ -13,7 +12,7 @@ import { noteFingerprint } from '../../domain/fingerprint';
 
 export type MockFailureKind = '429' | '500' | 'timeout';
 
-/** Standard HubSpot company properties that always exist, besides the `taazaa_*` ones Scout maps. */
+/** Standard HubSpot company properties, which always exist. Scout's own (`taazaa_*`, `scout_link`) exist only after "Set up HubSpot fields". */
 const KNOWN_PROPERTIES = new Set([
   'name',
   'domain',
@@ -22,7 +21,6 @@ const KNOWN_PROPERTIES = new Set([
   'hubspot_owner_id',
   'lifecyclestage',
   'numberofemployees',
-  ...DEFAULT_FIELD_MAPPINGS.map((m) => m.crmProperty),
 ]);
 
 export const ID_PREFIX = {
@@ -125,7 +123,7 @@ export function hubspotMock(ctx: ModuleContext): CrmAdapter {
         ? { externalId: c.externalId, name: c.name, domain: c.domain, website: c.website, location: c.location, employees: c.employees, description: c.description }
         : null,
       lifecycleStage: p.lifecycle ?? '',
-      qualifiedAt: p.createdAt.toISOString(),
+      qualifiedAt: (p.qualifiedAt ?? p.createdAt).toISOString(),
       raw: { id: p.externalId, lifecyclestage: p.lifecycle },
     };
   }
@@ -363,8 +361,8 @@ export function hubspotMock(ctx: ModuleContext): CrmAdapter {
         const rows = await tx
           .select()
           .from(mockPerson)
-          .where(and(eq(mockPerson.tenantId, tenantId), eq(mockPerson.lifecycle, rule.value), gte(mockPerson.createdAt, new Date(changedSince))))
-          .orderBy(asc(mockPerson.createdAt), asc(mockPerson.externalId));
+          .where(and(eq(mockPerson.tenantId, tenantId), eq(mockPerson.lifecycle, rule.value), gte(mockPerson.qualifiedAt, new Date(changedSince))))
+          .orderBy(asc(mockPerson.qualifiedAt), asc(mockPerson.externalId));
         return Promise.all(rows.map((p) => leadOut(tx, p)));
       }),
 
@@ -374,11 +372,27 @@ export function hubspotMock(ctx: ModuleContext): CrmAdapter {
         return p && rule.property === 'lifecyclestage' && p.lifecycle === rule.value ? leadOut(tx, p) : null;
       }),
 
-    // The mock has no property store: the properties Scout maps count as existing, anything else is reported as created each time.
-    existingProperties: () => run('existingProperties', async () => [...KNOWN_PROPERTIES]),
 
-    setUpProperties: ({ properties }) =>
-      run('setUpProperties', async () => ({ created: properties.map((p) => p.name).filter((n) => !KNOWN_PROPERTIES.has(n)) })),
+    existingProperties: () =>
+      run('existingProperties', async (tx) => {
+        const rows = await tx.select({ name: mockProperty.name }).from(mockProperty).where(eq(mockProperty.tenantId, tenantId)).orderBy(asc(mockProperty.name));
+        return [...KNOWN_PROPERTIES, ...rows.map((r) => r.name)];
+      }),
+
+    setUpProperties: ({ groupName, properties }) =>
+      run('setUpProperties', async (tx) => {
+        const created: string[] = [];
+        for (const p of properties) {
+          if (KNOWN_PROPERTIES.has(p.name)) continue;
+          const rows = await tx
+            .insert(mockProperty)
+            .values({ tenantId, name: p.name, label: p.label, groupName })
+            .onConflictDoNothing()
+            .returning({ name: mockProperty.name });
+          if (rows.length) created.push(p.name);
+        }
+        return { created };
+      }),
 
     // Sample webhooks carry `x-hubspot-signature-v3: mock-valid`; the real check is the pure verifyHubSpotV3.
     verifyWebhook: ({ headers }) => run('verifyWebhook', async () => headers['x-hubspot-signature-v3'] === 'mock-valid'),
