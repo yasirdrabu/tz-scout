@@ -352,6 +352,46 @@ describe('a decline during or before the push (Review Focus 1, CRM-E3-S7-AC4)', 
   });
 });
 
+const unsentEvents = (type: string) => and(eq(outbox.tenantId, t.tenantId), isNull(outbox.sentAt), sql`${outbox.payload}->>'type' = ${type}`);
+
+describe('events handled out of order (final review I1)', () => {
+  it('a decline delivered before the assignment is created gives a cancelled handoff and no CRM writes', async () => {
+    const a = await account();
+    const made = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: ash }), { userId: leader });
+    const [held] = await adminDb.update(outbox).set({ sentAt: new Date() }).where(unsentEvents('routing.assignment.created')).returning({ seq: outbox.seq });
+    await declineAs(ash, made.id);
+    const calls = await callCount();
+    await runOutbox(t.tenantId);
+    expect(await handoffOf(made.id)).toMatchObject({ status: 'cancelled', isRepush: false, accountId: a });
+    expect((await handoffOf(made.id)).cancelRequestedAt).not.toBeNull();
+    await adminDb.update(outbox).set({ sentAt: null }).where(eq(outbox.seq, held!.seq));
+    await runOutbox(t.tenantId);
+    const rows = await t.run((ctx) => ctx.tx.select().from(handoff).where(eq(handoff.assignmentId, made.id)));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.status).toBe('cancelled');
+    expect(await callCount()).toBe(calls);
+    const d = await domainOf(a);
+    expect(await t.run((ctx) => ctx.tx.select().from(mockCompany).where(eq(mockCompany.domain, d)))).toHaveLength(0);
+  });
+
+  it("a reassign whose new created event is handled before the old withdrawn one takes the company from its original owner", async () => {
+    const d = domain();
+    await crmCompany(d, vijay);
+    const { a, asg, h } = await pushed({ domain: d });
+    expect(h.takenFromOwner).toBe(vijay);
+    await asPerson(t, (ctx) => withdraw(ctx, asg, { reassignTo: mike }), { userId: leader });
+    const [held] = await adminDb.update(outbox).set({ sentAt: new Date() }).where(unsentEvents('routing.assignment.withdrawn')).returning({ seq: outbox.seq });
+    expect(held).toBeTruthy();
+    await runOutbox(t.tenantId); // Mike's created and his push, with Ash's withdrawal still unhandled
+    const [mikes] = (await t.run((ctx) => ctx.tx.select().from(handoff).where(eq(handoff.accountId, a)))).filter((x) => x.sellerUserId === mike);
+    expect(mikes).toMatchObject({ status: 'completed', takenFromOwner: vijay });
+    await adminDb.update(outbox).set({ sentAt: null }).where(eq(outbox.seq, held!.seq));
+    await runOutbox(t.tenantId);
+    expect((await companyAt(d)).ownerExternalId).toBe(ownerOf(mike));
+    expect((await handoffOf(asg)).undone).toBeTruthy();
+  });
+});
+
 describe('a reassign (withdrawn with replacedBy)', () => {
   it('leaves the company with Mike and his four tasks open, and closes Ash\'s four', async () => {
     const { a, asg, d } = await pushed({ people: [person(5)] });

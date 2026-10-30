@@ -47,21 +47,42 @@ export const crmAccountUpdated = defineConsumer({
   },
 });
 
-/** The push starts on assignment, not acceptance (CRM-E3-S1-AC3). */
+// `orderedBy` keeps two deliveries for one account from running at once; it does not order events of different
+// types. A decline or withdrawal may be handled before the assignment's `created`, so each side copes with the
+// other coming first (final review I1).
+
+/**
+ * The push starts on assignment, not acceptance (CRM-E3-S1-AC3). A reassign first requests the undo of the
+ * assignment it replaces (the same idempotent request the withdrawal makes), so the new push sees the replaced
+ * seller's handoff as undo-requested even when the withdrawal is handled later.
+ */
 export const crmAssignmentCreated = defineConsumer({
   name: 'crm.assignment_created',
   event: assignmentCreated,
   orderedBy: (e) => e.data.accountId,
-  handle: async (e, ctx) => queueHandoff(ctx, e.data),
+  handle: async (e, ctx) => {
+    const d = e.data;
+    if (d.previousAssignmentId) {
+      await requestUndo(ctx, { assignmentId: d.previousAssignmentId, accountId: d.accountId, kind: 'withdrawn', reasonLabel: null, by: d.assignedBy });
+    }
+    await queueHandoff(ctx, d);
+  },
 });
 
-/** A seller's decline undoes the handoff (CRM-E3-S7). Ordered by account, so it comes after the assignment's own event. */
+/** A seller's decline undoes the handoff (CRM-E3-S7); one handled before the assignment's `created` leaves a cancelled handoff. */
 export const crmAssignmentDeclined = defineConsumer({
   name: 'crm.assignment_declined',
   event: assignmentDeclined,
   orderedBy: (e) => e.data.accountId,
   handle: async (e, ctx) =>
-    requestUndo(ctx, { assignmentId: e.data.assignmentId, kind: 'declined', reasonLabel: e.data.reasonLabel ?? e.data.reasonKey, by: e.data.sellerUserId }),
+    requestUndo(ctx, {
+      assignmentId: e.data.assignmentId,
+      accountId: e.data.accountId,
+      sellerUserId: e.data.sellerUserId,
+      kind: 'declined',
+      reasonLabel: e.data.reasonLabel ?? e.data.reasonKey,
+      by: e.data.sellerUserId,
+    }),
 });
 
 /** A withdrawal undoes the handoff too; on a reassign the new assignment pushes again on its own. */
@@ -69,7 +90,7 @@ export const crmAssignmentWithdrawn = defineConsumer({
   name: 'crm.assignment_withdrawn',
   event: assignmentWithdrawn,
   orderedBy: (e) => e.data.accountId,
-  handle: async (e, ctx) => requestUndo(ctx, { assignmentId: e.data.assignmentId, kind: 'withdrawn', reasonLabel: null, by: e.data.by }),
+  handle: async (e, ctx) => requestUndo(ctx, { assignmentId: e.data.assignmentId, accountId: e.data.accountId, kind: 'withdrawn', reasonLabel: null, by: e.data.by }),
 });
 
 /** A new person is linked to the CRM ids they arrived with; one added to a handed-off account goes to the CRM too (Ruling 22). */

@@ -5,12 +5,13 @@ import { crmOwnerId, members, tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { withTenant } from '@/platform/db/tenant';
 import { enqueueJob, publish } from '@/platform/events/outbox';
+import { newId } from '@/platform/ids';
 import { log } from '@/platform/log';
 import type { CrmAdapter } from '../contracts/adapter';
 import { handoffCancelled } from '../contracts/events';
 import { handoffUndoJob, UNDO_MAX_ATTEMPTS } from '../contracts/jobs';
 import type { HandoffUndone } from '../contracts/types';
-import { handoff, link } from '../db/schema';
+import { crmSetting, handoff, link } from '../db/schema';
 import { esc } from '../domain/note';
 import { classifyPushError, REASON_LIMIT, RETRIES_FAILED } from '../domain/push-errors';
 import { refreshBatch } from './batches';
@@ -30,19 +31,55 @@ const UNDO_TASK = 'undo_task';
 const personName = (p: PersonView) => [p.firstName, p.lastName].filter(Boolean).join(' ') || p.email || '';
 const subject = (h: Handoff) => ({ type: 'account', id: h.accountId });
 
+/** What a decline, a withdrawal or a reassign knows about the assignment whose handoff it undoes. */
+export type UndoRequest = { assignmentId: string; accountId: string; sellerUserId?: string | null; assignedBy?: string | null } & UndoReason;
+
 /**
- * `routing.assignment.declined` or `.withdrawn` (Ruling 6). One short write, with no account lock and nothing
+ * The assignment has no handoff yet: its `routing.assignment.created` has not been handled (consumers of different
+ * event types are not ordered). A `cancelled` handoff is stored in its place, so the later `queueHandoff` finds one and
+ * pushes nothing (final review I1). Nothing was written, so no undo job is queued. A handoff already undone keeps the
+ * unique index, so nothing is added for it.
+ */
+async function placeholder(ctx: ModuleContext, input: UndoRequest, now: Date): Promise<void> {
+  const [setting] = await ctx.tx.select({ system: crmSetting.system }).from(crmSetting).where(eq(crmSetting.tenantId, ctx.tenantId));
+  const [h] = await ctx.tx
+    .insert(handoff)
+    .values({
+      id: newId('hof'),
+      tenantId: ctx.tenantId,
+      accountId: input.accountId,
+      assignmentId: input.assignmentId,
+      sellerUserId: input.sellerUserId ?? null,
+      assignedBy: input.assignedBy ?? null,
+      system: setting?.system ?? 'hubspot',
+      status: 'cancelled',
+      ownershipAction: 'keep',
+      cancelRequestedAt: now,
+      isRepush: false,
+    })
+    .onConflictDoNothing()
+    .returning();
+  if (h) await publish(ctx, handoffCancelled, { handoffId: h.id, accountId: h.accountId, assignmentId: h.assignmentId, at: now.toISOString() }, subject(h));
+}
+
+/**
+ * `routing.assignment.declined` or `.withdrawn` (Ruling 6), and a reassign's `routing.assignment.created` for the
+ * assignment it replaces (final review I1). Idempotent: a second request for the assignment changes nothing. One short write, with no account lock and nothing
  * held while waiting for one. It covers every handoff of the assignment not yet undone (a re-push adds more,
  * Ruling 20), once each: a handoff still `queued` never started, so it ends here as `cancelled`; any other
  * gets `cancel_requested_at` (a running push stops before its next write; on a finished one it marks the undo
  * as requested). One `crm.handoff.undo` job, which waits for the push's account lock, undoes them together.
  */
-export async function requestUndo(ctx: ModuleContext, input: { assignmentId: string } & UndoReason, now: Date = new Date()): Promise<void> {
+export async function requestUndo(ctx: ModuleContext, input: UndoRequest, now: Date = new Date()): Promise<void> {
   const rows = await ctx.tx
     .select()
     .from(handoff)
     .where(and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.assignmentId, input.assignmentId), isNull(handoff.undone)))
     .orderBy(handoff.queuedAt, handoff.id);
+  if (rows.length === 0) {
+    await placeholder(ctx, input, now);
+    return;
+  }
   let target: Handoff | null = null;
   for (const h of rows) {
     const [stopped] = await ctx.tx
