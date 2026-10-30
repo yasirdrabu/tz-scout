@@ -5,7 +5,8 @@ import { getCrmSettings, setCrmSettings, setUpHubSpotFields } from '@/modules/cr
 import { SCOUT_PROPERTY_NAMES } from '@/modules/crm/adapters/hubspot/properties';
 import { mockProperty, propertySetup } from '@/modules/crm/db/schema';
 import { connectionSettings } from '@/modules/integrations';
-import { closeDbs } from '@/platform/db/client';
+import { callLog } from '@/modules/integrations/db/schema';
+import { adminDb, closeDbs } from '@/platform/db/client';
 import { auditLog } from '@/platform/db/schema';
 import { ScoutError } from '@/platform/errors';
 import { asPerson, routingTenant, type Tenant } from '../routing/helpers';
@@ -41,6 +42,11 @@ describe('CRM settings', () => {
     }
     expect(await refused({ qualifiedLeadRule: { property: '', value: 'x' } })).toEqual(['qualified_lead_rule.property']);
     expect(await refused({ system: 'nope' as 'hubspot' })).toEqual(['system']);
+    expect(await refused({ pushNewPeople: 'yes' as unknown as boolean, takeOverStaleOwnership: 1 as unknown as boolean })).toEqual([
+      'take_over_stale_ownership',
+      'push_new_people',
+    ]);
+    expect(await refused({ autoPush: true } as never)).toEqual(['auto_push']);
   });
 
   it('saves a change, audits it and puts the qualified-lead rule on the connection', async () => {
@@ -62,6 +68,8 @@ describe('Set up HubSpot fields', () => {
     expect(first.created.every((n) => SCOUT_PROPERTY_NAMES.includes(n))).toBe(true);
     const groups = await t.run((ctx) => ctx.tx.select({ group: mockProperty.groupName }).from(mockProperty));
     expect(new Set(groups.map((g) => g.group))).toEqual(new Set(['scout_buyer_signals']));
+    const [call] = await adminDb.select().from(callLog).where(and(eq(callLog.tenantId, t.tenantId), eq(callLog.operation, 'setUpProperties')));
+    expect(call!.requestSummary).toMatchObject({ groupName: 'scout_buyer_signals', groupLabel: 'Scout buyer signals' });
     const [setup] = await t.run((ctx) => ctx.tx.select().from(propertySetup));
     expect(setup).toMatchObject({ system: 'hubspot', groupName: 'scout_buyer_signals', createdProperties: first.created });
 

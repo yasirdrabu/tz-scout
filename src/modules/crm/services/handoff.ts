@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { getAccount, getFacts, type PersonView } from '@/modules/accounts';
 import { gateway } from '@/modules/integrations';
@@ -72,6 +72,35 @@ export async function queueHandoff(ctx: ModuleContext, e: Created): Promise<void
   if (inserted.length > 0) await enqueueJob(ctx, handoffPushJob, { handoffId: id });
 }
 
+/**
+ * A condition: no handoff of `h`'s assignment has a cancel requested or an undo. A decline covers the whole
+ * assignment, so a re-push the decline could not see yet (Ruling 20) still counts as cancelled.
+ */
+const noSiblingCancelled = (ctx: ModuleContext, h: Handoff) =>
+  sql`not exists (select 1 from crm.handoff s where s.tenant_id = ${ctx.tenantId} and s.assignment_id = ${h.assignmentId}
+    and (s.cancel_requested_at is not null or s.undone is not null))`;
+
+/** Whether the handoff's assignment was declined or withdrawn (committed state): any of its handoffs is flagged or undone. */
+export async function cancelRequested(ctx: ModuleContext, h: Pick<Handoff, 'assignmentId'>): Promise<boolean> {
+  const [row] = await ctx.tx
+    .select({ id: handoff.id })
+    .from(handoff)
+    .where(and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.assignmentId, h.assignmentId), or(isNotNull(handoff.cancelRequestedAt), isNotNull(handoff.undone))))
+    .limit(1);
+  return !!row;
+}
+
+/** The account's latest handoff, or undefined. */
+export async function latestRow(ctx: ModuleContext, accountId: string): Promise<Handoff | undefined> {
+  const [row] = await ctx.tx
+    .select()
+    .from(handoff)
+    .where(and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.accountId, accountId)))
+    .orderBy(desc(handoff.queuedAt), desc(handoff.id))
+    .limit(1);
+  return row;
+}
+
 /** Every job that writes to the CRM for an account takes this first (Ruling 5). */
 export async function lockAccount(ctx: ModuleContext, accountId: string): Promise<void> {
   await ctx.tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`crm:${ctx.tenantId}:${accountId}`}))`);
@@ -97,7 +126,7 @@ export async function runPush(ctx: ModuleContext, handoffId: string, now: Date =
   if (run.giveUp) return fail(ctx, h, h.lastError ?? RETRIES_FAILED, true);
   try {
     await lockAccount(ctx, h.accountId);
-    if (h.cancelRequestedAt) throw new Cancelled();
+    if (await cancelRequested(ctx, h)) throw new Cancelled();
     await push(ctx, h, now);
   } catch (e) {
     if (transactionClosed(e)) throw e;
@@ -145,7 +174,7 @@ async function settle(
     const done = await tx
       .update(handoff)
       .set(set)
-      .where(and(byId(c, h.id), inArray(handoff.status, OPEN), unlessCancelled ? isNull(handoff.cancelRequestedAt) : undefined))
+      .where(and(byId(c, h.id), inArray(handoff.status, OPEN), unlessCancelled ? and(isNull(handoff.cancelRequestedAt), noSiblingCancelled(c, h)) : undefined))
       .returning({ id: handoff.id });
     if (done.length === 0) {
       const [row] = await tx.select({ status: handoff.status }).from(handoff).where(byId(c, h.id));
@@ -186,10 +215,9 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
   if (takenFrom) await withTenant(ctx.tenantId, (tx) => tx.update(handoff).set({ takenFromOwner: takenFrom }).where(byId(ctx, h.id)));
 
   const call = <T>(op: string, fn: (a: CrmAdapter) => Promise<T>) => gateway.call(ctx, system, op, (a) => fn(a as CrmAdapter), { module: 'crm' });
-  /** Every CRM write first re-reads the committed cancel flag (Ruling 6). */
+  /** Every CRM write first re-reads the committed cancel flags of the assignment (Ruling 6). */
   const write = async <T>(op: string, fn: (a: CrmAdapter) => Promise<T>) => {
-    const [row] = await ctx.tx.select({ at: handoff.cancelRequestedAt }).from(handoff).where(byId(ctx, h.id));
-    if (row?.at) throw new Cancelled();
+    if (await cancelRequested(ctx, h)) throw new Cancelled();
     return call(op, fn);
   };
   const pkg = await handoffPackageProvider().package(ctx, account.id, h.assignmentId);

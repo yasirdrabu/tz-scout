@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { crmOwnerId, members } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { crmSetting, handoff } from '../db/schema';
@@ -16,12 +16,21 @@ export type OwnershipPreflightDetail = {
 
 const blocked = (message: string, reason: OwnershipPreflightDetail['reason']): OwnershipPreflightDetail => ({ result: 'blocked', message, reason, currentOwnerName: null, takenFrom: null });
 
-/** The owner Scout set on the account's latest completed `assign` handoff, or null. */
+/** The owner Scout set on the account's latest completed `assign` handoff whose undo has not given it back, or null. */
 async function pushedOwnerId(ctx: ModuleContext, accountId: string): Promise<string | null> {
   const [row] = await ctx.tx
     .select({ owner: handoff.ownerExternalId })
     .from(handoff)
-    .where(and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.accountId, accountId), eq(handoff.status, 'completed'), eq(handoff.ownershipAction, 'assign')))
+    .where(
+      and(
+        eq(handoff.tenantId, ctx.tenantId),
+        eq(handoff.accountId, accountId),
+        eq(handoff.status, 'completed'),
+        eq(handoff.ownershipAction, 'assign'),
+        // An undo that gave the company back means whoever owns it now got it after us.
+        sql`(${handoff.undone} is null or ${handoff.undone}->>'ownerReturnedTo' is null)`,
+      ),
+    )
     .orderBy(desc(handoff.completedAt), desc(handoff.queuedAt))
     .limit(1);
   return row?.owner ?? null;

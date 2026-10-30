@@ -9,24 +9,13 @@ import type { CrmAdapter } from '../contracts/adapter';
 import { handoffPushJob, personPushJob } from '../contracts/jobs';
 import { crmSetting, handoff } from '../db/schema';
 import { batchFor } from './batches';
-import { lockAccount, PUSH_PEOPLE_LIMIT } from './handoff';
+import { cancelRequested, latestRow, lockAccount, PUSH_PEOPLE_LIMIT } from './handoff';
 import { companyLink, getLinks, recordLink } from './links';
 
 export const ASSIGN_FIRST = 'Assign it before pushing.';
 
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
 const personName = (p: PersonView) => [p.firstName, p.lastName].filter(Boolean).join(' ') || p.email || '';
-
-/** The account's latest handoff, or undefined. */
-export async function latestRow(ctx: ModuleContext, accountId: string) {
-  const [row] = await ctx.tx
-    .select()
-    .from(handoff)
-    .where(and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.accountId, accountId)))
-    .orderBy(desc(handoff.queuedAt), desc(handoff.id))
-    .limit(1);
-  return row;
-}
 
 /**
  * "Push again" and "Push anyway, keep their owner" (CRM-E3-S6, Ruling 20). A new handoff for the latest
@@ -37,7 +26,7 @@ export async function latestRow(ctx: ModuleContext, accountId: string) {
 export async function push(ctx: ModuleContext, accountId: string, opts: { keepCurrentOwner?: boolean } = {}): Promise<{ handoffId: string }> {
   if ((await filterVisibleAccountIds(ctx, [accountId])).length === 0) throw notFound();
   const latest = await latestRow(ctx, accountId);
-  if (!latest || latest.cancelRequestedAt || latest.undone || latest.status === 'cancelled') {
+  if (!latest || latest.status === 'cancelled' || (await cancelRequested(ctx, latest))) {
     throw new ScoutError({ slug: 'conflict', status: 409, title: ASSIGN_FIRST });
   }
   const id = newId('hof');

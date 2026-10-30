@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { upsertFromArrival } from '@/modules/accounts';
-import { getHandoffs, lastActivityAt, latestHandoff, seedMockCrm, syncOwners } from '@/modules/crm';
+import { getHandoffs, lastActivityAt, latestHandoff, push, seedMockCrm, syncOwners } from '@/modules/crm';
 import { activity } from '@/modules/crm/db/schema';
 import { setConnectionSettings } from '@/modules/integrations';
 import { assign } from '@/modules/routing';
@@ -78,6 +78,9 @@ describe('handoff reads', () => {
     await t.run((ctx) => setConnectionSettings(ctx, 'hubspot', { portal_id: '123' }));
     const h = await asPerson(t, (ctx) => latestHandoff(ctx, a));
     expect(h!.crmUrl).toMatch(/^https:\/\/app\.hubspot\.com\/contacts\/123\/record\/0-2\/mock-co-\d+$/);
+    // A re-push still queued has no company of its own yet: the link comes from the company link.
+    const { handoffId } = await asPerson(t, (ctx) => push(ctx, a));
+    expect(await asPerson(t, (ctx) => latestHandoff(ctx, a))).toMatchObject({ id: handoffId, status: 'queued', crmUrl: h!.crmUrl });
   });
 
   it('lastActivityAt is the latest activity seen, or null', async () => {

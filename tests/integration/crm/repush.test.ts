@@ -1,13 +1,14 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { getAccount, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
-import { getLinks, hubspotMock, push, seedMockCrm, setCrmSettings, syncOwners } from '@/modules/crm';
+import { getLinks, hubspotMock, push, runPush, seedMockCrm, setCrmSettings, syncOwners } from '@/modules/crm';
+import { callLog } from '@/modules/integrations/db/schema';
 import { crmSetting, handoff, mockCompany, mockNote, mockPerson, mockTask } from '@/modules/crm/db/schema';
 import { mockCompleteTask, mockEditNote, setMockFailure } from '@/modules/crm/fixtures';
 import { assign, decline, withdraw } from '@/modules/routing';
 import { addMember } from '@/modules/tenancy';
-import { closeDbs } from '@/platform/db/client';
+import { adminDb, closeDbs } from '@/platform/db/client';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { runOutbox } from '../helpers/run-outbox';
@@ -69,6 +70,7 @@ const companyAt = async (d: string) => (await t.run((ctx) => ctx.tx.select().fro
 const notesOf = (companyId: string) => t.run((ctx) => ctx.tx.select().from(mockNote).where(eq(mockNote.companyExternalId, companyId)).orderBy(mockNote.externalId));
 const tasksOf = (companyId: string) => t.run((ctx) => ctx.tx.select().from(mockTask).where(eq(mockTask.companyExternalId, companyId)));
 const domainOf = async (accountId: string) => (await t.run((ctx) => getAccount(ctx, accountId)))!.domain!;
+const callCount = async () => (await adminDb.select({ id: callLog.id }).from(callLog).where(eq(callLog.tenantId, t.tenantId))).length;
 const asLeader = <T>(fn: Parameters<typeof asPerson<T>>[1]) => asPerson(t, fn, { userId: leader });
 
 async function pushed(opts: { domain?: string; people?: ArrivalPerson[]; seller?: string } = {}) {
@@ -194,6 +196,20 @@ describe('re-push (CRM-E3-S6, Ruling 20)', () => {
     }
   });
 
+  it('an undone handoff that gave the company back is not "the owner we set last time" (pushedOwnerId)', async () => {
+    const d = domain();
+    await t.run((ctx) => hubspotMock(ctx).upsertCompany({ domain: d, name: d, ownerExternalId: vijay, replaceableOwner: true, properties: {} }));
+    const { a, asg } = await pushed({ domain: d });
+    await asLeader((ctx) => withdraw(ctx, asg, {}));
+    await runOutbox(t.tenantId);
+    expect((await handoffsOf(a))[0]!.undone).toMatchObject({ ownerReturnedTo: vijay });
+    // Someone gives it to Ash by hand in HubSpot afterwards.
+    await t.run((ctx) => ctx.tx.update(mockCompany).set({ ownerExternalId: ownerOf(ash) }).where(eq(mockCompany.domain, d)));
+    const next = await asLeader((ctx) => assign(ctx, a, { sellerUserId: mike }));
+    await runOutbox(t.tenantId);
+    expect((await handoffsOf(a)).find((x) => x.assignmentId === next.id)).toMatchObject({ status: 'completed', takenFromOwner: ownerOf(ash) });
+  });
+
   it('a later handoff takes from the current owner when an earlier undo already returned ownership', async () => {
     const d = domain();
     await t.run((ctx) => hubspotMock(ctx).upsertCompany({ domain: d, name: d, ownerExternalId: vijay, replaceableOwner: true, properties: {} }));
@@ -215,6 +231,44 @@ describe('re-push (CRM-E3-S6, Ruling 20)', () => {
     const h = (await handoffsOf(a)).find((x) => x.assignmentId === third.id)!;
     // Ash's own undo already gave it back to Vijay, so it was taken from Ash, not Vijay.
     expect(h).toMatchObject({ status: 'completed', takenFromOwner: ownerOf(ash) });
+  });
+});
+
+describe('a re-push racing a decline (fix round 1)', () => {
+  it('a re-push row the decline could not see is cancelled before any CRM call', async () => {
+    const { a, asg, h } = await pushed();
+    await asPerson(t, (ctx) => decline(ctx, asg, { reasonKey: 'not_my_territory' }), { userId: ash });
+    await runOutbox(t.tenantId); // requestUndo and runUndo
+    expect((await handoffsOf(a))[0]!.undone).not.toBeNull();
+    // The re-push's row, as if its web request committed after the decline's group undo.
+    const id = newId('hof');
+    await t.run(async (ctx) => {
+      await ctx.tx.insert(handoff).values({
+        id,
+        tenantId: ctx.tenantId,
+        accountId: a,
+        assignmentId: asg,
+        sellerUserId: ash,
+        assignedBy: leader,
+        system: 'hubspot',
+        ownershipAction: 'assign',
+        isRepush: true,
+        handoffBatchId: h.handoffBatchId,
+      });
+    });
+    const before = await callCount();
+    await t.run((ctx) => runPush(ctx, id));
+    expect(await callCount()).toBe(before);
+    expect((await handoffsOf(a)).find((x) => x.id === id)!.status).toBe('cancelled');
+  });
+
+  it("push() answers 409 when a sibling handoff of the latest assignment is flagged", async () => {
+    const { a, asg } = await pushed();
+    await asLeader((ctx) => push(ctx, a)); // queued re-push, latest row
+    await t.run((ctx) => ctx.tx.update(handoff).set({ cancelRequestedAt: new Date() }).where(and(eq(handoff.assignmentId, asg), eq(handoff.isRepush, false))));
+    expect(await conflictOf(asLeader((ctx) => push(ctx, a)))).toMatchObject({ status: 409, message: 'Assign it before pushing.' });
+    await runOutbox(t.tenantId);
+    expect((await handoffsOf(a))[1]!.status).toBe('cancelled');
   });
 });
 

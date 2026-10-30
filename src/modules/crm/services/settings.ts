@@ -41,8 +41,17 @@ export async function getCrmSettings(ctx: ModuleContext): Promise<CrmSettings> {
   };
 }
 
+const SETTING_KEYS: (keyof CrmSettings)[] = ['system', 'takeOverStaleOwnership', 'pushNewPeople', 'followUpDays', 'qualifiedLeadRule'];
+const snake = (k: string) => k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+
 function check(patch: CrmSettingsPatch): { path: string; message: string }[] {
   const errors: { path: string; message: string }[] = [];
+  for (const k of Object.keys(patch)) {
+    if (!SETTING_KEYS.includes(k as keyof CrmSettings)) errors.push({ path: snake(k), message: 'Scout has no CRM setting by that name.' });
+  }
+  for (const k of ['takeOverStaleOwnership', 'pushNewPeople'] as const) {
+    if (patch[k] !== undefined && typeof patch[k] !== 'boolean') errors.push({ path: snake(k), message: 'Turn it on or off.' });
+  }
   if (patch.system !== undefined && !CRM_SYSTEMS.includes(patch.system)) errors.push({ path: 'system', message: 'Pick a CRM Scout knows.' });
   const days = patch.followUpDays;
   if (
@@ -102,7 +111,7 @@ export async function setUpHubSpotFields(ctx: ModuleContext): Promise<{ created:
     'hubspot',
     'setUpProperties',
     (a) => (a as CrmAdapter).setUpProperties({ groupName: PROPERTY_GROUP.name, groupLabel: PROPERTY_GROUP.label, properties: SCOUT_PROPERTIES }),
-    { module: 'crm' },
+    { module: 'crm', requestSummary: { groupName: PROPERTY_GROUP.name, groupLabel: PROPERTY_GROUP.label, properties: SCOUT_PROPERTIES.length } },
   );
   if (created.length === 0) return { created };
   const [row] = await ctx.tx

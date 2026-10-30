@@ -6,8 +6,8 @@ import { ScoutError } from '@/platform/errors';
 import type { HandoffUndone } from '../contracts/types';
 import { activity, deal, followThrough, handoff } from '../db/schema';
 import { followThroughCounts, type FollowThroughCounts } from '../domain/batch';
-import { getLinks, type AccountLinks } from './links';
-import { latestRow } from './push';
+import { latestRow } from './handoff';
+import { companyLink, getLinks, type AccountLinks } from './links';
 
 const visible = async (ctx: ModuleContext, accountId: string) => (await filterVisibleAccountIds(ctx, [accountId])).length > 0;
 
@@ -89,9 +89,11 @@ export async function latestHandoff(
   const h = await latestRow(ctx, accountId);
   if (!h) return null;
   const portal = h.system === 'hubspot' ? (await connectionSettings(ctx, 'hubspot')).portal_id : undefined;
+  // A re-push still in flight has no company yet: the company link has it.
+  const companyId = h.companyExternalId ?? (await companyLink(ctx, accountId, h.system));
   const crmUrl =
-    (typeof portal === 'string' || typeof portal === 'number') && portal !== '' && h.companyExternalId
-      ? `https://app.hubspot.com/contacts/${portal}/record/0-2/${h.companyExternalId}`
+    (typeof portal === 'string' || typeof portal === 'number') && portal !== '' && companyId
+      ? `https://app.hubspot.com/contacts/${portal}/record/0-2/${companyId}`
       : null;
   return { id: h.id, status: h.status, ownershipAction: h.ownershipAction, crmUrl };
 }
