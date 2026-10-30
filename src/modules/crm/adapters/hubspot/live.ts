@@ -544,13 +544,15 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
       return rows.map((d) => dealOut(d, companyOf.get(d.id) ?? null));
     },
 
-    // Pages on the stage date for the lifecycle rule, else on the last edit; the lead's `cursorAt` is that time.
+    // Pages on the stage date for the lifecycle rule, else on the last edit; the lead's `cursorAt` is that time. The
+    // lifecycle rule filters on the stage date alone: a contact already past the stage still has it (final review I6).
     async listQualifiedLeads({ changedSince, rule }) {
-      const pagedOn = qualifiedDateProp(rule) ?? 'lastmodifieddate';
+      const dateProp = qualifiedDateProp(rule);
+      const pagedOn = dateProp ?? 'lastmodifieddate';
       const contacts = await searchAll(
         'contacts',
         [
-          { propertyName: rule.property, operator: 'EQ', value: rule.value },
+          ...(dateProp ? [] : [{ propertyName: rule.property, operator: 'EQ', value: rule.value }]),
           { propertyName: pagedOn, operator: 'GTE', value: toMs(changedSince) },
         ],
         leadProps(rule),
@@ -562,7 +564,8 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
 
     async readQualifiedLead({ contactId, rule }) {
       const c = await getOrNull(objSchema, `/crm/v3/objects/contacts/${contactId}?properties=${leadProps(rule).join(',')}`);
-      if (!c || c.properties[rule.property] !== rule.value) return null;
+      const dateProp = qualifiedDateProp(rule);
+      if (!c || !(dateProp ? !!c.properties[dateProp] : c.properties[rule.property] === rule.value)) return null;
       return (await withCompanies([c], rule))[0] ?? null;
     },
 

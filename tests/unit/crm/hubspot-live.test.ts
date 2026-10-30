@@ -320,6 +320,7 @@ describe('hubspotLive activities, deals and leads', () => {
         body: { results: [obj('11', { name: 'Q', domain: 'q.example', website: null, city: 'Austin', state: 'TX', country: null, numberofemployees: '120', description: null })] },
       }),
       on('GET', '/crm/v3/objects/contacts/22', { body: obj('22', { lifecyclestage: 'customer' }) }),
+      on('GET', '/crm/v3/objects/contacts/23', { body: obj('23', { lifecyclestage: 'salesqualifiedlead', hs_lifecyclestage_marketingqualifiedlead_date: '2026-05-03T00:00:00Z' }) }),
       on('GET', '/crm/v3/objects/contacts/21', { body: contact }),
     );
     const a = adapter(f);
@@ -332,8 +333,8 @@ describe('hubspotLive activities, deals and leads', () => {
       cursorAt: '2026-05-01T00:00:00.000Z',
     });
     // The lifecycle rule pages on the stage date, not the last edit: a contact qualified long ago but edited lately is not read.
+    // It filters on that date alone, so a contact already past the stage (an SQL, a customer) still counts (final review I6).
     expect(f.calls[0]!.body!.filterGroups[0].filters).toEqual([
-      { propertyName: 'lifecyclestage', operator: 'EQ', value: 'marketingqualifiedlead' },
       { propertyName: 'hs_lifecyclestage_marketingqualifiedlead_date', operator: 'GTE', value: String(Date.parse('2026-01-01T00:00:00Z')) },
     ]);
     expect(f.calls[0]!.body!.sorts).toEqual([{ propertyName: 'hs_lifecyclestage_marketingqualifiedlead_date', direction: 'ASCENDING' }]);
@@ -341,6 +342,7 @@ describe('hubspotLive activities, deals and leads', () => {
     expect(f.calls[0]!.body!.properties).toContain('lastmodifieddate');
     expect(f.calls[0]!.body!.properties).not.toContain('hs_lastmodifieddate');
     expect(await a.readQualifiedLead({ contactId: '22', rule })).toBeNull();
+    expect((await a.readQualifiedLead({ contactId: '23', rule }))?.contact.externalId).toBe('23');
     expect((await a.readQualifiedLead({ contactId: '21', rule }))?.contact.email).toBe('pat@q.example');
   });
 

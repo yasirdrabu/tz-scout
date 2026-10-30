@@ -363,14 +363,15 @@ ${note}` : note) : task.body;
         return rows.map(dealOut);
       }),
 
-    // The mock keeps one lifecycle per contact, so only the lifecycle property can be a rule.
+    // The mock keeps one lifecycle per contact, so only the lifecycle property can be a rule. `qualified_at` stands for
+    // HubSpot's stage date: set means qualified, whatever the stage is now (a contact may have moved past it).
     listQualifiedLeads: ({ changedSince, rule }) =>
       run('listQualifiedLeads', async (tx) => {
         if (rule.property !== 'lifecyclestage') return [];
         const rows = await tx
           .select()
           .from(mockPerson)
-          .where(and(eq(mockPerson.tenantId, tenantId), eq(mockPerson.lifecycle, rule.value), gte(mockPerson.qualifiedAt, new Date(changedSince))))
+          .where(and(eq(mockPerson.tenantId, tenantId), gte(mockPerson.qualifiedAt, new Date(changedSince))))
           .orderBy(asc(mockPerson.qualifiedAt), asc(mockPerson.externalId));
         return Promise.all(rows.map((p) => leadOut(tx, p)));
       }),
@@ -378,7 +379,7 @@ ${note}` : note) : task.body;
     readQualifiedLead: ({ contactId, rule }) =>
       run('readQualifiedLead', async (tx) => {
         const p = await personById(tx, contactId);
-        return p && rule.property === 'lifecyclestage' && p.lifecycle === rule.value ? leadOut(tx, p) : null;
+        return p && rule.property === 'lifecyclestage' && p.qualifiedAt ? leadOut(tx, p) : null;
       }),
 
 

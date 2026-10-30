@@ -4,7 +4,7 @@ import '@/entry/compose';
 import '@/entry/registry';
 import { hubspotMock, noteFingerprint, seedMockCrm, type CrmAdapter } from '@/modules/crm';
 import { hubspotLive } from '@/modules/crm/adapters/hubspot/live';
-import { mockCompany, mockOwner } from '@/modules/crm/db/schema';
+import { mockCompany, mockOwner, mockPerson } from '@/modules/crm/db/schema';
 import { mockAddActivity, mockAddDeal, mockCompleteTask, mockEditNote, mockQualifyPerson, mockSetDeal, setMockFailure } from '@/modules/crm/fixtures';
 import { gateway, RateLimitedError } from '@/modules/integrations';
 import { callLog } from '@/modules/integrations/db/schema';
@@ -120,8 +120,20 @@ describe('mock HubSpot rules (CRM-E1-S3-AC2)', () => {
     const leads = await mock().listQualifiedLeads({ changedSince: EARLY, rule });
     const pat = leads.find((l) => l.contact.email === 'pat.lee@qualified.example');
     expect(pat?.company?.domain).toBe('qualified.example');
-    expect(await mock().listQualifiedLeads({ changedSince: EARLY, rule: { property: 'lifecyclestage', value: 'customer' } })).toEqual([]);
+    expect(await mock().listQualifiedLeads({ changedSince: EARLY, rule: { property: 'hs_lead_status', value: 'OPEN' } })).toEqual([]);
     expect((await mock().readQualifiedLead({ contactId: pat!.contact.externalId, rule }))?.contact.email).toBe('pat.lee@qualified.example');
+  });
+
+  it('a contact already past the qualified stage still counts: qualified_at set means qualified (final review I6)', async () => {
+    const a = mock();
+    const co = await a.upsertCompany(company(`past-${Date.now()}.example`));
+    const email = `past-${Date.now()}@past.example`;
+    const p = await a.upsertPerson({ name: 'Past Lee', email, ownerExternalId: null, takeOverOwner: false, companyExternalId: co.externalId });
+    await mockQualifyPerson(detached(), email);
+    await t.run((ctx) => ctx.tx.update(mockPerson).set({ lifecycle: 'salesqualifiedlead' }).where(eq(mockPerson.email, email)));
+    const rule = { property: 'lifecyclestage', value: 'marketingqualifiedlead' };
+    expect((await a.listQualifiedLeads({ changedSince: EARLY, rule })).some((l) => l.contact.email === email)).toBe(true);
+    expect((await a.readQualifiedLead({ contactId: p.externalId, rule }))?.contact.email).toBe(email);
   });
 
   it('returns a contact qualified after it was created when changedSince falls between the two', async () => {
