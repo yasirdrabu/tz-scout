@@ -8,10 +8,11 @@ import { setConnectionSettings } from '@/modules/integrations';
 import { assignmentCreated, bulk } from '@/modules/routing';
 import { addMember } from '@/modules/tenancy';
 import { closeDbs } from '@/platform/db/client';
+import type { DataLimit } from '@/platform/access';
 import { newId } from '@/platform/ids';
 import { publishTestEvent } from '../helpers/publish';
 import { runOutbox } from '../helpers/run-outbox';
-import { asPerson, domain, member, resolved, routingTenant, type Tenant } from '../routing/helpers';
+import { asPerson, domain, member, resolved, routingTenant, setSummary, type Tenant } from '../routing/helpers';
 import { seedUser } from '../tenancy/helpers';
 
 let t: Tenant;
@@ -95,7 +96,7 @@ describe('handoff batches and messages (CRM-E4)', () => {
     expect(toMike.text).toContain('Start with Pat Lee, CTO');
     expect(toMike.text).toMatch(/https:\/\/app\.hubspot\.com\/contacts\/777\/record\/0-2\/mock-co-\d+/);
     expect(toMike.text).toContain('(days 3, 7 and 14)');
-    expect(toMike.text.endsWith(await firstName(t.actor.id))).toBe(true);
+    expect(toMike.text!.endsWith(await firstName(t.actor.id))).toBe(true);
     expect(b.notSentYet).toEqual([]);
     expect(toMike.copiedAt).toBeNull();
   });
@@ -166,5 +167,75 @@ describe('handoff batches and messages (CRM-E4)', () => {
     const order = [...page1.items, ...page2.items].map((x) => x.id);
     expect(order).toEqual(all.map((r) => r.id).reverse().slice(0, order.length));
     expect(order[0]).toBe(newest);
+  });
+});
+
+describe('batches seen through a data limit (final review I3)', () => {
+  const as = (userId: string, dataLimit: DataLimit) => ({ userId, dataLimit });
+  const viewAs = (id: string, who: { userId: string; dataLimit: DataLimit }) => asPerson(t, (ctx) => getBatch(ctx, id), who);
+  const listAs = async (who: { userId: string; dataLimit: DataLimit }) => {
+    const items = [];
+    let cursor: string | undefined;
+    do {
+      const page = await asPerson(t, (ctx) => listBatches(ctx, { limit: 100, ...(cursor ? { cursor } : {}) }), who);
+      items.push(...page.items);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    return items;
+  };
+
+  it('a seller limited to own accounts sees only their handoffs, with no batch name and no message text', async () => {
+    const [mine, theirs] = [await account('Mine Co'), await account('Theirs Co')];
+    await setSummary(t, mine, { ownerUserId: mike });
+    const blk = newId('blk');
+    await assigned(mine, mike, blk);
+    await assigned(theirs, ash, blk);
+    await runOutbox(t.tenantId);
+    const id = await batchIdOf(mine);
+    const seller = as(mike, { kind: 'own_accounts' });
+
+    const b = (await viewAs(id, seller))!;
+    expect(b.name).toBeNull();
+    expect(b.handoffs.map((h) => h.accountId)).toEqual([mine]);
+    expect(b.messages.length).toBeGreaterThan(0);
+    expect(b.messages.every((m) => m.text === null && m.restricted)).toBe(true);
+    expect(JSON.stringify(b)).not.toContain('Theirs Co');
+    expect((await listAs(seller)).find((x) => x.id === id)).toEqual(b);
+
+    // A batch with nothing the seller can see is left out of the list and not found.
+    const other = await account('Elsewhere Co');
+    await assigned(other, ash, null);
+    await runOutbox(t.tenantId);
+    const hidden = await batchIdOf(other);
+    expect(await viewAs(hidden, seller)).toBeNull();
+    expect((await listAs(seller)).map((x) => x.id)).not.toContain(hidden);
+    // Unlimited, everything shows.
+    expect((await view(id))!.name).toEqual(expect.any(String));
+    expect((await view(id))!.messages.every((m) => typeof m.text === 'string' && !m.restricted)).toBe(true);
+  });
+
+  it('a leader limited by practice sees a batch of their practice whole, and a mixed one restricted', async () => {
+    const practice = newId('prc');
+    const [inside, inside2, outside] = [await account('Inside Co'), await account('Inside Two'), await account('Outside Co')];
+    await setSummary(t, inside, { practiceId: practice });
+    await setSummary(t, inside2, { practiceId: practice });
+    const whole = newId('blk');
+    await assigned(inside2, mike, whole);
+    const mixed = newId('blk');
+    await assigned(inside, mike, mixed);
+    await assigned(outside, ash, mixed);
+    const leader = await member(t, 'leader');
+    await runOutbox(t.tenantId);
+    const who = as(leader, { kind: 'practices', ids: [practice] });
+
+    const w = (await viewAs(await batchIdOf(inside2), who))!;
+    expect(w.name).toContain('Inside Two');
+    expect(w.messages.every((m) => typeof m.text === 'string' && m.text.includes('Inside Two') && !m.restricted)).toBe(true);
+
+    const m = (await viewAs(await batchIdOf(inside), who))!;
+    expect(m.name).toBeNull();
+    expect(m.handoffs.map((h) => h.accountId)).toEqual([inside]);
+    expect(m.messages.every((x) => x.text === null && x.restricted)).toBe(true);
+    expect(JSON.stringify(m)).not.toContain('Outside Co');
   });
 });

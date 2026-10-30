@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
-import { accountNames, getAccounts, type AccountView } from '@/modules/accounts';
+import { accountNames, filterVisibleAccountIds, getAccounts, type AccountView } from '@/modules/accounts';
 import { connectionSettings } from '@/modules/integrations';
 import { members, tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
@@ -97,9 +97,14 @@ export async function refreshBatch(ctx: ModuleContext, batchId: string): Promise
     .where(and(eq(messageTable.tenantId, ctx.tenantId), eq(messageTable.handoffBatchId, batchId), keep.length ? notInArray(messageTable.sellerUserId, keep) : undefined));
 }
 
+/**
+ * A batch as the reader may see it (final review I3): only handoffs of accounts inside the reader's data limit. When
+ * any handoff of the batch is outside it, the name and the message texts (which name every account) are withheld:
+ * `name` is null and each message has `text` null and `restricted` true.
+ */
 export type BatchView = {
   id: string;
-  name: string;
+  name: string | null;
   createdBy: string;
   createdAt: Date;
   handoffs: {
@@ -111,18 +116,22 @@ export type BatchView = {
     status: string;
     followThrough: FollowThroughCounts | null;
   }[];
-  messages: { id: string; sellerUserId: string; sellerName: string | null; count: number; text: string; copiedAt: Date | null; sentAt: Date | null }[];
+  messages: { id: string; sellerUserId: string; sellerName: string | null; count: number; text: string | null; restricted: boolean; copiedAt: Date | null; sentAt: Date | null }[];
   notSentYet: { accountName: string; reason: string }[];
 };
 
+/** The views of these batches; a batch with no handoff the reader can see is left out. */
 async function views(ctx: ModuleContext, batches: (typeof handoffBatch.$inferSelect)[]): Promise<BatchView[]> {
   if (batches.length === 0) return [];
   const ids = batches.map((b) => b.id);
-  const rows = await ctx.tx
+  const all = await ctx.tx
     .select()
     .from(handoff)
     .where(and(eq(handoff.tenantId, ctx.tenantId), inArray(handoff.handoffBatchId, ids)))
     .orderBy(handoff.queuedAt, handoff.id);
+  const visible = new Set(await filterVisibleAccountIds(ctx, [...new Set(all.map((r) => r.accountId))]));
+  const rows = all.filter((r) => visible.has(r.accountId));
+  const restricted = new Set(all.filter((r) => !visible.has(r.accountId)).map((r) => r.handoffBatchId));
   const msgs = await ctx.tx
     .select()
     .from(messageTable)
@@ -140,11 +149,13 @@ async function views(ctx: ModuleContext, batches: (typeof handoffBatch.$inferSel
   const nameOfUser = (id: string | null) => people.find((m) => m.userId === id)?.name ?? null;
   const accountName = (h: Handoff) => names.get(h.accountId) ?? 'An account you cannot see';
 
-  return batches.map((b) => {
+  return batches.flatMap((b) => {
     const mine = rows.filter((r) => r.handoffBatchId === b.id);
+    if (mine.length === 0) return [];
+    const hidden = restricted.has(b.id);
     return {
       id: b.id,
-      name: b.name,
+      name: hidden ? null : b.name,
       createdBy: b.createdBy,
       createdAt: b.createdAt,
       handoffs: mine.map((h) => ({
@@ -158,18 +169,31 @@ async function views(ctx: ModuleContext, batches: (typeof handoffBatch.$inferSel
       })),
       messages: msgs
         .filter((m) => m.handoffBatchId === b.id)
-        .map((m) => ({ id: m.id, sellerUserId: m.sellerUserId, sellerName: nameOfUser(m.sellerUserId), count: m.count, text: m.text, copiedAt: m.copiedAt, sentAt: m.sentAt })),
+        .map((m) => ({
+          id: m.id,
+          sellerUserId: m.sellerUserId,
+          sellerName: nameOfUser(m.sellerUserId),
+          count: m.count,
+          text: hidden ? null : m.text,
+          restricted: hidden,
+          copiedAt: m.copiedAt,
+          sentAt: m.sentAt,
+        })),
       notSentYet: mine.filter((h) => NOT_SENT_STATUSES.includes(h.status as never)).map((h) => ({ accountName: accountName(h), reason: notSentReason(h) })),
     };
   });
 }
 
+/** One batch, or null when it does not exist or has no handoff the reader can see. */
 export async function getBatch(ctx: ModuleContext, id: string): Promise<BatchView | null> {
   const rows = await ctx.tx.select().from(handoffBatch).where(and(eq(handoffBatch.tenantId, ctx.tenantId), eq(handoffBatch.id, id)));
   return (await views(ctx, rows))[0] ?? null;
 }
 
-/** Newest first (CRM-E4-S1-AC1). The cursor is the last batch's id; its position is read from its row. */
+/**
+ * Newest first (CRM-E4-S1-AC1). The cursor is the last batch's id; its position is read from its row. A batch the
+ * reader can see none of is left out, so a page may hold fewer than `limit`.
+ */
 export async function listBatches(ctx: ModuleContext, opts: { cursor?: string; limit?: number } = {}): Promise<{ items: BatchView[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
   const after = opts.cursor
