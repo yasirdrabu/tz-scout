@@ -290,10 +290,14 @@ export function hubspotMock(ctx: ModuleContext): CrmAdapter {
         return { externalId, status: 'open' as const };
       }),
 
-    closeTask: ({ externalId }) =>
+    closeTask: ({ externalId, note }) =>
       run('closeTask', async (tx) => {
-        if (!(await taskById(tx, externalId))) throw httpError(404, `HubSpot task ${externalId} was not found (sample data).`);
-        await tx.update(mockTask).set({ status: 'completed' }).where(taskWhere(externalId));
+        const task = await taskById(tx, externalId);
+        if (!task) throw httpError(404, `HubSpot task ${externalId} was not found (sample data).`);
+        const body = note ? (task.body ? `${task.body}
+
+${note}` : note) : task.body;
+        await tx.update(mockTask).set({ status: 'completed', body }).where(taskWhere(externalId));
         return { status: 'completed' as const };
       }),
 

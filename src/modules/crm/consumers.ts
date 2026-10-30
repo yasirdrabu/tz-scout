@@ -1,11 +1,12 @@
 import { getAccount } from '@/modules/accounts';
 import { accountCreated, accountUpdated } from '@/modules/accounts/contracts/events';
-import { assignmentCreated } from '@/modules/routing/contracts/events';
+import { assignmentCreated, assignmentDeclined, assignmentWithdrawn } from '@/modules/routing/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { seedCrmDefaults } from './defaults';
 import { queueCompanyCheck } from './services/checks';
 import { queueHandoff } from './services/handoff';
+import { requestUndo } from './services/undo';
 
 /** Gives a new tenant its CRM setting, HubSpot field mapping and polling schedules. */
 export const crmTenantDefaults = defineConsumer({
@@ -42,5 +43,22 @@ export const crmAssignmentCreated = defineConsumer({
   handle: async (e, ctx) => queueHandoff(ctx, e.data),
 });
 
+/** A seller's decline undoes the handoff (CRM-E3-S7). Ordered by account, so it comes after the assignment's own event. */
+export const crmAssignmentDeclined = defineConsumer({
+  name: 'crm.assignment_declined',
+  event: assignmentDeclined,
+  orderedBy: (e) => e.data.accountId,
+  handle: async (e, ctx) =>
+    requestUndo(ctx, { assignmentId: e.data.assignmentId, kind: 'declined', reasonLabel: e.data.reasonLabel ?? e.data.reasonKey, by: e.data.sellerUserId }),
+});
+
+/** A withdrawal undoes the handoff too; on a reassign the new assignment pushes again on its own. */
+export const crmAssignmentWithdrawn = defineConsumer({
+  name: 'crm.assignment_withdrawn',
+  event: assignmentWithdrawn,
+  orderedBy: (e) => e.data.accountId,
+  handle: async (e, ctx) => requestUndo(ctx, { assignmentId: e.data.assignmentId, kind: 'withdrawn', reasonLabel: null, by: e.data.by }),
+});
+
 /** Every CRM consumer, for the worker's list. */
-export const crmConsumers = [crmTenantDefaults, crmAccountCreated, crmAccountUpdated, crmAssignmentCreated];
+export const crmConsumers = [crmTenantDefaults, crmAccountCreated, crmAccountUpdated, crmAssignmentCreated, crmAssignmentDeclined, crmAssignmentWithdrawn];

@@ -16,7 +16,7 @@ export const link = crm.table(
   {
     id: text('id').primaryKey(), // lnk_
     tenantId: text('tenant_id').notNull(),
-    scoutType: text('scout_type').notNull(), // account | person | note | task | deal | owner
+    scoutType: text('scout_type').notNull(), // account | person | note | task | deal | owner | undo_note
     scoutId: text('scout_id').notNull(),
     system: text('system').notNull(),
     externalId: text('external_id').notNull(),

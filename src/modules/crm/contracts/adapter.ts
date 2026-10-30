@@ -97,7 +97,8 @@ export const upsertTaskInput = z.object({
 });
 export const upsertTaskOutput = z.object({ externalId: id, status: taskStatusSchema });
 
-export const closeTaskInput = z.object({ externalId: id });
+/** `note` is added to the task's body as it closes, e.g. "Declined in Scout: <reason>". */
+export const closeTaskInput = z.object({ externalId: id, note: z.string().min(1).optional() });
 export const closeTaskOutput = z.object({ status: taskStatusSchema });
 
 export const listOwnersInput = z.object({});

@@ -460,8 +460,15 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
       return { externalId: created.id, status: 'open' as const };
     },
 
-    async closeTask({ externalId }) {
-      await call(anySchema, 'PATCH', `/crm/v3/objects/tasks/${externalId}`, { properties: { hs_task_status: 'COMPLETED' } });
+    async closeTask({ externalId, note }) {
+      const properties: Record<string, string> = { hs_task_status: 'COMPLETED' };
+      if (note) {
+        // The body a person may have edited is kept; the note goes after it.
+        const task = await call(objSchema, 'GET', `/crm/v3/objects/tasks/${externalId}?properties=hs_task_body`);
+        const body = text(task.properties.hs_task_body);
+        properties.hs_task_body = body ? `${body}<br><br>${note}` : note;
+      }
+      await call(anySchema, 'PATCH', `/crm/v3/objects/tasks/${externalId}`, { properties });
       return { status: 'completed' as const };
     },
 

@@ -124,6 +124,15 @@ describe('hubspotLive notes and tasks', () => {
     expect(await adapter(f).closeTask({ externalId: 't1' })).toEqual({ status: 'completed' });
     expect(f.calls[0]!.body).toEqual({ properties: { hs_task_status: 'COMPLETED' } });
   });
+
+  it('closes a task with a note after the body it has', async () => {
+    const f = fake(
+      on('GET', '/crm/v3/objects/tasks/t1', { body: obj('t1', { hs_task_body: 'Call the CIO' }) }),
+      on('PATCH', '/crm/v3/objects/tasks/t1', { body: obj('t1', {}) }),
+    );
+    expect(await adapter(f).closeTask({ externalId: 't1', note: 'Withdrawn in Scout' })).toEqual({ status: 'completed' });
+    expect(f.calls.find((c) => c.method === 'PATCH')!.body).toEqual({ properties: { hs_task_status: 'COMPLETED', hs_task_body: 'Call the CIO<br><br>Withdrawn in Scout' } });
+  });
 });
 
 describe('hubspotLive errors', () => {

@@ -1,9 +1,10 @@
 import { defineJobHandler } from '@/platform/runtime/jobs';
 import { ScoutError } from '@/platform/errors';
-import { companyCheckJob, handoffPushJob, ownersSyncJob } from './contracts/jobs';
+import { companyCheckJob, handoffPushJob, handoffUndoJob, ownersSyncJob } from './contracts/jobs';
 import { checkCompany } from './services/checks';
 import { runPush } from './services/handoff';
 import { syncOwners } from './services/owners';
+import { runUndo } from './services/undo';
 
 /** Checks one new account against the CRM. */
 export const companyCheckHandler = defineJobHandler(companyCheckJob, async (e, ctx) => {
@@ -25,5 +26,11 @@ export const handoffPushHandler = defineJobHandler(handoffPushJob, async (e, ctx
   await runPush(ctx, e.data.handoffId, new Date());
 });
 
+/** Undoes a handoff after a decline or withdrawal (CRM-E3-S7). */
+export const handoffUndoHandler = defineJobHandler(handoffUndoJob, async (e, ctx) => {
+  const { handoffId, ...why } = e.data;
+  await runUndo(ctx, handoffId, new Date(), why);
+});
+
 /** Every CRM job handler, for the worker's list. */
-export const crmJobHandlers = [companyCheckHandler, ownersSyncHandler, handoffPushHandler];
+export const crmJobHandlers = [companyCheckHandler, ownersSyncHandler, handoffPushHandler, handoffUndoHandler];

@@ -37,8 +37,8 @@ type Handoff = typeof handoff.$inferSelect;
 /** A cancel was requested (Ruling 6): stop before the next write. */
 class Cancelled extends Error {}
 
-const byId = (ctx: ModuleContext, id: string) => and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.id, id));
-const OPEN = ['queued', 'running'];
+export const byId = (ctx: ModuleContext, id: string) => and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.id, id));
+export const OPEN = ['queued', 'running'];
 
 /** The handler's transaction was closed under it (time limit): stop now, record nothing; the platform redelivers. */
 const transactionClosed = (e: unknown): boolean =>
@@ -102,7 +102,7 @@ export async function runPush(ctx: ModuleContext, handoffId: string, now: Date =
   } catch (e) {
     if (transactionClosed(e)) throw e;
     if (e instanceof Cancelled) {
-      await settle(ctx, h, { status: 'cancelled' }, (c) => publish(c, handoffCancelled, { ...ids(h), at: now.toISOString() }, subject(h)));
+      await cancelHandoff(ctx, h, now);
       return;
     }
     const f = classifyPushError(e);
@@ -114,6 +114,11 @@ export async function runPush(ctx: ModuleContext, handoffId: string, now: Date =
 
 const ids = (h: Handoff) => ({ handoffId: h.id, accountId: h.accountId, assignmentId: h.assignmentId });
 const subject = (h: Handoff) => ({ type: 'account', id: h.accountId });
+
+/** Ends a handoff still queued or running as `cancelled` and publishes `crm.handoff.cancelled` (Ruling 6); one already final is left alone. */
+export async function cancelHandoff(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
+  await settle(ctx, h, { status: 'cancelled' }, (c) => publish(c, handoffCancelled, { ...ids(h), at: now.toISOString() }, subject(h)));
+}
 
 async function fail(ctx: ModuleContext, h: Handoff, reason: string, retryable: boolean): Promise<void> {
   const text = reason.slice(0, REASON_LIMIT);
@@ -177,6 +182,8 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
   }
   const take = re.decision.action === 'assign';
   const takenFrom = re.decision.action === 'assign' ? re.decision.takenFrom : null;
+  // Recorded before the first write, so the undo of a push stopped midway knows whom to give the company back to (Ruling 7).
+  if (takenFrom) await withTenant(ctx.tenantId, (tx) => tx.update(handoff).set({ takenFromOwner: takenFrom }).where(byId(ctx, h.id)));
 
   const call = <T>(op: string, fn: (a: CrmAdapter) => Promise<T>) => gateway.call(ctx, system, op, (a) => fn(a as CrmAdapter), { module: 'crm' });
   /** Every CRM write first re-reads the committed cancel flag (Ruling 6). */

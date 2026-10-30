@@ -25,6 +25,8 @@ export type HandoffUndone = {
   tasksLeftDone: string[];
   ownerReturnedTo: string | null;
   noteExternalId: string | null;
+  /** `Owner left as is: <assigner> has no HubSpot owner` when the owner could not go back; else null. */
+  ownerNote: string | null;
   at: string;
 };
 

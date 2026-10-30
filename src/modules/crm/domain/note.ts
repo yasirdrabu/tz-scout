@@ -32,7 +32,7 @@ export type NoteInput = {
   pkg: { sections: { key: string; label: string; html: string }[] } | null;
 };
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+export const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const heading = (t: string) => `<p><strong>${esc(t)}</strong></p>`;
 const words = (key: string) => key.replace(/_/g, ' ');
 
