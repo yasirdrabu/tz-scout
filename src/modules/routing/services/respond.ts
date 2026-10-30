@@ -47,7 +47,7 @@ async function lockAssignment(ctx: ModuleContext, id: string, sellerUserId?: str
 }
 
 /** Accepts a pending assignment on a locked row. The caller publishes the snapshot. */
-async function acceptLocked(ctx: ModuleContext, a: Assignment, how: 'seller' | 'auto_timeout', at: Date): Promise<void> {
+export async function acceptLocked(ctx: ModuleContext, a: Assignment, how: 'seller' | 'auto_timeout' | 'crm_activity', at: Date): Promise<void> {
   await ctx.tx
     .update(assignment)
     .set({ status: 'accepted', acceptedHow: how, respondedAt: at })

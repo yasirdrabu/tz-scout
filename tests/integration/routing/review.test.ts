@@ -240,7 +240,8 @@ describe('"New from" and unchanged status', () => {
     await resolved(t, a, { sourceChain: { agentSourceId: 'src_agent' } });
     expect((await reviewOf(a)).flags.newFrom).toBeDefined();
     await asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'declined', reasonKey: 'duplicate' }));
-    expect((await reviewOf(a)).flags).toEqual({});
+    const { handoff: _handoff, ...flags } = (await reviewOf(a)).flags; // the CRM handoff state is not part of this assignment's flags
+    expect(flags).toEqual({});
     await runOutbox(t.tenantId);
     expect((await summaryOf(t, a)).reviewFlags).toEqual([]);
   });

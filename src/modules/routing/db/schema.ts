@@ -70,7 +70,7 @@ export const accountReview = routing.table(
     currentAssignmentId: text('current_assignment_id'),
     stage: text('stage').notNull().default('arrived'),
     stageChangedAt: at('stage_changed_at').notNull().defaultNow(),
-    flags: jsonb('flags').$type<ReviewFlags>().notNull().default({}), // newFrom, declinedBySeller
+    flags: jsonb('flags').$type<ReviewFlags>().notNull().default({}), // newFrom, declinedBySeller, handoff
     version: integer('version').notNull().default(1),
     /** Set when the account was merged into another; the row is then kept read-only, as a record. */
     mergedInto: text('merged_into'),

@@ -421,12 +421,13 @@ describe('markSeen (Ruling 7)', () => {
 });
 
 describe('tenancy.member.removed', () => {
-  it('withdraws that seller\'s open assignments, one snapshot per account, and leaves others alone', async () => {
+  it('withdraws that seller\'s open assignments, one snapshot per account (plus one when its handoff is undone), and leaves others alone', async () => {
     const gone = await member(t, 'seller');
     const first = await assigned(gone);
     const second = await assigned(gone);
     await asSeller((ctx) => accept(ctx, second.id), gone);
     const kept = await assigned(seller);
+    await runOutbox(t.tenantId); // let the pushes to the CRM finish, so only the removal is counted
     const before = [await snapshotCount(t, first.a), await snapshotCount(t, second.a)];
 
     await publishTestEvent(t.tenantId, memberRemoved, { userId: gone, removedBy: t.actor.id });
@@ -436,14 +437,14 @@ describe('tenancy.member.removed', () => {
     expect((await assignmentOf(second.id)).status).toBe('withdrawn');
     expect((await assignmentOf(kept.id)).status).toBe('pending');
     expect(await reviewOf(second.a)).toMatchObject({ stage: 'reviewed', currentAssignmentId: null });
-    expect([await snapshotCount(t, first.a), await snapshotCount(t, second.a)]).toEqual([before[0]! + 1, before[1]! + 1]);
+    expect([await snapshotCount(t, first.a), await snapshotCount(t, second.a)]).toEqual([before[0]! + 2, before[1]! + 2]); // the withdrawal, then the undone handoff (crm.handoff.cancelled)
     expect(await summaryOf(t, second.a)).toMatchObject({ ownerUserId: null, hasOpenAssignment: false });
     expect((await published(t, first.a)).find((e) => e.type === assignmentWithdrawn.type)!.data).toMatchObject({ by: t.actor.id, replacedBy: null });
 
     // The event again: nothing is open any more, so nothing is written.
     await publishTestEvent(t.tenantId, memberRemoved, { userId: gone, removedBy: t.actor.id });
     await runOutbox(t.tenantId);
-    expect([await snapshotCount(t, first.a), await snapshotCount(t, second.a)]).toEqual([before[0]! + 1, before[1]! + 1]);
+    expect([await snapshotCount(t, first.a), await snapshotCount(t, second.a)]).toEqual([before[0]! + 2, before[1]! + 2]); // the withdrawal, then the undone handoff (crm.handoff.cancelled)
   });
 });
 

@@ -8,6 +8,7 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { assignmentCreated } from '../contracts/events';
 import { ownershipPreflight, type OwnershipPreflightResult } from '../contracts/ports';
+import type { HandoffFlag } from '../contracts/types';
 import { accountReview, assignment } from '../db/schema';
 import {
   applyStatusChange,
@@ -140,10 +141,12 @@ export async function assign(ctx: ModuleContext, accountId: string, input: Assig
   }
 
   const leadOfferOverrideId = input.leadOfferId ?? row.leadOfferOverrideId;
+  // The handoff to the CRM starts now; its id arrives with the later CRM events (Ruling 19).
+  const sending: HandoffFlag = { handoffId: null, state: 'sending', at: new Date().toISOString() };
   // In SQL, so the "New from" that ending the replaced assignment cleared stays cleared.
   await ctx.tx
     .update(accountReview)
-    .set({ currentAssignmentId: id, flags: sql`${accountReview.flags} - 'declinedBySeller'`, leadOfferOverrideId })
+    .set({ currentAssignmentId: id, flags: sql`(${accountReview.flags} - 'declinedBySeller') || jsonb_build_object('handoff', ${JSON.stringify(sending)}::jsonb)`, leadOfferOverrideId })
     .where(and(eq(accountReview.tenantId, ctx.tenantId), eq(accountReview.accountId, accountId)));
   const offerId = leadOfferOverrideId ?? (await getSummaries(ctx, [accountId]))[0]?.bestOfferId ?? null;
   await publish(ctx, assignmentCreated, {

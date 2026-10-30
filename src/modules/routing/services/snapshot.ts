@@ -50,6 +50,8 @@ async function buildSnapshot(ctx: ModuleContext, review: typeof accountReview.$i
   const reviewFlags: ReviewFlag[] = [];
   if (review.flags.declinedBySeller) reviewFlags.push('declined_by_seller');
   if (review.flags.newFrom) reviewFlags.push('new_from');
+  if (review.flags.handoff?.state === 'needs_decision') reviewFlags.push('handoff_needs_decision');
+  if (review.flags.handoff?.state === 'failed') reviewFlags.push('handoff_failed');
 
   return {
     reviewStatusKey: review.statusKey,

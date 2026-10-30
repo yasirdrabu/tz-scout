@@ -101,7 +101,7 @@ describe('assign (REV-E2-S1)', () => {
     ]);
     expect((await events(a)).map((e) => e.type)).toEqual(['routing.assignment.created', 'routing.assignment.withdrawn', 'routing.assignment.created']);
     expect((await events(a))[1]!.data).toMatchObject({ assignmentId: first.id, replacedBy: second.id });
-    expect((await reviewOf(a)).flags).toEqual({});
+    expect((await reviewOf(a)).flags).not.toHaveProperty('declinedBySeller');
   });
 
   it('refuses a declined account (Ruling 14), an invited seller and someone who cannot take assignments', async () => {
