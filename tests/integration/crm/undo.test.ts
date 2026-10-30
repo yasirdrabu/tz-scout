@@ -251,6 +251,25 @@ describe('an undo that fails and is retried (fix round 1)', () => {
     expect((await tasksOf((await companyAt(d)).externalId)).every((x) => x.status === 'completed')).toBe(true);
     expect(await events(handoffCancelled.type, a)).toHaveLength(1);
   });
+
+  it('giving up on a handoff the push left running cancels it and publishes cancelled (final review I8)', async () => {
+    const a = await account({ people: [person(10)] });
+    await t.run((ctx) => setMockFailure(ctx, 'upsertPerson', 'timeout', 1));
+    const made = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: ash }), { userId: leader });
+    expect(await runThroughFailures(1)).toBe(1);
+    const h = await handoffOf(made.id);
+    expect(h.status).toBe('running');
+    await adminDb.update(outbox).set({ sentAt: new Date() }).where(unsentJobs('crm.handoff.push'));
+    await declineAs(ash, made.id);
+    await runOutbox(t.tenantId, { until: async () => true }); // the decline; its undo job is taken by hand below
+    await adminDb.update(outbox).set({ sentAt: new Date() }).where(unsentJobs('crm.handoff.undo'));
+    await t.run((ctx) => ctx.tx.update(handoff).set({ undoAttempts: 6 }).where(eq(handoff.id, h.id)));
+    await t.run((ctx) => runUndo(ctx, h.id, new Date(), { kind: 'declined', reasonLabel: 'Not my territory', by: ash }));
+    const after = await handoffOf(made.id);
+    expect(after.status).toBe('cancelled');
+    expect(after.undone).toMatchObject({ failed: true, reason: RETRIES_FAILED });
+    expect(await events(handoffCancelled.type, a)).toEqual([expect.objectContaining({ data: expect.objectContaining({ handoffId: h.id }) })]);
+  });
 });
 
 const MOCK_LOCK = () => `crm-mock:${t.tenantId}`;

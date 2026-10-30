@@ -174,7 +174,7 @@ export async function runUndo(ctx: ModuleContext, handoffId: string, now: Date, 
  * Stores `undone` once on each handoff of the group and refreshes their batches. A handoff the push had
  * finished (completed, failed or needs_decision) also publishes `crm.handoff.cancelled` here, once; one
  * already cancelled was announced by `cancelHandoff` or by the push itself. One still open (only when giving
- * up) is cancelled here too.
+ * up) is cancelled here and publishes it too (final review I8).
  */
 async function record(ctx: ModuleContext, group: Handoff[], undone: HandoffUndone, now: Date): Promise<void> {
   const batches = new Set<string>();
@@ -182,7 +182,7 @@ async function record(ctx: ModuleContext, group: Handoff[], undone: HandoffUndon
     const set = OPEN.includes(h.status) ? { undone, status: 'cancelled' } : { undone };
     const wrote = await ctx.tx.update(handoff).set(set).where(and(byId(ctx, h.id), isNull(handoff.undone))).returning({ id: handoff.id });
     if (wrote.length === 0) continue;
-    if (!OPEN.includes(h.status) && h.status !== 'cancelled') {
+    if (h.status !== 'cancelled') {
       await publish(ctx, handoffCancelled, { handoffId: h.id, accountId: h.accountId, assignmentId: h.assignmentId, at: now.toISOString() }, subject(h));
     }
     if (h.handoffBatchId) batches.add(h.handoffBatchId);
