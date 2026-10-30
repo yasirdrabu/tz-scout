@@ -4,12 +4,14 @@ import '@/entry/compose';
 import { mergeAccounts } from '@/modules/accounts';
 import { getLinks, recordLink } from '@/modules/crm';
 import { activity, companyCheck, deal, followThrough, handoff, link } from '@/modules/crm/db/schema';
-import { moveCrmToSurvivor } from '@/modules/crm/services/merge';
+import { accountMerged } from '@/modules/accounts/contracts/events';
+import { getScore } from '@/modules/scoring';
 import { getArrival, submitArrival } from '@/modules/intake';
 import { assign } from '@/modules/routing';
 import { accountReview } from '@/modules/routing/db/schema';
 import { closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
+import { publishTestEvent } from '../helpers/publish';
 import { runOutbox } from '../helpers/run-outbox';
 import { asSource, personAndAgent, validArrival } from '../intake/helpers';
 import { arrivedAccount, asPerson, member, routingTenant, type Tenant } from '../routing/helpers';
@@ -86,6 +88,7 @@ describe('merging accounts that are in the CRM', () => {
     const [review] = await t.run((ctx) => ctx.tx.select().from(accountReview).where(eq(accountReview.accountId, survivor)));
     expect(review).toMatchObject({ currentAssignmentId: made.id, mergedInto: null });
     expect((await t.run((ctx) => getArrival(ctx, sent.arrivalId)))!.accountId).toBe(survivor);
+    expect(await t.run((ctx) => getScore(ctx, survivor))).toMatchObject({ accountId: survivor });
   });
 
   it('keeps both links when the guard was bypassed, and getLinks reports the conflict', async () => {
@@ -93,7 +96,8 @@ describe('merging accounts that are in the CRM', () => {
     const b = await arrivedAccount(t, { name: 'Bypass B' });
     await linkCompany(a, 'mock-co-130');
     await linkCompany(b, 'mock-co-131');
-    await t.run((ctx) => moveCrmToSurvivor(ctx, a, b));
+    await publishTestEvent(t.tenantId, accountMerged, { survivorId: a, mergedId: b, mergedBy: 'usr_leader' }); // the guard is bypassed: no mergeAccounts call
+    await runOutbox(t.tenantId);
     expect((await t.run((ctx) => getLinks(ctx, a))).conflict).toBe(true);
   });
 });

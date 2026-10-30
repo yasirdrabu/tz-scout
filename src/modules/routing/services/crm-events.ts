@@ -1,10 +1,10 @@
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { activityObserved, dealChanged, handoffCancelled, handoffCompleted, handoffFailed, handoffNeedsDecision } from '@/modules/crm/contracts/events';
 import type { ModuleContext } from '@/platform/context';
 import type { Envelope } from '@/platform/events/envelope';
 import type { EventDef } from '@/platform/events/registry';
 import type { HandoffFlag } from '../contracts/types';
-import { accountReview } from '../db/schema';
+import { accountReview, assignment } from '../db/schema';
 import type { StageEvent } from '../domain/stages';
 import { lockRow, openAssignment } from './review';
 import { acceptLocked } from './respond';
@@ -42,10 +42,18 @@ export async function onCrmDeal(e: EventOf<typeof dealChanged>, ctx: ModuleConte
   if (await moveStage(ctx, accountId, DEAL_STAGE[status], e.id)) await publishReviewSnapshot(ctx, accountId);
 }
 
-/** Sets `flags.handoff` unless the stored state is newer; one snapshot when it changed. */
-export async function setHandoffFlag(ctx: ModuleContext, accountId: string, next: HandoffFlag): Promise<void> {
+/** Sets `flags.handoff` unless the event is for an assignment other than the account's latest or the stored state is newer; one snapshot when it changed. */
+export async function setHandoffFlag(ctx: ModuleContext, accountId: string, assignmentId: string, next: HandoffFlag): Promise<void> {
   const row = await lockRow(ctx, accountId);
   if (!row || row.mergedInto) return;
+  // A handoff that followed a merge can report on an assignment that isn't this account's.
+  const [latest] = await ctx.tx
+    .select({ id: assignment.id })
+    .from(assignment)
+    .where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.accountId, accountId)))
+    .orderBy(desc(assignment.assignedAt), desc(assignment.id))
+    .limit(1);
+  if (latest?.id !== assignmentId) return;
   const current = row.flags.handoff;
   if (current && Date.parse(current.at) > Date.parse(next.at)) return;
   await ctx.tx
@@ -56,13 +64,13 @@ export async function setHandoffFlag(ctx: ModuleContext, accountId: string, next
 }
 
 export const onHandoffCompleted = (e: EventOf<typeof handoffCompleted>, ctx: ModuleContext) =>
-  setHandoffFlag(ctx, e.data.accountId, { handoffId: e.data.handoffId, state: 'in_crm', at: e.data.observedAt });
+  setHandoffFlag(ctx, e.data.accountId, e.data.assignmentId, { handoffId: e.data.handoffId, state: 'in_crm', at: e.data.observedAt });
 
 export const onHandoffFailed = (e: EventOf<typeof handoffFailed>, ctx: ModuleContext) =>
-  setHandoffFlag(ctx, e.data.accountId, { handoffId: e.data.handoffId, state: 'failed', reason: e.data.reason, at: e.occurredAt });
+  setHandoffFlag(ctx, e.data.accountId, e.data.assignmentId, { handoffId: e.data.handoffId, state: 'failed', reason: e.data.reason, at: e.occurredAt });
 
 export const onHandoffNeedsDecision = (e: EventOf<typeof handoffNeedsDecision>, ctx: ModuleContext) =>
-  setHandoffFlag(ctx, e.data.accountId, {
+  setHandoffFlag(ctx, e.data.accountId, e.data.assignmentId, {
     handoffId: e.data.handoffId,
     state: 'needs_decision',
     reason: e.data.reason,
@@ -71,4 +79,4 @@ export const onHandoffNeedsDecision = (e: EventOf<typeof handoffNeedsDecision>, 
   });
 
 export const onHandoffCancelled = (e: EventOf<typeof handoffCancelled>, ctx: ModuleContext) =>
-  setHandoffFlag(ctx, e.data.accountId, { handoffId: e.data.handoffId, state: 'cancelled', at: e.data.at });
+  setHandoffFlag(ctx, e.data.accountId, e.data.assignmentId, { handoffId: e.data.handoffId, state: 'cancelled', at: e.data.at });

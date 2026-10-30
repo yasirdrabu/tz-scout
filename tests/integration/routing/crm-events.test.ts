@@ -116,9 +116,10 @@ describe('deals', () => {
 describe('handoff state (Ruling 19)', () => {
   it('assign sets sending; needs_decision sets the flag and the reason', async () => {
     const a = await assigned();
+    const asg = (await assignmentOf(a)).id;
     expect((await reviewOf(a)).flags.handoff).toMatchObject({ state: 'sending' });
     await runOutbox(t.tenantId); // the real push has said its piece; later events win
-    await publishTestEvent(t.tenantId, handoffNeedsDecision, { handoffId: 'hof_1', accountId: a, assignmentId: 'asg_x', reason: 'open_deal', currentOwnerName: 'Vijay Kumar' });
+    await publishTestEvent(t.tenantId, handoffNeedsDecision, { handoffId: 'hof_1', accountId: a, assignmentId: asg, reason: 'open_deal', currentOwnerName: 'Vijay Kumar' });
     await runOutbox(t.tenantId);
     expect((await reviewOf(a)).flags.handoff).toMatchObject({ handoffId: 'hof_1', state: 'needs_decision', reason: 'open_deal', currentOwnerName: 'Vijay Kumar' });
     expect((await summaryOf(t, a)).reviewFlags).toContain('handoff_needs_decision');
@@ -126,8 +127,9 @@ describe('handoff state (Ruling 19)', () => {
 
   it('completed after failed with a later at gives in_crm, and an older event is ignored', async () => {
     const a = await assigned();
+    const asg = (await assignmentOf(a)).id;
     await runOutbox(t.tenantId);
-    await publishTestEvent(t.tenantId, handoffFailed, { handoffId: 'hof_2', accountId: a, assignmentId: 'asg_x', system: 'hubspot', attempt: 3, retryable: false, reason: 'Token refused' });
+    await publishTestEvent(t.tenantId, handoffFailed, { handoffId: 'hof_2', accountId: a, assignmentId: asg, system: 'hubspot', attempt: 3, retryable: false, reason: 'Token refused' });
     await runOutbox(t.tenantId);
     expect((await reviewOf(a)).flags.handoff).toMatchObject({ state: 'failed', reason: 'Token refused' });
     expect((await summaryOf(t, a)).reviewFlags).toContain('handoff_failed');
@@ -135,7 +137,7 @@ describe('handoff state (Ruling 19)', () => {
     await publishTestEvent(t.tenantId, handoffCompleted, {
       handoffId: 'hof_2',
       accountId: a,
-      assignmentId: 'asg_x',
+      assignmentId: asg,
       handoffBatchId: null,
       system: 'hubspot',
       companyExternalId: 'c1',
@@ -151,12 +153,27 @@ describe('handoff state (Ruling 19)', () => {
     expect((await reviewOf(a)).flags.handoff).toMatchObject({ state: 'in_crm' });
     expect((await summaryOf(t, a)).reviewFlags).not.toContain('handoff_failed');
 
-    await publishTestEvent(t.tenantId, handoffCancelled, { handoffId: 'hof_2', accountId: a, assignmentId: 'asg_x', at: new Date(Date.now() - 3_600_000).toISOString() });
+    await publishTestEvent(t.tenantId, handoffCancelled, { handoffId: 'hof_2', accountId: a, assignmentId: asg, at: new Date(Date.now() - 3_600_000).toISOString() });
     await runOutbox(t.tenantId);
     expect((await reviewOf(a)).flags.handoff).toMatchObject({ state: 'in_crm' });
 
-    await publishTestEvent(t.tenantId, handoffCancelled, { handoffId: 'hof_2', accountId: a, assignmentId: 'asg_x', at: new Date(Date.now() + 120_000).toISOString() });
+    await publishTestEvent(t.tenantId, handoffCancelled, { handoffId: 'hof_2', accountId: a, assignmentId: asg, at: new Date(Date.now() + 120_000).toISOString() });
     await runOutbox(t.tenantId);
     expect((await reviewOf(a)).flags.handoff).toMatchObject({ state: 'cancelled' });
+  });
+});
+
+describe('handoff events for another assignment', () => {
+  it('are ignored: no write and no snapshot', async () => {
+    const a = await assigned();
+    await runOutbox(t.tenantId);
+    const before = await reviewOf(a);
+    await publishTestEvent(t.tenantId, handoffFailed, { handoffId: 'hof_old', accountId: a, assignmentId: 'asg_not_latest', system: 'hubspot', attempt: 1, retryable: false, reason: 'Stale' });
+    await publishTestEvent(t.tenantId, handoffNeedsDecision, { handoffId: 'hof_old', accountId: a, assignmentId: 'asg_not_latest', reason: 'customer', currentOwnerName: null });
+    await runOutbox(t.tenantId);
+    const after = await reviewOf(a);
+    expect(after.flags.handoff).toEqual(before.flags.handoff);
+    expect(after.version).toBe(before.version);
+    expect((await summaryOf(t, a)).reviewFlags).not.toContain('handoff_failed');
   });
 });
