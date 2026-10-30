@@ -1,43 +1,37 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { getAccount, getFacts, type PersonView } from '@/modules/accounts';
-import { gateway, RateLimitedError } from '@/modules/integrations';
+import { gateway } from '@/modules/integrations';
 import type { assignmentCreated } from '@/modules/routing/contracts/events';
 import { crmOwnerId, members, tenantSummary, tenantTimezone } from '@/modules/tenancy';
 import { config } from '@/platform/config';
 import type { ModuleContext } from '@/platform/context';
 import { withTenant } from '@/platform/db/tenant';
-import { ScoutError } from '@/platform/errors';
 import { enqueueJob, publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
+import { log } from '@/platform/log';
 import type { CrmAdapter } from '../contracts/adapter';
 import { handoffCancelled, handoffCompleted, handoffFailed, handoffNeedsDecision } from '../contracts/events';
-import { handoffPushJob } from '../contracts/jobs';
+import { handoffPushJob, PUSH_MAX_ATTEMPTS } from '../contracts/jobs';
 import { handoffPackageProvider } from '../contracts/ports';
 import { DEFAULT_FOLLOW_UP_DAYS } from '../contracts/types';
 import { crmSetting, fieldMapping, followThrough, handoff, handoffBatch } from '../db/schema';
 import { propertyValues } from '../domain/fields';
 import { buildNote } from '../domain/note';
+import { classifyPushError, NO_CRM_OWNER, NO_DOMAIN, NotPushable, OWNER_INACTIVE, REASON_LIMIT, RETRIES_FAILED } from '../domain/push-errors';
 import { buildTasks } from '../domain/tasks';
 import { getLinks, recordLink } from './links';
+import { isOwnerActive } from './owners';
 import { recheckOwnership, stopReason } from './preflight';
 
-/** The run that reaches this many attempts is the last one (the job's maxDeliver, Ruling 4). */
-export const MAX_ATTEMPTS = handoffPushJob.opts.maxDeliver ?? 6;
+/** Runs that may do CRM work; the job keeps one delivery more for giving up (Ruling 4). */
+export const MAX_ATTEMPTS = PUSH_MAX_ATTEMPTS;
 /** At most this many people go with a push, primary first. */
 export const PUSH_PEOPLE_LIMIT = 10;
-export const REASON_LIMIT = 300;
-
-export const NO_CRM_OWNER = "This seller isn't linked to a CRM owner";
-export const TOKEN_REFUSED = 'HubSpot refused the token. Enter a new one in Integrations.';
-export const RETRIES_FAILED = 'HubSpot was busy and every retry failed.';
-export const NO_DOMAIN = 'This account has no website, so HubSpot cannot match it.';
 
 type Created = z.infer<typeof assignmentCreated.data>;
 type Handoff = typeof handoff.$inferSelect;
 
-/** Not worth retrying: the reason is shown as is. */
-class NotPushable extends Error {}
 /** A cancel was requested (Ruling 6): stop before the next write. */
 class Cancelled extends Error {}
 
@@ -94,54 +88,65 @@ export async function lockAccount(ctx: ModuleContext, accountId: string): Promis
 /**
  * The `crm.handoff.push` job (CRM-E3 Flow, Rulings 3 to 6 and 9). A retryable error is rethrown so the platform
  * retries it, until the run that reaches MAX_ATTEMPTS; that run, and any non-retryable error, marks the handoff
- * failed and returns.
+ * failed and returns. A run that finds MAX_ATTEMPTS already used (earlier runs died before they could say so)
+ * does no CRM work and marks it failed.
  */
 export async function runPush(ctx: ModuleContext, handoffId: string, now: Date = new Date()): Promise<void> {
-  const [first] = await ctx.tx.select({ accountId: handoff.accountId }).from(handoff).where(byId(ctx, handoffId));
-  if (!first) return;
-  await lockAccount(ctx, first.accountId);
-  // Counted in its own transaction, so a run that fails and rolls back still counts (Ruling 4).
-  const [h] = await withTenant(ctx.tenantId, (tx) =>
-    tx
-      .update(handoff)
-      .set({ attempts: sql`${handoff.attempts} + 1`, status: 'running' })
-      .where(and(byId(ctx, handoffId), inArray(handoff.status, ['queued', 'running'])))
-      .returning(),
-  );
-  if (!h) return; // already finished
+  // Counted in its own transaction before the lock, so a run that dies, waits too long or rolls back still counts.
+  const run = await withTenant(ctx.tenantId, async (tx) => {
+    const [row] = await tx.select().from(handoff).where(and(byId(ctx, handoffId), inArray(handoff.status, ['queued', 'running']))).for('update');
+    if (!row) return null; // already finished
+    if (row.attempts >= MAX_ATTEMPTS) return { h: row, giveUp: true };
+    const [h] = await tx.update(handoff).set({ attempts: sql`${handoff.attempts} + 1`, status: 'running' }).where(byId(ctx, handoffId)).returning();
+    return { h: h!, giveUp: false };
+  });
+  if (!run) return;
+  const { h } = run;
+  if (run.giveUp) return fail(ctx, h, h.lastError ?? RETRIES_FAILED, true);
   try {
+    await lockAccount(ctx, h.accountId);
     if (h.cancelRequestedAt) throw new Cancelled();
     await push(ctx, h, now);
   } catch (e) {
-    if (e instanceof Cancelled) return settle(ctx, h, { status: 'cancelled' }, () => publish(ctx, handoffCancelled, { ...ids(h), at: now.toISOString() }, subject(h)));
-    const { retryable, reason } = classify(e);
-    if (retryable && h.attempts < MAX_ATTEMPTS) throw e;
-    const text = (retryable ? RETRIES_FAILED : reason).slice(0, REASON_LIMIT);
-    await settle(ctx, h, { status: 'failed', lastError: text }, () =>
-      publish(ctx, handoffFailed, { ...ids(h), system: h.system, attempt: h.attempts, retryable, reason: text }, subject(h)),
-    );
+    if (e instanceof Cancelled) {
+      await settle(ctx, h, { status: 'cancelled' }, (c) => publish(c, handoffCancelled, { ...ids(h), at: now.toISOString() }, subject(h)));
+      return;
+    }
+    const f = classifyPushError(e);
+    if (f.unexpected) log.error({ err: e, tenantId: ctx.tenantId, handoffId }, 'crm: handoff push failed unexpectedly');
+    if (f.retryable && h.attempts < MAX_ATTEMPTS) throw e;
+    await fail(ctx, h, f.retryable ? RETRIES_FAILED : f.reason, f.retryable);
   }
 }
 
 const ids = (h: Handoff) => ({ handoffId: h.id, accountId: h.accountId, assignmentId: h.assignmentId });
 const subject = (h: Handoff) => ({ type: 'account', id: h.accountId });
 
-/** Sets the final status, publishes its event and refreshes the batch. */
-async function settle(ctx: ModuleContext, h: Handoff, set: Partial<Handoff>, announce: () => Promise<unknown>): Promise<void> {
-  await ctx.tx.update(handoff).set(set).where(byId(ctx, h.id));
-  await announce();
-  if (h.handoffBatchId) await refreshBatch(ctx, h.handoffBatchId);
+async function fail(ctx: ModuleContext, h: Handoff, reason: string, retryable: boolean): Promise<void> {
+  const text = reason.slice(0, REASON_LIMIT);
+  await settle(ctx, h, { status: 'failed', lastError: text }, (c) =>
+    publish(c, handoffFailed, { ...ids(h), system: h.system, attempt: h.attempts, retryable, reason: text }, subject(h)),
+  );
 }
 
-function classify(e: unknown): { retryable: boolean; reason: string } {
-  if (e instanceof NotPushable || e instanceof ScoutError) return { retryable: false, reason: e.message };
-  if (e instanceof RateLimitedError) return { retryable: true, reason: RETRIES_FAILED };
-  const status = (e as { status?: unknown } | null)?.status;
-  if ((e as Error | null)?.name === 'TimeoutError' || status === 429 || (typeof status === 'number' && status >= 500)) return { retryable: true, reason: RETRIES_FAILED };
-  if (status === 401) return { retryable: false, reason: TOKEN_REFUSED };
-  // A 403 already says which permission ("HubSpot needs another permission: <scope>.").
-  if (typeof status === 'number' && status >= 400) return { retryable: false, reason: (e as Error).message };
-  return { retryable: true, reason: RETRIES_FAILED };
+/**
+ * Sets a final status, publishes its event and refreshes the batch, in a transaction of its own so a run whose
+ * transaction was aborted still records it. `unlessCancelled` skips the write when a cancel was requested;
+ * the result says whether it was written.
+ */
+async function settle(ctx: ModuleContext, h: Handoff, set: Partial<Handoff>, announce: (c: ModuleContext) => Promise<unknown>, unlessCancelled = false): Promise<boolean> {
+  return withTenant(ctx.tenantId, async (tx) => {
+    const c = { ...ctx, tx };
+    const done = await tx
+      .update(handoff)
+      .set(set)
+      .where(and(byId(c, h.id), unlessCancelled ? isNull(handoff.cancelRequestedAt) : undefined))
+      .returning({ id: handoff.id });
+    if (done.length === 0) return false;
+    await announce(c);
+    if (h.handoffBatchId) await refreshBatch(c, h.handoffBatchId);
+    return true;
+  });
 }
 
 const personName = (p: PersonView) => [p.firstName, p.lastName].filter(Boolean).join(' ') || p.email || '';
@@ -150,15 +155,22 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
   const system = h.system;
   const sellerOwner = h.sellerUserId ? await crmOwnerId(ctx, h.sellerUserId, system) : null;
   if (!sellerOwner) throw new NotPushable(NO_CRM_OWNER);
+  if ((await isOwnerActive(ctx, system, sellerOwner)) === false) throw new NotPushable(OWNER_INACTIVE);
   const account = await getAccount(ctx, h.accountId);
   if (!account?.domain) throw new NotPushable(NO_DOMAIN);
 
   const re = await recheckOwnership(ctx, account.id, sellerOwner, h.ownershipAction === 'keep');
   if (re.decision.action === 'stop') {
     const reason = stopReason(re.check!);
-    return settle(ctx, h, { status: 'needs_decision', decisionReason: reason }, () =>
-      publish(ctx, handoffNeedsDecision, { ...ids(h), reason, currentOwnerName: re.currentOwnerName }, subject(h)),
+    const written = await settle(
+      ctx,
+      h,
+      { status: 'needs_decision', decisionReason: reason },
+      (c) => publish(c, handoffNeedsDecision, { ...ids(h), reason, currentOwnerName: re.currentOwnerName }, subject(h)),
+      true,
     );
+    if (!written) throw new Cancelled();
+    return;
   }
   const take = re.decision.action === 'assign';
   const takenFrom = re.decision.action === 'assign' ? re.decision.takenFrom : null;

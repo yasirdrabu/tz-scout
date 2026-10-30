@@ -1,11 +1,23 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { getAccount, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
-import { handoffCompleted, handoffFailed, handoffNeedsDecision, hubspotMock, registerHandoffPackageProvider, seedMockCrm, syncOwners } from '@/modules/crm';
+import {
+  OWNER_INACTIVE,
+  RETRIES_FAILED,
+  TOKEN_REFUSED,
+  handoffCompleted,
+  handoffFailed,
+  handoffNeedsDecision,
+  hubspotMock,
+  registerHandoffPackageProvider,
+  seedMockCrm,
+  syncOwners,
+} from '@/modules/crm';
 import { followThrough, handoff, link, mockCompany, mockNote, mockPerson, mockTask } from '@/modules/crm/db/schema';
 import { mockAddDeal, setMockFailure } from '@/modules/crm/fixtures';
 import { assign, assignmentCreated, bulk } from '@/modules/routing';
+import { callLog } from '@/modules/integrations/db/schema';
 import { addMember } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -20,11 +32,12 @@ type ArrivalPerson = ArrivalForAccounts['people'][number];
 let t: Tenant;
 let seller: string;
 let vijay: string;
+let rahul: string;
 
 beforeAll(async () => {
   t = await routingTenant();
   seller = await member(t, 'seller');
-  vijay = (await t.run((ctx) => seedMockCrm(ctx))).vijay;
+  ({ vijay, rahul } = await t.run((ctx) => seedMockCrm(ctx)));
   await t.run((ctx) => syncOwners(ctx));
 });
 afterEach(() => registerHandoffPackageProvider(null));
@@ -282,5 +295,85 @@ describe('handoff push on assignment (CRM-E3-S1)', () => {
     await runOutbox(t.tenantId);
     expect((await events(assignmentCreated.type, single))[0]!.data.bulkId).toBeNull();
     expect((await handoffsOf(single))[0]!.handoffBatchId).not.toBe(hs[0]!.handoffBatchId);
+  });
+});
+
+/** Publishes `routing.assignment.created` and delivers it, stopping once the handoff is queued (its push not run yet). */
+async function queued(accountId: string, sellerUserId = seller): Promise<void> {
+  await publishTestEvent(t.tenantId, assignmentCreated, {
+    assignmentId: newId('asg'),
+    accountId,
+    sellerUserId,
+    assignedBy: t.actor.id,
+    templateId: null,
+    offerId: null,
+    notes: null,
+    ownershipDecision: 'assign',
+    previousAssignmentId: null,
+    bulkId: null,
+  });
+  await runOutbox(t.tenantId, { until: async () => (await handoffsOf(accountId)).length > 0 });
+}
+const setAttempts = (accountId: string, attempts: number) => t.run((ctx) => ctx.tx.update(handoff).set({ attempts }).where(eq(handoff.accountId, accountId)));
+const callCount = async () => (await adminDb.select({ id: callLog.id }).from(callLog).where(eq(callLog.tenantId, t.tenantId))).length;
+
+describe('giving up and failing for good (Ruling 4, fix round 1)', () => {
+  it('a run that finds six attempts already used marks the handoff failed with no CRM call', async () => {
+    const a = await account();
+    await queued(a);
+    await setAttempts(a, 6); // six earlier runs died without saying so
+    const calls = await callCount();
+    await runOutbox(t.tenantId);
+    const [h] = await handoffsOf(a);
+    expect(h).toMatchObject({ status: 'failed', attempts: 6, lastError: RETRIES_FAILED });
+    expect((await events(handoffFailed.type, a))[0]!.data).toMatchObject({ attempt: 6, reason: RETRIES_FAILED });
+    expect(await callCount()).toBe(calls);
+    expect(await companiesAt(await domainOf(a))).toHaveLength(0);
+  });
+
+  it('a final run whose transaction a database error aborted still leaves the handoff failed', async () => {
+    // Deterministic: the package provider raises a serialisation failure (SQLSTATE 40001) inside the push
+    // transaction, which aborts it; on the sixth attempt that retryable error must end as failed.
+    registerHandoffPackageProvider({
+      package: async (ctx) => {
+        await ctx.tx.execute(sql`do $$ begin raise exception 'forced' using errcode = '40001'; end $$`);
+        return null;
+      },
+    });
+    const a = await account();
+    await queued(a);
+    await setAttempts(a, 5);
+    await runOutbox(t.tenantId).catch(() => undefined); // the commit of the aborted transaction may throw
+    const [h] = await handoffsOf(a);
+    expect(h).toMatchObject({ status: 'failed', attempts: 6, lastError: RETRIES_FAILED });
+    expect(await events(handoffFailed.type, a)).toHaveLength(1);
+    registerHandoffPackageProvider(null);
+    await runOutbox(t.tenantId); // a redelivery finds it finished and does nothing
+    expect((await handoffsOf(a))[0]!.status).toBe('failed');
+  });
+
+  it('a 401 fails at once with the token sentence; a 403 names the permission', async () => {
+    const a = await account();
+    await t.run((ctx) => setMockFailure(ctx, 'upsertCompany', '401', 1));
+    await queued(a);
+    await runOutbox(t.tenantId);
+    expect((await handoffsOf(a))[0]).toMatchObject({ status: 'failed', attempts: 1, lastError: TOKEN_REFUSED });
+    expect((await events(handoffFailed.type, a))[0]!.data).toMatchObject({ retryable: false, reason: TOKEN_REFUSED });
+
+    const b = await account();
+    await t.run((ctx) => setMockFailure(ctx, 'upsertCompany', '403', 1));
+    await queued(b);
+    await runOutbox(t.tenantId);
+    expect((await handoffsOf(b))[0]).toMatchObject({ status: 'failed', attempts: 1, lastError: 'HubSpot needs another permission: crm.objects.companies.write.' });
+  });
+
+  it("a seller whose HubSpot owner is inactive in the roster fails at once", async () => {
+    const u = await seedUser();
+    await t.run((ctx) => addMember(ctx, { email: u.email, role: 'seller', crmOwnerIds: { hubspot: rahul } }));
+    const a = await account();
+    await queued(a, u.id);
+    await runOutbox(t.tenantId);
+    expect((await handoffsOf(a))[0]).toMatchObject({ status: 'failed', attempts: 1, lastError: OWNER_INACTIVE });
+    expect(await companiesAt(await domainOf(a))).toHaveLength(0);
   });
 });

@@ -1,8 +1,15 @@
 import { z } from 'zod';
 import { defineJob } from '@/platform/events/registry';
 
-/** Pushes one handoff to the CRM. Six runs at most (Ruling 4). */
-export const handoffPushJob = defineJob('crm.handoff.push', z.object({ handoffId: z.string() }), { maxDeliver: 6 });
+/** Runs of a push that may do CRM work (Ruling 4). */
+export const PUSH_MAX_ATTEMPTS = 6;
+
+/**
+ * Pushes one handoff to the CRM. One delivery more than PUSH_MAX_ATTEMPTS is kept for giving up, so a handoff
+ * whose last run died (time limit, lock wait, aborted transaction) is still marked failed. A live push makes about
+ * 20 HubSpot calls and may sleep on 429s, hence the longer time limit.
+ */
+export const handoffPushJob = defineJob('crm.handoff.push', z.object({ handoffId: z.string() }), { maxDeliver: PUSH_MAX_ATTEMPTS + 1, timeoutMs: 120_000 });
 
 /** Undoes what a handoff wrote after a decline or withdrawal (Ruling 7). */
 export const handoffUndoJob = defineJob('crm.handoff.undo', z.object({ handoffId: z.string() }), {});

@@ -13,6 +13,7 @@ export {
   activityPollJob,
   companyCheckJob,
   dealsPollJob,
+  PUSH_MAX_ATTEMPTS,
   handoffPushJob,
   handoffUndoJob,
   ownersSyncJob,
@@ -35,7 +36,8 @@ export {
 export { capabilitiesSchema, crmOperations, type CrmAdapter, type CrmCapabilities, type CrmDeal, type QualifiedLead } from './contracts/adapter';
 export { crmAccountCreated, crmAccountUpdated, crmAssignmentCreated, crmConsumers, crmTenantDefaults } from './consumers';
 export { companyCheckHandler, crmJobHandlers, handoffPushHandler, ownersSyncHandler } from './jobs';
-export { MAX_ATTEMPTS, NO_CRM_OWNER, RETRIES_FAILED, TOKEN_REFUSED, batchFor, queueHandoff, refreshBatch, runPush } from './services/handoff';
+export { MAX_ATTEMPTS, batchFor, queueHandoff, refreshBatch, runPush } from './services/handoff';
+export { NO_CRM_OWNER, OWNER_INACTIVE, RETRIES_FAILED, SOMETHING_WRONG, TOKEN_REFUSED, UNREADABLE_ANSWER, classifyPushError } from './domain/push-errors';
 export { companyLink, getLinks, linkExternalIds, recordLink, type AccountLinks, type LinkRow, type RecordLink } from './services/links';
 export { CHECK_TTL_MS, checkCompany, companyChecks, lookupCompany, queueCompanyCheck, refreshCheck, type CompanyCheck } from './services/checks';
 export {

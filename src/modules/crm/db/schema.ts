@@ -392,10 +392,10 @@ export const mockFailure = crm.table(
   {
     tenantId: text('tenant_id').notNull(),
     operation: text('operation').notNull(),
-    kind: text('kind').notNull(), // 429 | 500 | timeout
+    kind: text('kind').notNull(), // 401 | 403 | 429 | 500 | timeout
     remaining: integer('remaining').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.tenantId, t.operation] }), check('mock_failure_kind_valid', sql`${t.kind} in ('429', '500', 'timeout')`)],
+  (t) => [primaryKey({ columns: [t.tenantId, t.operation] }), check('mock_failure_kind_valid', sql`${t.kind} in ('401', '403', '429', '500', 'timeout')`)],
 );
 
 /** Company properties the mock has "created" (Set up HubSpot fields). */

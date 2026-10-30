@@ -29,6 +29,13 @@
       "when": 1793330116026,
       "tag": "0003_crm_handoff_assignment",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793330981076,
+      "tag": "0004_crm_mock_auth_failures",
+      "breakpoints": true
     }
   ]
 }

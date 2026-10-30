@@ -10,7 +10,7 @@ import { noteFingerprint } from '../../domain/fingerprint';
 // The Postgres-backed HubSpot stand-in (Ruling 2). Every write is its own transaction, like a CRM that does
 // not roll back when the caller does, and the rules are those of the v1 live connector.
 
-export type MockFailureKind = '429' | '500' | 'timeout';
+export type MockFailureKind = '401' | '403' | '429' | '500' | 'timeout';
 
 /** Standard HubSpot company properties, which always exist. Scout's own (`taazaa_*`, `scout_link`) exist only after "Set up HubSpot fields". */
 const KNOWN_PROPERTIES = new Set([
@@ -59,6 +59,8 @@ async function consumeFailure(ctx: ModuleContext, operation: string): Promise<vo
     await tx.update(mockFailure).set({ remaining: row.remaining - 1 }).where(where);
     return row.kind as MockFailureKind;
   });
+  if (kind === '401') throw httpError(401, 'HubSpot refused the token (sample data).');
+  if (kind === '403') throw httpError(403, 'HubSpot needs another permission: crm.objects.companies.write.');
   if (kind === '429') throw new RateLimitedError('HubSpot asked us to slow down (sample data).');
   if (kind === '500') throw httpError(500, 'HubSpot returned 500 (sample data).');
   if (kind === 'timeout') throw Object.assign(new Error('HubSpot timed out (sample data).'), { name: 'TimeoutError' });
