@@ -6,6 +6,7 @@ import type { assignmentCreated } from '@/modules/routing/contracts/events';
 import { crmOwnerId, members, tenantSummary, tenantTimezone } from '@/modules/tenancy';
 import { config } from '@/platform/config';
 import type { ModuleContext } from '@/platform/context';
+import { TransactionClosedError } from '@/platform/db/guarded-tx';
 import { withTenant } from '@/platform/db/tenant';
 import { enqueueJob, publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
@@ -36,6 +37,11 @@ type Handoff = typeof handoff.$inferSelect;
 class Cancelled extends Error {}
 
 const byId = (ctx: ModuleContext, id: string) => and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.id, id));
+const OPEN = ['queued', 'running'];
+
+/** The handler's transaction was closed under it (time limit): stop now, record nothing; the platform redelivers. */
+const transactionClosed = (e: unknown): boolean =>
+  e instanceof TransactionClosedError || (e as { cause?: unknown } | null)?.cause instanceof TransactionClosedError;
 
 /** The handoff batch for a bulk run, found or made; a null key makes a batch of its own (Ruling 8). */
 export async function batchFor(ctx: ModuleContext, bulkKey: string | null, createdBy: string): Promise<string> {
@@ -94,7 +100,7 @@ export async function lockAccount(ctx: ModuleContext, accountId: string): Promis
 export async function runPush(ctx: ModuleContext, handoffId: string, now: Date = new Date()): Promise<void> {
   // Counted in its own transaction before the lock, so a run that dies, waits too long or rolls back still counts.
   const run = await withTenant(ctx.tenantId, async (tx) => {
-    const [row] = await tx.select().from(handoff).where(and(byId(ctx, handoffId), inArray(handoff.status, ['queued', 'running']))).for('update');
+    const [row] = await tx.select().from(handoff).where(and(byId(ctx, handoffId), inArray(handoff.status, OPEN))).for('update');
     if (!row) return null; // already finished
     if (row.attempts >= MAX_ATTEMPTS) return { h: row, giveUp: true };
     const [h] = await tx.update(handoff).set({ attempts: sql`${handoff.attempts} + 1`, status: 'running' }).where(byId(ctx, handoffId)).returning();
@@ -108,6 +114,7 @@ export async function runPush(ctx: ModuleContext, handoffId: string, now: Date =
     if (h.cancelRequestedAt) throw new Cancelled();
     await push(ctx, h, now);
   } catch (e) {
+    if (transactionClosed(e)) throw e;
     if (e instanceof Cancelled) {
       await settle(ctx, h, { status: 'cancelled' }, (c) => publish(c, handoffCancelled, { ...ids(h), at: now.toISOString() }, subject(h)));
       return;
@@ -131,21 +138,31 @@ async function fail(ctx: ModuleContext, h: Handoff, reason: string, retryable: b
 
 /**
  * Sets a final status, publishes its event and refreshes the batch, in a transaction of its own so a run whose
- * transaction was aborted still records it. `unlessCancelled` skips the write when a cancel was requested;
- * the result says whether it was written.
+ * transaction was aborted still records it, and so the push transaction never holds the handoff row. Only a
+ * handoff still queued or running is changed; one already final elsewhere is left alone (`final`) and nothing
+ * is published. `unlessCancelled` also skips the write when a cancel was requested (`cancelled`).
  */
-async function settle(ctx: ModuleContext, h: Handoff, set: Partial<Handoff>, announce: (c: ModuleContext) => Promise<unknown>, unlessCancelled = false): Promise<boolean> {
+async function settle(
+  ctx: ModuleContext,
+  h: Handoff,
+  set: Partial<Handoff>,
+  announce: (c: ModuleContext) => Promise<unknown>,
+  unlessCancelled = false,
+): Promise<'written' | 'cancelled' | 'final'> {
   return withTenant(ctx.tenantId, async (tx) => {
     const c = { ...ctx, tx };
     const done = await tx
       .update(handoff)
       .set(set)
-      .where(and(byId(c, h.id), unlessCancelled ? isNull(handoff.cancelRequestedAt) : undefined))
+      .where(and(byId(c, h.id), inArray(handoff.status, OPEN), unlessCancelled ? isNull(handoff.cancelRequestedAt) : undefined))
       .returning({ id: handoff.id });
-    if (done.length === 0) return false;
+    if (done.length === 0) {
+      const [row] = await tx.select({ status: handoff.status }).from(handoff).where(byId(c, h.id));
+      return row && OPEN.includes(row.status) ? 'cancelled' : 'final';
+    }
     await announce(c);
     if (h.handoffBatchId) await refreshBatch(c, h.handoffBatchId);
-    return true;
+    return 'written';
   });
 }
 
@@ -169,7 +186,7 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
       (c) => publish(c, handoffNeedsDecision, { ...ids(h), reason, currentOwnerName: re.currentOwnerName }, subject(h)),
       true,
     );
-    if (!written) throw new Cancelled();
+    if (written === 'cancelled') throw new Cancelled();
     return;
   }
   const take = re.decision.action === 'assign';
@@ -291,44 +308,41 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
     taskIds.push(r.externalId);
   }
 
-  await readBaseline(ctx, h.id, call, company.externalId, taskIds);
+  const ft = await call('readFollowThrough', (a) => a.readFollowThrough({ companyExternalId: company.externalId, taskExternalIds: taskIds }));
 
-  const done = await ctx.tx
-    .update(handoff)
-    .set({ status: 'completed', completedAt: now, ownerExternalId: company.ownerExternalId, companyExternalId: company.externalId, takenFromOwner: takenFrom, lastError: null })
-    .where(and(byId(ctx, h.id), isNull(handoff.cancelRequestedAt)))
-    .returning({ id: handoff.id });
-  if (done.length === 0) throw new Cancelled();
-  await publish(
+  // Completion, its baseline, event and batch refresh in one transaction of its own (Ruling 6: only with no cancel).
+  const outcome = await settle(
     ctx,
-    handoffCompleted,
-    {
-      ...ids(h),
-      handoffBatchId: h.handoffBatchId,
-      system,
-      companyExternalId: company.externalId,
-      personExternalIds: pushed.map((p) => p.externalId),
-      ownerExternalId: company.ownerExternalId,
-      ownershipAction: h.ownershipAction as 'assign' | 'keep',
-      takenFromOwner: takenFrom,
-      taskCount: taskIds.length,
-      companyLifecycle: re.check?.lifecycle ?? 'none',
-      observedAt: (re.check?.checkedAt ?? now).toISOString(),
+    h,
+    { status: 'completed', completedAt: now, ownerExternalId: company.ownerExternalId, companyExternalId: company.externalId, takenFromOwner: takenFrom, lastError: null },
+    async (c) => {
+      await storeBaseline(c, h.id, ft);
+      await publish(
+        c,
+        handoffCompleted,
+        {
+          ...ids(h),
+          handoffBatchId: h.handoffBatchId,
+          system,
+          companyExternalId: company.externalId,
+          personExternalIds: pushed.map((p) => p.externalId),
+          ownerExternalId: company.ownerExternalId,
+          ownershipAction: h.ownershipAction as 'assign' | 'keep',
+          takenFromOwner: takenFrom,
+          taskCount: taskIds.length,
+          companyLifecycle: re.check?.lifecycle ?? 'none',
+          observedAt: (re.check?.checkedAt ?? now).toISOString(),
+        },
+        subject(h),
+      );
     },
-    subject(h),
+    true,
   );
-  if (h.handoffBatchId) await refreshBatch(ctx, h.handoffBatchId);
+  if (outcome === 'cancelled') throw new Cancelled();
 }
 
 /** What the company already had before the handoff, so follow-through counts only what came after. */
-async function readBaseline(
-  ctx: ModuleContext,
-  handoffId: string,
-  call: <T>(op: string, fn: (a: CrmAdapter) => Promise<T>) => Promise<T>,
-  companyExternalId: string,
-  taskExternalIds: string[],
-): Promise<void> {
-  const ft = await call('readFollowThrough', (a) => a.readFollowThrough({ companyExternalId, taskExternalIds }));
+async function storeBaseline(ctx: ModuleContext, handoffId: string, ft: Awaited<ReturnType<CrmAdapter['readFollowThrough']>>): Promise<void> {
   const baseline = { emails: ft.emails, calls: ft.calls, meetings: ft.meetings, deals: ft.deals, openDeals: ft.openDeals };
   const values = {
     baseline,

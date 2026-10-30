@@ -11,6 +11,7 @@ import {
   handoffNeedsDecision,
   hubspotMock,
   registerHandoffPackageProvider,
+  runPush,
   seedMockCrm,
   syncOwners,
 } from '@/modules/crm';
@@ -20,6 +21,8 @@ import { assign, assignmentCreated, bulk } from '@/modules/routing';
 import { callLog } from '@/modules/integrations/db/schema';
 import { addMember } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
+import { guardTx } from '@/platform/db/guarded-tx';
+import { withTenant } from '@/platform/db/tenant';
 import { outbox } from '@/platform/db/schema';
 import { newId } from '@/platform/ids';
 import { publishTestEvent } from '../helpers/publish';
@@ -375,5 +378,54 @@ describe('giving up and failing for good (Ruling 4, fix round 1)', () => {
     await runOutbox(t.tenantId);
     expect((await handoffsOf(a))[0]).toMatchObject({ status: 'failed', attempts: 1, lastError: OWNER_INACTIVE });
     expect(await companiesAt(await domainOf(a))).toHaveLength(0);
+  });
+});
+
+describe('a handler that outlived its time limit (fix round 2)', () => {
+  /** Runs the push the way the worker does, in a guarded transaction, and returns what it threw. */
+  const pushGuarded = (handoffId: string, mid: (close: (reason: string) => void) => void) =>
+    withTenant(t.tenantId, async (tx) => {
+      const guarded = guardTx(tx);
+      registerHandoffPackageProvider({
+        package: async () => {
+          mid(guarded.close);
+          return null;
+        },
+      });
+      return runPush({ tenantId: t.tenantId, actor: { kind: 'system', id: 'test' }, correlationId: newId('cor'), tx: guarded.tx }, handoffId).then(
+        () => null,
+        (e: unknown) => e,
+      );
+    });
+
+  it('stops when its transaction is closed mid-push: the handoff stays running, nothing failed is published', async () => {
+    const a = await account();
+    await queued(a);
+    const [h] = await handoffsOf(a);
+    // Closing the guard is what the worker does to a handler past its time limit.
+    const thrown = await pushGuarded(h!.id, (close) => close('The handler ran past its time limit'));
+    expect(thrown).toBeTruthy();
+    expect((await handoffsOf(a))[0]).toMatchObject({ status: 'running', attempts: 1, lastError: null });
+    expect(await events(handoffFailed.type, a)).toHaveLength(0);
+    registerHandoffPackageProvider(null);
+    await runOutbox(t.tenantId); // the redelivery finishes it
+    expect((await handoffsOf(a))[0]).toMatchObject({ status: 'completed', attempts: 2 });
+  });
+
+  it('a failure settled after another run completed the handoff changes nothing and publishes nothing', async () => {
+    const a = await account();
+    await queued(a);
+    const [h] = await handoffsOf(a);
+    registerHandoffPackageProvider({
+      package: async () => {
+        await adminDb.update(handoff).set({ status: 'completed' }).where(eq(handoff.id, h!.id));
+        throw new Error('undefined is not a function');
+      },
+    });
+    // Another delivery completes the handoff while this run works; this run then fails for good.
+    await t.run((ctx) => runPush(ctx, h!.id));
+    expect((await handoffsOf(a))[0]).toMatchObject({ status: 'completed', lastError: null });
+    expect(await events(handoffFailed.type, a)).toHaveLength(0);
+    expect(await events(handoffCompleted.type, a)).toHaveLength(0);
   });
 });
