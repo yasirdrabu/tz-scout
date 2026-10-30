@@ -13,8 +13,11 @@ export const PREFLIGHT_RESULTS = ['new', 'assign', 'stop', 'blocked'] as const;
 export type PreflightResultKey = (typeof PREFLIGHT_RESULTS)[number];
 export type OwnershipPreflightResult = { result: PreflightResultKey; message: string };
 
+/** `fresh` (default true) asks the CRM now; false lets the CRM answer from a check under a day old (a bulk assign). */
+export type PreflightOptions = { fresh?: boolean };
+
 export interface OwnershipPreflight {
-  check(ctx: ModuleContext, accountId: string, sellerUserId: string): Promise<OwnershipPreflightResult>;
+  check(ctx: ModuleContext, accountId: string, sellerUserId: string, opts?: PreflightOptions): Promise<OwnershipPreflightResult>;
 }
 
 const defaultPreflight: OwnershipPreflight = {

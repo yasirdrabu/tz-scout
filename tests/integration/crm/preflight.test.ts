@@ -4,11 +4,15 @@ import '@/entry/compose';
 import { upsertFromArrival } from '@/modules/accounts';
 import { crmOwnershipPreflight, preflightOwnership, seedMockCrm, syncOwners } from '@/modules/crm';
 import { companyCheck, crmSetting, handoff } from '@/modules/crm/db/schema';
+import { setMockFailure } from '@/modules/crm/fixtures';
+import { callLog } from '@/modules/integrations/db/schema';
+import { bulk } from '@/modules/routing';
+import { ScoutError } from '@/platform/errors';
 import { user } from '@/modules/tenancy/db/schema';
 import { addMember } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
-import { routingTenant, type Tenant } from '../routing/helpers';
+import { arrivedAccount, member, routingTenant, type Tenant } from '../routing/helpers';
 import { seedUser } from '../tenancy/helpers';
 
 let t: Tenant;
@@ -17,6 +21,7 @@ let bo: string; // no HubSpot owner id
 let rahulSeller: string; // linked to the inactive Rahul
 let vijaySeller: string; // linked to Vijay
 let vijayId: string;
+let bulkSeller: string; // an active seller who can take assignments
 
 const seller = async (name: string, owner?: string) => {
   const u = await seedUser();
@@ -29,6 +34,7 @@ beforeAll(async () => {
   t = await routingTenant();
   ash = await seller('Ash', 'mock-ow-701');
   bo = await seller('Bo');
+  bulkSeller = await member(t, 'seller');
   const seeded = await t.run((ctx) => seedMockCrm(ctx));
   vijayId = seeded.vijay;
   rahulSeller = await seller('Rahul', seeded.rahul);
@@ -110,5 +116,36 @@ describe('ownership preflight with the mock CRM', () => {
     expect(await t.run((ctx) => crmOwnershipPreflight.check(ctx, id, ash))).toEqual({ result: 'assign', message: 'Owned by Vijay Kumar: will move to Ash' });
     const [row] = await t.run((ctx) => ctx.tx.select().from(companyCheck).where(eq(companyCheck.accountId, id)));
     expect(row).toMatchObject({ exists: true, ownerName: 'Vijay Kumar' });
+  });
+});
+
+describe('the preflight when HubSpot does not answer, and in a bulk (final review I2)', () => {
+  const calls = async () => (await adminDb.select({ id: callLog.id }).from(callLog).where(eq(callLog.tenantId, t.tenantId))).length;
+  // Every stored check of the tenant, the ones kept by domain included.
+  const ageChecks = () => t.run((ctx) => ctx.tx.update(companyCheck).set({ checkedAt: new Date(Date.now() - 25 * 60 * 60 * 1000) }).where(eq(companyCheck.tenantId, ctx.tenantId)));
+
+  it('a rate-limited CRM is a 503 that says to try again', async () => {
+    const id = await arrive('owned-elsewhere.example');
+    await t.run((ctx) => setMockFailure(ctx, 'findCompany', '429', 1));
+    const e = await t.run((ctx) => preflightOwnership(ctx, id, ash)).catch((err: unknown) => err);
+    expect(e).toBeInstanceOf(ScoutError);
+    expect(e).toMatchObject({ status: 503, slug: 'crm_unavailable', message: "HubSpot didn't answer. Try again in a minute." });
+  });
+
+  it('a rate-limited preflight fails one account of a bulk with 503 and the others go ahead', async () => {
+    const ids = [await arrivedAccount(t), await arrivedAccount(t)];
+    await ageChecks(); // no check younger than a day, so the bulk asks the CRM
+    await t.run((ctx) => setMockFailure(ctx, 'findCompany', '429', 1));
+    const results = await t.run((ctx) => bulk({ ...ctx, access: { userId: t.actor.id, dataLimit: { kind: 'all' } } }, ids, { kind: 'assign', sellerUserId: bulkSeller }));
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.filter((r) => !r.ok)).toEqual([expect.objectContaining({ ok: false, status: 503, message: "HubSpot didn't answer. Try again in a minute." })]);
+  });
+
+  it('a bulk makes no CRM call when the stored checks are under a day old', async () => {
+    const ids = [await arrivedAccount(t), await arrivedAccount(t)]; // each was checked on arrival
+    const before = await calls();
+    const results = await t.run((ctx) => bulk({ ...ctx, access: { userId: t.actor.id, dataLimit: { kind: 'all' } } }, ids, { kind: 'assign', sellerUserId: bulkSeller }));
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(await calls()).toBe(before);
   });
 });

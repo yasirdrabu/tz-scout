@@ -7,7 +7,7 @@ import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { assignmentCreated } from '../contracts/events';
-import { ownershipPreflight, type OwnershipPreflightResult } from '../contracts/ports';
+import { ownershipPreflight, type OwnershipPreflightResult, type PreflightOptions } from '../contracts/ports';
 import type { HandoffFlag } from '../contracts/types';
 import { accountReview, assignment } from '../db/schema';
 import {
@@ -65,13 +65,18 @@ async function checkSeller(ctx: ModuleContext, sellerUserId: string): Promise<vo
 }
 
 /** What assigning would do, on a review row the caller has read (and, for a write, locked). */
-async function plan(ctx: ModuleContext, row: { accountId: string; statusKey: string }, sellerUserId: string): Promise<AssignPreview & { open: Awaited<ReturnType<typeof openAssignment>> }> {
+async function plan(
+  ctx: ModuleContext,
+  row: { accountId: string; statusKey: string },
+  sellerUserId: string,
+  opts: PreflightOptions = {},
+): Promise<AssignPreview & { open: Awaited<ReturnType<typeof openAssignment>> }> {
   await checkSeller(ctx, sellerUserId);
   const statuses = await loadStatuses(ctx);
   const current = statuses.find((s) => s.key === row.statusKey);
   if (current?.isDeclined) throw conflict('Reopen it before assigning.');
   const approve = current?.countsAsReviewed ? undefined : statuses.find((s) => !s.archivedAt && s.countsAsReviewed && !s.isDeclined);
-  const preflight = await ownershipPreflight().check(ctx, row.accountId, sellerUserId);
+  const preflight = await ownershipPreflight().check(ctx, row.accountId, sellerUserId, opts);
   const open = await openAssignment(ctx, row.accountId);
   return {
     preflight,
@@ -104,12 +109,12 @@ async function checkLeadOffer(ctx: ModuleContext, offerId: string): Promise<void
  * its message. An open assignment is replaced. The seller's decline flag clears; a lead offer is
  * stored as the account's override. One snapshot at the end.
  */
-export async function assign(ctx: ModuleContext, accountId: string, input: AssignInput, opts: { bulkId?: string } = {}): Promise<AssignmentView> {
+export async function assign(ctx: ModuleContext, accountId: string, input: AssignInput, opts: { bulkId?: string } & PreflightOptions = {}): Promise<AssignmentView> {
   const by = requirePerson(ctx);
   const notes = input.notes?.trim() || null;
   checkLength(notes, 'notes');
   const row = await lockForWrite(ctx, accountId);
-  const p = await plan(ctx, row, input.sellerUserId);
+  const p = await plan(ctx, row, input.sellerUserId, { fresh: opts.fresh });
   const ownershipDecision = input.ownershipDecision ?? 'assign';
   if (p.preflight.result === 'blocked' || (p.preflight.result === 'stop' && ownershipDecision !== 'keep')) throw conflict(p.preflight.message);
   if (input.leadOfferId) await checkLeadOffer(ctx, input.leadOfferId);
@@ -184,7 +189,8 @@ export async function bulk(ctx: ModuleContext, accountIds: string[], action: Bul
       await ctx.tx.transaction(async (tx) => {
         const sp = { ...ctx, tx };
         const { kind, ...input } = action;
-        if (kind === 'assign') await assign(sp, accountId, input as AssignInput, { bulkId });
+        // The push asks the CRM about ownership again (CRM-E3-S1-AC5), so a bulk's preflight may use a check under a day old.
+        if (kind === 'assign') await assign(sp, accountId, input as AssignInput, { bulkId, fresh: false });
         else await changeStatus(sp, accountId, input as StatusChangeInput);
       });
       results.set(accountId, { accountId, ok: true });

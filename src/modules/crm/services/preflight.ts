@@ -1,9 +1,10 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { crmOwnerId, members } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
+import { ScoutError } from '@/platform/errors';
 import { crmSetting, handoff } from '../db/schema';
 import { decideOwnership } from '../domain/ownership';
-import { refreshCheck, type CompanyCheck } from './checks';
+import { checkCompany, refreshCheck, type CompanyCheck } from './checks';
 import { crmSystem, isOwnerActive } from './owners';
 
 export type OwnershipPreflightDetail = {
@@ -40,13 +41,16 @@ async function pushedOwnerId(ctx: ModuleContext, accountId: string): Promise<str
 export const stopReason = (check: Pick<CompanyCheck, 'openDeals' | 'lifecycle'>): 'open_deal' | 'customer' | 'owned_elsewhere' =>
   check.openDeals > 0 ? 'open_deal' : check.lifecycle === 'customer' ? 'customer' : 'owned_elsewhere';
 
+export const CRM_UNAVAILABLE = "HubSpot didn't answer. Try again in a minute.";
+
 /**
  * Asks the CRM about the account's company now (refreshing its stored check) and applies the ownership rule
- * for this seller's owner id. Used by the preflight and again by the push (CRM-E3-S1-AC5).
+ * for this seller's owner id. Used by the preflight and again by the push (CRM-E3-S1-AC5). With `fresh` false,
+ * a stored check under a day old is used instead, and the CRM is asked only when there is none.
  */
-export async function recheckOwnership(ctx: ModuleContext, accountId: string, sellerOwner: string, allowOtherOwner: boolean) {
+export async function recheckOwnership(ctx: ModuleContext, accountId: string, sellerOwner: string, allowOtherOwner: boolean, fresh = true) {
   const system = await crmSystem(ctx);
-  const check = await refreshCheck(ctx, accountId);
+  const check = fresh ? await refreshCheck(ctx, accountId) : await checkCompany(ctx, accountId);
   const [setting] = await ctx.tx.select({ takeOver: crmSetting.takeOverStaleOwnership }).from(crmSetting).where(eq(crmSetting.tenantId, ctx.tenantId));
   const currentActive = check?.ownerExternalId ? await isOwnerActive(ctx, system, check.ownerExternalId) : null;
   const decision = decideOwnership({
@@ -63,9 +67,20 @@ export async function recheckOwnership(ctx: ModuleContext, accountId: string, se
 
 /**
  * What assigning this account to this seller would do in the CRM (Ruling 1). Asks the CRM now (which refreshes
- * the account's stored check), applies the ownership rule and words the answer.
+ * the account's stored check), or with `fresh` false reuses a check under a day old, applies the ownership rule
+ * and words the answer. A CRM that fails to answer (rate limit, time-out, 5xx, network, or any error that is not
+ * Scout's own) is a 503 that says to try again, so one account of a bulk fails alone (final review I2).
  */
-export async function preflightOwnership(ctx: ModuleContext, accountId: string, sellerUserId: string): Promise<OwnershipPreflightDetail> {
+export async function preflightOwnership(ctx: ModuleContext, accountId: string, sellerUserId: string, opts: { fresh?: boolean } = {}): Promise<OwnershipPreflightDetail> {
+  try {
+    return await preflight(ctx, accountId, sellerUserId, opts.fresh ?? true);
+  } catch (e) {
+    if (e instanceof ScoutError) throw e;
+    throw new ScoutError({ status: 503, slug: 'crm_unavailable', title: CRM_UNAVAILABLE });
+  }
+}
+
+async function preflight(ctx: ModuleContext, accountId: string, sellerUserId: string, fresh: boolean): Promise<OwnershipPreflightDetail> {
   const system = await crmSystem(ctx);
   const seller = (await members(ctx)).find((m) => m.userId === sellerUserId);
   const first = seller?.name.trim().split(/\s+/)[0] || 'This person';
@@ -73,7 +88,7 @@ export async function preflightOwnership(ctx: ModuleContext, accountId: string, 
   if (!sellerOwner) return blocked(`${first} has no HubSpot owner set. Set it in Members first.`, 'no_owner');
   if ((await isOwnerActive(ctx, system, sellerOwner)) === false) return blocked('Link this person to a HubSpot owner first', 'no_owner');
 
-  const { check, decision, currentActive, currentOwnerName: name } = await recheckOwnership(ctx, accountId, sellerOwner, false);
+  const { check, decision, currentActive, currentOwnerName: name } = await recheckOwnership(ctx, accountId, sellerOwner, false, fresh);
   if (!check?.exists) return { result: 'new', message: 'New in the CRM', reason: null, currentOwnerName: null, takenFrom: null };
 
   const out = (result: 'assign' | 'stop', message: string, reason: OwnershipPreflightDetail['reason'], takenFrom: string | null = null): OwnershipPreflightDetail => ({
@@ -98,8 +113,8 @@ export async function preflightOwnership(ctx: ModuleContext, accountId: string, 
 /** The port Routing calls before an assignment; CRM implements it and the composition root registers it. */
 // Typed structurally: CRM does not import Routing, and compose.ts checks the shape against Routing's port.
 export const crmOwnershipPreflight = {
-  check: async (ctx: ModuleContext, accountId: string, sellerUserId: string): Promise<Pick<OwnershipPreflightDetail, 'result' | 'message'>> => {
-    const { result, message } = await preflightOwnership(ctx, accountId, sellerUserId);
+  check: async (ctx: ModuleContext, accountId: string, sellerUserId: string, opts?: { fresh?: boolean }): Promise<Pick<OwnershipPreflightDetail, 'result' | 'message'>> => {
+    const { result, message } = await preflightOwnership(ctx, accountId, sellerUserId, opts);
     return { result, message };
   },
 };
