@@ -32,7 +32,7 @@ const arrive = (account: { name: string; domain?: string }) =>
   );
 type Payload = { type: string; data: { accountId?: string } & Record<string, unknown> };
 const checkedEvents = async (accountId: string) =>
-  (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId)))
+  (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId)).orderBy(outbox.seq))
     .map((r) => r.payload as Payload)
     .filter((p) => p.type === 'crm.company.checked' && p.data.accountId === accountId);
 

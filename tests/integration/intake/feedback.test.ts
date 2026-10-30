@@ -69,7 +69,7 @@ const ALL_SOURCES = () => [ash.personId, ash.agentId, bo.personId, bo.agentId, v
 const rowsFor = (accountId: string) => t.run((ctx) => ctx.tx.select().from(sourceFeedback).where(eq(sourceFeedback.accountId, accountId)));
 const recordedEvents = () =>
   t.run(async (ctx) =>
-    (await ctx.tx.select().from(outbox).where(eq(outbox.tenantId, ctx.tenantId))).filter(
+    (await ctx.tx.select().from(outbox).where(eq(outbox.tenantId, ctx.tenantId)).orderBy(outbox.seq)).filter(
       (r) => (r.payload as { type: string }).type === 'intake.feedback.recorded',
     ),
   );
