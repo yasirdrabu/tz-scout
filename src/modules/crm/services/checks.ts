@@ -46,7 +46,7 @@ const toCheck = (r: Stored): CompanyCheck => ({
 });
 
 /** Customer when the CRM says so or any deal is won; open deal when any deal is open; else none (Ruling 12). */
-function lifecycleOf(crmLifecycle: string | null, deals: { status: string }[]): CompanyLifecycle {
+export function lifecycleOf(crmLifecycle: string | null, deals: { status: string }[]): CompanyLifecycle {
   if (crmLifecycle === 'customer' || deals.some((d) => d.status === 'won')) return 'customer';
   return deals.some((d) => d.status === 'open') ? 'open_deal' : 'none';
 }

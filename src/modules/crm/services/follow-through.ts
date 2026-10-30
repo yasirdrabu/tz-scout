@@ -12,7 +12,10 @@ import { syncJob } from '../contracts/jobs';
 import type { ActivityKind } from '../contracts/types';
 import { activity, followThrough as followThroughTable, handoff, link, taskLink } from '../db/schema';
 import { countsOfRow, type FollowThroughCounts } from '../domain/follow-through';
+import { syncDeals } from './deals';
 import { lockAccount, transactionClosed } from './handoff';
+import { companyLink } from './links';
+import { crmSystem } from './owners';
 
 type Handoff = typeof handoff.$inferSelect;
 
@@ -33,13 +36,15 @@ const latestCompleted = async (ctx: ModuleContext, accountId: string): Promise<H
 
 /**
  * Reads one account's follow-through and activities now (Ruling 18) and records what is new. Never writes to the CRM.
- * Takes the account lock like every job that touches the account (Ruling 5). Task 12 adds the deals step.
+ * Takes the account lock like every job that touches the account (Ruling 5). Reads the account's deals too, from its handoff company or else its company link.
  */
 export async function syncAccount(ctx: ModuleContext, accountId: string, now: Date): Promise<void> {
   await lockAccount(ctx, accountId);
   const h = await latestCompleted(ctx, accountId);
-  if (!h?.companyExternalId) return;
-  await syncFollowThrough(ctx, h, h.companyExternalId, now);
+  if (h?.companyExternalId) await syncFollowThrough(ctx, h, h.companyExternalId, now);
+  const system = h?.system ?? (await crmSystem(ctx));
+  const company = h?.companyExternalId ?? (await companyLink(ctx, accountId, system));
+  if (company) await syncDeals(ctx, system, company, now);
 }
 
 async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternalId: string, now: Date): Promise<void> {

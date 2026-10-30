@@ -1,7 +1,8 @@
 import { defineJobHandler } from '@/platform/runtime/jobs';
 import { ScoutError } from '@/platform/errors';
-import { activityPollJob, companyCheckJob, handoffPushJob, handoffUndoJob, ownersSyncJob, personPushJob, syncJob } from './contracts/jobs';
+import { activityPollJob, companyCheckJob, dealsPollJob, handoffPushJob, handoffUndoJob, ownersSyncJob, personPushJob, syncJob } from './contracts/jobs';
 import { checkCompany } from './services/checks';
+import { pollDeals } from './services/deals';
 import { pollActivity, syncAccount } from './services/follow-through';
 import { runPush } from './services/handoff';
 import { syncOwners } from './services/owners';
@@ -44,10 +45,15 @@ export const activityPollHandler = defineJobHandler(activityPollJob, async (_e, 
   await pollActivity(ctx, new Date());
 });
 
+/** Hourly: reads deals changed since the last poll (Ruling 18). */
+export const dealsPollHandler = defineJobHandler(dealsPollJob, async (_e, ctx) => {
+  await pollDeals(ctx, new Date());
+});
+
 /** Reads one account now: Check follow-through, and later webhooks (Ruling 18). */
 export const syncHandler = defineJobHandler(syncJob, async (e, ctx) => {
   await syncAccount(ctx, e.data.accountId, new Date());
 });
 
 /** Every CRM job handler, for the worker's list. */
-export const crmJobHandlers = [companyCheckHandler, ownersSyncHandler, handoffPushHandler, handoffUndoHandler, personPushHandler, activityPollHandler, syncHandler];
+export const crmJobHandlers = [companyCheckHandler, ownersSyncHandler, handoffPushHandler, handoffUndoHandler, personPushHandler, activityPollHandler, syncHandler, dealsPollHandler];

@@ -252,6 +252,8 @@ export const crmSetting = crm.table(
     takeOverStaleOwnership: boolean('take_over_stale_ownership').notNull().default(true),
     pushNewPeople: boolean('push_new_people').notNull().default(true),
     followUpDays: jsonb('follow_up_days').$type<number[]>().notNull().default([3, 7, 14]),
+    /** High-water mark of the last deals poll (Ruling 18). */
+    dealsPolledUntil: at('deals_polled_until'),
     updatedAt: at('updated_at').notNull().defaultNow(),
   },
   (t) => [

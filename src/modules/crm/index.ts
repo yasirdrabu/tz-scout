@@ -44,7 +44,7 @@ export {
   crmPersonAdded,
   crmTenantDefaults,
 } from './consumers';
-export { activityPollHandler, companyCheckHandler, crmJobHandlers, syncHandler, handoffPushHandler, handoffUndoHandler, ownersSyncHandler, personPushHandler } from './jobs';
+export { activityPollHandler, companyCheckHandler, dealsPollHandler, crmJobHandlers, syncHandler, handoffPushHandler, handoffUndoHandler, ownersSyncHandler, personPushHandler } from './jobs';
 export { ASSIGN_FIRST, push, queuePersonPush, runPersonPush } from './services/push';
 export { POLL_LIMIT, POLL_WINDOW_MS, checkFollowThrough, followThrough, pollActivity, syncAccount } from './services/follow-through';
 export { getHandoffs, lastActivityAt, latestHandoff, type HandoffRow, type HandoffsView } from './services/read';
@@ -84,3 +84,6 @@ export { noteFingerprint } from './domain/fingerprint';
 export { hubspotMock } from './adapters/hubspot/mock';
 export { registerHubspotAdapter } from './adapters/hubspot/register';
 export { seedMockCrm } from './fixtures';
+export { DEALS_FIRST_LOOKBACK_MS, DEALS_OVERLAP_MS, applyDeals, companyLifecycle, pollDeals } from './services/deals';
+export { handleCrmWebhook } from './services/webhook';
+export { SIGNATURE_MAX_AGE_MS, parseHubSpotWebhook, verifyHubSpotV3, type SignedRequest, type WebhookEvent } from './domain/webhook';

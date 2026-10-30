@@ -50,6 +50,13 @@
       "when": 1793334711437,
       "tag": "0006_crm_handoff_repush",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793336424888,
+      "tag": "0007_crm_deals_cursor",
+      "breakpoints": true
     }
   ]
 }
