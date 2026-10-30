@@ -10,7 +10,7 @@ import { connectionChanged, connectionTested } from '../contracts/events';
 import { callLog, connection, credential } from '../db/schema';
 import { ensureConnection, runCall } from '../gateway';
 import { PROVIDERS, adapterFactories, isKnownProvider, type TestResult } from '../providers';
-import { credentialAad, sealValue } from './vault';
+import { credentialAad, openValue, sealValue } from './vault';
 
 export type ConnectionMode = 'mock' | 'live';
 export type ConnectionStatus = 'not_set_up' | 'connected' | 'failing' | 'disabled';
@@ -249,6 +249,26 @@ export async function testConnection(ctx: ModuleContext, provider: string): Prom
     { type: 'connection', id: conn.id },
   );
   return result;
+}
+
+/** The decrypted HubSpot-style `client_secret` that verifies inbound webhooks, or null when none is stored. */
+export async function webhookSecret(ctx: ModuleContext, provider: string): Promise<string | null> {
+  requireProvider(provider);
+  const [row] = await ctx.tx
+    .select({ cred: credential })
+    .from(credential)
+    .innerJoin(connection, and(eq(connection.tenantId, credential.tenantId), eq(connection.id, credential.connectionId)))
+    .where(
+      and(
+        eq(credential.tenantId, ctx.tenantId),
+        eq(connection.provider, provider),
+        eq(credential.kind, 'client_secret'),
+        isNull(credential.replacedAt),
+      ),
+    )
+    .orderBy(desc(credential.createdAt))
+    .limit(1);
+  return row ? openValue(row.cred, credentialAad(ctx.tenantId, row.cred.connectionId, row.cred.id)) : null;
 }
 
 /** The connection's settings (non-secret: HubSpot `portal_id`, the qualified-lead rule), `{}` when it has no row yet. */

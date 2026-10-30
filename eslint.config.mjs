@@ -49,6 +49,8 @@ export const ADMIN_DB_ALLOWED = [
   "src/modules/tenancy/services/**",
   "src/modules/tenancy/auth.ts",
   "src/modules/integrations/jobs.ts",
+  // An unauthenticated webhook has no tenant until its connection is found (connectionTenant).
+  "src/modules/integrations/services/inbound.ts",
   "src/entry/**",
 ];
 const LIVE_ADAPTERS = ["src/modules/*/adapters/*/live*", "src/modules/*/adapters/*/live*/**"];

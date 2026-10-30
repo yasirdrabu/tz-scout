@@ -16,6 +16,7 @@ export {
   setDisabled,
   setMode,
   testConnection,
+  webhookSecret,
   type CallView,
   type ConnectionMode,
   type ConnectionStatus,
@@ -31,5 +32,6 @@ export {
   type Provider,
   type TestResult,
 } from './providers';
+export { connectionTenant } from './services/inbound';
 export { MASTER_KEY_MISSING } from './services/vault';
 export { credentialsCleanupHandler, credentialsCleanupJob } from './jobs';
