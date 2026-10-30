@@ -14,7 +14,6 @@ import { activity, followThrough as followThroughTable, handoff, link, taskLink 
 import { countsOfRow, type FollowThroughCounts } from '../domain/follow-through';
 import { syncDeals } from './deals';
 import { lockAccount, transactionClosed } from './handoff';
-import { companyLink } from './links';
 import { crmSystem } from './owners';
 
 type Handoff = typeof handoff.$inferSelect;
@@ -43,8 +42,15 @@ export async function syncAccount(ctx: ModuleContext, accountId: string, now: Da
   const h = await latestCompleted(ctx, accountId);
   if (h?.companyExternalId) await syncFollowThrough(ctx, h, h.companyExternalId, now);
   const system = h?.system ?? (await crmSystem(ctx));
-  const company = h?.companyExternalId ?? (await companyLink(ctx, accountId, system));
-  if (company) await syncDeals(ctx, system, company, now);
+  // applyDeals keeps only deals whose company has an account link, so read by the linked companies; the handoff's company is the fallback.
+  const linked = (
+    await ctx.tx
+      .select({ externalId: link.externalId })
+      .from(link)
+      .where(and(eq(link.tenantId, ctx.tenantId), eq(link.scoutType, 'account'), eq(link.scoutId, accountId), eq(link.system, system)))
+  ).map((r) => r.externalId);
+  const companies = linked.length ? linked : h?.companyExternalId ? [h.companyExternalId] : [];
+  for (const company of companies) await syncDeals(ctx, system, company, now);
 }
 
 async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternalId: string, now: Date): Promise<void> {

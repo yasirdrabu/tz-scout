@@ -237,6 +237,8 @@ export const companyCheck = crm.table(
     ownerExternalId: text('owner_external_id'),
     ownerName: text('owner_name'),
     lifecycle: text('lifecycle'),
+    /** The CRM's own lifecycle stage, before deals are folded in (Ruling 12). */
+    crmLifecycle: text('crm_lifecycle'),
     openDeals: integer('open_deals').notNull().default(0),
     checkedAt: at('checked_at').notNull().defaultNow(),
   },

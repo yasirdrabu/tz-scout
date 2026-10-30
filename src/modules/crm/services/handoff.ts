@@ -22,6 +22,7 @@ import { buildNote } from '../domain/note';
 import { classifyPushError, NO_CRM_OWNER, NO_DOMAIN, NotPushable, OWNER_INACTIVE, REASON_LIMIT, RETRIES_FAILED } from '../domain/push-errors';
 import { buildTasks } from '../domain/tasks';
 import { batchFor, refreshBatch } from './batches';
+import { companyLifecycle } from './deals';
 import { getLinks, recordLink } from './links';
 import { isOwnerActive } from './owners';
 import { recheckOwnership, stopReason } from './preflight';
@@ -351,7 +352,7 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
           ownershipAction: h.ownershipAction as 'assign' | 'keep',
           takenFromOwner: takenFrom,
           taskCount: taskIds.length,
-          companyLifecycle: re.check?.lifecycle ?? 'none',
+          companyLifecycle: await companyLifecycle(c, h.accountId, re.check ?? undefined),
           observedAt: (re.check?.checkedAt ?? now).toISOString(),
         },
         subject(h),

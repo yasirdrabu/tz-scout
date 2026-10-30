@@ -21,14 +21,19 @@ export const DEALS_FIRST_LOOKBACK_MS = 24 * 60 * 60 * 1000;
  * `none`, `open_deal` or `customer` (Ruling 12): customer when the stored CRM check says customer or any cached deal is won,
  * open deal when any cached deal is open, else none.
  */
-export async function companyLifecycle(ctx: ModuleContext, accountId: string): Promise<CompanyLifecycle> {
+export async function companyLifecycle(
+  ctx: ModuleContext,
+  accountId: string,
+  /** A check that just called the CRM: its raw stage and deals are newer than anything stored, and cover deals not cached yet. */
+  fresh?: { crmLifecycle: string | null; freshDeals?: { status: string }[] },
+): Promise<CompanyLifecycle> {
   const system = await crmSystem(ctx);
   const [check] = await ctx.tx
-    .select({ lifecycle: companyCheck.lifecycle })
+    .select({ crmLifecycle: companyCheck.crmLifecycle })
     .from(companyCheck)
     .where(and(eq(companyCheck.tenantId, ctx.tenantId), eq(companyCheck.accountId, accountId), eq(companyCheck.system, system)));
-  const deals = await ctx.tx.select({ status: deal.status }).from(deal).where(and(eq(deal.tenantId, ctx.tenantId), eq(deal.accountId, accountId)));
-  return lifecycleOf(check?.lifecycle ?? null, deals);
+  const cached = await ctx.tx.select({ status: deal.status }).from(deal).where(and(eq(deal.tenantId, ctx.tenantId), eq(deal.accountId, accountId)));
+  return lifecycleOf(fresh ? fresh.crmLifecycle : (check?.crmLifecycle ?? null), fresh?.freshDeals ?? cached);
 }
 
 /**
@@ -126,7 +131,7 @@ export async function pollDeals(ctx: ModuleContext, now: Date): Promise<number> 
   await ctx.tx
     .insert(crmSetting)
     .values({ tenantId: ctx.tenantId, dealsPolledUntil: now })
-    .onConflictDoUpdate({ target: crmSetting.tenantId, set: { dealsPolledUntil: now } });
+    .onConflictDoUpdate({ target: crmSetting.tenantId, set: { dealsPolledUntil: now, updatedAt: now } });
   return published;
 }
 

@@ -1,0 +1,1 @@
+ALTER TABLE "crm"."company_check" ADD COLUMN "crm_lifecycle" text;

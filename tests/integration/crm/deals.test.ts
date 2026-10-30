@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { upsertFromArrival } from '@/modules/accounts';
-import { dealChanged, hubspotMock, pollDeals, recordLink, seedMockCrm, syncAccount } from '@/modules/crm';
+import { checkCompany, dealChanged, hubspotMock, pollDeals, recordLink, seedMockCrm, syncAccount } from '@/modules/crm';
 import { deal, link } from '@/modules/crm/db/schema';
 import { mockAddDeal, mockSetDeal } from '@/modules/crm/fixtures';
 import { recentCalls } from '@/modules/integrations';
@@ -19,8 +19,8 @@ beforeAll(async () => {
 afterAll(closeDbs);
 
 /** An account linked to a fresh mock company. */
-async function linked(): Promise<{ accountId: string; company: string }> {
-  const d = domain();
+async function linked(domainName?: string): Promise<{ accountId: string; company: string }> {
+  const d = domainName ?? domain();
   const { accountId } = await t.run((ctx) =>
     upsertFromArrival(ctx, {
       arrivalId: newId('evt').replace('evt_', 'arr_'),
@@ -72,6 +72,29 @@ describe('deals (CRM-E5-S3)', () => {
     await poll();
     await t.run((ctx) => syncAccount(ctx, accountId, new Date()));
     expect(await events(accountId)).toHaveLength(1);
+  });
+
+  it('a won deal that reverts stops counting as a customer (Ruling 12)', async () => {
+    const { accountId, company } = await linked();
+    const ext = await t.run((ctx) => mockAddDeal(ctx, { companyExternalId: company, name: 'Flip', amountCents: 1 }));
+    await poll();
+    await t.run((ctx) => mockSetDeal(ctx, ext, { status: 'won' }));
+    await poll();
+    await t.run((ctx) => mockSetDeal(ctx, ext, { status: 'open' }));
+    await poll();
+    await t.run((ctx) => mockSetDeal(ctx, ext, { status: 'lost' }));
+    await poll();
+    expect((await events(accountId)).map((e) => [e.status, e.companyLifecycle])).toEqual([['open', 'open_deal'], ['won', 'customer'], ['open', 'open_deal'], ['lost', 'none']]);
+  });
+
+  it('a company the CRM calls a customer stays one when its only deal is lost', async () => {
+    const { accountId, company } = await linked('customer.example');
+    await t.run((ctx) => checkCompany(ctx, accountId));
+    const co = await t.run((ctx) => hubspotMock(ctx).findCompany({ domain: 'customer.example' }));
+    await t.run((ctx) => mockAddDeal(ctx, { companyExternalId: co?.externalId ?? company, name: 'Lost', status: 'lost' }));
+    await t.run((ctx) => recordLink(ctx, { scoutType: 'account', scoutId: accountId, system: 'hubspot', externalId: co!.externalId }));
+    await poll();
+    expect((await events(accountId)).map((e) => e.companyLifecycle)).toEqual(['customer']);
   });
 
   it('a stage change alone publishes nothing', async () => {

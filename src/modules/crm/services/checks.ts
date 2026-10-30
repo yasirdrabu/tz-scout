@@ -10,6 +10,7 @@ import { companyChecked } from '../contracts/events';
 import { companyCheckJob } from '../contracts/jobs';
 import type { CompanyLifecycle } from '../contracts/types';
 import { companyCheck, handoff, link } from '../db/schema';
+import { companyLifecycle } from './deals';
 import { recordLink } from './links';
 import { crmSystem, ownerName, rosterSynced, syncOwners } from './owners';
 
@@ -27,6 +28,10 @@ export type CompanyCheck = {
   ownerExternalId: string | null;
   ownerName: string | null;
   lifecycle: CompanyLifecycle;
+  /** The CRM's own stage, before deals are folded in. */
+  crmLifecycle: string | null;
+  /** The company's deals as the CRM just returned them; only on a check that called the CRM. */
+  freshDeals?: { status: string }[];
   openDeals: number;
   checkedAt: Date;
 };
@@ -41,6 +46,7 @@ const toCheck = (r: Stored): CompanyCheck => ({
   ownerExternalId: r.ownerExternalId,
   ownerName: r.ownerName,
   lifecycle: (r.lifecycle ?? 'none') as CompanyLifecycle,
+  crmLifecycle: r.crmLifecycle,
   openDeals: r.openDeals,
   checkedAt: r.checkedAt,
 });
@@ -96,6 +102,8 @@ async function lookup(ctx: ModuleContext, system: string, domain: string, now: D
     ownerExternalId: found?.ownerExternalId ?? null,
     ownerName: await nameOf(ctx, system, found?.ownerExternalId ?? null),
     lifecycle: found ? lifecycleOf(found.lifecycle, found.deals) : 'none',
+    crmLifecycle: found?.lifecycle ?? null,
+    freshDeals: found?.deals ?? [],
     openDeals: found?.openDeals ?? 0,
     checkedAt: now,
   };
@@ -107,6 +115,7 @@ async function lookup(ctx: ModuleContext, system: string, domain: string, now: D
     ownerExternalId: check.ownerExternalId,
     ownerName: check.ownerName,
     lifecycle: check.lifecycle,
+    crmLifecycle: check.crmLifecycle,
     openDeals: check.openDeals,
     checkedAt: now,
   };
@@ -155,6 +164,7 @@ async function storeCheck(ctx: ModuleContext, accountId: string, system: string,
     ownerExternalId: check.ownerExternalId,
     ownerName: check.ownerName,
     lifecycle: check.lifecycle,
+    crmLifecycle: check.crmLifecycle,
     openDeals: check.openDeals,
     checkedAt: check.checkedAt,
   };
@@ -174,7 +184,7 @@ async function storeCheck(ctx: ModuleContext, accountId: string, system: string,
       exists: check.exists,
       companyExternalId: check.companyExternalId,
       ownerName: check.ownerName,
-      companyLifecycle: check.lifecycle,
+      companyLifecycle: await companyLifecycle(ctx, accountId, check),
       observedAt: now.toISOString(),
     },
     { type: 'account', id: accountId },
