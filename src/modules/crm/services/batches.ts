@@ -8,7 +8,8 @@ import { newId } from '@/platform/ids';
 import { handoffPackageProvider } from '../contracts/ports';
 import { DEFAULT_FOLLOW_UP_DAYS } from '../contracts/types';
 import { crmSetting, followThrough, handoff, handoffBatch, handoffMessage as messageTable } from '../db/schema';
-import { batchName, followThroughCounts, notSentReason, NOT_SENT_STATUSES, type FollowThroughCounts } from '../domain/batch';
+import { batchName, notSentReason, NOT_SENT_STATUSES } from '../domain/batch';
+import { countsOfRow, type FollowThroughCounts } from '../domain/follow-through';
 import { handoffMessages } from '../domain/message';
 
 type Handoff = typeof handoff.$inferSelect;
@@ -133,7 +134,7 @@ async function views(ctx: ModuleContext, batches: (typeof handoffBatch.$inferSel
         .from(followThrough)
         .where(and(eq(followThrough.tenantId, ctx.tenantId), inArray(followThrough.handoffId, rows.map((r) => r.id))))
     : [];
-  const ftBy = new Map(ft.map((f) => [f.handoffId, followThroughCounts(f)]));
+  const ftBy = new Map(ft.map((f) => [f.handoffId, countsOfRow(f, null, new Date())]));
   const names = await accountNames(ctx, [...new Set(rows.map((r) => r.accountId))]);
   const people = await members(ctx);
   const nameOfUser = (id: string | null) => people.find((m) => m.userId === id)?.name ?? null;

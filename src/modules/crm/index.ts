@@ -44,8 +44,9 @@ export {
   crmPersonAdded,
   crmTenantDefaults,
 } from './consumers';
-export { companyCheckHandler, crmJobHandlers, handoffPushHandler, handoffUndoHandler, ownersSyncHandler, personPushHandler } from './jobs';
+export { activityPollHandler, companyCheckHandler, crmJobHandlers, syncHandler, handoffPushHandler, handoffUndoHandler, ownersSyncHandler, personPushHandler } from './jobs';
 export { ASSIGN_FIRST, push, queuePersonPush, runPersonPush } from './services/push';
+export { POLL_LIMIT, POLL_WINDOW_MS, checkFollowThrough, followThrough, pollActivity, syncAccount } from './services/follow-through';
 export { getHandoffs, lastActivityAt, latestHandoff, type HandoffRow, type HandoffsView } from './services/read';
 export {
   DEFAULT_QUALIFIED_LEAD_RULE,
@@ -59,7 +60,8 @@ export {
 export { MAX_ATTEMPTS, queueHandoff, runPush } from './services/handoff';
 export { requestUndo, runUndo, type UndoReason } from './services/undo';
 export { batchFor, getBatch, listBatches, markCopied, refreshBatch, type BatchView } from './services/batches';
-export { batchName, followThroughCounts } from './domain/batch';
+export { batchName } from './domain/batch';
+export { countsOfRow, followThroughCounts, type FollowThroughCounts, type LatestState } from './domain/follow-through';
 export { handoffMessage, handoffMessages, replyBy, type HandoffAccount, type HandoffMessage } from './domain/message';
 export { NO_CRM_OWNER, OWNER_INACTIVE, RETRIES_FAILED, SOMETHING_WRONG, TOKEN_REFUSED, UNREADABLE_ANSWER, classifyPushError } from './domain/push-errors';
 export { companyLink, getLinks, linkExternalIds, recordLink, type AccountLinks, type LinkRow, type RecordLink } from './services/links';

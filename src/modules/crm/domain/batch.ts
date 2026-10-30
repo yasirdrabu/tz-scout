@@ -27,23 +27,3 @@ export function notSentReason(h: { status: string; lastError: string | null; dec
   if (h.status === 'needs_decision') return (h.decisionReason && DECISION_REASONS[h.decisionReason]) || h.decisionReason || 'The push needs a decision.';
   return 'The handoff was cancelled.';
 }
-
-export type FollowThroughCounts = { tasksDone: number; tasksTotal: number; emails: number; calls: number; meetings: number; deals: number; openDeals: number };
-
-/** Counts since the handoff: what the CRM has now minus what the company had when it was pushed, never below 0. */
-export function followThroughCounts(row: {
-  baseline: Record<string, number>;
-  latest: Record<string, number>;
-  tasks: { status: string }[];
-}): FollowThroughCounts {
-  const since = (k: string) => Math.max(0, (row.latest[k] ?? 0) - (row.baseline[k] ?? 0));
-  return {
-    tasksDone: row.tasks.filter((t) => t.status.toUpperCase() === 'COMPLETED').length,
-    tasksTotal: row.tasks.length,
-    emails: since('emails'),
-    calls: since('calls'),
-    meetings: since('meetings'),
-    deals: since('deals'),
-    openDeals: row.latest.openDeals ?? 0,
-  };
-}

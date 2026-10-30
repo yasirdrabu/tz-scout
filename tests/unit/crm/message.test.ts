@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { batchName, followThroughCounts, notSentReason } from '@/modules/crm/domain/batch';
+import { batchName, notSentReason } from '@/modules/crm/domain/batch';
 import { handoffMessage, handoffMessages, replyBy } from '@/modules/crm/domain/message';
 
 const timezone = 'America/New_York';
@@ -90,15 +90,5 @@ describe('not sent reasons and counts', () => {
     expect(notSentReason({ status: 'failed', lastError: 'HubSpot refused the token. Enter a new one in Integrations.', decisionReason: null })).toMatch(/^HubSpot refused/);
     expect(notSentReason({ status: 'needs_decision', lastError: null, decisionReason: 'open_deal' })).toMatch(/open deal/);
     expect(notSentReason({ status: 'cancelled', lastError: null, decisionReason: null })).toMatch(/cancelled/);
-  });
-
-  it('counts since the handoff and never below 0', () => {
-    expect(
-      followThroughCounts({
-        baseline: { emails: 2, calls: 5 },
-        latest: { emails: 5, calls: 3, openDeals: 1 },
-        tasks: [{ status: 'COMPLETED' }, { status: 'NOT_STARTED' }],
-      }),
-    ).toEqual({ tasksDone: 1, tasksTotal: 2, emails: 3, calls: 0, meetings: 0, deals: 0, openDeals: 1 });
   });
 });

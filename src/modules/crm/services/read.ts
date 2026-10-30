@@ -5,7 +5,7 @@ import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import type { HandoffUndone } from '../contracts/types';
 import { activity, deal, followThrough, handoff } from '../db/schema';
-import { followThroughCounts, type FollowThroughCounts } from '../domain/batch';
+import { countsOfRow, type FollowThroughCounts } from '../domain/follow-through';
 import { latestRow } from './handoff';
 import { companyLink, getLinks, type AccountLinks } from './links';
 
@@ -74,7 +74,7 @@ export async function getHandoffs(ctx: ModuleContext, accountId: string): Promis
       queuedAt: r.queuedAt,
       completedAt: r.completedAt,
     })),
-    followThrough: ft ? { handoffId: ft.handoffId, counts: followThroughCounts(ft), stage: ft.stage, checkedAt: ft.checkedAt } : null,
+    followThrough: ft ? { handoffId: ft.handoffId, counts: countsOfRow(ft, null, new Date()), stage: ft.stage, checkedAt: ft.checkedAt } : null,
     deals,
     conflict: links.conflict,
   };
