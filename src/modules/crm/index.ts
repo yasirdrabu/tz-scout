@@ -35,3 +35,7 @@ export {
 export { capabilitiesSchema, crmOperations, type CrmAdapter, type CrmCapabilities, type CrmDeal, type QualifiedLead } from './contracts/adapter';
 export { crmConsumers, crmTenantDefaults } from './consumers';
 export { CRM_SCHEDULES, DEFAULT_FIELD_MAPPINGS, seedCrmDefaults } from './defaults';
+export { noteFingerprint } from './domain/fingerprint';
+export { hubspotMock } from './adapters/hubspot/mock';
+export { registerHubspotAdapter } from './adapters/hubspot/register';
+export { seedMockCrm } from './fixtures';

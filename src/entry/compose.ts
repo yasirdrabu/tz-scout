@@ -4,9 +4,11 @@
 import { registerSourceAccessProvider, registerSourceInfoProvider } from '@/modules/accounts';
 import { intakeSourceAccess, intakeSourceInfo, intakeSourceValidator, registerReviewStatusValidator } from '@/modules/intake';
 import { routingReviewStatusValidator } from '@/modules/routing';
+import { registerHubspotAdapter } from '@/modules/crm';
 import { registerSourceValidator } from '@/modules/tenancy';
 
 registerSourceValidator(intakeSourceValidator);
 registerSourceInfoProvider(intakeSourceInfo);
 registerSourceAccessProvider(intakeSourceAccess);
 registerReviewStatusValidator(routingReviewStatusValidator);
+registerHubspotAdapter();
