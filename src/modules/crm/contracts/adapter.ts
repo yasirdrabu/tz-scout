@@ -170,6 +170,7 @@ export const existingPropertiesOutput = z.array(z.string());
 
 export const setUpPropertiesInput = z.object({
   groupName: z.string().min(1),
+  groupLabel: z.string().min(1).optional(),
   properties: z.array(
     z.object({
       name: z.string().min(1),

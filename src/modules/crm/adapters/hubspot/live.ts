@@ -58,7 +58,7 @@ type Filter = { propertyName: string; operator: string; value: string };
 
 const COMPANY_PROPS = ['name', 'domain', 'website', 'city', 'state', 'country', 'numberofemployees', 'description', 'hubspot_owner_id', 'lifecyclestage'];
 const DEAL_PROPS = ['dealname', 'dealstage', 'amount', 'deal_currency_code', 'createdate', 'closedate', 'hs_is_closed', 'hs_is_closed_won'];
-const CONTACT_PROPS = ['firstname', 'lastname', 'email', 'jobtitle', 'phone', 'mobilephone', 'hs_linkedin_url', 'associatedcompanyid', 'lifecyclestage', 'hs_lastmodifieddate', 'createdate', 'hubspot_owner_id'];
+const CONTACT_PROPS = ['firstname', 'lastname', 'email', 'jobtitle', 'phone', 'mobilephone', 'hs_linkedin_url', 'associatedcompanyid', 'lifecyclestage', 'lastmodifieddate', 'createdate', 'hubspot_owner_id'];
 
 const clean = (o: Record<string, string | number | null | undefined>): Record<string, string> =>
   Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)]));
@@ -266,7 +266,7 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
           }
         : null,
       lifecycleStage: p.lifecyclestage ?? '',
-      qualifiedAt: toIso(qualifiedProp ? p[qualifiedProp] : null) ?? toIso(p.hs_lastmodifieddate) ?? toIso(p.createdate) ?? new Date().toISOString(),
+      qualifiedAt: toIso(qualifiedProp ? p[qualifiedProp] : null) ?? toIso(p.lastmodifieddate) ?? toIso(p.createdate) ?? new Date().toISOString(),
       raw: Object.fromEntries(Object.entries(p).filter(([, v]) => v != null)),
     };
   }
@@ -502,7 +502,9 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
     },
 
     async listActivities({ companyExternalId, since }) {
-      const all = (await Promise.all((['emails', 'calls', 'meetings'] as const).map((o) => activitiesOf(o, companyExternalId, since)))).flat();
+      // One after another: three searches at once would crowd HubSpot's per-second search limit.
+      const all: Awaited<ReturnType<typeof activitiesOf>> = [];
+      for (const o of ['emails', 'calls', 'meetings'] as const) all.push(...(await activitiesOf(o, companyExternalId, since)));
       return all.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.externalId.localeCompare(b.externalId));
     },
 
@@ -528,11 +530,11 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
         'contacts',
         [
           { propertyName: rule.property, operator: 'EQ', value: rule.value },
-          { propertyName: 'hs_lastmodifieddate', operator: 'GTE', value: toMs(changedSince) },
+          { propertyName: 'lastmodifieddate', operator: 'GTE', value: toMs(changedSince) },
         ],
         leadProps(rule),
         200,
-        [{ propertyName: 'hs_lastmodifieddate', direction: 'ASCENDING' }],
+        [{ propertyName: 'lastmodifieddate', direction: 'ASCENDING' }],
       );
       return withCompanies(contacts, rule);
     },
@@ -547,13 +549,13 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
       return (await call(namesSchema, 'GET', '/crm/v3/properties/companies')).results.map((p) => p.name);
     },
 
-    async setUpProperties({ groupName, properties }) {
+    async setUpProperties({ groupName, groupLabel, properties }) {
       const have = new Set(await adapter.existingProperties({}));
       const missing = properties.filter((p) => !have.has(p.name));
       if (!missing.length) return { created: [] };
       const groups = await call(namesSchema, 'GET', '/crm/v3/properties/companies/groups');
       if (!groups.results.some((g) => g.name === groupName)) {
-        await call(anySchema, 'POST', '/crm/v3/properties/companies/groups', { name: groupName, label: groupName.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) });
+        await call(anySchema, 'POST', '/crm/v3/properties/companies/groups', { name: groupName, label: groupLabel ?? groupName });
       }
       const fieldTypes = { string: 'text', number: 'number', date: 'date', enumeration: 'select' } as const;
       const created: string[] = [];

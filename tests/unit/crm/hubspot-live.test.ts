@@ -239,13 +239,14 @@ describe('hubspotLive properties', () => {
       exact('POST', '/crm/v3/properties/companies', (r) => (have.add(r.body!.name), { body: {} })),
     );
     const a = adapter(f);
-    const input = { groupName: 'scout_buyer_signals', properties: SCOUT_PROPERTIES };
+    const input = { groupName: 'scout_buyer_signals', groupLabel: 'Scout buyer signals', properties: SCOUT_PROPERTIES };
     const first = await a.setUpProperties(input);
     expect(first.created).toHaveLength(SCOUT_PROPERTIES.length - 1);
     expect(first.created).not.toContain('taazaa_tier');
     expect(first.created).toContain('scout_link');
     const posts = f.calls.filter((c) => c.method === 'POST' && c.path === '/crm/v3/properties/companies');
     expect(posts.every((c) => c.body!.groupName === 'scout_buyer_signals')).toBe(true);
+    expect(f.calls.find((c) => c.method === 'POST' && c.path.endsWith('/groups'))!.body).toEqual({ name: 'scout_buyer_signals', label: 'Scout buyer signals' });
     const second = await a.setUpProperties(input);
     expect(second.created).toEqual([]);
     expect(await a.existingProperties({})).toContain('scout_link');
@@ -300,7 +301,7 @@ describe('hubspotLive activities, deals and leads', () => {
       associatedcompanyid: '11',
       lifecyclestage: 'marketingqualifiedlead',
       hs_lifecyclestage_marketingqualifiedlead_date: '2026-05-01T00:00:00Z',
-      hs_lastmodifieddate: '2026-05-02T00:00:00Z',
+      lastmodifieddate: '2026-05-02T00:00:00Z',
     });
     const f = fake(
       on('POST', '/crm/v3/objects/contacts/search', { body: { results: [contact] } }),
@@ -319,6 +320,11 @@ describe('hubspotLive activities, deals and leads', () => {
       qualifiedAt: '2026-05-01T00:00:00.000Z',
     });
     expect(f.calls[0]!.body!.filterGroups[0].filters).toContainEqual({ propertyName: 'lifecyclestage', operator: 'EQ', value: 'marketingqualifiedlead' });
+    // Contacts use `lastmodifieddate`; `hs_lastmodifieddate` is for companies and deals.
+    expect(f.calls[0]!.body!.filterGroups[0].filters).toContainEqual({ propertyName: 'lastmodifieddate', operator: 'GTE', value: String(Date.parse('2026-01-01T00:00:00Z')) });
+    expect(f.calls[0]!.body!.sorts).toEqual([{ propertyName: 'lastmodifieddate', direction: 'ASCENDING' }]);
+    expect(f.calls[0]!.body!.properties).toContain('lastmodifieddate');
+    expect(f.calls[0]!.body!.properties).not.toContain('hs_lastmodifieddate');
     expect(await a.readQualifiedLead({ contactId: '22', rule })).toBeNull();
     expect((await a.readQualifiedLead({ contactId: '21', rule }))?.contact.email).toBe('pat@q.example');
   });
