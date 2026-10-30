@@ -41,8 +41,10 @@ export {
   getSignals,
   getSummaries,
   listAccountIds,
+  listExternalIds,
   listPeople,
   type AccountSummaryView,
+  type ExternalIdRow,
   type ScoringView,
 } from './services/read';
 export { exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';

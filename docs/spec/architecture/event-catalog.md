@@ -24,9 +24,9 @@ module adds an event or tool.
 | `intake.feedback.recorded` | SRC | A source was told why its arrival lost a conflict, was sent back or declined at review, or was declined by a seller. One per distinct source in the chain, per cause. Data: `sourceId`, `arrivalId`, `accountId`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`), `reasonKey`, `note` | webhooks |
 | `accounts.account.exclusion_changed` | ACC | Account ruled out, or a person overrode a rule. Optional `arrivalId` | SCO (rescore), REV |
 | `enrichment.search.completed` | ENR | A saved-search run finished (maybe partial) | ANL (counts only; cost comes from INT usage) |
-| `accounts.account.created` / `.updated` / `.archived` | ACC | Account lifecycle. `created` and `updated` carry an optional `arrivalId` when an arrival caused them | SCO, CRM, ANL |
+| `accounts.account.created` / `.updated` / `.archived` | ACC | Account lifecycle. `created` and `updated` carry an optional `arrivalId` when an arrival caused them, and optional `externalIds` (the outside ids this write added; CRM turns them into links) | SCO, CRM, ANL |
 | `accounts.account.merged` | ACC | Two accounts became one; carries `survivorId`, `mergedId` | every module holding account ids |
-| `accounts.person.added` / `.updated` | ACC | Person lifecycle, including buying role changes. Optional `arrivalId` when an arrival caused it | SCO, PLB, CRM |
+| `accounts.person.added` / `.updated` | ACC | Person lifecycle, including buying role changes. Optional `arrivalId` when an arrival caused it, and optional `externalIds` (the outside ids this write added) | SCO, PLB, CRM |
 | `accounts.fact.recorded` | ACC | A fact was stored with provenance. Optional `arrivalId` | SCO |
 | `accounts.signal.recorded` | ACC | A dated signal was stored. Optional `arrivalId` | SCO |
 | `accounts.conflict.detected` | ACC | Two sources disagree on a fact | REV (shows on page) |
@@ -39,13 +39,16 @@ module adds an event or tool.
 | `offers.offer.approved` / `.archived` / `.changed` | OFF | Offer lifecycle | SCO (rescore), PLB |
 | `routing.review.changed` | REV | After every write to an account's review: `accountId`, `version` (`account_review.version`) and a full `snapshot` (`reviewStatusKey`, `ownerUserId`, `ownerHistoryUserIds`, `hasOpenAssignment`, `stage`, `reviewFlags`) | ACC (account summary) |
 | `routing.status.changed` | REV | Review status moved; carries `from`, `to` | ANL, webhooks |
-| `routing.assignment.created` | REV | Leader assigned an account to a seller | CRM (handoff), PLB (plan), ANL |
-| `routing.assignment.accepted` / `.declined` | REV | Seller response; decline carries reason | ANL, SRC (trust), CRM (decline undoes handoff), PLB (pause plan) |
+| `routing.assignment.created` | REV | Leader assigned an account to a seller. Carries `bulkId` (null for a single assign; one `blk_` id for every assignment in one bulk action), which CRM uses to group handoffs into one batch | CRM (handoff), PLB (plan), ANL |
+| `routing.assignment.accepted` / `.declined` | REV | Seller response; decline carries the reason and its `reasonLabel` (the words the person saw) | ANL, SRC (trust), CRM (decline undoes handoff), PLB (pause plan) |
 | `routing.assignment.withdrawn` | REV | Assigner withdrew or replaced an open assignment | CRM (undo handoff), PLB |
 | `routing.stage.changed` | REV | Account moved funnel stage (arrived to won, or an exit) | ANL, SRC (status for agents), webhooks |
-| `crm.handoff.completed` / `.failed` | CRM | Account pushed to the CRM (or failed) | ANL, webhooks |
+| `crm.handoff.completed` / `.failed` | CRM | Account pushed to the CRM (or failed). `completed` carries `companyLifecycle` (`none`, `open_deal`, `customer`) and `observedAt` | ANL, webhooks, REV (handoff flag), ACC (`crm_status`) |
+| `crm.handoff.cancelled` | CRM | A handoff was declined, withdrawn or stopped before it finished, or a completed handoff was undone. Internal | REV (handoff flag) |
+| `crm.company.checked` | CRM | The CRM check before review: whether the account's company exists in the CRM, who owns it, and `companyLifecycle`, with `observedAt` | ACC (`crm_status`) |
+| `crm.lead.qualified` | CRM | A contact's lifecycle change matched the qualified-lead rule (`connectionId`, `contactId`). Internal; it keeps CRM from importing Intake | SRC (arrival) |
 | `crm.activity.observed` | CRM | Email, call, meeting or task seen in the CRM since handoff | PLB, ANL |
-| `crm.deal.changed` | CRM | Deal created or moved (open, won, lost) with amount | PLB, ANL, SRC (trust), OFF (wins) |
+| `crm.deal.changed` | CRM | Deal created or moved (open, won, lost) with amount; carries `companyLifecycle` and `observedAt` | PLB, ANL, SRC (trust), OFF (wins), REV (stage), ACC (`crm_status`) |
 | `playbooks.plan.created` / `.changed` | PLB | Account plan applied or edited | CRM (tasks), ANL |
 | `playbooks.step.completed` | PLB | A step was done | ANL |
 | `playbooks.outcome.recorded` | PLB | Reply, meeting, opportunity, won or lost on an account | SRC (trust), ANL |
@@ -53,7 +56,7 @@ module adds an event or tool.
 | `playbooks.brief.updated` | PLB | Brief sections drafted or edited | CRM (refresh note on next push) |
 | `offers.practice.changed` | OFF | Practice created, renamed or archived | SCO, PLB |
 | `offers.win_analysis.completed` | OFF | Win analysis run finished | ANL |
-| `crm.handoff.needs_decision` | CRM | CRM state changed since preflight; the push stopped for a person to decide | REV (queue flag) |
+| `crm.handoff.needs_decision` | CRM | CRM state changed since preflight; the push stopped for a person to decide | REV (handoff flag) |
 | `campaigns.test.launched` / `.completed` | CMP | Message test lifecycle | ANL |
 | `campaigns.statement.decided` | CMP | Keep, drop, rewrite or retest, with verdict | PLB (winning words) |
 | `campaigns.ad_spend.recorded` | CMP | One day's spend for one ad campaign | ANL (automatic cost line) |
@@ -80,6 +83,15 @@ Jobs travel the same way as events, as `jobs.<name>` messages. Each module spec 
 | `scoring.rescore.accounts` | SCO | Scores up to 200 accounts, each in its own savepoint; a failed account is queued again on its own. Timeout 300 seconds |
 | `scoring.ageing` | SCO | Nightly, per tenant at 02:00 UTC: rescores accounts with a signal under a year old whose score is over 20 hours old, cause `ageing` |
 | `routing.assignments.auto_accept` | REV | Hourly, per tenant: accepts pending assignments that waited out the workspace's working days (at most 500 per run) |
+| `intake.qualified_leads.poll` | SRC | Every 15 minutes, per tenant: reads HubSpot contacts that became qualified since the last poll (at most 200 a run, oldest first, 5 minutes of overlap) and submits each as an arrival |
+| `crm.company.check` | CRM | Checks one account's company in the CRM before review; enqueued when an account is created or its domain changes, and by the R1c backfill |
+| `crm.handoff.push` | CRM | Pushes one handoff. Delivered up to 7 times: the first 6 runs are push attempts (retryable errors are rethrown), the 7th only marks a handoff `failed` if the job died. Timeout 120 seconds |
+| `crm.handoff.undo` | CRM | Undoes a handoff after a decline or withdrawal: closes Scout's open tasks, returns ownership, adds a short note |
+| `crm.person.push` | CRM | Pushes one person added after the handoff, when the tenant setting is on |
+| `crm.activity.poll` | CRM | Every 15 minutes, per tenant: reads follow-through and activity for up to 200 handed-off accounts (latest handoff completed within 180 days, least recently checked first) |
+| `crm.deals.poll` | CRM | Hourly, per tenant: reads deals changed since the last poll and keeps those on linked companies |
+| `crm.owners.sync` | CRM | Daily at 05:00 UTC, per tenant: reads the CRM's owner roster (up to 2,000 owners) |
+| `crm.sync` | CRM | Reads one account's follow-through, activity and deals now (from a webhook or "Check follow-through") |
 
 ## Versions and arrival ids
 

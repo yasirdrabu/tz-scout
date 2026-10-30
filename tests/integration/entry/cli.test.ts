@@ -136,6 +136,37 @@ describe('scout CLI', () => {
     expect(missing.stderr).toContain('No workspace with the slug "nowhere".');
   }, 90_000);
 
+  it('seed twice leaves one CRM setting, one set of field mappings and one set of mock fixtures; backfill-r1c changes nothing more', async () => {
+    const seeded = await scout(['seed']).done;
+    expect(seeded.code, seeded.stderr).toBe(0);
+    const id = ((await adminDb.execute(sql`select id from tenancy.tenant where slug = 'taazaa'`)) as unknown as { id: string }[])[0]!.id;
+    const read = async () => {
+      const n = async (q: ReturnType<typeof sql>) => Number(((await adminDb.execute(q)) as unknown as { n: string }[])[0]!.n);
+      return {
+        settings: await n(sql`select count(*) n from crm.setting where tenant_id = ${id}`),
+        mappings: await n(sql`select count(*) n from crm.field_mapping where tenant_id = ${id}`),
+        owners: await n(sql`select count(*) n from crm.mock_owner where tenant_id = ${id}`),
+        companies: await n(sql`select count(*) n from crm.mock_company where tenant_id = ${id}`),
+        contacts: await n(sql`select count(*) n from crm.mock_person where tenant_id = ${id}`),
+        deals: await n(sql`select count(*) n from crm.mock_deal where tenant_id = ${id}`),
+        schedules: await n(sql`select count(*) n from platform.schedule where tenant_id = ${id}`),
+      };
+    };
+    const before = await read();
+    expect(before).toMatchObject({ settings: 1, mappings: 11, companies: 5, contacts: 1, deals: 1 });
+    expect(before.owners).toBeGreaterThanOrEqual(5);
+    const r = await scout(['backfill-r1c', 'taazaa']).done;
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stdout).toContain('Workspace taazaa is up to date.');
+    expect(await read()).toEqual(before);
+    const again = await scout(['seed']).done;
+    expect(again.code, again.stderr).toBe(0);
+    expect(await read()).toEqual(before);
+    const missing = await scout(['backfill-r1c', 'nowhere']).done;
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain('No workspace with the slug "nowhere".');
+  }, 120_000);
+
   it('import taazaa research-a.csv exits 0 and prints the batch', async () => {
     const r = await scout(['import', 'taazaa', 'tests/fixtures/imports/research-a.csv']).done;
     expect(r.code, r.stderr).toBe(0);

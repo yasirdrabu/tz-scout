@@ -1,5 +1,49 @@
 # Changelog
 
+## 2026-10-30: Taazaa Scout R1c CRM sync
+
+An assigned account now lands in HubSpot with its note and tasks, the rep's replies and deals come back and move the account through the funnel, and HubSpot contacts that marketing qualified arrive in the review queue. It runs on a mock HubSpot that lives in Postgres; the live connector is built but has not yet run against a real portal. This release has the `/v1` API only; screens come from the front end.
+
+**What was built**
+- **Handoff push**: `routing.assignment.created` queues a handoff (`crm.handoff.push`). It checks ownership, then writes the company, up to 10 people (primary first), one context note and four tasks (a first touch and follow-ups on days 3, 7 and 14), all owned by the seller. Every write is linked as it happens, so a retry updates instead of duplicating. `POST /v1/accounts/{id}:push` pushes again or retries a failed handoff.
+- **Ownership preflight**: CRM implements Routing's `OwnershipPreflight` port (it stays a port). It answers new, assign, stop or blocked with the exact messages in the specs.
+- **Undo on decline or withdrawal**: tasks Scout wrote are closed with "Declined in Scout: <reason>" or "Withdrawn in Scout", ownership goes back, and a separate short note is added. A decline that arrives while the push is running stops the push (`cancelled`) and the undo runs on what was written.
+- **Batches and messages**: one batch for each leader action (`bulkId`), one message per seller listing the completed handoffs.
+- **Follow-through, activity and deals**: activity every 15 minutes, deals hourly, owners daily at 05:00 UTC. A new activity is seen once; a deal event is published only when status or amount changed. A reply or meeting moves the stage to Engaged, an open deal to Opportunity, won to Won, lost to Lost, and an activity by the assigned seller accepts the assignment (`crm_activity`).
+- **The CRM check before review**: a new account with a domain is looked up in the CRM (`crm.company.checked`); the queue shows whether the company exists, who owns it and its lifecycle, and Accounts keeps `crm_status` from it.
+- **HubSpot qualified leads in**: every 15 minutes Intake reads contacts that became qualified and submits each as an arrival from the `hubspot_qualified` source, linked to its HubSpot company and contact. The rule is editable in `PUT /v1/settings/crm`. A contact with no company goes through intake's normal rules.
+- **Inbound webhook**: `POST /v1/inbound/hubspot/{connectionId}` checks the v3 signature (the `client_secret` is a second credential) and answers 200 within a second; deal and engagement events trigger a sync, lifecycle events that match the rule publish `crm.lead.qualified`.
+- **Field mapping and setup**: default `taazaa_*` mappings per tenant plus `scout_link`; "Set up HubSpot fields" creates the group `scout_buyer_signals` and only the missing properties.
+- **API**: `/v1/accounts/{id}/handoffs`, `/v1/handoff-batches`, `/v1/handoff-messages/{id}`, `/v1/settings/crm` and `/v1/crm/{owners, owners:sync, qualified-leads:simulate, …}`.
+- **Backfill and seed**: `scout backfill-r1c <tenant-slug>` gives a workspace built before R1c its CRM defaults and schedules, a company check for each account with a domain and none yet, links from the HubSpot ids accounts already carry, and the qualified-lead poll schedule. `scout seed` runs it for its tenants and loads the sample HubSpot data when the connection is in mock mode. Running either twice changes nothing.
+- **Exit test**: on the mock, an agent sends an account, it is scored and assigned by a leader and lands in the mock CRM with the note and four tasks owned by the seller; the batch has one message per seller; the seller's reply makes the next activity poll accept the assignment and move the stage to Engaged; a new deal moves it to Opportunity and a won deal to Won; a second account that is assigned and then declined has its tasks closed and its owner returned; a qualified contact polled from the mock reaches the queue as needs_review, linked.
+
+**New events, jobs and fields**
+- Events: `crm.company.checked`, `crm.handoff.cancelled` (internal), `crm.lead.qualified` (internal).
+- Fields: `companyLifecycle` and `observedAt` on `crm.company.checked`, `crm.handoff.completed` and `crm.deal.changed`; `bulkId` on `routing.assignment.created`; `reasonLabel` on `routing.assignment.declined`; `externalIds` on the accounts created, updated and person events; `actorOwnerExternalId` on CRM activities; `cursorAt` on a qualified lead.
+- Jobs: `crm.company.check`, `crm.handoff.push`, `crm.handoff.undo`, `crm.person.push`, `crm.activity.poll`, `crm.deals.poll`, `crm.owners.sync`, `crm.sync` and `intake.qualified_leads.poll`.
+- Tables: the `crm` schema (`link`, `handoff`, `handoff_batch`, `handoff_message`, `owner`, `field_mapping`, `property_setup`, `follow_through`, `deal`, `activity`, `task_link`, `company_check`, `setting`, `webhook_receipt` and the mock tables `mock_company`, `mock_person`, `mock_note`, `mock_task`, `mock_deal`, `mock_owner`, `mock_property`, `mock_activity`, `mock_failure`). On the handoff: `is_repush`, `seller_user_id`, `assigned_by`, `assignment_note`, `cancel_requested_at`, `undone` and `undo_attempts`; the status `cancelled`. `company_check.domain` and `crm_lifecycle`. `setting.deals_polled_until`. `accounts.account.crm_status_at`. `intake.arrival.external_ids` and `intake.crm_lead_poll`.
+- Id prefixes: `hof_`, `hbt_`, `lnk_`, `hmg_`, `cow_`, `fmp_`, `dea_`, `cac_`, `whr_`, `blk_`.
+
+**Decisions to know about**
+- The mock CRM commits each record on its own, like a real CRM that does not roll back. Mock ids are `mock-co-<n>`, `mock-ct-<n>`, `mock-nt-<n>`, `mock-tk-<n>`, `mock-dl-<n>` and `mock-ow-<n>`, numbered per tenant.
+- Links are written per CRM write in their own transaction, so a push that fails and rolls back still leaves its links and a retry finds them.
+- `crm.handoff.push` is delivered up to 7 times: 6 push attempts, and a 7th delivery that only marks the handoff `failed` if the job died, so a handoff never stays `running`. Retryable errors are timeouts, 429, 5xx, network errors and transient database errors; a response Scout cannot read, or any other error, fails the handoff and Retry is one click. An account with no website fails with "This account has no website, so HubSpot cannot match it."
+- A re-push is a new handoff row (`is_repush`); only the first handoff of an assignment is unique, so `routing.assignment.created` arriving twice still makes one.
+- The push counts its attempt before it takes the account lock; the lock only has to come before the first CRM write. Push, undo, person push and sync take the lock `crm:<tenant>:<account>`.
+- A decline that finds the push running sets `cancel_requested_at` in its own transaction. The push checks it, and any sibling handoff of the same assignment, before each write. A completed handoff that is undone stays `completed` with `undone` set, and `crm.handoff.cancelled` takes it out of "in CRM" in Routing. Requesting an undo marks every non-queued handoff of the assignment, so a re-push after a decline is refused with "Assign it before pushing."
+- "Withdrawn by <name>" names whoever withdrew, falling back to the assigner. Returning ownership skips a replaced seller whose undo was requested.
+- Routing applies handoff events only for the account's latest assignment, so stale events for replaced or merged-in assignments are ignored; a cancel for the just-declined latest assignment still lands. A reply or meeting from any actor moves the stage to Engaged, even while an assignment is pending, because the spec sets no actor condition for the stage.
+- The deal poll keeps its cursor in `crm.setting.deals_polled_until` (5 minutes of overlap, 24 hours of look-back the first time), because the largest synced time would not advance in quiet periods.
+- The qualified-lead poll pages on `cursorAt`, overlaps 5 minutes, and holds its cursor only for errors known to be transient (429, 5xx, network, transient database errors); anything else is logged and skipped so one bad lead cannot stall the poll. A full page of leads at the same instant that does not advance triggers one more read; more than 200 leads at an identical instant remains a known edge. For a custom rule the arrival key is `hubspot:<contactId>:<property>`, because there is no qualification date.
+- Intake accepts reserved `.example` domains everywhere, which the mock fixtures need; reserved domains never resolve, so junk `.example` accounts are possible from any source.
+- Activity external ids stay the raw HubSpot ids (engagements share one id sequence per portal).
+- "Set up HubSpot fields" does not recreate `taazaa_other_offers` or `taazaa_signal_source`; existing v1 properties are left where they are.
+- Integrations gained `connectionSettings(ctx, provider)` so CRM can read `portal_id`.
+- One dynamic route, `/v1/crm/[resource]`, serves `owners`, `owners:sync` and the other CRM actions, because Next.js folders cannot match `owners:sync` and `:` is not allowed in Windows folder names.
+- The Playbooks handoff package is not built yet. With no provider registered, the note holds the Accounts sections only and the tasks use the plain defaults; Playbooks is the next plan.
+- The live HubSpot connector has not run against a real portal. The gated contract run (`SCOUT_LIVE_HUBSPOT_TOKEN`) is needed before cutover.
+
 ## 2026-10-27: Taazaa Scout R1b scoring and review
 
 Every account is now scored and explained, lands in a review queue, and can be approved, assigned, accepted or declined by a person, and the agent that sent it can read where it stands. This release has the `/v1` API only; screens come later.

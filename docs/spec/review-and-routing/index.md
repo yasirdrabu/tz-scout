@@ -18,7 +18,7 @@ People decide (D6). Nothing reaches a CRM without an assignment made by a person
 | `review_status_def` | `id`, `tenant_id`, `key`, `label`, `order`, `counts_as_reviewed` (bool), `is_declined` (bool), `is_initial` (bool), `returns_to_source` (bool), `tone` (`neutral`, `near`, `good`, `bad`), `archived_at` |
 | `initial_status_rule` | `tenant_id`, `source_kind` (`agent`, `vendor`, `person`, `import`, `crm`, `form`), `source_id` (nullable, overrides kind), `status_key` |
 | `decline_reason_def` | `id`, `tenant_id`, `key`, `label`, `applies_to` (`review`, `assignment`, `both`), `archived_at` |
-| `account_review` | `account_id` (pk with tenant), `status_key`, `status_changed_at`, `status_changed_by`, `lead_offer_override_id`, `insights` (markdown, leader notes), `insights_by`, `insights_at`, `current_assignment_id`, `stage`, `stage_changed_at`, `flags` (json: `newFrom {sourceId, at}`, `declinedBySeller {assignmentId, sellerUserId, sellerName, reasonKey, reasonLabel, at}`; `conflicts`, `enrichment_requested`, `low_trust` come later), `version` (bumped by every write), `merged_into` (set when merged away; the row is then read-only) |
+| `account_review` | `account_id` (pk with tenant), `status_key`, `status_changed_at`, `status_changed_by`, `lead_offer_override_id`, `insights` (markdown, leader notes), `insights_by`, `insights_at`, `current_assignment_id`, `stage`, `stage_changed_at`, `flags` (json: `newFrom {sourceId, at}`, `declinedBySeller {assignmentId, sellerUserId, sellerName, reasonKey, reasonLabel, at}`, `handoff {handoffId, assignmentId, state, reason?, currentOwnerName?, at}` where `state` is `sending`, `in_crm`, `needs_decision`, `failed` or `cancelled`; a later `at` wins, and an event for an assignment that is not the account's latest is ignored; `conflicts`, `enrichment_requested`, `low_trust` come later), `version` (bumped by every write), `merged_into` (set when merged away; the row is then read-only) |
 | `status_change` | `id`, `tenant_id`, `account_id`, `from_key`, `to_key`, `note`, `reason_key`, `by`, `at` |
 | `assignment` | `id` (`asg_`), `tenant_id`, `account_id`, `seller_user_id`, `assigned_by`, `assigned_at`, `notes` (markdown), `template_id` (opaque id passed to Playbooks), `status` (`pending`, `accepted`, `declined`, `withdrawn`, `replaced`), `responded_at`, `accepted_how` (`seller`, `crm_activity`, `auto_timeout`), `decline_reason_key`, `decline_note`, `previous_assignment_id` |
 | `stage_change` | `id`, `tenant_id`, `account_id`, `from_stage`, `to_stage`, `cause_event_id`, `at` |
@@ -56,9 +56,9 @@ with plans (spec's call, D27).
 | Event | Data |
 |---|---|
 | `routing.status.changed` | `accountId`, `from`, `to`, `countsAsReviewed`, `isDeclined`, `returnsToSource`, `note`, `reasonKey`, `by` |
-| `routing.assignment.created` | `assignmentId`, `accountId`, `sellerUserId`, `assignedBy`, `templateId`, `offerId` (lead offer), `notes`, `ownershipDecision` (`assign`, `keep`), `previousAssignmentId` |
+| `routing.assignment.created` | `assignmentId`, `accountId`, `sellerUserId`, `assignedBy`, `templateId`, `offerId` (lead offer), `notes`, `ownershipDecision` (`assign`, `keep`), `previousAssignmentId`, `bulkId` (nullable; one `blk_` id for each bulk action) |
 | `routing.assignment.accepted` | `assignmentId`, `accountId`, `sellerUserId`, `acceptedHow` |
-| `routing.assignment.declined` | `assignmentId`, `accountId`, `sellerUserId`, `reasonKey`, `note` |
+| `routing.assignment.declined` | `assignmentId`, `accountId`, `sellerUserId`, `reasonKey`, `reasonLabel`, `note` |
 | `routing.assignment.withdrawn` | `assignmentId`, `accountId`, `by`, `replacedBy` (assignment id or null) |
 | `routing.stage.changed` | `accountId`, `from`, `to`, `causeEventId` |
 | `routing.review.changed` | `accountId`, `version`, `snapshot` (`reviewStatusKey`, `ownerUserId`, `ownerHistoryUserIds`, `hasOpenAssignment`, `stage`, `reviewFlags`). Published once at the end of every write to an account's review (creation, status, assignment, flags, stage, merge); Accounts keeps its summary from it. `ownerHistoryUserIds` are the sellers of assignments that were accepted (by the seller, CRM activity or timeout) and later ended |
@@ -74,7 +74,9 @@ A stage move's `cause_event_id` is suffixed by the action (`<id>:accepted`, `:de
 | `scoring.account.scored` | refresh queue sort fields; flag `low_trust` | yes |
 | `accounts.conflict.detected` / `.resolved` | set or clear the conflicts flag | yes |
 | `enrichment.request.flagged` / `.completed` | set or clear the enrichment flag | yes |
-| `crm.handoff.completed` / `.failed` | update handoff status for the tracker; on failure notify the assigner | yes |
+| `crm.handoff.completed` / `.failed` / `.needs_decision` / `.cancelled` | set the handoff flag (`sending` on assignment, then `in_crm`, `failed`, `needs_decision` or `cancelled`); `needs_decision` and `failed` also go to the review summary as `handoff_needs_decision` and `handoff_failed` | yes |
+| `crm.activity.observed` | an activity by the open pending assignment's seller accepts it (`acceptedHow` `crm_activity`); a reply or meeting from anyone moves the stage to Engaged | yes |
+| `crm.deal.changed` | status `open` moves the stage to Opportunity, `won` to Won, `lost` to Lost | yes |
 | `crm.activity.observed` | implicit acceptance (REV-E2); stage engaged on reply or meeting | yes |
 | `playbooks.outcome.recorded` | stage engaged on reply or meeting | yes |
 | `crm.deal.changed` | stage opportunity, won, lost | yes |

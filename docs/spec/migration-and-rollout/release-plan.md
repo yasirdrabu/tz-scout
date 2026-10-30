@@ -73,7 +73,19 @@ R1b status (Scoring and review, updated 2026-10-27). The `/v1` API only; screens
 - [ ] Rescore progress (SCO-E5-S4-AC1 "progress is visible") moved to R2 with the weights screen. In R1b `POST /v1/rescore` returns 202 with a job id.
 - [ ] CI `images` job's migrate step creates the `scoring` and `routing` tables. Pending: needs a push.
 
-Moved to later plans: R1c has CRM, HubSpot qualified leads, `crm_status` consumers, a registered `MergeGuard` and the cross-module merge test. R1d has the MCP tools, Apollo and Vibe pulls, usage caps through INT `checkCap`, per-minute rate limits, OpenAPI, the v1 data migration and the 500-a-minute throughput test.
+R1c status (CRM sync, updated 2026-10-30). The `/v1` API only; screens come from the front end.
+
+- [x] CRM module and schema: adapter contract, the HubSpot mock (Postgres-backed, with failure injection) and the live connector, links, the owner roster, the CRM check before review, field mapping with "Set up HubSpot fields".
+- [x] Handoff push with the ownership preflight (a port that CRM implements), retries (6 attempts in 7 deliveries), undo on decline or withdrawal (including a decline during the push), re-push, batches and per-seller messages.
+- [x] Follow-through, activity and deal polls with the events that move the stage (Engaged, Opportunity, Won, Lost), implied acceptance from CRM activity, and `crm_status` kept from `companyLifecycle`.
+- [x] HubSpot qualified leads in (poll and the signed inbound webhook), the registered `MergeGuard`, and the cross-module merge test.
+- [x] Backfill and seed: `scout backfill-r1c <tenant-slug>` adds the CRM defaults and schedules, a company check for each account with a domain and none yet, links from existing HubSpot ids and the qualified-lead poll schedule; seed runs it for its tenants and loads the sample HubSpot data in mock mode.
+- [x] R1c exit test, on the mock: send, score, assign, land in the CRM with note and four tasks, one message per seller, a reply accepts and engages, a deal moves the stage to opportunity and won, a decline closes the tasks and returns the owner, a qualified contact arrives as needs_review, linked.
+- [ ] The live HubSpot connector has not yet run against a real portal. The gated contract run (`SCOUT_LIVE_HUBSPOT_TOKEN`) is needed before cutover.
+- [ ] The Playbooks handoff package (`HandoffPackageProvider`) is not built; the note and tasks use the Accounts-only defaults until it is. It is the next plan.
+- [ ] CI `images` job's migrate step creates the `crm` tables. Pending: needs a push.
+
+Moved to later plans: R1d has the MCP tools, Apollo and Vibe pulls, usage caps through INT `checkCap`, per-minute rate limits, OpenAPI, the v1 data migration and the 500-a-minute throughput test.
 
 ## R2 ABM
 

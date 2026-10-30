@@ -88,6 +88,7 @@ export { hubspotMock } from './adapters/hubspot/mock';
 export { registerHubspotAdapter } from './adapters/hubspot/register';
 export { seedMockCrm } from './fixtures';
 export { DEALS_FIRST_LOOKBACK_MS, DEALS_OVERLAP_MS, applyDeals, companyLifecycle, pollDeals } from './services/deals';
+export { backfillCrm } from './services/backfill';
 export { handleCrmWebhook } from './services/webhook';
 export { LEADS_POLL_LIMIT, fetchQualifiedLead, listQualifiedLeads } from './services/leads';
 export { SIGNATURE_MAX_AGE_MS, parseHubSpotWebhook, verifyHubSpotV3, type SignedRequest, type WebhookEvent } from './domain/webhook';

@@ -11,7 +11,7 @@ epic keeps its rules and makes it event driven, retried and visible.
 ## Flow
 
 1. `routing.assignment.created` arrives. The consumer creates a `crm.handoff` (status `queued`) and
-   publishes `jobs.crm.handoff` through the outbox. Ordered by `accountId`.
+   publishes `jobs.crm.handoff.push` through the outbox. Ordered by `accountId`. Every job that writes to the CRM for an account (push, undo, person push, sync) first takes the advisory lock `crm:<tenant>:<account>`.
 2. The job loads the account and people from Accounts, and the handoff package (scores, best offer,
    fit parts, signals as scored, offer and case studies, brief, opener, follow-up sequence, plan
    steps) from the registered `HandoffPackageProvider` (Playbooks), then builds the note (CRM-E3-S3).
@@ -102,18 +102,17 @@ As a rep, I want dated tasks in my CRM, so that I know what to do when.
 ### CRM-E3-S5 Retries and failures people can see
 As a leader, I want to know when a push failed and why, so that no assigned account silently sits
 outside the CRM.
-- CRM-E3-S5-AC1 Retryable errors (timeouts, 429, 5xx) retry with the platform backoff; each attempt is
-  counted on the handoff.
-- CRM-E3-S5-AC2 After the last attempt, or on a non-retryable error (bad token, missing scope,
-  validation), status is `failed`, `crm.handoff.failed` is published, and the account page and Sent
+- CRM-E3-S5-AC1 Retryable errors (timeouts, 429, 5xx, and transient database errors) are rethrown and retry with the platform backoff; each run counts an attempt on the handoff before it takes the account lock. The job is delivered up to 7 times (`maxDeliver` 7) and the first 6 deliveries are push attempts; the 7th only marks a handoff `failed` when the job died, so a handoff never stays `running`.
+- CRM-E3-S5-AC2 After the last attempt (attempt 6), or on a non-retryable error (bad token, missing scope,
+  an answer Scout could not read, a seller with no CRM owner, an account with no website), status is `failed`, `crm.handoff.failed` is published, and the account page and Sent
   view show the reason in plain words with a Retry button.
 - CRM-E3-S5-AC3 A failed handoff never leaves half-linked records: links are written per successful
-  write, and a retry resumes from what already exists.
+  write, each in its own transaction, and a retry resumes from what already exists. Reasons are plain words of at most 300 characters: "HubSpot refused the token. Enter a new one in Integrations.", "HubSpot needs another permission: <scope>.", "This seller isn't linked to a CRM owner", "HubSpot was busy and every retry failed.", "HubSpot sent an answer Scout could not read.", "This account has no website, so HubSpot cannot match it." and "Something went wrong sending this to HubSpot. Try again."
 
 ### CRM-E3-S6 Re-push and push anyway
 As a leader, I want to push again after new facts or a reassignment, so that the CRM stays current.
 - CRM-E3-S6-AC1 `POST /v1/accounts/{id}:push` (202) and the account page's "Push again" create a new
-  handoff that updates the same company, note and tasks. The same call retries a failed handoff.
+  handoff that updates the same company, note and tasks. The same call retries a failed handoff. The push uses the latest handoff's assignment and seller; when there is none, or that assignment was declined or withdrawn, it answers 409 "Assign it before pushing."
 - CRM-E3-S6-AC2 "Push and keep their owner" pushes the context without changing the owner and records
   `ownership_action = keep`.
 
@@ -121,12 +120,11 @@ As a leader, I want to push again after new facts or a reassignment, so that the
 As a seller, I want an account I declined to leave my CRM queue, so that my tasks and book stay
 accurate.
 - CRM-E3-S7-AC1 Given `routing.assignment.declined` or `.withdrawn` for a pushed account, within 10
-  seconds the open tasks Scout created are closed with "Declined in Scout: <reason>" (or "Withdrawn in
+  seconds the open tasks Scout created are closed with "Declined in Scout: <reason label>" (or "Withdrawn in
   Scout"), and ownership returns to the previous owner recorded on the handoff, or the assigner when
-  none was recorded or that owner is inactive.
-- CRM-E3-S7-AC2 A line is added to the note ("Returned by <seller> on <date>: <reason>"); the note, people
+  none was recorded or that owner is inactive. Ownership returns only for an `assign` handoff whose company is still owned by the seller, and covers the company and the people Scout set an owner on. When the assigner has no CRM owner either, the owner stays and the undo records "Owner left as is: <assigner> has no HubSpot owner". A `keep` handoff changes no owner.
+- CRM-E3-S7-AC2 A separate short note is added on the company ("Returned by <seller> on <Mon D, YYYY>: <reason label>", or "Withdrawn by <name of whoever withdrew> on <date>"); the context note is never edited by an undo, and the note, people
   and anything a person wrote in the CRM are never deleted.
-- CRM-E3-S7-AC3 Tasks a person already completed stay completed. The handoff records what was undone,
-  and the account page lists it.
+- CRM-E3-S7-AC3 Tasks a person already completed stay completed. The handoff records what was undone (`undone` = `tasksClosed[]`, `tasksLeftDone[]`, `ownerReturnedTo`, `noteExternalId`, `at`), and the account page lists it. A completed handoff that was undone stays `completed` with `undone` set, and `crm.handoff.cancelled` tells Routing it is no longer in the CRM.
 - CRM-E3-S7-AC4 When the decline arrives before the push finished, the push stops after its current
-  write and the undo runs on what was written.
+  write and the undo runs on what was written. The decline consumer sets `cancel_requested_at` on the assignment's handoffs in its own transaction and enqueues `crm.handoff.undo`; the push re-reads the flag (committed state) before each CRM write and, on finding it, ends with status `cancelled`. The undo takes the same account lock, so it runs after the push and undoes what the links show was written. A handoff still `queued` becomes `cancelled` with nothing to undo.
