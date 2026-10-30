@@ -13,7 +13,7 @@ import '@/entry/compose';
 import { POST } from '@/app/v1/inbound/hubspot/[connectionId]/route';
 import { leadQualified } from '@/modules/crm';
 import { webhookReceipt } from '@/modules/crm/db/schema';
-import { ensureConnectionId, saveCredential } from '@/modules/integrations';
+import { ensureConnectionId, saveCredential, setDisabled } from '@/modules/integrations';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
 import { cfg } from '../integrations/cfg';
@@ -92,6 +92,20 @@ describe('POST /v1/inbound/hubspot/{connectionId} (SRC-E6-S1-AC2)', () => {
 
   it('an unknown connection id is 401, not 404', async () => {
     expect((await send('con_doesnotexist')).status).toBe(401);
+  });
+
+  it('a malformed escape in the connection id is a 401, not a 500 (final review M3)', async () => {
+    expect((await send('con_%E0%A4%A')).status).toBe(401);
+    expect((await send(`con_${'x'.repeat(500)}`)).status).toBe(401);
+  });
+
+  it('a disabled HubSpot connection is 401 and enqueues nothing (final review M3)', async () => {
+    const off = await routingTenant();
+    const id = await off.run((ctx) => ensureConnectionId(ctx, 'hubspot'));
+    await off.run((ctx) => saveCredential(ctx, 'hubspot', { kind: 'client_secret', value: SECRET }));
+    await off.run((ctx) => setDisabled(ctx, 'hubspot', true));
+    expect((await send(id)).status).toBe(401);
+    expect(await off.run((ctx) => ctx.tx.select().from(webhookReceipt).where(eq(webhookReceipt.connectionId, id)))).toHaveLength(0);
   });
 
   it('a body over 1 MB is refused with 413', async () => {

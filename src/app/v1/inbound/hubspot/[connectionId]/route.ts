@@ -10,6 +10,8 @@ import { boundedRequest } from '../../../_lib/intake';
 export const dynamic = 'force-dynamic';
 
 const MAX_BYTES = 1024 * 1024;
+/** A connection id is logged at most this long, so a crafted path cannot flood the log. */
+const LOGGED_ID_LIMIT = 64;
 
 const problem = (status: number, slug: string, title: string) =>
   new Response(JSON.stringify({ type: `about:blank#${slug}`, title, status }), {
@@ -30,16 +32,22 @@ function signedUrl(req: Request): string {
 /**
  * `POST /v1/inbound/hubspot/{connectionId}`. No principal: the connection id finds the tenant, and the v3 signature
  * made with that tenant's client secret is the authentication (Ruling 15). Every refusal is 401 and logged, so an
- * unknown connection looks the same as a wrong signature.
+ * unknown, malformed or disabled connection looks the same as a wrong signature.
  */
 export async function POST(req: Request): Promise<Response> {
   const correlationId = newId('cor');
   const parts = new URL(req.url).pathname.split('/').filter(Boolean);
-  const connectionId = decodeURIComponent(parts[parts.indexOf('hubspot') + 1] ?? '');
+  const rawId = parts[parts.indexOf('hubspot') + 1] ?? '';
+  let connectionId = '';
   const refuse = (reason: string, tenantId?: string) => {
-    logFor({ correlationId, ...(tenantId ? { tenantId } : {}) }).warn({ connectionId, reason }, 'refused an inbound hubspot webhook');
+    logFor({ correlationId, ...(tenantId ? { tenantId } : {}) }).warn({ connectionId: (connectionId || rawId).slice(0, LOGGED_ID_LIMIT), reason }, 'refused an inbound hubspot webhook');
     return problem(401, 'unauthenticated', 'Not authorized.');
   };
+  try {
+    connectionId = decodeURIComponent(rawId);
+  } catch {
+    return refuse('malformed connection id');
+  }
 
   let rawBody: string;
   try {
@@ -51,6 +59,7 @@ export async function POST(req: Request): Promise<Response> {
   const found = connectionId ? await connectionTenant(connectionId) : null;
   if (!found || found.provider !== 'hubspot') return refuse('unknown connection');
   const { tenantId } = found;
+  if (found.status === 'disabled') return refuse('connection disabled', tenantId);
   try {
     return await withTenant(tenantId, async (tx) => {
       const ctx = { tenantId, actor: { kind: 'system' as const, id: 'hubspot_webhook' }, correlationId, tx };
