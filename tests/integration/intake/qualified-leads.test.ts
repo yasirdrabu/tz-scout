@@ -6,11 +6,11 @@ import { accountAlias, personAlias } from '@/modules/accounts/db/schema';
 import { getLinks, leadQualified, seedMockCrm, syncOwners } from '@/modules/crm';
 import { handoff, mockCompany, mockPerson } from '@/modules/crm/db/schema';
 import { mockQualifyPerson } from '@/modules/crm/fixtures';
-import { pollQualifiedLeads, simulateQualifiedLead } from '@/modules/intake';
+import { leadRef, pollQualifiedLeads, simulateQualifiedLead } from '@/modules/intake';
 import { arrivalResolved } from '@/modules/intake/contracts/events';
 import { arrival, crmLeadPoll, source } from '@/modules/intake/db/schema';
-import { SAMPLE_ONLY, connectionId } from '@/modules/integrations';
-import { connection } from '@/modules/integrations/db/schema';
+import { SAMPLE_ONLY, ensureConnectionId } from '@/modules/integrations';
+import { callLog, connection } from '@/modules/integrations/db/schema';
 import { assign } from '@/modules/routing';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -29,7 +29,7 @@ const PAT = 'pat.lee@qualified.example';
 beforeAll(async () => {
   t = await routingTenant();
   await t.run((ctx) => seedMockCrm(ctx));
-  conn = await t.run((ctx) => connectionId(ctx, 'hubspot'));
+  conn = await t.run((ctx) => ensureConnectionId(ctx, 'hubspot'));
   [{ id: hubspotSource }] = (await t.run((ctx) =>
     ctx.tx.select({ id: source.id }).from(source).where(sql`${source.settings}->>'key' = 'hubspot_qualified'`),
   )) as [{ id: string }];
@@ -55,10 +55,10 @@ const resolvedEvent = async (arrivalId: string) =>
     .find((e) => e.type === arrivalResolved.type && e.data.arrivalId === arrivalId)?.data;
 
 /** A qualified HubSpot contact with no company. */
-async function noCompanyContact(email: string): Promise<string> {
+async function noCompanyContact(email: string, qualifiedAt = new Date()): Promise<string> {
   const externalId = `mock-ct-x${newId('acc').slice(-8).toLowerCase()}`;
   await withTenant(t.tenantId, (tx) =>
-    tx.insert(mockPerson).values({ tenantId: t.tenantId, externalId, name: 'Sam Rivera', title: 'CTO', email, lifecycle: 'marketingqualifiedlead', qualifiedAt: new Date() }),
+    tx.insert(mockPerson).values({ tenantId: t.tenantId, externalId, name: 'Sam Rivera', title: 'CTO', email, lifecycle: 'marketingqualifiedlead', qualifiedAt }),
   );
   return externalId;
 }
@@ -97,8 +97,14 @@ describe('HubSpot qualified leads in (SRC-E6-S1, CRM-E6)', () => {
     // The new seller gets a mock owner, so the push can assign the company to them.
     await t.run((ctx) => seedMockCrm(ctx));
     await t.run((ctx) => syncOwners(ctx));
+    const companiesBefore = (await t.run((ctx) => ctx.tx.select().from(mockCompany))).length;
     await asPerson(t, (ctx) => assign(ctx, a!.accountId!, { sellerUserId: seller }));
     await runOutbox(t.tenantId);
+
+    // The push called upsertCompany with the link, and the mock created no company: an update, not a create.
+    const upserts = await adminDb.select().from(callLog).where(and(eq(callLog.tenantId, t.tenantId), eq(callLog.operation, 'upsertCompany')));
+    expect(upserts.map((c) => c.outcome)).toEqual(['ok']);
+    expect((await t.run((ctx) => ctx.tx.select().from(mockCompany))).length).toBe(companiesBefore);
 
     const [h] = await t.run((ctx) => ctx.tx.select().from(handoff).where(eq(handoff.accountId, a!.accountId!)));
     expect(h).toMatchObject({ status: 'completed', companyExternalId: pat.companyExternalId });
@@ -147,6 +153,26 @@ describe('HubSpot qualified leads in (SRC-E6-S1, CRM-E6)', () => {
     expect(account.people.map((p) => p.email)).toEqual([email]);
   });
 
+  const polledUntil = async () => (await t.run((ctx) => ctx.tx.select().from(crmLeadPoll).where(eq(crmLeadPoll.connectionId, conn))))[0]!.polledUntil;
+
+  it('a lead exactly at the cursor is read again and deduped', async () => {
+    const at = new Date(Date.now() + 60 * 60_000);
+    const contactId = await noCompanyContact(`edge@edge-${newId('acc').slice(-8).toLowerCase()}.com`, at);
+    await poll();
+    expect((await polledUntil()).toISOString()).toBe(at.toISOString());
+    await poll();
+    expect(await arrivalsFor(contactId)).toHaveLength(1);
+    expect((await polledUntil()).toISOString()).toBe(at.toISOString());
+  });
+
+  it('a lead that becomes visible after the poll passed its time is still picked up by the overlap', async () => {
+    const cursor = await polledUntil();
+    const contactId = await noCompanyContact(`late@late-${newId('acc').slice(-8).toLowerCase()}.com`, new Date(cursor.getTime() - 2 * 60_000));
+    await poll();
+    expect((await arrivalsFor(contactId))[0]?.status).toBe('resolved');
+    expect((await polledUntil()).toISOString()).toBe(cursor.toISOString());
+  });
+
   it('polled_until advances to the latest qualified time', async () => {
     const later = new Date(Date.now() + 24 * 60 * 60_000);
     await t.run((ctx) => mockQualifyPerson(ctx, PAT, later));
@@ -155,6 +181,14 @@ describe('HubSpot qualified leads in (SRC-E6-S1, CRM-E6)', () => {
     expect(row!.polledUntil.toISOString()).toBe(later.toISOString());
     // A new qualified date is a new arrival.
     expect(await arrivalsFor((await mockContact(PAT)).externalId)).toHaveLength(2);
+  });
+});
+
+describe('leadRef', () => {
+  it('keys the lifecycle rule by qualified date and any other rule by its property', () => {
+    const lead = { contact: { externalId: '7' }, qualifiedAt: '2026-05-01T10:00:00.000Z' } as Parameters<typeof leadRef>[0];
+    expect(leadRef(lead, { property: 'lifecyclestage', value: 'marketingqualifiedlead' })).toBe('hubspot:7:2026-05-01');
+    expect(leadRef(lead, { property: 'lead_grade', value: 'A' })).toBe('hubspot:7:lead_grade');
   });
 });
 
@@ -171,7 +205,7 @@ describe('simulate a qualified lead (SRC-E6-S1-AC4)', () => {
 
   it('gives 409 outside the mock', async () => {
     const s = await routingTenant();
-    const id = await s.run((ctx) => connectionId(ctx, 'hubspot'));
+    const id = await s.run((ctx) => ensureConnectionId(ctx, 'hubspot'));
     await adminDb.update(connection).set({ mode: 'live' }).where(eq(connection.id, id));
     await expect(s.run((ctx) => simulateQualifiedLead(ctx))).rejects.toMatchObject({ status: 409, message: SAMPLE_ONLY });
   });

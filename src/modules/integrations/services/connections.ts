@@ -265,7 +265,7 @@ export async function connectionSettings(ctx: ModuleContext, provider: string): 
  * The id of the tenant's connection for `provider`, creating the default row when there is none. The row is created in
  * its own transaction, as the gateway does, so calls that log against it see it.
  */
-export async function connectionId(ctx: ModuleContext, provider: string): Promise<string> {
+export async function ensureConnectionId(ctx: ModuleContext, provider: string): Promise<string> {
   requireProvider(provider);
   const find = async () =>
     (

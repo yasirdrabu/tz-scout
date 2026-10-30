@@ -61,6 +61,10 @@ const COMPANY_PROPS = ['name', 'domain', 'website', 'city', 'state', 'country', 
 const DEAL_PROPS = ['dealname', 'dealstage', 'amount', 'deal_currency_code', 'createdate', 'closedate', 'hs_is_closed', 'hs_is_closed_won'];
 const CONTACT_PROPS = ['firstname', 'lastname', 'email', 'jobtitle', 'phone', 'mobilephone', 'hs_linkedin_url', 'associatedcompanyid', 'lifecyclestage', 'lastmodifieddate', 'createdate', 'hubspot_owner_id'];
 
+/** The date HubSpot sets when a contact enters the rule's lifecycle stage; null for a rule on any other property. */
+const qualifiedDateProp = (rule: { property: string; value: string }): string | null =>
+  rule.property === 'lifecyclestage' ? `hs_lifecyclestage_${rule.value}_date` : null;
+
 const clean = (o: Record<string, string | number | null | undefined>): Record<string, string> =>
   Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)]));
 
@@ -244,7 +248,9 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
   function leadOut(contact: Obj, company: Obj | undefined, rule: { property: string; value: string }): QualifiedLead {
     const p = contact.properties;
     const cp = company?.properties ?? {};
-    const qualifiedProp = rule.property === 'lifecyclestage' ? `hs_lifecyclestage_${rule.value}_date` : null;
+    // The lifecycle rule has a date for the stage; any other rule only has the last edit, the best known time.
+    const pagedOn = qualifiedDateProp(rule) ?? 'lastmodifieddate';
+    const at = toIso(p[pagedOn]) ?? toIso(p.lastmodifieddate) ?? toIso(p.createdate) ?? new Date().toISOString();
     const name = [p.firstname, p.lastname].filter(Boolean).join(' ').trim();
     return {
       contact: {
@@ -267,14 +273,16 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
           }
         : null,
       lifecycleStage: p.lifecyclestage ?? '',
-      qualifiedAt: toIso(qualifiedProp ? p[qualifiedProp] : null) ?? toIso(p.lastmodifieddate) ?? toIso(p.createdate) ?? new Date().toISOString(),
+      qualifiedAt: at,
+      cursorAt: at,
       raw: Object.fromEntries(Object.entries(p).filter(([, v]) => v != null)),
     };
   }
 
-  const leadProps = (rule: { property: string; value: string }) => [
-    ...new Set([...CONTACT_PROPS, rule.property, ...(rule.property === 'lifecyclestage' ? [`hs_lifecyclestage_${rule.value}_date`] : [])]),
-  ];
+  const leadProps = (rule: { property: string; value: string }) => {
+    const dateProp = qualifiedDateProp(rule);
+    return [...new Set([...CONTACT_PROPS, rule.property, ...(dateProp ? [dateProp] : [])])];
+  };
 
   async function withCompanies(contacts: Obj[], rule: { property: string; value: string }): Promise<QualifiedLead[]> {
     const ids = [...new Set(contacts.map((c) => c.properties.associatedcompanyid).filter((id): id is string => !!id))];
@@ -533,16 +541,18 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
       });
     },
 
+    // Pages on the stage date for the lifecycle rule, else on the last edit; the lead's `cursorAt` is that time.
     async listQualifiedLeads({ changedSince, rule }) {
+      const pagedOn = qualifiedDateProp(rule) ?? 'lastmodifieddate';
       const contacts = await searchAll(
         'contacts',
         [
           { propertyName: rule.property, operator: 'EQ', value: rule.value },
-          { propertyName: 'lastmodifieddate', operator: 'GTE', value: toMs(changedSince) },
+          { propertyName: pagedOn, operator: 'GTE', value: toMs(changedSince) },
         ],
         leadProps(rule),
         200,
-        [{ propertyName: 'lastmodifieddate', direction: 'ASCENDING' }],
+        [{ propertyName: pagedOn, direction: 'ASCENDING' }],
       );
       return withCompanies(contacts, rule);
     },

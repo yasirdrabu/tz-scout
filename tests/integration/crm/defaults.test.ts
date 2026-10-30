@@ -127,6 +127,7 @@ const lead = {
   company: null,
   lifecycleStage: 'marketingqualifiedlead',
   qualifiedAt: '2026-10-01T00:00:00.000Z',
+  cursorAt: '2026-10-01T00:00:00.000Z',
   raw: {},
 };
 

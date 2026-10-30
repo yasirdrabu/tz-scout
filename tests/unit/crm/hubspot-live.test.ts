@@ -327,15 +327,34 @@ describe('hubspotLive activities, deals and leads', () => {
       contact: { externalId: '21', name: 'Pat Lee', email: 'pat@q.example', title: 'CTO', phone: '555' },
       company: { externalId: '11', domain: 'q.example', location: 'Austin, TX', employees: 120 },
       qualifiedAt: '2026-05-01T00:00:00.000Z',
+      cursorAt: '2026-05-01T00:00:00.000Z',
     });
-    expect(f.calls[0]!.body!.filterGroups[0].filters).toContainEqual({ propertyName: 'lifecyclestage', operator: 'EQ', value: 'marketingqualifiedlead' });
-    // Contacts use `lastmodifieddate`; `hs_lastmodifieddate` is for companies and deals.
-    expect(f.calls[0]!.body!.filterGroups[0].filters).toContainEqual({ propertyName: 'lastmodifieddate', operator: 'GTE', value: String(Date.parse('2026-01-01T00:00:00Z')) });
-    expect(f.calls[0]!.body!.sorts).toEqual([{ propertyName: 'lastmodifieddate', direction: 'ASCENDING' }]);
+    // The lifecycle rule pages on the stage date, not the last edit: a contact qualified long ago but edited lately is not read.
+    expect(f.calls[0]!.body!.filterGroups[0].filters).toEqual([
+      { propertyName: 'lifecyclestage', operator: 'EQ', value: 'marketingqualifiedlead' },
+      { propertyName: 'hs_lifecyclestage_marketingqualifiedlead_date', operator: 'GTE', value: String(Date.parse('2026-01-01T00:00:00Z')) },
+    ]);
+    expect(f.calls[0]!.body!.sorts).toEqual([{ propertyName: 'hs_lifecyclestage_marketingqualifiedlead_date', direction: 'ASCENDING' }]);
+    expect(f.calls[0]!.body!.properties).toContain('hs_lifecyclestage_marketingqualifiedlead_date');
     expect(f.calls[0]!.body!.properties).toContain('lastmodifieddate');
     expect(f.calls[0]!.body!.properties).not.toContain('hs_lastmodifieddate');
     expect(await a.readQualifiedLead({ contactId: '22', rule })).toBeNull();
     expect((await a.readQualifiedLead({ contactId: '21', rule }))?.contact.email).toBe('pat@q.example');
+  });
+
+  it('a rule on any other property pages on the last edit, which is the best known qualified time', async () => {
+    const rule = { property: 'lead_grade', value: 'A' };
+    const contact = obj('31', { firstname: 'Sam', email: 'sam@q.example', lead_grade: 'A', lastmodifieddate: '2026-06-03T00:00:00Z', associatedcompanyid: null });
+    const f = fake(on('POST', '/crm/v3/objects/contacts/search', { body: { results: [contact] } }));
+    const leads = await adapter(f).listQualifiedLeads({ changedSince: '2026-06-01T00:00:00Z', rule });
+    expect(leads[0]).toMatchObject({ company: null, qualifiedAt: '2026-06-03T00:00:00.000Z', cursorAt: '2026-06-03T00:00:00.000Z' });
+    // Contacts use `lastmodifieddate`; `hs_lastmodifieddate` is for companies and deals.
+    expect(f.calls[0]!.body!.filterGroups[0].filters).toEqual([
+      { propertyName: 'lead_grade', operator: 'EQ', value: 'A' },
+      { propertyName: 'lastmodifieddate', operator: 'GTE', value: String(Date.parse('2026-06-01T00:00:00Z')) },
+    ]);
+    expect(f.calls[0]!.body!.sorts).toEqual([{ propertyName: 'lastmodifieddate', direction: 'ASCENDING' }]);
+    expect(f.calls[0]!.body!.properties).toContain('lead_grade');
   });
 });
 

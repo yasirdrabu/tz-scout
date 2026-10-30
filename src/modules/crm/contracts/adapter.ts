@@ -155,6 +155,8 @@ export const qualifiedLeadSchema = z.object({
     .nullable(),
   lifecycleStage: z.string(),
   qualifiedAt: iso,
+  /** The time the adapter paged on (the stage date for the lifecycle rule, else the last edit); the poll's cursor. */
+  cursorAt: iso,
   raw: z.record(z.string(), z.unknown()),
 });
 export type QualifiedLead = z.infer<typeof qualifiedLeadSchema>;

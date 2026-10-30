@@ -126,6 +126,7 @@ export function hubspotMock(ctx: ModuleContext): CrmAdapter {
         : null,
       lifecycleStage: p.lifecycle ?? '',
       qualifiedAt: (p.qualifiedAt ?? p.createdAt).toISOString(),
+      cursorAt: (p.qualifiedAt ?? p.createdAt).toISOString(),
       raw: { id: p.externalId, lifecyclestage: p.lifecycle },
     };
   }

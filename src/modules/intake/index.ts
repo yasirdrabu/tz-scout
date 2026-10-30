@@ -24,6 +24,7 @@ export { feedbackForArrival, listFeedback, recordFeedback, type ArrivalFeedback,
 export { importRunHandler, qualifiedLeadsPollHandler, resolveHandler, waitingExpireHandler } from './jobs';
 export {
   FIRST_POLL_LOOKBACK_MS,
+  LEADS_OVERLAP_MS,
   SAMPLE_LEAD_EMAIL,
   leadRef,
   pollQualifiedLeads,
