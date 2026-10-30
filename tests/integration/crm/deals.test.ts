@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { upsertFromArrival } from '@/modules/accounts';
-import { checkCompany, dealChanged, hubspotMock, pollDeals, recordLink, seedMockCrm, syncAccount } from '@/modules/crm';
+import { checkCompany, companyChecked, dealChanged, hubspotMock, pollDeals, recordLink, refreshCheck, seedMockCrm, syncAccount } from '@/modules/crm';
 import { deal, link } from '@/modules/crm/db/schema';
 import { mockAddDeal, mockSetDeal } from '@/modules/crm/fixtures';
 import { recentCalls } from '@/modules/integrations';
@@ -85,6 +85,23 @@ describe('deals (CRM-E5-S3)', () => {
     await t.run((ctx) => mockSetDeal(ctx, ext, { status: 'lost' }));
     await poll();
     expect((await events(accountId)).map((e) => [e.status, e.companyLifecycle])).toEqual([['open', 'open_deal'], ['won', 'customer'], ['open', 'open_deal'], ['lost', 'none']]);
+  });
+
+  it('a stored check that folded a won deal does not keep the company a customer after the deal is lost (Ruling 12)', async () => {
+    const d = domain();
+    const { accountId, company } = await linked(d);
+    const ext = await t.run((ctx) => mockAddDeal(ctx, { companyExternalId: company, name: 'Won once', status: 'won', amountCents: 9 }));
+    const first = await t.run((ctx) => checkCompany(ctx, accountId));
+    expect(first?.lifecycle).toBe('customer');
+    await t.run((ctx) => mockSetDeal(ctx, ext, { status: 'lost' }));
+    await poll();
+    expect((await events(accountId)).map((e) => e.companyLifecycle)).toEqual(['none']);
+    await t.run((ctx) => refreshCheck(ctx, accountId));
+    const checked = (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId)).orderBy(outbox.seq))
+      .map((r) => r.payload as { type: string; data: Record<string, unknown> })
+      .filter((e) => e.type === companyChecked.type && e.data.accountId === accountId)
+      .map((e) => e.data.companyLifecycle);
+    expect(checked).toEqual(['customer', 'none']);
   });
 
   it('a company the CRM calls a customer stays one when its only deal is lost', async () => {
