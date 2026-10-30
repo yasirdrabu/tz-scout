@@ -1,13 +1,15 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { getAccount } from '@/modules/accounts';
 import { gateway } from '@/modules/integrations';
 import type { ModuleContext } from '@/platform/context';
+import { ScoutError } from '@/platform/errors';
+import { log } from '@/platform/log';
 import { enqueueJob, publish } from '@/platform/events/outbox';
 import type { CrmAdapter } from '../contracts/adapter';
 import { companyChecked } from '../contracts/events';
 import { companyCheckJob } from '../contracts/jobs';
 import type { CompanyLifecycle } from '../contracts/types';
-import { companyCheck } from '../db/schema';
+import { companyCheck, handoff, link } from '../db/schema';
 import { recordLink } from './links';
 import { crmSystem, ownerName, rosterSynced, syncOwners } from './owners';
 
@@ -53,42 +55,39 @@ function lifecycleOf(crmLifecycle: string | null, deals: { status: string }[]): 
 async function nameOf(ctx: ModuleContext, system: string, ownerId: string | null): Promise<string | null> {
   if (!ownerId) return null;
   if (!(await rosterSynced(ctx, system))) {
-    await syncOwners(ctx).catch(() => undefined);
+    await syncOwners(ctx).catch((e: unknown) => {
+      // A token that can't read owners (409) is expected; anything else is worth a line in the log.
+      if (!(e instanceof ScoutError && e.status === 409)) log.warn({ err: (e as Error).message }, 'crm: owner roster sync failed during a company check');
+    });
   }
   return (await ownerName(ctx, system, ownerId)) ?? `HubSpot owner ${ownerId}`;
 }
 
+const normalDomain = (d: string) => d.trim().toLowerCase();
+
 /**
- * Asks the CRM about a domain (Ruling 11). With `accountId`, a stored check younger than 24 hours is returned
- * and no CRM call is made; otherwise the CRM is called and, with `accountId`, the answer is stored.
+ * Asks the CRM about a domain (Ruling 11). The newest stored check for that domain younger than 24 hours is
+ * returned with no CRM call; otherwise the CRM is called.
  */
-export async function lookupCompany(ctx: ModuleContext, domain: string, opts: { accountId?: string; now?: Date } = {}): Promise<CompanyCheck> {
-  const now = opts.now ?? new Date();
+export async function lookupCompany(ctx: ModuleContext, domain: string, opts: { now?: Date } = {}): Promise<CompanyCheck> {
   const system = await crmSystem(ctx);
-  const { check } = await lookup(ctx, system, domain, opts.accountId ?? null, now);
-  return check;
+  return (await lookup(ctx, system, normalDomain(domain), opts.now ?? new Date())).check;
 }
 
-async function lookup(
-  ctx: ModuleContext,
-  system: string,
-  domain: string,
-  accountId: string | null,
-  now: Date,
-): Promise<{ check: CompanyCheck; fresh: boolean }> {
-  if (accountId) {
-    const [stored] = await ctx.tx
-      .select()
-      .from(companyCheck)
-      .where(and(eq(companyCheck.tenantId, ctx.tenantId), eq(companyCheck.accountId, accountId), eq(companyCheck.system, system)));
-    if (stored && now.getTime() - stored.checkedAt.getTime() < CHECK_TTL_MS) return { check: toCheck(stored), fresh: false };
-  }
+async function lookup(ctx: ModuleContext, system: string, domain: string, now: Date): Promise<{ check: CompanyCheck; fresh: boolean }> {
+  const [stored] = await ctx.tx
+    .select()
+    .from(companyCheck)
+    .where(and(eq(companyCheck.tenantId, ctx.tenantId), eq(companyCheck.system, system), eq(companyCheck.domain, domain), gt(companyCheck.checkedAt, new Date(now.getTime() - CHECK_TTL_MS))))
+    .orderBy(desc(companyCheck.checkedAt))
+    .limit(1);
+  if (stored) return { check: toCheck(stored), fresh: false };
   const found = await gateway.call(ctx, system, 'findCompany', (a) => (a as CrmAdapter).findCompany({ domain }), {
     module: 'crm',
     requestSummary: { domain },
   });
   const check: CompanyCheck = {
-    accountId,
+    accountId: null,
     system,
     exists: found !== null,
     companyExternalId: found?.externalId ?? null,
@@ -98,21 +97,21 @@ async function lookup(
     openDeals: found?.openDeals ?? 0,
     checkedAt: now,
   };
-  if (accountId) {
-    const values = {
-      exists: check.exists,
-      companyExternalId: check.companyExternalId,
-      ownerExternalId: check.ownerExternalId,
-      ownerName: check.ownerName,
-      lifecycle: check.lifecycle,
-      openDeals: check.openDeals,
-      checkedAt: now,
-    };
-    await ctx.tx
-      .insert(companyCheck)
-      .values({ tenantId: ctx.tenantId, accountId, system, ...values })
-      .onConflictDoUpdate({ target: [companyCheck.tenantId, companyCheck.accountId, companyCheck.system], set: values });
-  }
+  // Kept under a key of its own, so a lookup that has no account still reuses it for 24 hours.
+  const values = {
+    domain,
+    exists: check.exists,
+    companyExternalId: check.companyExternalId,
+    ownerExternalId: check.ownerExternalId,
+    ownerName: check.ownerName,
+    lifecycle: check.lifecycle,
+    openDeals: check.openDeals,
+    checkedAt: now,
+  };
+  await ctx.tx
+    .insert(companyCheck)
+    .values({ tenantId: ctx.tenantId, accountId: `domain:${domain}`, system, ...values })
+    .onConflictDoUpdate({ target: [companyCheck.tenantId, companyCheck.accountId, companyCheck.system], set: values });
   return { check, fresh: true };
 }
 
@@ -126,8 +125,28 @@ export async function checkCompany(ctx: ModuleContext, accountId: string): Promi
   if (!account?.domain) return null;
   const now = new Date();
   const system = await crmSystem(ctx);
-  const { check, fresh } = await lookup(ctx, system, account.domain, accountId, now);
-  if (!fresh) return check;
+  const domain = normalDomain(account.domain);
+  const [own] = await ctx.tx
+    .select()
+    .from(companyCheck)
+    .where(and(eq(companyCheck.tenantId, ctx.tenantId), eq(companyCheck.accountId, accountId), eq(companyCheck.system, system)));
+  if (own && own.domain === domain && now.getTime() - own.checkedAt.getTime() < CHECK_TTL_MS) return toCheck(own);
+
+  const { check } = await lookup(ctx, system, domain, now);
+  const values = {
+    domain,
+    exists: check.exists,
+    companyExternalId: check.companyExternalId,
+    ownerExternalId: check.ownerExternalId,
+    ownerName: check.ownerName,
+    lifecycle: check.lifecycle,
+    openDeals: check.openDeals,
+    checkedAt: check.checkedAt,
+  };
+  await ctx.tx
+    .insert(companyCheck)
+    .values({ tenantId: ctx.tenantId, accountId, system, ...values })
+    .onConflictDoUpdate({ target: [companyCheck.tenantId, companyCheck.accountId, companyCheck.system], set: values });
   if (check.companyExternalId) {
     await recordLink(ctx, { scoutType: 'account', scoutId: accountId, system, externalId: check.companyExternalId });
   }
@@ -145,7 +164,7 @@ export async function checkCompany(ctx: ModuleContext, accountId: string): Promi
     },
     { type: 'account', id: accountId },
   );
-  return check;
+  return { ...check, accountId };
 }
 
 /** The stored checks for these accounts (at most 200); accounts never checked are left out. */
@@ -160,9 +179,29 @@ export async function companyChecks(ctx: ModuleContext, accountIds: string[]): P
   return rows.map((r) => ({ ...toCheck(r), accountId: r.accountId }));
 }
 
-/** Queues a check for an account that has a domain. A changed domain drops the old check first, so the new one is not served from the cache. */
+/**
+ * Queues a check for an account that has a domain. A changed domain drops the old check, and the company link
+ * that check made unless a handoff has completed for the account (those links stay), so the edit does not
+ * leave two company links.
+ */
 export async function queueCompanyCheck(ctx: ModuleContext, accountId: string, domain: string | null, opts: { domainChanged?: boolean } = {}): Promise<void> {
-  if (opts.domainChanged) await ctx.tx.delete(companyCheck).where(and(eq(companyCheck.tenantId, ctx.tenantId), eq(companyCheck.accountId, accountId)));
+  if (opts.domainChanged) {
+    const old = await ctx.tx.select().from(companyCheck).where(and(eq(companyCheck.tenantId, ctx.tenantId), eq(companyCheck.accountId, accountId)));
+    const [done] = await ctx.tx
+      .select({ id: handoff.id })
+      .from(handoff)
+      .where(and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.accountId, accountId), eq(handoff.status, 'completed')))
+      .limit(1);
+    if (!done) {
+      for (const o of old) {
+        if (!o.companyExternalId) continue;
+        await ctx.tx
+          .delete(link)
+          .where(and(eq(link.tenantId, ctx.tenantId), eq(link.scoutType, 'account'), eq(link.scoutId, accountId), eq(link.system, o.system), eq(link.externalId, o.companyExternalId)));
+      }
+    }
+    await ctx.tx.delete(companyCheck).where(and(eq(companyCheck.tenantId, ctx.tenantId), eq(companyCheck.accountId, accountId)));
+  }
   if (!domain) return;
   await enqueueJob(ctx, companyCheckJob, { accountId });
 }

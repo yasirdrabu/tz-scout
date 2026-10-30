@@ -7,6 +7,7 @@ export {
   memberRole,
   members,
   removeMember,
+  setCrmOwnerId,
   setCrmOwnerIds,
   tenantsFor,
   userForCrmOwner,

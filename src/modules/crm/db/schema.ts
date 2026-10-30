@@ -222,6 +222,8 @@ export const companyCheck = crm.table(
     tenantId: text('tenant_id').notNull(),
     accountId: text('account_id').notNull(),
     system: text('system').notNull(),
+    /** Lower-cased, so a lookup by domain can reuse a check. */
+    domain: text('domain'),
     exists: boolean('exists').notNull(),
     companyExternalId: text('company_external_id'),
     ownerExternalId: text('owner_external_id'),
@@ -230,7 +232,7 @@ export const companyCheck = crm.table(
     openDeals: integer('open_deals').notNull().default(0),
     checkedAt: at('checked_at').notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.tenantId, t.accountId, t.system] })],
+  (t) => [primaryKey({ columns: [t.tenantId, t.accountId, t.system] }), index('company_check_domain_idx').on(t.tenantId, t.system, t.domain)],
 );
 
 /** One row per tenant. */

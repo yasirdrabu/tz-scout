@@ -54,7 +54,7 @@ describe('the CRM check before review', () => {
     const { accountId } = await arrive({ name: 'Customer', domain: 'customer.example' });
     await runOutbox(t.tenantId);
     const before = (await finds()).length;
-    const again = await t.run((ctx) => lookupCompany(ctx, 'customer.example', { accountId }));
+    const again = await t.run((ctx) => lookupCompany(ctx, 'Customer.example'));
     await t.run((ctx) => checkCompany(ctx, accountId));
     expect((await finds()).length).toBe(before);
     expect(again).toMatchObject({ exists: true, lifecycle: 'customer' });
@@ -69,5 +69,16 @@ describe('the CRM check before review', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ accountId, exists: false, ownerName: null, lifecycle: 'none' });
     expect(await checkedEvents(shell.accountId)).toHaveLength(0);
+  });
+});
+
+describe('lookups by domain', () => {
+  it('two lookups by domain alone make one CRM call', async () => {
+    const before = (await finds()).length;
+    const first = await t.run((ctx) => lookupCompany(ctx, 'owned-elsewhere.example'));
+    const second = await t.run((ctx) => lookupCompany(ctx, 'OWNED-elsewhere.example'));
+    expect(first.exists).toBe(true);
+    expect(second.exists).toBe(true);
+    expect((await finds()).length).toBe(before + 1);
   });
 });

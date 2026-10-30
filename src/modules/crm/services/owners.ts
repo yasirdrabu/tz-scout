@@ -1,6 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { listConnections, gateway } from '@/modules/integrations';
-import { crmOwnerId, members, setCrmOwnerIds } from '@/modules/tenancy';
+import { crmOwnerId, members, setCrmOwnerId } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
@@ -89,7 +89,7 @@ export async function confirmOwnerMatch(ctx: ModuleContext, input: { userId: str
   if (!match) {
     throw new ScoutError({ slug: 'owner-match-not-found', status: 409, title: 'That HubSpot owner is not a match for this person.' });
   }
-  await setCrmOwnerIds(ctx, match.membershipId, { [system]: input.externalOwnerId });
+  await setCrmOwnerId(ctx, match.membershipId, system, input.externalOwnerId);
 }
 
 /** The roster name for an owner id, or null when the owner is not in the roster. */

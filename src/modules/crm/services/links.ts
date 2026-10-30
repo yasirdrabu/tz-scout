@@ -1,4 +1,4 @@
-import { and, eq, inArray, like, or } from 'drizzle-orm';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import { getAccount } from '@/modules/accounts';
 import type { ModuleContext } from '@/platform/context';
 import { withTenant } from '@/platform/db/tenant';
@@ -56,7 +56,7 @@ export async function getLinks(ctx: ModuleContext, accountId: string): Promise<A
   const scoped = [
     and(inArray(link.scoutType, ['account', 'note']), eq(link.scoutId, accountId)),
     personIds.length ? and(eq(link.scoutType, 'person'), inArray(link.scoutId, personIds)) : undefined,
-    ...handoffs.map((h) => and(eq(link.scoutType, 'task'), like(link.scoutId, `${h.assignmentId}:%`))),
+    ...handoffs.map((h) => and(eq(link.scoutType, 'task'), sql`left(${link.scoutId}, ${h.assignmentId.length + 1}) = ${h.assignmentId + ':'}`)),
     deals.length ? and(eq(link.scoutType, 'deal'), inArray(link.scoutId, deals.map((d) => d.id))) : undefined,
   ].filter((c) => c !== undefined);
   const rows = (await ctx.tx.select().from(link).where(and(eq(link.tenantId, ctx.tenantId), or(...scoped)))).sort(

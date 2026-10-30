@@ -7,6 +7,7 @@ import {
   crmOwnerId,
   members,
   removeMember,
+  setCrmOwnerId,
   setCrmOwnerIds,
   tenantsFor,
   userForCrmOwner,
@@ -211,6 +212,19 @@ describe('CRM owner ids', () => {
     await inTenant(tenantId, owner, (ctx) => setCrmOwnerIds(ctx, other, { hubspot: '456' }));
     // Re-saving a membership's own id is fine.
     await inTenant(tenantId, owner, (ctx) => setCrmOwnerIds(ctx, other, { hubspot: '456' }));
+  });
+
+  it('sets one CRM owner id and keeps the others; refuses an id another member holds', async () => {
+    const a = await inTenant(tenantId, owner, (ctx) =>
+      addMember(ctx, { email: 'merge-a@example.com', role: 'seller', crmOwnerIds: { other_crm: 'x' } }),
+    );
+    const b = await inTenant(tenantId, owner, (ctx) => addMember(ctx, { email: 'merge-b@example.com', role: 'seller' }));
+    await inTenant(tenantId, owner, (ctx) => setCrmOwnerId(ctx, a, 'hubspot', 'merge-901'));
+    const [row] = await adminDb.select({ ids: membership.crmOwnerIds }).from(membership).where(eq(membership.id, a));
+    expect(row?.ids).toEqual({ other_crm: 'x', hubspot: 'merge-901' });
+    await expect(inTenant(tenantId, owner, (ctx) => setCrmOwnerId(ctx, b, 'hubspot', 'merge-901'))).rejects.toThrow(
+      'That CRM user is already linked to someone else.',
+    );
   });
 
   it('allows the same owner id in another tenant, and frees it when the member is removed', async () => {
