@@ -204,7 +204,7 @@ export async function runCall<T>(
         value,
         settings: (conn.settings ?? {}) as Record<string, unknown>,
       });
-    } else adapter = factories.mock();
+    } else adapter = factories.mock(ctx);
     result = await fn(adapter, { scrub });
     try {
       measured = (opts.measure as ((r: T) => typeof measured) | undefined)?.(result) ?? {};

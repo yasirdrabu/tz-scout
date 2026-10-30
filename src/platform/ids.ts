@@ -41,7 +41,17 @@ export type IdPrefix =
   | 'stc'
   | 'drd'
   | 'fb'
-  | 'blob';
+  | 'blob'
+  | 'hof'
+  | 'hbt'
+  | 'lnk'
+  | 'hmg'
+  | 'cow'
+  | 'fmp'
+  | 'dea'
+  | 'cac'
+  | 'whr'
+  | 'blk';
 
 const ulid = monotonicFactory();
 

@@ -1,3 +1,5 @@
+import type { ModuleContext } from '@/platform/context';
+
 /** The shared provider list (spec: integrations/adapter-contract-and-providers.md). */
 export type Provider = {
   key: string;
@@ -40,7 +42,7 @@ export type Adapter = { test(): Promise<TestResult> };
 export type LiveCredentials = { kind: string; value: string; settings: Record<string, unknown> };
 
 export type AdapterFactories = {
-  mock: () => Adapter;
+  mock: (ctx: ModuleContext) => Adapter;
   live?: (creds: LiveCredentials) => Adapter;
 };
 

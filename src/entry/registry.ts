@@ -17,4 +17,6 @@ import '@/modules/scoring/contracts/events';
 import '@/modules/scoring';
 import '@/modules/routing/contracts/events';
 import '@/modules/routing';
+import '@/modules/crm/contracts/events';
+import '@/modules/crm';
 import './compose';

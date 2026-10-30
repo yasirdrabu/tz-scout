@@ -16,7 +16,7 @@ const PLATFORM_WIDE = new Set([
 ]);
 
 /** Schemas where every table must be tenant-scoped, with no exceptions beyond the allowlist. */
-const STRICT_SCHEMAS = ['offers', 'accounts', 'intake', 'scoring', 'routing'];
+const STRICT_SCHEMAS = ['offers', 'accounts', 'crm', 'intake', 'scoring', 'routing'];
 
 it('every table with a tenant_id forces row level security, except the platform-wide allowlist', async () => {
   const rows = await adminDb.execute<{ name: string; rls: boolean; forced: boolean }>(sql`
@@ -25,7 +25,7 @@ it('every table with a tenant_id forces row level security, except the platform-
     join pg_namespace n on n.oid = c.relnamespace
     join pg_attribute a on a.attrelid = c.oid and a.attname = 'tenant_id' and not a.attisdropped
     where c.relkind in ('r', 'p')
-      and n.nspname in ('platform', 'tenancy', 'integrations', 'ai', 'offers', 'accounts', 'intake', 'scoring', 'routing')
+      and n.nspname in ('platform', 'tenancy', 'integrations', 'ai', 'offers', 'accounts', 'crm', 'intake', 'scoring', 'routing')
     order by 1`);
   expect(rows.length).toBeGreaterThan(0);
   const offenders = rows.filter((r) => !PLATFORM_WIDE.has(r.name) && !(r.rls && r.forced)).map((r) => r.name);
