@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { lastActivityAt, latestHandoff } from '@/modules/crm';
 import { accountNames, filterVisibleAccountIds, getSummaries, resolveAccountId } from '@/modules/accounts';
 import { getArrival } from '@/modules/intake';
 import { members, tenantTimezone } from '@/modules/tenancy';
@@ -15,8 +16,10 @@ export type AccountStatus = {
   reviewStatus: string | null;
   tier: string | null;
   ownerName: string | null;
-  /** Null until R1c brings CRM activity. */
+  /** The latest CRM activity; only read for a principal with `crm:push`, else null. */
   lastActivityAt: Date | null;
+  /** The latest CRM handoff, for a principal with `crm:push`; absent otherwise, null when there is none. */
+  handoff?: { status: string; ownershipAction: string; crmUrl: string | null } | null;
   /** The review decline reason's label, only while the account holds a declined status. A seller's decline stays internal. */
   declinedReason: string | null;
   /** The note on the move to the declined status the account holds. */
@@ -52,9 +55,10 @@ const monthDay = (d: Date, timeZone: string) => new Intl.DateTimeFormat('en-US',
 /**
  * Where one account stands, for the agent or person that sent it (REV-E4-S2). `idOrArrivalId` may be an
  * `arr_` id, which intake resolves among the caller's own arrivals. An account the caller can't see, or
- * an arrival that isn't theirs, is null (the route answers 404, never 403).
+ * an arrival that isn't theirs, is null (the route answers 404, never 403). `opts.crm` is set by the route for a
+ * principal with `crm:push` (the context carries no permissions) and adds the handoff and the last CRM activity.
  */
-export async function getAccountStatus(ctx: ModuleContext, idOrArrivalId: string): Promise<AccountStatus | null> {
+export async function getAccountStatus(ctx: ModuleContext, idOrArrivalId: string, opts: { crm?: boolean } = {}): Promise<AccountStatus | null> {
   let asked: string | null | undefined = idOrArrivalId;
   if (idOrArrivalId.startsWith('arr_')) {
     const arr = await getArrival(ctx, idOrArrivalId);
@@ -110,6 +114,13 @@ export async function getAccountStatus(ctx: ModuleContext, idOrArrivalId: string
           ? 'Reviewed. Waiting for a seller.'
           : 'Waiting for review.';
 
+  const crm = opts.crm
+    ? await (async () => {
+        const h = await latestHandoff(ctx, accountId);
+        return { handoff: h ? { status: h.status, ownershipAction: h.ownershipAction, crmUrl: h.crmUrl } : null, lastActivityAt: await lastActivityAt(ctx, accountId) };
+      })()
+    : null;
+
   return {
     accountId,
     name,
@@ -117,7 +128,8 @@ export async function getAccountStatus(ctx: ModuleContext, idOrArrivalId: string
     reviewStatus: review?.statusKey ?? null,
     tier: summary?.tier ?? null,
     ownerName,
-    lastActivityAt: null,
+    lastActivityAt: crm?.lastActivityAt ?? null,
+    ...(crm ? { handoff: crm.handoff } : {}),
     declinedReason,
     declinedNote,
     sendBackNote,

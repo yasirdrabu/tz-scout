@@ -1,5 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { seedMockCrm } from '@/modules/crm';
+import { companyCheck } from '@/modules/crm/db/schema';
 import { submitArrival, submitBatch } from '@/modules/intake';
 import { arrival } from '@/modules/intake/db/schema';
 import { assign, changeStatus, countQueue, listQueue, setInsights } from '@/modules/routing';
@@ -115,5 +117,20 @@ describe('the queue (REV-E1-S1)', () => {
     const limited = { dataLimit: { kind: 'practices' as const, ids: ['prc_limit'] } };
     expect(ids(await asPerson(t, (ctx) => listQueue(ctx, { sourceId: tag }), limited))).toEqual([inP]);
     expect(await asPerson(t, (ctx) => countQueue(ctx, { sourceId: tag }), limited)).toBe(1);
+  });
+});
+
+describe('CRM fields in the queue (Ruling 19)', () => {
+  it('a row shows what the CRM check found', async () => {
+    const ct = await routingTenant();
+    await ct.run((ctx) => seedMockCrm(ctx));
+    const hit = await arrivedAccount(ct, { name: 'Open Deal', domain: 'open-deal.example' });
+    const miss = await arrivedAccount(ct, { name: 'Elsewhere' });
+    const shell = await arrivedAccount(ct, { name: 'No check' });
+    await ct.run((ctx) => ctx.tx.delete(companyCheck).where(eq(companyCheck.accountId, shell)));
+    const page = await asPerson(ct, (ctx) => listQueue(ctx, { statusKeys: ['unvetted'] }));
+    expect(page.data.find((r) => r.accountId === hit)?.crm).toEqual({ exists: true, ownerName: 'Vijay Kumar', lifecycle: 'open_deal' });
+    expect(page.data.find((r) => r.accountId === shell)?.crm).toBeNull();
+    expect(page.data.find((r) => r.accountId === miss)?.crm).toEqual({ exists: false, ownerName: null, lifecycle: 'none' });
   });
 });

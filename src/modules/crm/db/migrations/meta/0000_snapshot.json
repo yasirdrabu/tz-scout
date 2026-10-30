@@ -1,0 +1,2026 @@
+{
+  "id": "309e6ca2-3891-4050-b345-c87f3d7e6df5",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "crm.activity": {
+      "name": "activity",
+      "schema": "crm",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "handoff_id": {
+          "name": "handoff_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "system": {
+          "name": "system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "activity_uq": {
+          "name": "activity_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "system",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "activity_account_idx": {
+          "name": "activity_account_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "occurred_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "activity_kind_valid": {
+          "name": "activity_kind_valid",
+          "value": "\"crm\".\"activity\".\"kind\" in ('email', 'reply', 'call', 'meeting', 'task_done')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "crm.company_check": {
+      "name": "company_check",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "system": {
+          "name": "system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "exists": {
+          "name": "exists",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "company_external_id": {
+          "name": "company_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "owner_external_id": {
+          "name": "owner_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "owner_name": {
+          "name": "owner_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lifecycle": {
+          "name": "lifecycle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "open_deals": {
+          "name": "open_deals",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "checked_at": {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "company_check_tenant_id_account_id_system_pk": {
+          "name": "company_check_tenant_id_account_id_system_pk",
+          "columns": [
+            "tenant_id",
+            "account_id",
+            "system"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.setting": {
+      "name": "setting",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "system": {
+          "name": "system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'hubspot'"
+        },
+        "take_over_stale_ownership": {
+          "name": "take_over_stale_ownership",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "push_new_people": {
+          "name": "push_new_people",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "follow_up_days": {
+          "name": "follow_up_days",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[3,7,14]'::jsonb"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "crm_setting_follow_up_days_valid": {
+          "name": "crm_setting_follow_up_days_valid",
+          "value": "jsonb_typeof(\"crm\".\"setting\".\"follow_up_days\") = 'array' and jsonb_array_length(\"crm\".\"setting\".\"follow_up_days\") between 1 and 5"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "crm.deal": {
+      "name": "deal",
+      "schema": "crm",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "system": {
+          "name": "system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stage": {
+          "name": "stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "opened_at": {
+          "name": "opened_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "synced_at": {
+          "name": "synced_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "deal_uq": {
+          "name": "deal_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "system",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "deal_account_idx": {
+          "name": "deal_account_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "deal_status_valid": {
+          "name": "deal_status_valid",
+          "value": "\"crm\".\"deal\".\"status\" in ('open', 'won', 'lost')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "crm.field_mapping": {
+      "name": "field_mapping",
+      "schema": "crm",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "system": {
+          "name": "system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scout_field": {
+          "name": "scout_field",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "crm_object": {
+          "name": "crm_object",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "crm_property": {
+          "name": "crm_property",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "direction": {
+          "name": "direction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'push'"
+        },
+        "transform": {
+          "name": "transform",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'none'"
+        },
+        "transform_config": {
+          "name": "transform_config",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        }
+      },
+      "indexes": {
+        "field_mapping_uq": {
+          "name": "field_mapping_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "system",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "scout_field",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "crm_object",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "field_mapping_transform_valid": {
+          "name": "field_mapping_transform_valid",
+          "value": "\"crm\".\"field_mapping\".\"transform\" in ('none', 'cents_to_amount', 'date', 'enum_map')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "crm.follow_through": {
+      "name": "follow_through",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "handoff_id": {
+          "name": "handoff_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "baseline": {
+          "name": "baseline",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "latest": {
+          "name": "latest",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "tasks": {
+          "name": "tasks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "checked_at": {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stage": {
+          "name": "stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "owner_external_id": {
+          "name": "owner_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "follow_through_tenant_id_handoff_id_pk": {
+          "name": "follow_through_tenant_id_handoff_id_pk",
+          "columns": [
+            "tenant_id",
+            "handoff_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.handoff": {
+      "name": "handoff",
+      "schema": "crm",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assignment_id": {
+          "name": "assignment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "handoff_batch_id": {
+          "name": "handoff_batch_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "system": {
+          "name": "system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'queued'"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "ownership_action": {
+          "name": "ownership_action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "taken_from_owner": {
+          "name": "taken_from_owner",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "owner_external_id": {
+          "name": "owner_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "company_external_id": {
+          "name": "company_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision_reason": {
+          "name": "decision_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancel_requested_at": {
+          "name": "cancel_requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "undone": {
+          "name": "undone",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "queued_at": {
+          "name": "queued_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "handoff_assignment_uq": {
+          "name": "handoff_assignment_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "assignment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "handoff_account_idx": {
+          "name": "handoff_account_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "queued_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "handoff_batch_idx": {
+          "name": "handoff_batch_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "handoff_batch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "handoff_status_valid": {
+          "name": "handoff_status_valid",
+          "value": "\"crm\".\"handoff\".\"status\" in ('queued', 'running', 'completed', 'needs_decision', 'failed', 'cancelled')"
+        },
+        "handoff_ownership_action_valid": {
+          "name": "handoff_ownership_action_valid",
+          "value": "\"crm\".\"handoff\".\"ownership_action\" in ('assign', 'keep')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "crm.handoff_batch": {
+      "name": "handoff_batch",
+      "schema": "crm",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bulk_key": {
+          "name": "bulk_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "handoff_batch_bulk_key_uq": {
+          "name": "handoff_batch_bulk_key_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "bulk_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"crm\".\"handoff_batch\".\"bulk_key\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.handoff_message": {
+      "name": "handoff_message",
+      "schema": "crm",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "handoff_batch_id": {
+          "name": "handoff_batch_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seller_user_id": {
+          "name": "seller_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "count": {
+          "name": "count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "copied_at": {
+          "name": "copied_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "handoff_message_uq": {
+          "name": "handoff_message_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "handoff_batch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "seller_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.link": {
+      "name": "link",
+      "schema": "crm",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scout_type": {
+          "name": "scout_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scout_id": {
+          "name": "scout_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "system": {
+          "name": "system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_synced_at": {
+          "name": "last_synced_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "link_uq": {
+          "name": "link_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "system",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "scout_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "scout_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "link_external_idx": {
+          "name": "link_external_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "system",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.mock_activity": {
+      "name": "mock_activity",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "company_external_id": {
+          "name": "company_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_owner_external_id": {
+          "name": "actor_owner_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "mock_activity_tenant_id_external_id_pk": {
+          "name": "mock_activity_tenant_id_external_id_pk",
+          "columns": [
+            "tenant_id",
+            "external_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.mock_company": {
+      "name": "mock_company",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "website": {
+          "name": "website",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "location": {
+          "name": "location",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "employees": {
+          "name": "employees",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "owner_external_id": {
+          "name": "owner_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lifecycle": {
+          "name": "lifecycle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'lead'"
+        },
+        "properties": {
+          "name": "properties",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mock_company_domain_uq": {
+          "name": "mock_company_domain_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "domain",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "mock_company_tenant_id_external_id_pk": {
+          "name": "mock_company_tenant_id_external_id_pk",
+          "columns": [
+            "tenant_id",
+            "external_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.mock_deal": {
+      "name": "mock_deal",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "company_external_id": {
+          "name": "company_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stage": {
+          "name": "stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "opened_at": {
+          "name": "opened_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "mock_deal_tenant_id_external_id_pk": {
+          "name": "mock_deal_tenant_id_external_id_pk",
+          "columns": [
+            "tenant_id",
+            "external_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.mock_failure": {
+      "name": "mock_failure",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operation": {
+          "name": "operation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "remaining": {
+          "name": "remaining",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "mock_failure_tenant_id_operation_pk": {
+          "name": "mock_failure_tenant_id_operation_pk",
+          "columns": [
+            "tenant_id",
+            "operation"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "mock_failure_kind_valid": {
+          "name": "mock_failure_kind_valid",
+          "value": "\"crm\".\"mock_failure\".\"kind\" in ('429', '500', 'timeout')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "crm.mock_note": {
+      "name": "mock_note",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "company_external_id": {
+          "name": "company_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "person_external_id": {
+          "name": "person_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "html": {
+          "name": "html",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_external_id": {
+          "name": "owner_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "mock_note_tenant_id_external_id_pk": {
+          "name": "mock_note_tenant_id_external_id_pk",
+          "columns": [
+            "tenant_id",
+            "external_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.mock_owner": {
+      "name": "mock_owner",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "mock_owner_tenant_id_external_id_pk": {
+          "name": "mock_owner_tenant_id_external_id_pk",
+          "columns": [
+            "tenant_id",
+            "external_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.mock_person": {
+      "name": "mock_person",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "company_external_id": {
+          "name": "company_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phones": {
+          "name": "phones",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "linkedin": {
+          "name": "linkedin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "owner_external_id": {
+          "name": "owner_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lifecycle": {
+          "name": "lifecycle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mock_person_email_idx": {
+          "name": "mock_person_email_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "mock_person_tenant_id_external_id_pk": {
+          "name": "mock_person_tenant_id_external_id_pk",
+          "columns": [
+            "tenant_id",
+            "external_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.mock_task": {
+      "name": "mock_task",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "company_external_id": {
+          "name": "company_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "person_external_id": {
+          "name": "person_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "owner_external_id": {
+          "name": "owner_external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "due_at": {
+          "name": "due_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "mock_task_tenant_id_external_id_pk": {
+          "name": "mock_task_tenant_id_external_id_pk",
+          "columns": [
+            "tenant_id",
+            "external_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.owner": {
+      "name": "owner",
+      "schema": "crm",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "system": {
+          "name": "system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_owner_id": {
+          "name": "external_owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "synced_at": {
+          "name": "synced_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "owner_uq": {
+          "name": "owner_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "system",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_owner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.property_setup": {
+      "name": "property_setup",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "system": {
+          "name": "system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "group_name": {
+          "name": "group_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_properties": {
+          "name": "created_properties",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "set_up_at": {
+          "name": "set_up_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "set_up_by": {
+          "name": "set_up_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "property_setup_tenant_id_system_pk": {
+          "name": "property_setup_tenant_id_system_pk",
+          "columns": [
+            "tenant_id",
+            "system"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.task_link": {
+      "name": "task_link",
+      "schema": "crm",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "step_id": {
+          "name": "step_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "system": {
+          "name": "system",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_task_id": {
+          "name": "external_task_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "due_at": {
+          "name": "due_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "task_link_tenant_id_system_step_id_pk": {
+          "name": "task_link_tenant_id_system_step_id_pk",
+          "columns": [
+            "tenant_id",
+            "system",
+            "step_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "crm.webhook_receipt": {
+      "name": "webhook_receipt",
+      "schema": "crm",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "processed_at": {
+          "name": "processed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "webhook_receipt_idx": {
+          "name": "webhook_receipt_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "received_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {
+    "crm": "crm"
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

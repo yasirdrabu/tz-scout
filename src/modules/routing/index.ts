@@ -27,7 +27,7 @@ export {
   type ReviewSnapshot,
   type Stage,
 } from './contracts/types';
-export { routingAccountMerged, routingArrivalResolved, routingConsumers, routingMemberRemoved, routingTenantDefaults } from './consumers';
+export { routingAccountMerged, routingArrivalResolved, routingConsumers, routingCrmActivity, routingCrmDeal, routingCrmHandoffCancelled, routingCrmHandoffCompleted, routingCrmHandoffFailed, routingCrmHandoffNeedsDecision, routingMemberRemoved, routingTenantDefaults } from './consumers';
 export { DEFAULT_AUTO_ACCEPT_WORKING_DAYS, DEFAULT_REASONS, DEFAULT_STATUSES, seedRoutingDefaults } from './defaults';
 export { nextStage, type StageEvent } from './domain/stages';
 export { declineProblems, reasonNeedsNote, statusChangeProblems, type ReasonDef, type StatusDefRules } from './domain/status-rules';

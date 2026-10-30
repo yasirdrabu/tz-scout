@@ -17,6 +17,8 @@ import {
   userIdForEmail,
 } from '@/modules/tenancy';
 import { seedAccountDefaults } from '@/modules/accounts';
+import { backfillCrm, seedCrmDefaults, seedMockCrm } from '@/modules/crm';
+import { listConnections } from '@/modules/integrations';
 import { listSources, personSourceFor, registerSource, seedIntakeDefaults } from '@/modules/intake';
 import { seedMissingSignalRules, seedOffers } from '@/modules/offers';
 import { backfillReviews, seedRoutingDefaults } from '@/modules/routing';
@@ -76,6 +78,17 @@ export async function backfillR1b(ctx: ModuleContext): Promise<void> {
 }
 
 /**
+ * Brings a tenant built before R1c up to date: the CRM defaults (settings, field mappings and polling schedules), the
+ * qualified-lead poll schedule, a company check for each account with a domain and none yet, and links from the HubSpot
+ * ids accounts already carry. Safe to run again. Background context only.
+ */
+export async function backfillR1c(ctx: ModuleContext): Promise<void> {
+  await seedCrmDefaults(ctx);
+  await seedIntakeDefaults(ctx);
+  await backfillCrm(ctx);
+}
+
+/**
  * Local development data: one platform admin, two tenants, a few people, a person source for each, a development agent and a dev API key bound to it. Safe to
  * run again. Also schedules the hourly credential cleanup. Returns a fresh key for `taazaa` on each run, because
  * a key's secret is only shown once.
@@ -121,6 +134,7 @@ export async function seed(): Promise<{ devApiKey: string }> {
       // Existing tenants never got the tenant.created event, so call the intake defaults directly.
       await seedIntakeDefaults(ctx(tx));
       await backfillR1b(ctx(tx));
+      await backfillR1c(ctx(tx));
     });
     // Sources come after the first transaction commits, so the sellers' users exist.
     const emails = [ADMIN_EMAIL, t.ownerEmail, ...t.sellers.map((s) => s.email)];
@@ -135,6 +149,9 @@ export async function seed(): Promise<{ devApiKey: string }> {
       }
       const have = (await listSources(c)).find((s) => s.kind === 'agent' && s.name === DEV_AGENT_NAME);
       if (!have) await registerSource(c, { kind: 'agent', name: DEV_AGENT_NAME, parentId: adminSourceId });
+      // Sample HubSpot data for a workspace on the mock connection (the default).
+      const hubspot = (await listConnections(c)).find((x) => x.provider === 'hubspot');
+      if (!hubspot || hubspot.mode === 'mock') await seedMockCrm(c);
     });
     if (t.slug === 'taazaa') taazaaId = row.id;
   }

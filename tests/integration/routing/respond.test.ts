@@ -90,7 +90,7 @@ describe('accept and decline (REV-E2-S2, REV-E2-S3)', () => {
     expect(review).toMatchObject({ statusKey: 'reviewed', stage: 'reviewed', currentAssignmentId: null });
     expect(review.flags.declinedBySeller).toMatchObject({ assignmentId: id, sellerUserId: seller, reasonKey: 'not_my_territory', reasonLabel: 'Not my territory' });
     expect(review.flags.declinedBySeller!.sellerName).toBeTruthy();
-    expect((await published(t, a)).find((e) => e.type === assignmentDeclined.type)!.data).toEqual({ assignmentId: id, accountId: a, sellerUserId: seller, reasonKey: 'not_my_territory', note: null });
+    expect((await published(t, a)).find((e) => e.type === assignmentDeclined.type)!.data).toEqual({ assignmentId: id, accountId: a, sellerUserId: seller, reasonKey: 'not_my_territory', reasonLabel: 'Not my territory', note: null });
     await runOutbox(t.tenantId);
     expect(await summaryOf(t, a)).toMatchObject({ ownerUserId: null, hasOpenAssignment: false, reviewStatusKey: 'reviewed' });
     const queue = await asPerson(t, (ctx) => listQueue(ctx, {}));
@@ -421,13 +421,15 @@ describe('markSeen (Ruling 7)', () => {
 });
 
 describe('tenancy.member.removed', () => {
-  it('withdraws that seller\'s open assignments, one snapshot per account, and leaves others alone', async () => {
+  it('withdraws that seller\'s open assignments, one snapshot per account (plus one when its handoff is undone), and leaves others alone', async () => {
     const gone = await member(t, 'seller');
     const first = await assigned(gone);
     const second = await assigned(gone);
     await asSeller((ctx) => accept(ctx, second.id), gone);
     const kept = await assigned(seller);
+    await runOutbox(t.tenantId); // let the pushes to the CRM finish, so only the removal is counted
     const before = [await snapshotCount(t, first.a), await snapshotCount(t, second.a)];
+    const seen = [(await published(t, first.a)).length, (await published(t, second.a)).length];
 
     await publishTestEvent(t.tenantId, memberRemoved, { userId: gone, removedBy: t.actor.id });
     await runOutbox(t.tenantId);
@@ -436,14 +438,24 @@ describe('tenancy.member.removed', () => {
     expect((await assignmentOf(second.id)).status).toBe('withdrawn');
     expect((await assignmentOf(kept.id)).status).toBe('pending');
     expect(await reviewOf(second.a)).toMatchObject({ stage: 'reviewed', currentAssignmentId: null });
-    expect([await snapshotCount(t, first.a), await snapshotCount(t, second.a)]).toEqual([before[0]! + 1, before[1]! + 1]);
+    expect([await snapshotCount(t, first.a), await snapshotCount(t, second.a)]).toEqual([before[0]! + 2, before[1]! + 2]); // the withdrawal, then the undone handoff (crm.handoff.cancelled)
+    // Each snapshot follows the event that caused it: the withdrawal, then crm.handoff.cancelled.
+    const causes = [assignmentWithdrawn.type, 'crm.handoff.cancelled', reviewChanged.type];
+    for (const [i, acc] of [first.a, second.a].entries()) {
+      expect((await published(t, acc)).slice(seen[i]).map((e) => e.type).filter((x) => causes.includes(x))).toEqual([
+        assignmentWithdrawn.type,
+        reviewChanged.type,
+        'crm.handoff.cancelled',
+        reviewChanged.type,
+      ]);
+    }
     expect(await summaryOf(t, second.a)).toMatchObject({ ownerUserId: null, hasOpenAssignment: false });
     expect((await published(t, first.a)).find((e) => e.type === assignmentWithdrawn.type)!.data).toMatchObject({ by: t.actor.id, replacedBy: null });
 
     // The event again: nothing is open any more, so nothing is written.
     await publishTestEvent(t.tenantId, memberRemoved, { userId: gone, removedBy: t.actor.id });
     await runOutbox(t.tenantId);
-    expect([await snapshotCount(t, first.a), await snapshotCount(t, second.a)]).toEqual([before[0]! + 1, before[1]! + 1]);
+    expect([await snapshotCount(t, first.a), await snapshotCount(t, second.a)]).toEqual([before[0]! + 2, before[1]! + 2]); // the withdrawal, then the undone handoff (crm.handoff.cancelled)
   });
 });
 

@@ -7,6 +7,9 @@ export const sourceChainSchema = z.object({
   vendorSourceId: z.string().optional(),
 });
 
+/** Outside ids a write added (Ruling 13); absent when it added none. */
+const externalIds = z.array(z.object({ system: z.string(), id: z.string() })).optional();
+
 export const accountCreated = defineEvent(
   'accounts.account.created',
   1,
@@ -16,13 +19,14 @@ export const accountCreated = defineEvent(
     domain: z.string().nullable(),
     isShell: z.boolean(),
     arrivalId: z.string().optional(),
+    externalIds,
   }),
 );
 
 export const accountUpdated = defineEvent(
   'accounts.account.updated',
   1,
-  z.object({ accountId: z.string(), changedKeys: z.array(z.string()), arrivalId: z.string().optional() }),
+  z.object({ accountId: z.string(), changedKeys: z.array(z.string()), arrivalId: z.string().optional(), externalIds }),
 );
 
 export const accountArchived = defineEvent(
@@ -51,6 +55,7 @@ export const personAdded = defineEvent(
     personId: z.string(),
     roleKeys: z.array(z.string()),
     arrivalId: z.string().optional(),
+    externalIds,
   }),
 );
 
@@ -63,6 +68,7 @@ export const personUpdated = defineEvent(
     changedKeys: z.array(z.string()),
     roleKeys: z.array(z.string()),
     arrivalId: z.string().optional(),
+    externalIds,
   }),
 );
 

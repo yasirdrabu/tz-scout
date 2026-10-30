@@ -2,7 +2,7 @@ import { and, arrayOverlaps, asc, desc, eq, exists, gt, gte, inArray, isNull, or
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import type { AccountView, CrmStatus, FactKind, FactView, PersonView, RoleOrigin, SignalKind, SignalView, SourceChain } from '../contracts/types';
-import { account, accountAlias, accountSummary, exclusionRule, fact, person, personRole, signal } from '../db/schema';
+import { account, accountAlias, accountSummary, exclusionRule, fact, person, personAlias, personRole, signal } from '../db/schema';
 import type { Exclusion } from './exclusion';
 import { resolveAccountId } from './match';
 import { filterVisibleAccountIds, visibleAccounts } from './visibility';
@@ -239,6 +239,24 @@ export async function getAccountForScoring(ctx: ModuleContext, accountId: string
     excludedLabel: exclusion?.label ?? null,
     excludedOverride: acc.excludedOverride,
   };
+}
+
+/** An outside system's id for an account (`personId` null) or one of its people, as recorded when it arrived. */
+export type ExternalIdRow = { accountId: string; personId: string | null; system: string; id: string };
+
+/** Every external id alias in the tenant, for background jobs: no visibility filter, so it refuses a context with an access. */
+export async function listExternalIds(ctx: ModuleContext): Promise<ExternalIdRow[]> {
+  if (ctx.access) throw new ScoutError({ slug: 'forbidden', status: 403, title: 'Only background jobs can list every external id.' });
+  const accounts = await ctx.tx
+    .select({ accountId: accountAlias.accountId, system: accountAlias.system, id: accountAlias.value })
+    .from(accountAlias)
+    .where(and(eq(accountAlias.tenantId, ctx.tenantId), eq(accountAlias.kind, 'external_id')));
+  const people = await ctx.tx
+    .select({ accountId: person.accountId, personId: personAlias.personId, system: personAlias.system, id: personAlias.value })
+    .from(personAlias)
+    .innerJoin(person, eq(person.id, personAlias.personId))
+    .where(and(eq(personAlias.tenantId, ctx.tenantId), eq(personAlias.kind, 'external_id')));
+  return [...accounts.map((a) => ({ ...a, personId: null })), ...people];
 }
 
 const MAX_PAGE = 200;

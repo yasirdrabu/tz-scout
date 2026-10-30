@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNull, sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import { config } from '@/platform/config';
 import type { ModuleContext } from '@/platform/context';
+import { withTenant } from '@/platform/db/tenant';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
@@ -9,7 +10,7 @@ import { connectionChanged, connectionTested } from '../contracts/events';
 import { callLog, connection, credential } from '../db/schema';
 import { ensureConnection, runCall } from '../gateway';
 import { PROVIDERS, adapterFactories, isKnownProvider, type TestResult } from '../providers';
-import { credentialAad, sealValue } from './vault';
+import { credentialAad, openValue, sealValue } from './vault';
 
 export type ConnectionMode = 'mock' | 'live';
 export type ConnectionStatus = 'not_set_up' | 'connected' | 'failing' | 'disabled';
@@ -111,6 +112,23 @@ export async function saveCredential(
   // Bound to tenant, connection and credential ids; throws master-key-missing before anything is stored.
   const sealed = sealValue(value, credentialAad(ctx.tenantId, conn.id, id));
   const hint = value.length >= HINT_MIN_LENGTH ? value.slice(-4) : null;
+  // HubSpot's webhook client secret is kept beside the token (Ruling 16): it is never the connection's
+  // credential, and it replaces only an earlier client secret.
+  const beside = provider === 'hubspot' && input.kind === 'client_secret';
+  const [earlierSecret] = beside
+    ? await ctx.tx
+        .select({ id: credential.id })
+        .from(credential)
+        .where(
+          and(
+            eq(credential.tenantId, ctx.tenantId),
+            eq(credential.connectionId, conn.id),
+            eq(credential.kind, 'client_secret'),
+            isNull(credential.replacedAt),
+          ),
+        )
+        .limit(1)
+    : [];
   await ctx.tx.insert(credential).values({
     id,
     tenantId: ctx.tenantId,
@@ -123,24 +141,33 @@ export async function saveCredential(
     keyVersion: sealed.keyVersion,
     hint,
     expiresAt: input.expiresAt ?? null,
-    rotatedAt: conn.credentialId ? new Date() : null,
+    rotatedAt: (beside ? earlierSecret : conn.credentialId) ? new Date() : null,
   });
-  if (conn.credentialId) {
+  if (beside) {
+    if (earlierSecret) {
+      await ctx.tx
+        .update(credential)
+        .set({ replacedAt: sql`now()` })
+        .where(and(eq(credential.tenantId, ctx.tenantId), eq(credential.id, earlierSecret.id)));
+    }
+  } else if (conn.credentialId) {
     await ctx.tx
       .update(credential)
       .set({ replacedAt: sql`now()` })
       .where(and(eq(credential.tenantId, ctx.tenantId), eq(credential.id, conn.credentialId)));
   }
-  await ctx.tx
-    .update(connection)
-    .set({
-      credentialId: id,
-      lastTestedAt: null,
-      lastTestResult: null,
-      consecutiveFailures: 0,
-      updatedAt: sql`now()`,
-    })
-    .where(and(eq(connection.tenantId, ctx.tenantId), eq(connection.id, conn.id)));
+  if (!beside) {
+    await ctx.tx
+      .update(connection)
+      .set({
+        credentialId: id,
+        lastTestedAt: null,
+        lastTestResult: null,
+        consecutiveFailures: 0,
+        updatedAt: sql`now()`,
+      })
+      .where(and(eq(connection.tenantId, ctx.tenantId), eq(connection.id, conn.id)));
+  }
   await audit(ctx, {
     action: 'integrations.credential.saved',
     subject: { type: 'connection', id: conn.id },
@@ -183,6 +210,7 @@ export async function testConnection(ctx: ModuleContext, provider: string): Prom
             ...raw,
             message: scrub(raw.message),
             ...(raw.missingPermissions ? { missingPermissions: raw.missingPermissions.map(scrub) } : {}),
+            ...(raw.facts ? { facts: Object.fromEntries(Object.entries(raw.facts).map(([k, v]) => [k, scrub(v)])) } : {}),
           };
           if (!r.ok) throw new TestFailed(r);
           return r;
@@ -209,6 +237,8 @@ export async function testConnection(ctx: ModuleContext, provider: string): Prom
       lastTestResult: result,
       lastError: result.ok ? null : result.message,
       status,
+      // What a passing test learned (HubSpot: portal id and name) is kept with the connection's settings.
+      ...(result.ok && result.facts ? { settings: { ...(conn.settings as Record<string, unknown>), ...result.facts } } : {}),
       updatedAt: sql`now()`,
     })
     .where(and(eq(connection.tenantId, ctx.tenantId), eq(connection.id, conn.id)));
@@ -219,6 +249,80 @@ export async function testConnection(ctx: ModuleContext, provider: string): Prom
     { type: 'connection', id: conn.id },
   );
   return result;
+}
+
+/** The decrypted HubSpot-style `client_secret` that verifies inbound webhooks, or null when none is stored. */
+export async function webhookSecret(ctx: ModuleContext, provider: string): Promise<string | null> {
+  requireProvider(provider);
+  const [row] = await ctx.tx
+    .select({ cred: credential })
+    .from(credential)
+    .innerJoin(connection, and(eq(connection.tenantId, credential.tenantId), eq(connection.id, credential.connectionId)))
+    .where(
+      and(
+        eq(credential.tenantId, ctx.tenantId),
+        eq(connection.provider, provider),
+        eq(credential.kind, 'client_secret'),
+        isNull(credential.replacedAt),
+      ),
+    )
+    .orderBy(desc(credential.createdAt))
+    .limit(1);
+  return row ? openValue(row.cred, credentialAad(ctx.tenantId, row.cred.connectionId, row.cred.id)) : null;
+}
+
+/** The connection's settings (non-secret: HubSpot `portal_id`, the qualified-lead rule), `{}` when it has no row yet. */
+export async function connectionSettings(ctx: ModuleContext, provider: string): Promise<Record<string, unknown>> {
+  requireProvider(provider);
+  const [row] = await ctx.tx
+    .select({ settings: connection.settings })
+    .from(connection)
+    .where(and(eq(connection.tenantId, ctx.tenantId), eq(connection.provider, provider)));
+  return (row?.settings ?? {}) as Record<string, unknown>;
+}
+
+/**
+ * The id of the tenant's connection for `provider`, creating the default row when there is none. The row is created in
+ * its own transaction, as the gateway does, so calls that log against it see it.
+ */
+export async function ensureConnectionId(ctx: ModuleContext, provider: string): Promise<string> {
+  requireProvider(provider);
+  const find = async () =>
+    (
+      await ctx.tx
+        .select({ id: connection.id })
+        .from(connection)
+        .where(and(eq(connection.tenantId, ctx.tenantId), eq(connection.provider, provider)))
+        .orderBy(asc(connection.createdAt), asc(connection.id))
+        .limit(1)
+    )[0]?.id;
+  const found = await find();
+  if (found) return found;
+  await withTenant(ctx.tenantId, (tx) => ensureConnection(tx, ctx.tenantId, provider, ctx.actor.id));
+  return (await find())!;
+}
+
+/** Shallow-merges `patch` into the connection's settings (a key set to a new value replaces the old one) and returns the result. */
+export async function setConnectionSettings(
+  ctx: ModuleContext,
+  provider: string,
+  patch: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  requireProvider(provider);
+  const conn = await ensureConnection(ctx.tx, ctx.tenantId, provider, ctx.actor.id);
+  const before = (conn.settings ?? {}) as Record<string, unknown>;
+  const after = { ...before, ...patch };
+  await ctx.tx
+    .update(connection)
+    .set({ settings: after, updatedAt: sql`now()` })
+    .where(and(eq(connection.tenantId, ctx.tenantId), eq(connection.id, conn.id)));
+  await audit(ctx, {
+    action: 'integrations.connection.settings_changed',
+    subject: { type: 'connection', id: conn.id },
+    before: Object.fromEntries(Object.keys(patch).map((k) => [k, before[k] ?? null])),
+    after: { provider, ...patch },
+  });
+  return after;
 }
 
 /** Live needs a credential and a passing test in the last 10 minutes. */

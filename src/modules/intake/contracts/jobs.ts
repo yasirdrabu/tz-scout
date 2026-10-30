@@ -9,3 +9,6 @@ export const importRunJob = defineJob('intake.import.run', z.object({ importId: 
 
 /** Rejects arrivals that have waited 30 days for a person. One schedule per tenant. */
 export const waitingExpireJob = defineJob('intake.waiting.expire', z.object({}), {});
+
+/** Reads contacts the CRM marked qualified since the last poll and submits each (Ruling 14). Every 15 minutes per tenant. */
+export const qualifiedLeadsPollJob = defineJob('intake.qualified_leads.poll', z.object({}), { timeoutMs: 5 * 60_000 });

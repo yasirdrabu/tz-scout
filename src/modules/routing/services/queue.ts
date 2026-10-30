@@ -1,5 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { countAccounts, search, type SearchQuery, type SearchRow } from '@/modules/accounts';
+import { companyChecks } from '@/modules/crm';
 import { batchAccountIds, sourceNames } from '@/modules/intake';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -29,6 +30,8 @@ export type QueueRow = SearchRow & {
   insightsBy: string | null;
   insightsAt: Date | null;
   /** The flag details: who declined and why, which source a new arrival came from ("New from <source>"). */
+  /** What the CRM check found (Ruling 19); null when the account was never checked. */
+  crm: { exists: boolean; ownerName: string | null; lifecycle: string } | null;
   flags: Omit<ReviewFlags, 'newFrom'> & { newFrom?: NonNullable<ReviewFlags['newFrom']> & { sourceName: string | null } };
 };
 
@@ -73,8 +76,10 @@ export async function listQueue(ctx: ModuleContext, f: QueueFilters = {}): Promi
   const byId = new Map(reviews.map((r) => [r.accountId, r]));
   const labels = new Map(statuses.map((s) => [s.key, s.label]));
   const names = await sourceNames(ctx, [...new Set(reviews.flatMap((r) => (r.flags.newFrom ? [r.flags.newFrom.sourceId] : [])))]);
+  const checks = new Map((await companyChecks(ctx, ids)).map((c) => [c.accountId, c]));
   return {
     data: page.data.map((r) => {
+      const check = checks.get(r.accountId);
       const review = byId.get(r.accountId);
       const { newFrom, ...flags } = review?.flags ?? {};
       return {
@@ -83,6 +88,7 @@ export async function listQueue(ctx: ModuleContext, f: QueueFilters = {}): Promi
         insights: review?.insights ?? null,
         insightsBy: review?.insightsBy ?? null,
         insightsAt: review?.insightsAt ?? null,
+        crm: check ? { exists: check.exists, ownerName: check.ownerName, lifecycle: check.lifecycle } : null,
         flags: newFrom ? { ...flags, newFrom: { ...newFrom, sourceName: names.get(newFrom.sourceId) ?? null } } : flags,
       };
     }),

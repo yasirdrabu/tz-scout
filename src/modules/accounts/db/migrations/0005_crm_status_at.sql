@@ -1,0 +1,1 @@
+ALTER TABLE "accounts"."account" ADD COLUMN "crm_status_at" timestamp with time zone;

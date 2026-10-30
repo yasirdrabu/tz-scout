@@ -27,16 +27,20 @@ the Integrations module; this module asks Integrations for a ready client.
 | Table | Key fields | Notes |
 |---|---|---|
 | `crm.link` | `id`, `tenant_id`, `scout_type` (account, person, note, task, deal, owner), `scout_id`, `system` (hubspot, salesforce, dynamics, dayko_kindle), `external_id`, `fingerprint`, `last_synced_at` | One row per Scout record per CRM record. Unique on (`tenant_id`, `system`, `scout_type`, `scout_id`, `external_id`). |
-| `crm.handoff` | `id` (`hof_`), `tenant_id`, `account_id`, `assignment_id`, `handoff_batch_id`, `system`, `status` (queued, running, completed, needs_decision, failed), `attempts`, `ownership_action` (assign, keep), `taken_from_owner`, `decision_reason`, `last_error`, `queued_at`, `completed_at` | One per push. A re-push is a new row. |
-| `crm.handoff_batch` | `id` (`hbt_`), `tenant_id`, `name` ("Oct 16 · 14 to Mike, 15 to Ashkan"), `created_by`, `created_at` | Groups handoffs made together. |
+| `crm.handoff` | `id` (`hof_`), `tenant_id`, `account_id`, `assignment_id`, `handoff_batch_id`, `system`, `status` (queued, running, completed, needs_decision, failed, cancelled), `attempts`, `ownership_action` (assign, keep), `taken_from_owner`, `decision_reason`, `last_error`, `seller_user_id`, `assigned_by`, `assignment_note` (copied from `routing.assignment.created`, because CRM learns about assignments only from events), `cancel_requested_at`, `undone`, `undo_attempts`, `is_repush`, `queued_at`, `completed_at` | One per push. A re-push is a new row with `is_repush` true; only the first handoff of an assignment is unique, so a repeated `routing.assignment.created` makes no second one. `cancelled` means a decline or withdrawal stopped it, or it never started. |
+| `crm.handoff_batch` | `id` (`hbt_`), `tenant_id`, `name` ("Oct 16 · 14 to Mike, 15 to Ashkan"), `bulk_key`, `created_by`, `created_at` | Groups handoffs made together. One batch for each leader action: handoffs with the same `bulkId` (from `routing.assignment.created`) share a batch, and a null `bulkId` makes its own. The name and the per-seller messages are rewritten whenever one of the batch's handoffs completes, fails, needs a decision or is cancelled. |
 | `crm.handoff_message` | `id`, `handoff_batch_id`, `seller_user_id`, `count`, `text`, `copied_at`, `sent_at` | One message per rep per batch. |
 | `crm.owner` | `id`, `tenant_id`, `system`, `external_owner_id`, `name`, `email`, `active`, `synced_at` | The CRM's owner roster, active and former, used to name who owns a company today. The link from a Scout user to their CRM owner id is **not** here: it lives on the TEN membership (`crm_owner_ids`, e.g. `{ hubspot: "123" }`) and is read with `crmOwnerId(ctx, userId, crm)`. This replaces v1's `Seller` table. |
 | `crm.field_mapping` | `id`, `tenant_id`, `system`, `scout_field`, `crm_object` (company, contact, deal), `crm_property`, `direction` (push, read), `transform` (none, cents_to_amount, date, enum_map), `enabled` | Per tenant. Defaults seeded per system. |
 | `crm.property_setup` | `tenant_id`, `system`, `group_name`, `created_properties[]`, `set_up_at`, `set_up_by` | Record of the custom fields Scout created. |
-| `crm.follow_through` | `handoff_id`, `baseline` (counts at push), `latest` (counts now), `tasks` (id, status, due), `checked_at`, `stage`, `owner_external_id` | Counts since handoff = latest minus baseline. |
+| `crm.follow_through` | `handoff_id`, `baseline` (counts at push), `latest` (counts now), `tasks` (id, status, due), `checked_at`, `sync_queued_at`, `stage`, `owner_external_id` | Counts since handoff = latest minus baseline. `sync_queued_at` is when the activity poll last queued a `crm.sync` for it. |
 | `crm.deal` | `id`, `tenant_id`, `account_id`, `system`, `external_id`, `name`, `stage`, `status` (open, won, lost), `amount_cents`, `currency`, `opened_at`, `closed_at`, `synced_at` | Cache of deal state. Never the source of truth (v1 rule). |
 | `crm.activity` | `id`, `tenant_id`, `account_id`, `handoff_id`, `system`, `external_id`, `kind` (email, reply, call, meeting, task_done), `occurred_at` | Each activity seen once; drives `crm.activity.observed`. |
 | `crm.task_link` | `step_id`, `system`, `external_task_id`, `due_at`, `status` | Playbook step to CRM task. |
+| `crm.setting` | `tenant_id`, `system`, `take_over_stale_ownership`, `push_new_people`, `follow_up_days`, `deals_polled_until`, `deals_poll_requested_at` | One row per tenant. `deals_polled_until` is the deal poll's cursor (5 minutes of overlap, 24 hours of look-back the first time; after a full page of 1,000 deals it is the last deal's modified time). `deals_poll_requested_at` is when a webhook last queued a deals poll for a deal Scout has not seen; another waits 5 minutes. |
+| `crm.company_check` | `tenant_id`, `account_id`, `system`, `domain`, `exists`, `company_external_id`, `owner_external_id`, `owner_name`, `lifecycle`, `crm_lifecycle`, `open_deals`, `checked_at` | The CRM check before review. `domain` (lower case) lets a lookup by domain reuse a check younger than 24 hours; `crm_lifecycle` is the CRM's own stage before deals are folded into `lifecycle`. |
+| `crm.webhook_receipt` | `id` (`whr_`), `tenant_id`, `connection_id`, `body`, `received_at` | Every inbound HubSpot webhook body, kept as received. |
+| `crm.mock_company`, `mock_person`, `mock_note`, `mock_task`, `mock_deal`, `mock_owner`, `mock_property`, `mock_activity`, `mock_failure` | all with `tenant_id` | The mock HubSpot's records (see CRM-E1). `mock_property` holds custom properties, `mock_activity` holds the emails, calls and meetings tests and the seed add, and `mock_failure` (`operation`, `kind` 429, 500 or timeout, `remaining`) makes an operation fail on purpose. |
 
 ## Depends on
 
@@ -75,11 +79,14 @@ tenant's credentials, rate limits, usage caps and call log.
 
 | Event | Data |
 |---|---|
-| `crm.handoff.completed` | `handoffId`, `accountId`, `assignmentId`, `handoffBatchId`, `system`, `companyExternalId`, `personExternalIds[]`, `ownerExternalId`, `ownershipAction` (assign, keep), `takenFromOwner` (nullable), `taskCount`, `companyLifecycle` (`none`, `open_deal`, `customer`: what the CRM said about the company at push time; ACC uses it with `crm.deal.changed` to keep `crm_status`) |
+| `crm.handoff.completed` | `handoffId`, `accountId`, `assignmentId`, `handoffBatchId`, `system`, `companyExternalId`, `personExternalIds[]`, `ownerExternalId`, `ownershipAction` (assign, keep), `takenFromOwner` (nullable), `taskCount`, `companyLifecycle` (`none`, `open_deal`, `customer`: `customer` when the CRM lifecycle is customer or any cached deal is won, `open_deal` when any cached deal is open; ACC uses it with `crm.deal.changed` and `crm.company.checked` to keep `crm_status`), `observedAt` (ACC applies a status only when this is newer than `account.crm_status_at`) |
 | `crm.handoff.failed` | `handoffId`, `accountId`, `assignmentId`, `system`, `attempt`, `retryable`, `reason` |
+| `crm.handoff.cancelled` | `handoffId`, `accountId`, `assignmentId`, `at`. Internal. Published when a decline or withdrawal stopped a handoff, and when an undo of a completed handoff finished (the handoff stays `completed` with `undone` set) |
+| `crm.company.checked` | `accountId`, `system`, `exists`, `companyExternalId` (nullable), `ownerName` (nullable), `companyLifecycle`, `observedAt`. A matched company also gets an `account` link |
+| `crm.lead.qualified` | `connectionId`, `contactId`. Internal. Published by the inbound webhook when a lifecycle change matches the qualified-lead rule; Intake consumes it |
 | `crm.handoff.needs_decision` | `handoffId`, `accountId`, `assignmentId`, `reason` (open_deal, customer, owned_elsewhere), `currentOwnerName` |
-| `crm.activity.observed` | `accountId`, `handoffId` (nullable), `system`, `externalId`, `kind` (email, reply, call, meeting, task_done), `occurredAt`, `actorCrmOwnerId` (nullable), `actorUserId` (nullable: the Scout user whose membership `crm_owner_ids` holds that owner; REV uses it for implied acceptance), `taskExternalId` and `stepId` (for `task_done` on a plan step task) |
-| `crm.deal.changed` | `accountId`, `system`, `dealExternalId`, `status` (open, won, lost), `previousStatus` (nullable), `stage`, `amountCents`, `currency`, `openedAt`, `closedAt` (nullable) |
+| `crm.activity.observed` | `accountId`, `handoffId` (nullable), `system`, `externalId`, `kind` (email, reply, call, meeting, task_done), `occurredAt`, `actorCrmOwnerId` (nullable), `actorUserId` (nullable: the Scout user whose membership `crm_owner_ids` holds that owner; REV uses it for implied acceptance), `taskExternalId` and `stepId` (for `task_done` on a plan step task). `actorOwnerExternalId` is read from the CRM for each activity, and `actorUserId` comes from Tenancy's `userForCrmOwner` |
+| `crm.deal.changed` | `accountId`, `system`, `dealExternalId`, `status` (open, won, lost), `previousStatus` (nullable), `stage`, `amountCents`, `currency`, `openedAt`, `closedAt` (nullable), `companyLifecycle`, `observedAt`. Published only when status or amount changed; a deal first seen already closed publishes its closed status; an unchanged re-read publishes nothing |
 
 `crm.handoff.completed` and `crm.deal.changed` are public webhook event types (see
 `public-api/outgoing-webhooks.md`); the others are internal.
@@ -88,22 +95,25 @@ tenant's credentials, rate limits, usage caps and call log.
 
 | Event | Does |
 |---|---|
-| `routing.assignment.created` | Queue `jobs.crm.handoff`, using the assignment's `ownershipDecision` (plain assign, or "push anyway, keep their owner") from REV's preflight. The push always starts on assignment, not acceptance (REV-E3 decision). |
-| `routing.assignment.declined` / `.withdrawn` | Undo the handoff (CRM-E3-S7): close the open tasks Scout created with "Declined in Scout: <reason>", give ownership back to the previous owner recorded on the handoff (or the assigner), add a line to the note. Never delete anything people wrote. |
+| `routing.assignment.created` | Queue `crm.handoff.push`, using the assignment's `ownershipDecision` (plain assign, or "push anyway, keep their owner") from REV's preflight. The push always starts on assignment, not acceptance (REV-E3 decision). With a `previousAssignmentId` (a reassign) it first requests the undo of the replaced assignment, the same request its withdrawal makes, so the new push takes the company from its original owner even when the withdrawal is handled later. |
+| `routing.assignment.declined` / `.withdrawn` | Undo the handoff (CRM-E3-S7): close the open tasks Scout created with "Declined in Scout: <reason label>", give ownership back to the previous owner recorded on the handoff (or the assigner), add a separate short note. Never delete or edit anything people wrote. A decline that arrives while the push runs sets `cancel_requested_at` first (CRM-E3-S7-AC4). Consumers of different event types are not ordered, so a decline or withdrawal handled before the assignment's `created` stores a `cancelled` handoff for it, and the later `created` pushes nothing. |
 | `playbooks.plan.created` / `.changed` | Create, update or close the CRM tasks for the plan's steps on handed-off accounts (step data read from the package provider). |
 | `playbooks.step.completed` | Complete the step's CRM task. |
 | `accounts.account.merged` | Repoint links from the merged id to the survivor; flag if both had different CRM companies. |
 | `jobs.history.republish` | Re-publish stored handoff, activity and deal events with `replay: true` (events-and-async.md). |
-| `accounts.person.added` | On a handed-off account, push the new person on the next sync if the tenant setting "Push new people" is on (default on). |
-| `tenancy.member.added` | If a `crm.owner` has the same email, suggest the match to an owner in Settings → Team; confirming writes the membership's `crm_owner_ids`. |
+| `accounts.person.added` | On a handed-off account whose setting "Push new people" is on (default on) and that has fewer than 10 people linked, queue `crm.person.push`. It pushes with the handoff's owner decision and links the person. |
+| `accounts.account.created` / `.updated` | Check the account's company in the CRM (`crm.company.check`) when it has a domain (on `.updated`, only when the domain changed). When the event carries `externalIds`, record them as links (CRM-E6-S2). |
+| `accounts.person.updated` | When the event carries `externalIds`, record them as links. |
+| `crm.lead.qualified` | Not consumed here; Intake consumes it. |
 
 ## Public interface (for other modules)
 
-- `preflightOwnership(ctx, accountId, sellerUserId)` → `{ result: assign | stop, reason, currentOwnerName, takenFrom }` (REV-E3 assign dialog; same pure rule the push uses)
-- `getLinks(ctx, accountId)`, `findLinkedAccount(ctx, system, externalId)`
-- `lookupCompany(ctx, domain)` (read-only CRM check, cached 24 hours)
+- `preflightOwnership(ctx, accountId, sellerUserId, { fresh })` → `{ result: new | assign | stop | blocked, message, reason, currentOwnerName, takenFrom }` (REV-E3 assign dialog; same pure rule the push uses). `fresh` (default true) asks the CRM now; false uses a stored check under 24 hours old (a bulk assign). A CRM that does not answer is a 503 `crm_unavailable` ("HubSpot didn't answer. Try again in a minute.").
+- `getLinks(ctx, accountId)`. There is no `findLinkedAccount`: Accounts already matches arrivals on `external_id` aliases.
+- `lookupCompany(ctx, domain)` (read-only CRM check, cached 24 hours), `companyChecks(ctx, accountIds)` (stored checks, at most 200), `latestHandoff` and `lastActivityAt`
+- `ownerMatches(ctx)` pairs active members that have no owner id with roster owners of the same email (case-insensitive), computed on read; confirming calls Tenancy `setCrmOwnerIds`. There is no stored suggestion and no `tenancy.member.added` consumer.
 - `fetchQualifiedLead(ctx, connectionId, contactId)`, `listQualifiedLeads(ctx, connectionId, since)` (for SRC-E6)
-- `handleCrmWebhook(ctx, connectionId, events)` (deal and engagement events routed from SRC's HubSpot endpoint)
+- `handleCrmWebhook(ctx, connectionId, rawBody)` (called by the inbound route; stores the body, enqueues `crm.sync` for each affected linked company, queues at most one `crm.deals.poll` per 5 minutes for deals Scout has not seen, and publishes `crm.lead.qualified` for lifecycle changes that match the rule). The route refuses an unknown, malformed or disabled connection with a logged 401.
 - `followThrough(ctx, accountId)`
 - `backfillWonDeals(ctx, { since, limit })` → closed-won deals with company, amount, close date and
   associated contacts, read only (`crm:backfillWonDeals` in OFF's win analysis; default last 24 months
@@ -124,9 +134,12 @@ Handoff lists, batches and messages are web-app screens (Sent) in R1, not `/v1` 
 
 Inbound CRM webhooks are optional; polling is the primary path in R1 (D28, see CRM-E6). When an admin
 sets up subscriptions by hand in HubSpot, HubSpot sends every subscription to one URL per connection,
-`POST /v1/inbound/hubspot/{connectionId}`, owned by Sources and intake (SRC-E6), which checks the
-signature once against the connection's optional `webhook_client_secret`. Contact lifecycle changes go
-to intake; deal and engagement events are handed to `handleCrmWebhook` here.
+`POST /v1/inbound/hubspot/{connectionId}`. In R1c the route sits outside `v1Route` (it has no principal) and Integrations
+checks it: `connectionTenant(connectionId)` finds the tenant, and the v3 signature is verified against the
+connection's `client_secret` (a second credential kept beside the token, never the connection's own
+credential). It answers 401 when the connection, the secret or the signature is wrong or the timestamp is
+over 5 minutes old, and 200 within a second otherwise. The body goes to `handleCrmWebhook` here; contact
+lifecycle changes reach Intake as `crm.lead.qualified`, so CRM never imports Intake.
 
 ## MCP tools
 
@@ -141,8 +154,10 @@ module's public interface.
 | Take over ownership from people not working the account | on |
 | Push new people on handed-off accounts | on |
 | Follow-up tasks | days 3, 7 and 14 after handoff |
-| Activity poll | every 15 minutes |
-| Deal poll | hourly |
+| Activity poll | every 15 minutes (a fixed tenant schedule, not a setting) |
+| Deal poll | hourly (fixed) |
+| Owner roster | daily at 05:00 UTC (fixed) |
+| Field mapping | the `taazaa_*` defaults seeded per tenant (`practice`, `best_offer`, `tier`, `fit`, `intent`, `priority`, `why_now`, `top_signals`, `research_topics`, `last_handoff`, and `scout_link`) |
 
 ## Open questions
 

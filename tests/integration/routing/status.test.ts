@@ -1,7 +1,9 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mergeAccounts } from '@/modules/accounts';
+import { seedMockCrm, syncOwners } from '@/modules/crm';
 import { rejectArrival, submitArrival } from '@/modules/intake';
+import { setConnectionSettings } from '@/modules/integrations';
 import { arrival } from '@/modules/intake/db/schema';
 import { accept, assign, changeStatus, decline, getAccountStatus, listAssignments } from '@/modules/routing';
 import { assignment, reviewStatusDef, statusChange } from '@/modules/routing/db/schema';
@@ -288,5 +290,25 @@ describe('assignment lists (REV-E2-S2)', () => {
     expect(p2.data.map((r) => r.id)).toEqual([made[0]]);
     expect(p2.nextCursor).toBeNull();
     await expect(run('garbage')).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe('CRM fields in the status (Ruling 19)', () => {
+  it('a principal with crm:push sees the handoff and the last activity; one without does not', async () => {
+    const ct = await routingTenant();
+    await ct.run((ctx) => seedMockCrm(ctx));
+    await ct.run((ctx) => syncOwners(ctx));
+    await ct.run((ctx) => setConnectionSettings(ctx, 'hubspot', { portal_id: '123' }));
+    const s = await member(ct, 'seller');
+    const a = await arrivedAccount(ct, { name: 'Crm Status Co' });
+    await asPerson(ct, (ctx) => assign(ctx, a, { sellerUserId: s }));
+    await runOutbox(ct.tenantId);
+    const leader = await asPerson(ct, (ctx) => getAccountStatus(ctx, a, { crm: true }));
+    expect(leader?.handoff).toMatchObject({ status: 'completed', ownershipAction: 'assign' });
+    expect(leader?.handoff?.crmUrl).toMatch(/^https:\/\/app\.hubspot\.com\/contacts\/123\/record\/0-2\//);
+    expect(leader?.lastActivityAt).toBeNull();
+    const agent = await asPerson(ct, (ctx) => getAccountStatus(ctx, a));
+    expect(agent).not.toHaveProperty('handoff');
+    expect(agent?.lastActivityAt).toBeNull();
   });
 });

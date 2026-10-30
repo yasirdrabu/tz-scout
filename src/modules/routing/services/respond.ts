@@ -47,7 +47,7 @@ async function lockAssignment(ctx: ModuleContext, id: string, sellerUserId?: str
 }
 
 /** Accepts a pending assignment on a locked row. The caller publishes the snapshot. */
-async function acceptLocked(ctx: ModuleContext, a: Assignment, how: 'seller' | 'auto_timeout', at: Date): Promise<void> {
+export async function acceptLocked(ctx: ModuleContext, a: Assignment, how: 'seller' | 'auto_timeout' | 'crm_activity', at: Date): Promise<void> {
   await ctx.tx
     .update(assignment)
     .set({ status: 'accepted', acceptedHow: how, respondedAt: at })
@@ -105,7 +105,7 @@ export async function decline(ctx: ModuleContext, assignmentId: string, input: D
     .update(accountReview)
     .set({ currentAssignmentId: null, flags: { ...flags, declinedBySeller: { assignmentId: a.id, sellerUserId: a.sellerUserId, sellerName, reasonKey, reasonLabel, at: at.toISOString() } } })
     .where(reviewWhere(ctx, a.accountId));
-  await publish(ctx, assignmentDeclined, { assignmentId: a.id, accountId: a.accountId, sellerUserId: a.sellerUserId, reasonKey, note });
+  await publish(ctx, assignmentDeclined, { assignmentId: a.id, accountId: a.accountId, sellerUserId: a.sellerUserId, reasonKey, reasonLabel, note });
   await moveStage(ctx, a.accountId, 'assignment_declined', `${a.id}:declined`);
   await publishReviewSnapshot(ctx, a.accountId);
 }

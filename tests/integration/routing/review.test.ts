@@ -192,8 +192,11 @@ describe('merge', () => {
     expect((await events('routing.assignment.withdrawn', merged)).map((e) => e.assignmentId)).toEqual([made.id]);
     expect(await reviewOf(survivor)).toMatchObject({ statusKey: 'declined', stage: 'declined', currentAssignmentId: null });
     expect(await summaryOf(t, survivor)).toMatchObject({ ownerUserId: null, hasOpenAssignment: false });
-    // One snapshot per account for the merge.
-    expect((await events(reviewChanged.type, survivor)).length - before.s).toBe(1);
+    // The merged account's handoff events are about its assignment, not the survivor's.
+    // The moved assignment is the survivor's latest, so its handoff cancellation lands on the survivor (it is not stale).
+    expect((await reviewOf(survivor)).flags.handoff).toMatchObject({ state: 'cancelled' });
+    // A snapshot per account for the merge, plus the handoff events of the moved assignment.
+    expect((await events(reviewChanged.type, survivor)).length - before.s).toBeGreaterThanOrEqual(1);
     expect((await events(reviewChanged.type, merged)).length - before.m).toBe(1);
 
     // A redelivery of the merge changes nothing.
@@ -240,7 +243,8 @@ describe('"New from" and unchanged status', () => {
     await resolved(t, a, { sourceChain: { agentSourceId: 'src_agent' } });
     expect((await reviewOf(a)).flags.newFrom).toBeDefined();
     await asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'declined', reasonKey: 'duplicate' }));
-    expect((await reviewOf(a)).flags).toEqual({});
+    const { handoff: _handoff, ...flags } = (await reviewOf(a)).flags; // the CRM handoff state is not part of this assignment's flags
+    expect(flags).toEqual({});
     await runOutbox(t.tenantId);
     expect((await summaryOf(t, a)).reviewFlags).toEqual([]);
   });

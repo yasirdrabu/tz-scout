@@ -6,7 +6,7 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { accountCreated, accountUpdated, factRecorded, personAdded, personUpdated, signalRecorded } from '../contracts/events';
 import type { ArrivalAccountFields, ArrivalForAccounts, FactKind } from '../contracts/types';
-import { account, accountAlias, fact } from '../db/schema';
+import { account, accountAlias, fact, personAlias } from '../db/schema';
 import { matchName } from '../domain/names';
 import { applyExclusion, type Exclusion } from './exclusion';
 import { ACCOUNT_COLUMNS, keepReplacedDomain, recordFacts, reproject, type FactInput } from './facts';
@@ -87,8 +87,13 @@ function accountFacts(a: ArrivalForAccounts, isShell: boolean): FactInput[] {
   return out;
 }
 
-/** `previousDomain`: the domain before this arrival's facts were projected. A replaced primary stays an alias. */
-async function addAliases(ctx: ModuleContext, accountId: string, a: ArrivalForAccounts, previousDomain: string | null): Promise<void> {
+type ExternalId = { system: string; id: string };
+
+/**
+ * `previousDomain`: the domain before this arrival's facts were projected. A replaced primary stays an alias.
+ * Returns the external ids this write added.
+ */
+async function addAliases(ctx: ModuleContext, accountId: string, a: ArrivalForAccounts, previousDomain: string | null): Promise<ExternalId[]> {
   await keepReplacedDomain(ctx, accountId, previousDomain);
   const [acc] = await ctx.tx.select().from(account).where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
   const rows: (typeof accountAlias.$inferInsert)[] = [];
@@ -96,9 +101,28 @@ async function addAliases(ctx: ModuleContext, accountId: string, a: ArrivalForAc
   if (domain && domain !== acc!.domain) rows.push({ tenantId: ctx.tenantId, accountId, kind: 'domain', value: domain });
   const name = a.account.name ? matchName(a.account.name) : '';
   if (name && name !== acc!.matchName) rows.push({ tenantId: ctx.tenantId, accountId, kind: 'name', value: name });
-  for (const x of a.externalIds) rows.push({ tenantId: ctx.tenantId, accountId, kind: 'external_id', system: x.system, value: x.id });
   if (rows.length) await ctx.tx.insert(accountAlias).values(rows).onConflictDoNothing();
+  if (a.externalIds.length === 0) return [];
+  const added = await ctx.tx
+    .insert(accountAlias)
+    .values(a.externalIds.map((x) => ({ tenantId: ctx.tenantId, accountId, kind: 'external_id', system: x.system, value: x.id })))
+    .onConflictDoNothing()
+    .returning({ system: accountAlias.system, value: accountAlias.value });
+  return added.map((x) => ({ system: x.system, id: x.value }));
 }
+
+/** Writes a person's external ids as aliases; returns the ones this write added. */
+async function addPersonAliases(ctx: ModuleContext, personId: string, ids: ExternalId[] | undefined): Promise<ExternalId[]> {
+  if (!ids?.length) return [];
+  const added = await ctx.tx
+    .insert(personAlias)
+    .values(ids.map((x) => ({ tenantId: ctx.tenantId, personId, kind: 'external_id', system: x.system, value: x.id })))
+    .onConflictDoNothing()
+    .returning({ system: personAlias.system, value: personAlias.value });
+  return added.map((x) => ({ system: x.system, id: x.value }));
+}
+
+const withIds = (ids: ExternalId[]) => (ids.length ? { externalIds: ids } : {});
 
 /** Projects `researcher_tier` onto the account when this arrival's tier fact is current. */
 async function projectResearchTier(ctx: ModuleContext, accountId: string, a: ArrivalForAccounts, factIds: string[]): Promise<void> {
@@ -117,12 +141,12 @@ async function projectResearchTier(ctx: ModuleContext, accountId: string, a: Arr
 }
 
 /** Published before the practice and exclusion events, so a new account is announced first. */
-async function publishCreated(ctx: ModuleContext, accountId: string, a: ArrivalForAccounts): Promise<void> {
+async function publishCreated(ctx: ModuleContext, accountId: string, a: ArrivalForAccounts, addedIds: ExternalId[]): Promise<void> {
   const [acc] = await ctx.tx.select().from(account).where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, accountId)));
   await publish(
     ctx,
     accountCreated,
-    { accountId, name: acc!.name, domain: acc!.domain, isShell: acc!.isShell, arrivalId: a.arrivalId },
+    { accountId, name: acc!.name, domain: acc!.domain, isShell: acc!.isShell, arrivalId: a.arrivalId, ...withIds(addedIds) },
     subjectOf(accountId),
   );
 }
@@ -135,6 +159,7 @@ async function publishEvents(
   people: PersonResult[],
   signals: StoredSignal[],
   factIds: string[],
+  addedIds: { account: ExternalId[]; people: ExternalId[][] },
 ): Promise<void> {
   const subject = subjectOf(accountId);
   const facts = factIds.length
@@ -145,12 +170,15 @@ async function publishEvents(
     : [];
   if (!created) {
     const changedKeys = [...new Set(facts.filter((f) => !f.personId && f.status === 'current').map((f) => f.key))];
-    if (changedKeys.length) await publish(ctx, accountUpdated, { accountId, changedKeys, arrivalId: a.arrivalId }, subject);
+    if (changedKeys.length || addedIds.account.length) {
+      await publish(ctx, accountUpdated, { accountId, changedKeys, arrivalId: a.arrivalId, ...withIds(addedIds.account) }, subject);
+    }
   }
-  for (const p of people) {
-    if (!p.existing) await publish(ctx, personAdded, { accountId, personId: p.personId, roleKeys: p.roleKeys, arrivalId: a.arrivalId }, subject);
-    else if (p.changedKeys.length) {
-      await publish(ctx, personUpdated, { accountId, personId: p.personId, changedKeys: p.changedKeys, roleKeys: p.roleKeys, arrivalId: a.arrivalId }, subject);
+  for (const [i, p] of people.entries()) {
+    const ids = withIds(addedIds.people[i] ?? []);
+    if (!p.existing) await publish(ctx, personAdded, { accountId, personId: p.personId, roleKeys: p.roleKeys, arrivalId: a.arrivalId, ...ids }, subject);
+    else if (p.changedKeys.length || ids.externalIds) {
+      await publish(ctx, personUpdated, { accountId, personId: p.personId, changedKeys: p.changedKeys, roleKeys: p.roleKeys, arrivalId: a.arrivalId, ...ids }, subject);
     }
   }
   for (const f of facts) {
@@ -237,9 +265,10 @@ export async function upsertFromArrival(
   const factIds = await recordFacts(ctx, id, null, accountFacts(opts.personId ? { ...a, facts: [] } : a, target.isShell), chain, a.arrivalId);
   await reproject(ctx, id);
   // 3. Aliases.
-  await addAliases(ctx, id, a, before?.domain ?? null);
+  const addedAccountIds = await addAliases(ctx, id, a, before?.domain ?? null);
   // 4. People.
   const people: PersonResult[] = [];
+  const addedPersonIds: ExternalId[][] = [];
   if (opts.personId) {
     const input = a.facts.map((f) => ({ key: f.key, value: f.value, url: f.url, note: f.note, observedAt: f.observedAt ?? a.receivedAt }));
     const r = await updatePersonFromArrival(ctx, id, opts.personId, input, chain, a.arrivalId);
@@ -257,6 +286,7 @@ export async function upsertFromArrival(
     });
     people.push(r);
     factIds.push(...r.factIds);
+    addedPersonIds.push(await addPersonAliases(ctx, r.personId, p.externalIds));
   }
   if (people.length) await repickPrimary(ctx, id);
   // 5. Signals.
@@ -264,7 +294,7 @@ export async function upsertFromArrival(
   for (const s of a.signals) signals.push(await storeSignal(ctx, id, s, chain, a.arrivalId, a.receivedAt));
   // 6. Research tier.
   await projectResearchTier(ctx, id, a, factIds);
-  if (target.created) await publishCreated(ctx, id, a);
+  if (target.created) await publishCreated(ctx, id, a, addedAccountIds);
   // 7. Practices. A new account's practices are part of its creation, not an update.
   const practiceId = await resolvePractice(ctx, a.practiceHint);
   if (practiceId) await setPractices(ctx, id, [practiceId], 'hint', { publish: !target.created, arrivalId: a.arrivalId });
@@ -274,7 +304,7 @@ export async function upsertFromArrival(
   const sourceIds = [chain.personSourceId, chain.agentSourceId, chain.vendorSourceId].filter((s): s is string => !!s);
   await writeSummary(ctx, id, { addSourceIds: sourceIds });
   // 10. Events (account.created went out after step 6).
-  await publishEvents(ctx, id, a, target.created, people, signals, factIds);
+  await publishEvents(ctx, id, a, target.created, people, signals, factIds, { account: addedAccountIds, people: addedPersonIds });
 
   return {
     accountId: id,

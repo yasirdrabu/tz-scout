@@ -3,7 +3,7 @@ import type { ModuleContext } from '@/platform/context';
 import { newId } from '@/platform/ids';
 import { upsertSchedule } from '@/platform/scheduler';
 import { relationshipDefault, source } from './db/schema';
-import { waitingExpireJob } from './contracts/jobs';
+import { qualifiedLeadsPollJob, waitingExpireJob } from './contracts/jobs';
 
 /** Vendor-level sources every tenant starts with (SRC-E1-S1-AC4). `settings.key` is what `via_vendor` matches. */
 export const DEFAULT_VENDOR_SOURCES = [
@@ -51,5 +51,10 @@ export async function seedIntakeDefaults(ctx: ModuleContext): Promise<void> {
   await upsertSchedule(
     { actor: ctx.actor, correlationId: ctx.correlationId },
     { tenantId, jobName: waitingExpireJob.name, cron: '0 4 * * *', timezone: 'UTC', payload: {} },
+  );
+  // Ruling 14: HubSpot qualified leads, every 15 minutes.
+  await upsertSchedule(
+    { actor: ctx.actor, correlationId: ctx.correlationId },
+    { tenantId, jobName: qualifiedLeadsPollJob.name, cron: '*/15 * * * *', timezone: 'UTC', payload: {} },
   );
 }

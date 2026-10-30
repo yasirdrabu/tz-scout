@@ -1,0 +1,2 @@
+ALTER TABLE "crm"."mock_failure" DROP CONSTRAINT "mock_failure_kind_valid";--> statement-breakpoint
+ALTER TABLE "crm"."mock_failure" ADD CONSTRAINT "mock_failure_kind_valid" CHECK ("crm"."mock_failure"."kind" in ('401', '403', '429', '500', 'timeout'));

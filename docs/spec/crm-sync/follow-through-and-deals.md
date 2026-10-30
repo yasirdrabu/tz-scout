@@ -14,7 +14,11 @@ record; Scout reads, never writes, deal state.
   deals). Follow-through shows counts above the baseline, so a previous owner's history doesn't count.
 - **How changes arrive (R1):** scheduled polls are the primary path: activity every 15 minutes, deals
   hourly (D28). CRM webhooks, where set up by hand and verified with `webhook_client_secret`, are an
-  optional faster path. Both feed the same idempotent job.
+  optional faster path. Both feed the same idempotent job. The activity poll only picks the accounts due
+  a check (up to 200, least recently checked or queued first) and queues one `crm.sync` per account;
+  each sync reads its account in its own job, so one slow or failing account does not hold up the rest.
+  The deal poll reads at most 1,000 deals a run; after a full page it continues from the last deal's
+  modified time on the next run.
 - **Activity:** each new email, reply, call, meeting or completed task on a handed-off company becomes
   one `crm.activity` row and one `crm.activity.observed` event. Activities are keyed by
   (`system`, `external_id`) so a webhook and a poll never double count.

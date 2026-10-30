@@ -137,6 +137,8 @@ export type ArrivalPerson = {
   linkedinUrl?: string;
   roleKeys?: string[];
   decisionNote?: string;
+  /** Outside ids for this person, for example `{ system: 'hubspot', id: '123' }`. */
+  externalIds?: { system: string; id: string }[];
 };
 
 type ArrivalSignalBase = {

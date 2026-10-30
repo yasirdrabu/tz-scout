@@ -50,6 +50,7 @@ describe('assign (REV-E2-S1)', () => {
       notes: 'Call the CIO',
       ownershipDecision: 'assign',
       previousAssignmentId: null,
+      bulkId: null,
     });
     expect(await snapshots(a)).toHaveLength(2); // creation, then one for the approve-and-assign write
     await runOutbox(t.tenantId);
@@ -100,7 +101,7 @@ describe('assign (REV-E2-S1)', () => {
     ]);
     expect((await events(a)).map((e) => e.type)).toEqual(['routing.assignment.created', 'routing.assignment.withdrawn', 'routing.assignment.created']);
     expect((await events(a))[1]!.data).toMatchObject({ assignmentId: first.id, replacedBy: second.id });
-    expect((await reviewOf(a)).flags).toEqual({});
+    expect((await reviewOf(a)).flags).toEqual({ handoff: expect.objectContaining({ state: 'sending' }) });
   });
 
   it('refuses a declined account (Ruling 14), an invited seller and someone who cannot take assignments', async () => {
@@ -157,6 +158,11 @@ describe('bulk (REV-E2-S1-AC3)', () => {
       ctx.tx.select().from(assignment).where(and(inArray(assignment.accountId, accounts), eq(assignment.status, 'pending'))),
     );
     expect(open.map((r) => r.accountId).sort()).toEqual([accounts[0], accounts[2]].sort());
+    // One bulk id for the run, on every assignment it created (Ruling 8).
+    const bulkIds = [accounts[0]!, accounts[2]!].map(async (a) => (await events(a)).find((e) => e.type === assignmentCreated.type)!.data.bulkId);
+    const [first, second] = await Promise.all(bulkIds);
+    expect(first).toMatch(/^blk_/);
+    expect(second).toBe(first);
     // One snapshot per account that changed (each has its creation snapshot first); none for the refused one.
     expect((await snapshots(accounts[0]!)).length).toBe(2);
     expect((await snapshots(accounts[1]!)).length).toBe(2); // creation and the decline

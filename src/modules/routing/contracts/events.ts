@@ -38,6 +38,8 @@ export const assignmentCreated = defineEvent(
     notes: z.string().nullable(),
     ownershipDecision: z.enum(['assign', 'keep']),
     previousAssignmentId: z.string().nullable(),
+    /** One id per bulk run, null for a single assign; CRM groups handoffs by it. Events stored before it parse as null. */
+    bulkId: z.string().nullable().default(null),
   }),
 );
 
@@ -60,6 +62,8 @@ export const assignmentDeclined = defineEvent(
     accountId: z.string(),
     sellerUserId: z.string(),
     reasonKey: z.string(),
+    /** Added later, so events stored before it have none. */
+    reasonLabel: z.string().optional(),
     note: z.string().nullable(),
   }),
 );

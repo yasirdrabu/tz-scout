@@ -38,7 +38,7 @@ describe('migrateAll', () => {
   });
 
   it('orders modules platform, tenancy, integrations, ai, offers', () => {
-    expect([...MODULE_ORDER]).toEqual(['platform', 'tenancy', 'integrations', 'ai', 'offers', 'accounts', 'intake', 'scoring', 'routing']);
+    expect([...MODULE_ORDER]).toEqual(['platform', 'tenancy', 'integrations', 'ai', 'offers', 'accounts', 'crm', 'intake', 'scoring', 'routing']);
   });
 
   it('applies a migration once and applies 0 on the second run', async () => {
@@ -50,6 +50,7 @@ describe('migrateAll', () => {
       ai: probeMigrations(),
       offers: emptyMigrations(),
       accounts: emptyMigrations(),
+      crm: emptyMigrations(),
       intake: emptyMigrations(),
       scoring: emptyMigrations(),
       routing: emptyMigrations(),

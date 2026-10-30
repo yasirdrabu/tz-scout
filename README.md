@@ -39,6 +39,12 @@ Bring a workspace built before R1b up to date (scoring and routing defaults and 
 npm run scout -- backfill-r1b taazaa
 ```
 
+Bring a workspace built before R1c up to date (CRM defaults and schedules, a company check for every account with a domain and none yet, links from the HubSpot ids accounts already carry, and the qualified-lead poll schedule). Seed does this for its own tenants and loads sample HubSpot data while the HubSpot connection is in mock mode; it is safe to run again:
+
+```bash
+npm run scout -- backfill-r1c taazaa
+```
+
 Send an arrival with the development key that seed printed (it is bound to the Local development agent):
 
 ```bash
@@ -69,7 +75,7 @@ npm run e2e       # Playwright; starts its own server on 4240 and a throwaway da
 
 ```bash
 npm run build     # Next.js standalone build plus dist/cli.js
-node dist/cli.js <migrate | seed | backfill-r1b | worker | relay | scheduler | all-background | web>
+node dist/cli.js <migrate | seed | backfill-r1b | backfill-r1c | worker | relay | scheduler | all-background | web>
 ```
 
 The container image (`infra/docker/`) runs the same CLI; the role is picked by the command.

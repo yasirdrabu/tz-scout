@@ -17,7 +17,9 @@ reading the contact and company from the CRM through the adapter contract.
 - Which change counts as qualified is the intake setting stored on the CRM connection (INT connection
   settings: `qualified_lead_rule` = property and value, e.g. `lifecyclestage = marketingqualifiedlead`,
   and whether webhooks are expected or only the poll runs). It is edited on the CRM connection's
-  settings screen, read by SRC-E6, and applied by this module when querying.
+  settings screen, read by SRC-E6, and applied by this module when querying. For the lifecycle rule the
+  HubSpot connector reads the stage date (`hs_lifecyclestage_<value>_date`) only, so a contact already
+  past the stage (a sales qualified lead or a customer) still counts as qualified when it has that date.
 - **Polling is the primary path; Scout does not register HubSpot webhook subscriptions** (spec's call,
   D28). A private app token cannot create webhook subscriptions through the API, and private-app
   webhook signatures are checked with the app's client secret, which the token does not carry. So:

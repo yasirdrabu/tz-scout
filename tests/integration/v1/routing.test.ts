@@ -13,6 +13,7 @@ import { POST as bulkRoute } from '@/app/v1/review-queue/bulk/route';
 import { GET as countRoute } from '@/app/v1/review-queue/count/route';
 import { GET as queueRoute } from '@/app/v1/review-queue/route';
 import { GET as getSettings, PUT as putSettings } from '@/app/v1/settings/review/route';
+import { seedMockCrm } from '@/modules/crm';
 import { assignmentCreated } from '@/modules/routing';
 import { membership } from '@/modules/tenancy/db/schema';
 import { SYSTEM_GRANTOR, addMember, createApiKey, createTenant, handleDevSignIn, setPrincipalCacheTtl, type Permission } from '@/modules/tenancy';
@@ -55,7 +56,8 @@ const as = (who: Who, handler: (r: Request) => Promise<Response>, path: string, 
 
 async function person(role: 'leader' | 'seller' | 'operator'): Promise<{ id: string; cookie: string }> {
   const u = await seedUser({ signedIn: true });
-  await run((ctx) => addMember(ctx, { email: u.email, role }));
+  // Sellers get a HubSpot owner id: the CRM preflight blocks an assignment without one.
+  await run((ctx) => addMember(ctx, { email: u.email, role, ...(role === 'seller' ? { crmOwnerIds: { hubspot: `mock-${u.id}` } } : {}) }));
   return { id: u.id, cookie: await signIn(u.id) };
 }
 
@@ -238,6 +240,19 @@ describe('assign, respond and withdraw', () => {
     expect(await res.json()).toMatchObject({ preflight: { result: 'new' }, approves_to: { key: 'reviewed', label: 'Reviewed' }, replaces: null });
     expect((await as('seller', accountAction, `accounts/${a}:assign-preview`, 'POST', { seller_user_id: ids.seller })).status).toBe(403);
     expect((await as('leader', accountAction, `accounts/${a}:assign-preview`, 'POST', {})).status).toBe(400);
+  });
+
+  it('shows the real CRM preflight, and refuses an open-deal company unless the leader keeps their owner', async () => {
+    await run((ctx) => seedMockCrm(ctx));
+    const a = await arrivedAccount(tenant(), { name: 'Open Deal Co', domain: 'open-deal.example', sourceChain: { agentSourceId: ash.agentId } });
+    const message = 'Open deal owned by Vijay Kumar: will not change owner';
+    const preview = await as('leader', accountAction, `accounts/${a}:assign-preview`, 'POST', { seller_user_id: ids.seller });
+    expect((await preview.json()).preflight).toEqual({ result: 'stop', message });
+    const refused = await as('leader', accountAction, `accounts/${a}:assign`, 'POST', { seller_user_id: ids.seller });
+    expect(refused.status).toBe(409);
+    expect(JSON.stringify(await refused.json())).toContain(message);
+    const kept = await as('leader', accountAction, `accounts/${a}:assign`, 'POST', { seller_user_id: ids.seller, ownership_decision: 'keep' });
+    expect(kept.status).toBe(202);
   });
 
   it('the seller declines with a reason, accepted or not; the copy comes back as 400s', async () => {

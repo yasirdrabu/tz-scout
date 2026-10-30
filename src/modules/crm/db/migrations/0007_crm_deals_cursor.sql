@@ -1,0 +1,1 @@
+ALTER TABLE "crm"."setting" ADD COLUMN "deals_polled_until" timestamp with time zone;

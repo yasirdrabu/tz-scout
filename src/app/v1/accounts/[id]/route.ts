@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { convertShell, editAccount, mergeAccounts, overrideExclusion, pinPrimary } from '@/modules/accounts';
+import { convertShell, filterVisibleAccountIds, editAccount, mergeAccounts, overrideExclusion, pinPrimary } from '@/modules/accounts';
+import { checkFollowThrough, push } from '@/modules/crm';
 import { submitArrival } from '@/modules/intake';
 import { assign, markSeen, previewAssign, type AssignInput } from '@/modules/routing';
 import { can } from '@/modules/tenancy';
@@ -44,6 +45,7 @@ const assignBody = z.strictObject({
   ownership_decision: z.enum(['assign', 'keep']).optional(),
 });
 const previewBody = z.strictObject({ seller_user_id: z.string() });
+const pushBody = z.strictObject({ keep_current_owner: z.boolean().optional() });
 const shellBody = z.strictObject({ name: z.string(), domain: z.string() });
 
 /** `POST /accounts/{id}:action`. All are people only; the service of each checks the data limit. Assigning is 202. */
@@ -76,6 +78,18 @@ export const POST = byAction('accounts', {
   'assign-preview': v1Route({ permission: 'assign:act', peopleOnly: true }, async (req, _principal, ctx) => {
     const { id } = idAndAction(req, 'accounts');
     return previewAssign(ctx, id, (await parseBody<{ sellerUserId: string }>(req, previewBody)).sellerUserId);
+  }),
+  /** Push to the CRM (202 `{ handoff_id }`). An API key with `crm:push` may call it; the body is optional. */
+  push: v1Route({ permission: 'crm:push' }, async (req, _principal, ctx) => {
+    const { id } = idAndAction(req, 'accounts');
+    const { keepCurrentOwner } = (await req.clone().text()).trim() ? await parseBody<{ keepCurrentOwner?: boolean }>(req, pushBody) : { keepCurrentOwner: undefined };
+    return accepted(await push(ctx, id, keepCurrentOwner === undefined ? {} : { keepCurrentOwner }));
+  }),
+  'check-follow-through': v1Route({ permission: 'crm:push', peopleOnly: true }, async (req, _principal, ctx) => {
+    const { id } = idAndAction(req, 'accounts');
+    if ((await filterVisibleAccountIds(ctx, [id])).length === 0) throw notFound();
+    await checkFollowThrough(ctx, id);
+    return accepted({});
   }),
   /** The assigned seller has seen the new arrival ("New from <source>"). No body. */
   seen: v1Route({ permission: 'assignments:respond', peopleOnly: true }, async (req, _principal, ctx) => markSeen(ctx, idAndAction(req, 'accounts').id)),

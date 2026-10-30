@@ -247,6 +247,25 @@ export async function setCrmOwnerIds(
   });
 }
 
+/** Sets one CRM's owner id on a membership and leaves the other CRMs' ids as they are. */
+export async function setCrmOwnerId(ctx: ModuleContext, membershipId: string, crm: string, ownerId: string): Promise<void> {
+  const clean = cleanCrmIds({ [crm]: ownerId });
+  await lockTenant(ctx, 'crm');
+  const m = await load(ctx, membershipId);
+  await assertCrmIdsFree(ctx, clean, membershipId);
+  const merged = { ...(m.crmOwnerIds ?? {}), ...clean };
+  await ctx.tx
+    .update(membership)
+    .set({ crmOwnerIds: sql`coalesce(${membership.crmOwnerIds}, '{}'::jsonb) || ${JSON.stringify(clean)}::jsonb`, updatedAt: new Date() })
+    .where(eq(membership.id, membershipId));
+  await audit(ctx, {
+    action: 'tenancy.member.crm_owner_ids_changed',
+    subject: { type: 'membership', id: membershipId },
+    before: { crmOwnerIds: m.crmOwnerIds },
+    after: { crmOwnerIds: merged },
+  });
+}
+
 /** The user's id in `crm` (for example the HubSpot owner id), or null. */
 export async function crmOwnerId(ctx: ModuleContext, userId: string, crm: string): Promise<string | null> {
   const [row] = await ctx.tx

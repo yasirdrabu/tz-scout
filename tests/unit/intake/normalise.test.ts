@@ -12,6 +12,8 @@ describe('normaliseDomain', () => {
     ['192.168.0.1', null],
     ['not a url', null],
     ['gmail.com', null],
+    ['https://www.Qualified.EXAMPLE/x', 'qualified.example'],
+    ['acme.invalidtld', null],
     ['https://www.miamidade.gov/global/transportation/home.page', 'miamidade.gov'],
     ['  Acme.COM ', 'acme.com'],
     ['https://blog.acme.com/post', 'acme.com'],
