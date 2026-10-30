@@ -90,7 +90,7 @@ describe('accept and decline (REV-E2-S2, REV-E2-S3)', () => {
     expect(review).toMatchObject({ statusKey: 'reviewed', stage: 'reviewed', currentAssignmentId: null });
     expect(review.flags.declinedBySeller).toMatchObject({ assignmentId: id, sellerUserId: seller, reasonKey: 'not_my_territory', reasonLabel: 'Not my territory' });
     expect(review.flags.declinedBySeller!.sellerName).toBeTruthy();
-    expect((await published(t, a)).find((e) => e.type === assignmentDeclined.type)!.data).toEqual({ assignmentId: id, accountId: a, sellerUserId: seller, reasonKey: 'not_my_territory', note: null });
+    expect((await published(t, a)).find((e) => e.type === assignmentDeclined.type)!.data).toEqual({ assignmentId: id, accountId: a, sellerUserId: seller, reasonKey: 'not_my_territory', reasonLabel: 'Not my territory', note: null });
     await runOutbox(t.tenantId);
     expect(await summaryOf(t, a)).toMatchObject({ ownerUserId: null, hasOpenAssignment: false, reviewStatusKey: 'reviewed' });
     const queue = await asPerson(t, (ctx) => listQueue(ctx, {}));

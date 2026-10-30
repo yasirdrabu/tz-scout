@@ -105,7 +105,7 @@ export async function decline(ctx: ModuleContext, assignmentId: string, input: D
     .update(accountReview)
     .set({ currentAssignmentId: null, flags: { ...flags, declinedBySeller: { assignmentId: a.id, sellerUserId: a.sellerUserId, sellerName, reasonKey, reasonLabel, at: at.toISOString() } } })
     .where(reviewWhere(ctx, a.accountId));
-  await publish(ctx, assignmentDeclined, { assignmentId: a.id, accountId: a.accountId, sellerUserId: a.sellerUserId, reasonKey, note });
+  await publish(ctx, assignmentDeclined, { assignmentId: a.id, accountId: a.accountId, sellerUserId: a.sellerUserId, reasonKey, reasonLabel, note });
   await moveStage(ctx, a.accountId, 'assignment_declined', `${a.id}:declined`);
   await publishReviewSnapshot(ctx, a.accountId);
 }

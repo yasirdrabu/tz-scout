@@ -33,8 +33,9 @@ export {
   type OwnershipAction,
 } from './contracts/types';
 export { capabilitiesSchema, crmOperations, type CrmAdapter, type CrmCapabilities, type CrmDeal, type QualifiedLead } from './contracts/adapter';
-export { crmAccountCreated, crmAccountUpdated, crmConsumers, crmTenantDefaults } from './consumers';
-export { companyCheckHandler, crmJobHandlers, ownersSyncHandler } from './jobs';
+export { crmAccountCreated, crmAccountUpdated, crmAssignmentCreated, crmConsumers, crmTenantDefaults } from './consumers';
+export { companyCheckHandler, crmJobHandlers, handoffPushHandler, ownersSyncHandler } from './jobs';
+export { MAX_ATTEMPTS, NO_CRM_OWNER, RETRIES_FAILED, TOKEN_REFUSED, batchFor, queueHandoff, refreshBatch, runPush } from './services/handoff';
 export { companyLink, getLinks, linkExternalIds, recordLink, type AccountLinks, type LinkRow, type RecordLink } from './services/links';
 export { CHECK_TTL_MS, checkCompany, companyChecks, lookupCompany, queueCompanyCheck, refreshCheck, type CompanyCheck } from './services/checks';
 export {

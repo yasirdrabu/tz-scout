@@ -1,9 +1,11 @@
 import { getAccount } from '@/modules/accounts';
 import { accountCreated, accountUpdated } from '@/modules/accounts/contracts/events';
+import { assignmentCreated } from '@/modules/routing/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { seedCrmDefaults } from './defaults';
 import { queueCompanyCheck } from './services/checks';
+import { queueHandoff } from './services/handoff';
 
 /** Gives a new tenant its CRM setting, HubSpot field mapping and polling schedules. */
 export const crmTenantDefaults = defineConsumer({
@@ -32,5 +34,13 @@ export const crmAccountUpdated = defineConsumer({
   },
 });
 
+/** The push starts on assignment, not acceptance (CRM-E3-S1-AC3). */
+export const crmAssignmentCreated = defineConsumer({
+  name: 'crm.assignment_created',
+  event: assignmentCreated,
+  orderedBy: (e) => e.data.accountId,
+  handle: async (e, ctx) => queueHandoff(ctx, e.data),
+});
+
 /** Every CRM consumer, for the worker's list. */
-export const crmConsumers = [crmTenantDefaults, crmAccountCreated, crmAccountUpdated];
+export const crmConsumers = [crmTenantDefaults, crmAccountCreated, crmAccountUpdated, crmAssignmentCreated];

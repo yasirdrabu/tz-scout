@@ -1,7 +1,8 @@
 import { defineJobHandler } from '@/platform/runtime/jobs';
 import { ScoutError } from '@/platform/errors';
-import { companyCheckJob, ownersSyncJob } from './contracts/jobs';
+import { companyCheckJob, handoffPushJob, ownersSyncJob } from './contracts/jobs';
 import { checkCompany } from './services/checks';
+import { runPush } from './services/handoff';
 import { syncOwners } from './services/owners';
 
 /** Checks one new account against the CRM. */
@@ -19,5 +20,10 @@ export const ownersSyncHandler = defineJobHandler(ownersSyncJob, async (_e, ctx)
   }
 });
 
+/** Pushes one handoff to the CRM (CRM-E3). */
+export const handoffPushHandler = defineJobHandler(handoffPushJob, async (e, ctx) => {
+  await runPush(ctx, e.data.handoffId, new Date());
+});
+
 /** Every CRM job handler, for the worker's list. */
-export const crmJobHandlers = [companyCheckHandler, ownersSyncHandler];
+export const crmJobHandlers = [companyCheckHandler, ownersSyncHandler, handoffPushHandler];

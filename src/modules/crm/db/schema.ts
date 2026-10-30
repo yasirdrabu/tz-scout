@@ -50,6 +50,10 @@ export const handoff = crm.table(
     tenantId: text('tenant_id').notNull(),
     accountId: text('account_id').notNull(),
     assignmentId: text('assignment_id').notNull(),
+    /** From `routing.assignment.created`: CRM knows assignments only from events. */
+    sellerUserId: text('seller_user_id'),
+    assignedBy: text('assigned_by'),
+    assignmentNote: text('assignment_note'),
     handoffBatchId: text('handoff_batch_id'),
     system: text('system').notNull(),
     status: text('status').notNull().default('queued'), // queued | running | completed | needs_decision | failed | cancelled

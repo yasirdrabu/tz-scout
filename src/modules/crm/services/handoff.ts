@@ -1,0 +1,332 @@
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import type { z } from 'zod';
+import { getAccount, getFacts, type PersonView } from '@/modules/accounts';
+import { gateway, RateLimitedError } from '@/modules/integrations';
+import type { assignmentCreated } from '@/modules/routing/contracts/events';
+import { crmOwnerId, members, tenantSummary, tenantTimezone } from '@/modules/tenancy';
+import { config } from '@/platform/config';
+import type { ModuleContext } from '@/platform/context';
+import { withTenant } from '@/platform/db/tenant';
+import { ScoutError } from '@/platform/errors';
+import { enqueueJob, publish } from '@/platform/events/outbox';
+import { newId } from '@/platform/ids';
+import type { CrmAdapter } from '../contracts/adapter';
+import { handoffCancelled, handoffCompleted, handoffFailed, handoffNeedsDecision } from '../contracts/events';
+import { handoffPushJob } from '../contracts/jobs';
+import { handoffPackageProvider } from '../contracts/ports';
+import { DEFAULT_FOLLOW_UP_DAYS } from '../contracts/types';
+import { crmSetting, fieldMapping, followThrough, handoff, handoffBatch } from '../db/schema';
+import { propertyValues } from '../domain/fields';
+import { buildNote } from '../domain/note';
+import { buildTasks } from '../domain/tasks';
+import { getLinks, recordLink } from './links';
+import { recheckOwnership, stopReason } from './preflight';
+
+/** The run that reaches this many attempts is the last one (the job's maxDeliver, Ruling 4). */
+export const MAX_ATTEMPTS = handoffPushJob.opts.maxDeliver ?? 6;
+/** At most this many people go with a push, primary first. */
+export const PUSH_PEOPLE_LIMIT = 10;
+export const REASON_LIMIT = 300;
+
+export const NO_CRM_OWNER = "This seller isn't linked to a CRM owner";
+export const TOKEN_REFUSED = 'HubSpot refused the token. Enter a new one in Integrations.';
+export const RETRIES_FAILED = 'HubSpot was busy and every retry failed.';
+export const NO_DOMAIN = 'This account has no website, so HubSpot cannot match it.';
+
+type Created = z.infer<typeof assignmentCreated.data>;
+type Handoff = typeof handoff.$inferSelect;
+
+/** Not worth retrying: the reason is shown as is. */
+class NotPushable extends Error {}
+/** A cancel was requested (Ruling 6): stop before the next write. */
+class Cancelled extends Error {}
+
+const byId = (ctx: ModuleContext, id: string) => and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.id, id));
+
+/** The handoff batch for a bulk run, found or made; a null key makes a batch of its own (Ruling 8). */
+export async function batchFor(ctx: ModuleContext, bulkKey: string | null, createdBy: string): Promise<string> {
+  const id = newId('hbt');
+  await ctx.tx.insert(handoffBatch).values({ id, tenantId: ctx.tenantId, bulkKey, createdBy }).onConflictDoNothing();
+  if (!bulkKey) return id;
+  const [row] = await ctx.tx
+    .select({ id: handoffBatch.id })
+    .from(handoffBatch)
+    .where(and(eq(handoffBatch.tenantId, ctx.tenantId), eq(handoffBatch.bulkKey, bulkKey)));
+  return row!.id;
+}
+
+/** Rewrites the batch name and the per-seller messages. Task 8 fills it in; until then it does nothing. */
+export async function refreshBatch(_ctx: ModuleContext, _batchId: string): Promise<void> {}
+
+/** Queues one handoff per assignment (CRM-E3-S1-AC1) and its push job. */
+export async function queueHandoff(ctx: ModuleContext, e: Created): Promise<void> {
+  const [have] = await ctx.tx
+    .select({ id: handoff.id })
+    .from(handoff)
+    .where(and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.assignmentId, e.assignmentId)));
+  if (have) return;
+  const [setting] = await ctx.tx.select({ system: crmSetting.system }).from(crmSetting).where(eq(crmSetting.tenantId, ctx.tenantId));
+  const id = newId('hof');
+  const inserted = await ctx.tx
+    .insert(handoff)
+    .values({
+      id,
+      tenantId: ctx.tenantId,
+      accountId: e.accountId,
+      assignmentId: e.assignmentId,
+      sellerUserId: e.sellerUserId,
+      assignedBy: e.assignedBy,
+      assignmentNote: e.notes,
+      handoffBatchId: await batchFor(ctx, e.bulkId ?? null, e.assignedBy),
+      system: setting?.system ?? 'hubspot',
+      ownershipAction: e.ownershipDecision,
+    })
+    .onConflictDoNothing()
+    .returning({ id: handoff.id });
+  if (inserted.length > 0) await enqueueJob(ctx, handoffPushJob, { handoffId: id });
+}
+
+/** Every job that writes to the CRM for an account takes this first (Ruling 5). */
+export async function lockAccount(ctx: ModuleContext, accountId: string): Promise<void> {
+  await ctx.tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`crm:${ctx.tenantId}:${accountId}`}))`);
+}
+
+/**
+ * The `crm.handoff.push` job (CRM-E3 Flow, Rulings 3 to 6 and 9). A retryable error is rethrown so the platform
+ * retries it, until the run that reaches MAX_ATTEMPTS; that run, and any non-retryable error, marks the handoff
+ * failed and returns.
+ */
+export async function runPush(ctx: ModuleContext, handoffId: string, now: Date = new Date()): Promise<void> {
+  const [first] = await ctx.tx.select({ accountId: handoff.accountId }).from(handoff).where(byId(ctx, handoffId));
+  if (!first) return;
+  await lockAccount(ctx, first.accountId);
+  // Counted in its own transaction, so a run that fails and rolls back still counts (Ruling 4).
+  const [h] = await withTenant(ctx.tenantId, (tx) =>
+    tx
+      .update(handoff)
+      .set({ attempts: sql`${handoff.attempts} + 1`, status: 'running' })
+      .where(and(byId(ctx, handoffId), inArray(handoff.status, ['queued', 'running'])))
+      .returning(),
+  );
+  if (!h) return; // already finished
+  try {
+    if (h.cancelRequestedAt) throw new Cancelled();
+    await push(ctx, h, now);
+  } catch (e) {
+    if (e instanceof Cancelled) return settle(ctx, h, { status: 'cancelled' }, () => publish(ctx, handoffCancelled, { ...ids(h), at: now.toISOString() }, subject(h)));
+    const { retryable, reason } = classify(e);
+    if (retryable && h.attempts < MAX_ATTEMPTS) throw e;
+    const text = (retryable ? RETRIES_FAILED : reason).slice(0, REASON_LIMIT);
+    await settle(ctx, h, { status: 'failed', lastError: text }, () =>
+      publish(ctx, handoffFailed, { ...ids(h), system: h.system, attempt: h.attempts, retryable, reason: text }, subject(h)),
+    );
+  }
+}
+
+const ids = (h: Handoff) => ({ handoffId: h.id, accountId: h.accountId, assignmentId: h.assignmentId });
+const subject = (h: Handoff) => ({ type: 'account', id: h.accountId });
+
+/** Sets the final status, publishes its event and refreshes the batch. */
+async function settle(ctx: ModuleContext, h: Handoff, set: Partial<Handoff>, announce: () => Promise<unknown>): Promise<void> {
+  await ctx.tx.update(handoff).set(set).where(byId(ctx, h.id));
+  await announce();
+  if (h.handoffBatchId) await refreshBatch(ctx, h.handoffBatchId);
+}
+
+function classify(e: unknown): { retryable: boolean; reason: string } {
+  if (e instanceof NotPushable || e instanceof ScoutError) return { retryable: false, reason: e.message };
+  if (e instanceof RateLimitedError) return { retryable: true, reason: RETRIES_FAILED };
+  const status = (e as { status?: unknown } | null)?.status;
+  if ((e as Error | null)?.name === 'TimeoutError' || status === 429 || (typeof status === 'number' && status >= 500)) return { retryable: true, reason: RETRIES_FAILED };
+  if (status === 401) return { retryable: false, reason: TOKEN_REFUSED };
+  // A 403 already says which permission ("HubSpot needs another permission: <scope>.").
+  if (typeof status === 'number' && status >= 400) return { retryable: false, reason: (e as Error).message };
+  return { retryable: true, reason: RETRIES_FAILED };
+}
+
+const personName = (p: PersonView) => [p.firstName, p.lastName].filter(Boolean).join(' ') || p.email || '';
+
+async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
+  const system = h.system;
+  const sellerOwner = h.sellerUserId ? await crmOwnerId(ctx, h.sellerUserId, system) : null;
+  if (!sellerOwner) throw new NotPushable(NO_CRM_OWNER);
+  const account = await getAccount(ctx, h.accountId);
+  if (!account?.domain) throw new NotPushable(NO_DOMAIN);
+
+  const re = await recheckOwnership(ctx, account.id, sellerOwner, h.ownershipAction === 'keep');
+  if (re.decision.action === 'stop') {
+    const reason = stopReason(re.check!);
+    return settle(ctx, h, { status: 'needs_decision', decisionReason: reason }, () =>
+      publish(ctx, handoffNeedsDecision, { ...ids(h), reason, currentOwnerName: re.currentOwnerName }, subject(h)),
+    );
+  }
+  const take = re.decision.action === 'assign';
+  const takenFrom = re.decision.action === 'assign' ? re.decision.takenFrom : null;
+
+  const call = <T>(op: string, fn: (a: CrmAdapter) => Promise<T>) => gateway.call(ctx, system, op, (a) => fn(a as CrmAdapter), { module: 'crm' });
+  /** Every CRM write first re-reads the committed cancel flag (Ruling 6). */
+  const write = async <T>(op: string, fn: (a: CrmAdapter) => Promise<T>) => {
+    const [row] = await ctx.tx.select({ at: handoff.cancelRequestedAt }).from(handoff).where(byId(ctx, h.id));
+    if (row?.at) throw new Cancelled();
+    return call(op, fn);
+  };
+  const pkg = await handoffPackageProvider().package(ctx, account.id, h.assignmentId);
+  const links = await getLinks(ctx, account.id);
+  const scoutUrl = `${config.publicUrl}/t/${(await tenantSummary(ctx)).slug}/accounts/${account.id}`;
+
+  // Company, with the mapped properties the CRM has; empty values are not sent (CRM-E3-S3-AC3).
+  const mappings = await ctx.tx
+    .select()
+    .from(fieldMapping)
+    .where(and(eq(fieldMapping.tenantId, ctx.tenantId), eq(fieldMapping.system, system), eq(fieldMapping.crmObject, 'company')));
+  const existing = new Set(await call('existingProperties', (a) => a.existingProperties({})));
+  const company = await write('upsertCompany', (a) =>
+    a.upsertCompany({
+      externalId: links.company?.externalId ?? re.check?.companyExternalId ?? undefined,
+      domain: account.domain!,
+      name: account.name,
+      website: account.websiteUrl,
+      location: [account.hqCity, account.hqState, account.hqCountry].filter(Boolean).join(', ') || null,
+      employees: account.employees,
+      description: account.description,
+      ownerExternalId: sellerOwner,
+      replaceableOwner: take,
+      properties: propertyValues(mappings, { ...(pkg?.properties ?? {}), scout_link: scoutUrl }, existing, now),
+    }),
+  );
+  await recordLink(ctx, { scoutType: 'account', scoutId: account.id, system, externalId: company.externalId });
+
+  // People get the same owner decision as the company (CRM-E3-S2-AC3).
+  const people = [...account.people].sort((x, y) => Number(y.isPrimary) - Number(x.isPrimary)).filter((p) => personName(p)).slice(0, PUSH_PEOPLE_LIMIT);
+  const pushed: { externalId: string; isPrimary: boolean }[] = [];
+  for (const p of people) {
+    const linked = links.people.find((l) => l.scoutId === p.id && l.system === system);
+    const r = await write('upsertPerson', (a) =>
+      a.upsertPerson({
+        externalId: linked?.externalId,
+        name: personName(p),
+        title: p.title,
+        email: p.email,
+        phones: [p.phone, p.mobilePhone].filter((x): x is string => !!x),
+        linkedin: p.linkedinUrl,
+        ownerExternalId: company.ownerExternalId,
+        takeOverOwner: take,
+        companyExternalId: company.externalId,
+      }),
+    );
+    await recordLink(ctx, { scoutType: 'person', scoutId: p.id, system, externalId: r.externalId });
+    pushed.push({ externalId: r.externalId, isPrimary: p.isPrimary });
+  }
+  const primaryExternalId = pushed.find((p) => p.isPrimary)?.externalId ?? null;
+
+  // The note; a fingerprint that no longer matches means a person edited it, so the CRM adds a new one.
+  const sellerName = (await members(ctx)).find((m) => m.userId === h.sellerUserId)?.name ?? 'the seller';
+  const ownerLine = take ? `Owner: ${sellerName}${takenFrom ? ` (reassigned from ${re.currentOwnerName})` : ''}` : `Owner: ${re.currentOwnerName}`;
+  const facts = await getFacts(ctx, account.id);
+  const { html } = buildNote({
+    account,
+    people: account.people,
+    assignmentNote: h.assignmentNote,
+    ownerLine,
+    scoutUrl,
+    dataAsOf: facts.reduce<Date | null>((m, f) => (!m || f.observedAt > m ? f.observedAt : m), null),
+    pkg,
+  });
+  const note = await write('upsertNote', (a) =>
+    a.upsertNote({
+      externalId: links.note?.externalId,
+      expectedFingerprint: links.note?.fingerprint ?? null,
+      companyExternalId: company.externalId,
+      personExternalIds: pushed.map((p) => p.externalId),
+      html,
+      ownerExternalId: sellerOwner,
+    }),
+  );
+  await recordLink(ctx, { scoutType: 'note', scoutId: account.id, system, externalId: note.externalId, fingerprint: note.fingerprint });
+
+  // First touch and follow-ups, keyed by assignment so a re-push updates them in place (Ruling 3).
+  const [setting] = await ctx.tx.select({ days: crmSetting.followUpDays }).from(crmSetting).where(eq(crmSetting.tenantId, ctx.tenantId));
+  const primary = account.people.find((p) => p.isPrimary && personName(p));
+  const best = pkg?.properties.best_offer;
+  const tasks = buildTasks({
+    account,
+    buyer: primary ? { name: personName(primary), title: primary.title, email: primary.email } : null,
+    offerName: typeof best === 'string' && best.trim() ? best : null,
+    followUpDays: setting?.days ?? DEFAULT_FOLLOW_UP_DAYS,
+    handoffAt: now,
+    timezone: await tenantTimezone(ctx),
+    pkg,
+  });
+  const keyed = [
+    { key: `${h.assignmentId}:first_touch`, spec: tasks.firstTouch },
+    ...tasks.followUps.map((f) => ({ key: `${h.assignmentId}:follow_up:${f.day}`, spec: f })),
+  ];
+  const taskIds: string[] = [];
+  for (const { key, spec } of keyed) {
+    const linked = links.tasks.find((l) => l.scoutId === key && l.system === system);
+    const r = await write('upsertTask', (a) =>
+      a.upsertTask({
+        externalId: linked?.externalId,
+        companyExternalId: company.externalId,
+        personExternalId: primaryExternalId,
+        subject: spec.subject,
+        body: spec.body,
+        ownerExternalId: sellerOwner,
+        dueAt: spec.dueAt,
+      }),
+    );
+    await recordLink(ctx, { scoutType: 'task', scoutId: key, system, externalId: r.externalId });
+    taskIds.push(r.externalId);
+  }
+
+  await readBaseline(ctx, h.id, call, company.externalId, taskIds);
+
+  const done = await ctx.tx
+    .update(handoff)
+    .set({ status: 'completed', completedAt: now, ownerExternalId: company.ownerExternalId, companyExternalId: company.externalId, takenFromOwner: takenFrom, lastError: null })
+    .where(and(byId(ctx, h.id), isNull(handoff.cancelRequestedAt)))
+    .returning({ id: handoff.id });
+  if (done.length === 0) throw new Cancelled();
+  await publish(
+    ctx,
+    handoffCompleted,
+    {
+      ...ids(h),
+      handoffBatchId: h.handoffBatchId,
+      system,
+      companyExternalId: company.externalId,
+      personExternalIds: pushed.map((p) => p.externalId),
+      ownerExternalId: company.ownerExternalId,
+      ownershipAction: h.ownershipAction as 'assign' | 'keep',
+      takenFromOwner: takenFrom,
+      taskCount: taskIds.length,
+      companyLifecycle: re.check?.lifecycle ?? 'none',
+      observedAt: (re.check?.checkedAt ?? now).toISOString(),
+    },
+    subject(h),
+  );
+  if (h.handoffBatchId) await refreshBatch(ctx, h.handoffBatchId);
+}
+
+/** What the company already had before the handoff, so follow-through counts only what came after. */
+async function readBaseline(
+  ctx: ModuleContext,
+  handoffId: string,
+  call: <T>(op: string, fn: (a: CrmAdapter) => Promise<T>) => Promise<T>,
+  companyExternalId: string,
+  taskExternalIds: string[],
+): Promise<void> {
+  const ft = await call('readFollowThrough', (a) => a.readFollowThrough({ companyExternalId, taskExternalIds }));
+  const baseline = { emails: ft.emails, calls: ft.calls, meetings: ft.meetings, deals: ft.deals, openDeals: ft.openDeals };
+  const values = {
+    baseline,
+    latest: baseline,
+    tasks: ft.tasks.map((x) => ({ id: x.externalId, status: x.status, due: x.dueAt })),
+    stage: ft.stage,
+    ownerExternalId: ft.ownerExternalId,
+  };
+  await ctx.tx
+    .insert(followThrough)
+    .values({ tenantId: ctx.tenantId, handoffId, ...values })
+    .onConflictDoUpdate({ target: [followThrough.tenantId, followThrough.handoffId], set: values });
+}

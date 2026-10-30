@@ -103,7 +103,7 @@ async function checkLeadOffer(ctx: ModuleContext, offerId: string): Promise<void
  * its message. An open assignment is replaced. The seller's decline flag clears; a lead offer is
  * stored as the account's override. One snapshot at the end.
  */
-export async function assign(ctx: ModuleContext, accountId: string, input: AssignInput): Promise<AssignmentView> {
+export async function assign(ctx: ModuleContext, accountId: string, input: AssignInput, opts: { bulkId?: string } = {}): Promise<AssignmentView> {
   const by = requirePerson(ctx);
   const notes = input.notes?.trim() || null;
   checkLength(notes, 'notes');
@@ -156,6 +156,7 @@ export async function assign(ctx: ModuleContext, accountId: string, input: Assig
     notes,
     ownershipDecision,
     previousAssignmentId: values.previousAssignmentId,
+    bulkId: opts.bulkId ?? null,
   });
   await publishReviewSnapshot(ctx, accountId);
   return { id, accountId, sellerUserId: input.sellerUserId, assignedBy: by, status: 'pending', notes, offerId, ownershipDecision, previousAssignmentId: values.previousAssignmentId };
@@ -174,12 +175,13 @@ export async function bulk(ctx: ModuleContext, accountIds: string[], action: Bul
   const ids = [...new Set(accountIds)];
   if (ids.length === 0 || ids.length > MAX_BULK) throw invalid('Pick 1 to 50 accounts.', 'account_ids');
   const results = new Map<string, BulkResult>();
+  const bulkId = newId('blk');
   for (const accountId of [...ids].sort()) {
     try {
       await ctx.tx.transaction(async (tx) => {
         const sp = { ...ctx, tx };
         const { kind, ...input } = action;
-        if (kind === 'assign') await assign(sp, accountId, input as AssignInput);
+        if (kind === 'assign') await assign(sp, accountId, input as AssignInput, { bulkId });
         else await changeStatus(sp, accountId, input as StatusChangeInput);
       });
       results.set(accountId, { accountId, ok: true });
