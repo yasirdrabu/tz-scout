@@ -1,13 +1,31 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { enqueueJob, publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { leadQualified } from '../contracts/events';
 import { dealsPollJob, syncJob } from '../contracts/jobs';
-import { deal, link, webhookReceipt } from '../db/schema';
+import { crmSetting, deal, link, webhookReceipt } from '../db/schema';
 import { parseHubSpotWebhook } from '../domain/webhook';
 import { crmSystem } from './owners';
 import { getCrmSettings } from './settings';
+
+/** Webhooks about deals Scout has not seen queue at most one deals poll in this long (final review I5). */
+export const DEALS_POLL_COALESCE_MS = 5 * 60 * 1000;
+
+/** Claims the tenant's deals poll request: true when none was made in the last 5 minutes (and records this one). */
+async function claimDealsPoll(ctx: ModuleContext, now: Date): Promise<boolean> {
+  const since = new Date(now.getTime() - DEALS_POLL_COALESCE_MS);
+  const claimed = await ctx.tx
+    .insert(crmSetting)
+    .values({ tenantId: ctx.tenantId, dealsPollRequestedAt: now })
+    .onConflictDoUpdate({
+      target: crmSetting.tenantId,
+      set: { dealsPollRequestedAt: now },
+      setWhere: or(isNull(crmSetting.dealsPollRequestedAt), lt(crmSetting.dealsPollRequestedAt, since)),
+    })
+    .returning({ tenantId: crmSetting.tenantId });
+  return claimed.length > 0;
+}
 
 /**
  * An inbound HubSpot webhook that the route (Task 16) has already authenticated: it found `connectionId` for this
@@ -16,7 +34,8 @@ import { getCrmSettings } from './settings';
  * Stores the body, then:
  * - a deal or engagement event enqueues `crm.sync` once per affected account that has a company link. A deal is
  *   matched by its stored `crm.deal` row, else by a company id in the event. An engagement that matches no account is
- *   covered by the 15 minute activity poll; a deal Scout has never seen queues one `crm.deals.poll` instead.
+ *   covered by the 15 minute activity poll; a deal Scout has never seen queues one `crm.deals.poll` instead, at most
+ *   one per 5 minutes (`crm.setting.deals_poll_requested_at`).
  * - a contact lifecycle event matching the qualified-lead rule publishes `crm.lead.qualified` (once per contact).
  */
 export async function handleCrmWebhook(ctx: ModuleContext, connectionId: string, rawBody: string): Promise<{ syncs: number; leads: number }> {
@@ -59,7 +78,7 @@ export async function handleCrmWebhook(ctx: ModuleContext, connectionId: string,
   }
 
   for (const accountId of accounts) await enqueueJob(ctx, syncJob, { accountId });
-  if (unknownDeal) await enqueueJob(ctx, dealsPollJob, {});
+  if (unknownDeal && (await claimDealsPoll(ctx, new Date()))) await enqueueJob(ctx, dealsPollJob, {});
   for (const contactId of contacts) await publish(ctx, leadQualified, { connectionId, contactId });
   await ctx.tx.update(webhookReceipt).set({ processedAt: new Date() }).where(eq(webhookReceipt.id, receiptId));
   return { syncs: accounts.size, leads: contacts.size };

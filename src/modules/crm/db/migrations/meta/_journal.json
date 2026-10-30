@@ -71,6 +71,13 @@
       "when": 1793344264376,
       "tag": "0009_crm_sync_queued",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793345123611,
+      "tag": "0010_crm_deals_poll_requested",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { upsertFromArrival } from '@/modules/accounts';
 import { dealsPollJob, handleCrmWebhook, hubspotMock, leadQualified, recordLink, seedMockCrm, syncAccount, syncJob } from '@/modules/crm';
-import { deal, webhookReceipt } from '@/modules/crm/db/schema';
+import { crmSetting, deal, webhookReceipt } from '@/modules/crm/db/schema';
 import { mockAddDeal } from '@/modules/crm/fixtures';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -70,5 +70,21 @@ describe('handleCrmWebhook (Ruling 15)', () => {
     ]);
     expect(await t.run((ctx) => handleCrmWebhook(ctx, 'con_y', body))).toEqual({ syncs: 0, leads: 0 });
     expect((await sent()).slice(before).filter((e) => e.type === `jobs.${dealsPollJob.name}`)).toHaveLength(1);
+  });
+
+  it('two webhooks with unknown deals within 5 minutes queue one deals poll; one after that queues another (final review I5)', async () => {
+    const t2 = await routingTenant();
+    await t2.run((ctx) => seedMockCrm(ctx));
+    const polls = async () =>
+      (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t2.tenantId)))
+        .map((r) => r.payload as { type: string })
+        .filter((e) => e.type === `jobs.${dealsPollJob.name}`).length;
+    const hook = (id: number) => t2.run((ctx) => handleCrmWebhook(ctx, 'con_z', JSON.stringify([{ subscriptionType: 'deal.creation', objectId: id }])));
+    await hook(9101);
+    await hook(9102);
+    expect(await polls()).toBe(1);
+    await t2.run((ctx) => ctx.tx.update(crmSetting).set({ dealsPollRequestedAt: new Date(Date.now() - 6 * 60_000) }).where(eq(crmSetting.tenantId, ctx.tenantId)));
+    await hook(9103);
+    expect(await polls()).toBe(2);
   });
 });

@@ -258,6 +258,8 @@ export const crmSetting = crm.table(
     followUpDays: jsonb('follow_up_days').$type<number[]>().notNull().default([3, 7, 14]),
     /** High-water mark of the last deals poll (Ruling 18). */
     dealsPolledUntil: at('deals_polled_until'),
+    /** When a webhook last queued a deals poll for a deal Scout has not seen; another waits 5 minutes. */
+    dealsPollRequestedAt: at('deals_poll_requested_at'),
     updatedAt: at('updated_at').notNull().defaultNow(),
   },
   (t) => [
