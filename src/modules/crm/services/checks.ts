@@ -74,13 +74,15 @@ export async function lookupCompany(ctx: ModuleContext, domain: string, opts: { 
   return (await lookup(ctx, system, normalDomain(domain), opts.now ?? new Date())).check;
 }
 
-async function lookup(ctx: ModuleContext, system: string, domain: string, now: Date): Promise<{ check: CompanyCheck; fresh: boolean }> {
-  const [stored] = await ctx.tx
-    .select()
-    .from(companyCheck)
-    .where(and(eq(companyCheck.tenantId, ctx.tenantId), eq(companyCheck.system, system), eq(companyCheck.domain, domain), gt(companyCheck.checkedAt, new Date(now.getTime() - CHECK_TTL_MS))))
-    .orderBy(desc(companyCheck.checkedAt))
-    .limit(1);
+async function lookup(ctx: ModuleContext, system: string, domain: string, now: Date, force = false): Promise<{ check: CompanyCheck; fresh: boolean }> {
+  const [stored] = force
+    ? []
+    : await ctx.tx
+        .select()
+        .from(companyCheck)
+        .where(and(eq(companyCheck.tenantId, ctx.tenantId), eq(companyCheck.system, system), eq(companyCheck.domain, domain), gt(companyCheck.checkedAt, new Date(now.getTime() - CHECK_TTL_MS))))
+        .orderBy(desc(companyCheck.checkedAt))
+        .limit(1);
   if (stored) return { check: toCheck(stored), fresh: false };
   const found = await gateway.call(ctx, system, 'findCompany', (a) => (a as CrmAdapter).findCompany({ domain }), {
     module: 'crm',
@@ -131,8 +133,21 @@ export async function checkCompany(ctx: ModuleContext, accountId: string): Promi
     .from(companyCheck)
     .where(and(eq(companyCheck.tenantId, ctx.tenantId), eq(companyCheck.accountId, accountId), eq(companyCheck.system, system)));
   if (own && own.domain === domain && now.getTime() - own.checkedAt.getTime() < CHECK_TTL_MS) return toCheck(own);
+  return storeCheck(ctx, accountId, system, domain, now, false);
+}
 
-  const { check } = await lookup(ctx, system, domain, now);
+/**
+ * Asks the CRM now, ignoring both caches, then updates the account's stored check (link and event included)
+ * the way `checkCompany` does. Null when the account has no domain. The ownership preflight uses it.
+ */
+export async function refreshCheck(ctx: ModuleContext, accountId: string): Promise<CompanyCheck | null> {
+  const account = await getAccount(ctx, accountId);
+  if (!account?.domain) return null;
+  return storeCheck(ctx, accountId, await crmSystem(ctx), normalDomain(account.domain), new Date(), true);
+}
+
+async function storeCheck(ctx: ModuleContext, accountId: string, system: string, domain: string, now: Date, force: boolean): Promise<CompanyCheck> {
+  const { check } = await lookup(ctx, system, domain, now, force);
   const values = {
     domain,
     exists: check.exists,

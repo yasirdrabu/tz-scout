@@ -27,7 +27,7 @@ type Chain = { personSourceId?: string; agentSourceId?: string; vendorSourceId?:
 /** An account that arrived and resolved (`intake.arrival.resolved` delivered), so it has a review row and a summary. */
 export async function arrivedAccount(
   t: Tenant,
-  opts: { name?: string; initialReviewStatusKey?: string; sourceChain?: Chain; batchId?: string } = {},
+  opts: { name?: string; domain?: string; initialReviewStatusKey?: string; sourceChain?: Chain; batchId?: string } = {},
 ): Promise<string> {
   const arrivalId = newId('evt').replace('evt_', 'arr_');
   const sourceChain = opts.sourceChain ?? {};
@@ -36,7 +36,7 @@ export async function arrivedAccount(
       arrivalId,
       receivedAt: new Date(),
       sourceChain,
-      account: { name: opts.name ?? 'Queue Co', domain: domain() },
+      account: { name: opts.name ?? 'Queue Co', domain: opts.domain ?? domain() },
       people: [],
       signals: [],
       facts: [],
@@ -77,7 +77,8 @@ export function asPerson<T>(t: Tenant, fn: (ctx: ModuleContext) => Promise<T>, o
 /** A member of the tenant; `invited` when they have never signed in. */
 export async function member(t: Tenant, role: 'leader' | 'seller' | 'operator' = 'seller', opts: { invited?: boolean } = {}): Promise<string> {
   const u = await seedUser({ signedIn: !opts.invited });
-  await t.run((ctx) => addMember(ctx, { email: u.email, role }));
+  // Assigning needs a HubSpot owner id: the CRM preflight blocks a seller without one.
+  await t.run((ctx) => addMember(ctx, { email: u.email, role, ...(role === 'seller' ? { crmOwnerIds: { hubspot: `mock-${u.id}` } } : {}) }));
   return u.id;
 }
 

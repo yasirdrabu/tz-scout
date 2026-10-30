@@ -36,7 +36,7 @@ export { capabilitiesSchema, crmOperations, type CrmAdapter, type CrmCapabilitie
 export { crmAccountCreated, crmAccountUpdated, crmConsumers, crmTenantDefaults } from './consumers';
 export { companyCheckHandler, crmJobHandlers, ownersSyncHandler } from './jobs';
 export { companyLink, getLinks, linkExternalIds, recordLink, type AccountLinks, type LinkRow, type RecordLink } from './services/links';
-export { CHECK_TTL_MS, checkCompany, companyChecks, lookupCompany, queueCompanyCheck, type CompanyCheck } from './services/checks';
+export { CHECK_TTL_MS, checkCompany, companyChecks, lookupCompany, queueCompanyCheck, refreshCheck, type CompanyCheck } from './services/checks';
 export {
   OWNERS_UNREADABLE,
   confirmOwnerMatch,
@@ -49,6 +49,8 @@ export {
   type OwnerRow,
 } from './services/owners';
 export { CRM_SCHEDULES, DEFAULT_FIELD_MAPPINGS, seedCrmDefaults } from './defaults';
+export { decideOwnership, type OwnershipDecision, type OwnershipInput } from './domain/ownership';
+export { crmOwnershipPreflight, preflightOwnership, type OwnershipPreflightDetail } from './services/preflight';
 export { noteFingerprint } from './domain/fingerprint';
 export { hubspotMock } from './adapters/hubspot/mock';
 export { registerHubspotAdapter } from './adapters/hubspot/register';
