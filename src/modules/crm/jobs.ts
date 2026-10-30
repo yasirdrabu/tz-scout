@@ -1,9 +1,10 @@
 import { defineJobHandler } from '@/platform/runtime/jobs';
 import { ScoutError } from '@/platform/errors';
-import { companyCheckJob, handoffPushJob, handoffUndoJob, ownersSyncJob } from './contracts/jobs';
+import { companyCheckJob, handoffPushJob, handoffUndoJob, ownersSyncJob, personPushJob } from './contracts/jobs';
 import { checkCompany } from './services/checks';
 import { runPush } from './services/handoff';
 import { syncOwners } from './services/owners';
+import { runPersonPush } from './services/push';
 import { runUndo } from './services/undo';
 
 /** Checks one new account against the CRM. */
@@ -32,5 +33,10 @@ export const handoffUndoHandler = defineJobHandler(handoffUndoJob, async (e, ctx
   await runUndo(ctx, handoffId, new Date(), why);
 });
 
+/** Pushes a person added after the handoff (Ruling 22). */
+export const personPushHandler = defineJobHandler(personPushJob, async (e, ctx) => {
+  await runPersonPush(ctx, e.data.accountId, e.data.personId);
+});
+
 /** Every CRM job handler, for the worker's list. */
-export const crmJobHandlers = [companyCheckHandler, ownersSyncHandler, handoffPushHandler, handoffUndoHandler];
+export const crmJobHandlers = [companyCheckHandler, ownersSyncHandler, handoffPushHandler, handoffUndoHandler, personPushHandler];

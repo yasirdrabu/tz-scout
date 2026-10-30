@@ -68,11 +68,13 @@ export const handoff = crm.table(
     undone: jsonb('undone').$type<HandoffUndone>(),
     /** Runs of the undo job, counted before its lock like `attempts` (Ruling 4's pattern). */
     undoAttempts: integer('undo_attempts').notNull().default(0),
+    /** A re-push (Ruling 20): another handoff for an assignment that already has one; only the first is deduped. */
+    isRepush: boolean('is_repush').notNull().default(false),
     queuedAt: at('queued_at').notNull().defaultNow(),
     completedAt: at('completed_at'),
   },
   (t) => [
-    uniqueIndex('handoff_assignment_uq').on(t.tenantId, t.assignmentId),
+    uniqueIndex('handoff_assignment_uq').on(t.tenantId, t.assignmentId).where(sql`not ${t.isRepush}`),
     index('handoff_account_idx').on(t.tenantId, t.accountId, t.queuedAt),
     index('handoff_batch_idx').on(t.tenantId, t.handoffBatchId),
     check('handoff_status_valid', sql`${t.status} in ('queued', 'running', 'completed', 'needs_decision', 'failed', 'cancelled')`),

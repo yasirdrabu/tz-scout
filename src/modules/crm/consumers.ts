@@ -1,11 +1,12 @@
 import { getAccount } from '@/modules/accounts';
-import { accountCreated, accountUpdated } from '@/modules/accounts/contracts/events';
+import { accountCreated, accountUpdated, personAdded } from '@/modules/accounts/contracts/events';
 import { assignmentCreated, assignmentDeclined, assignmentWithdrawn } from '@/modules/routing/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { seedCrmDefaults } from './defaults';
 import { queueCompanyCheck } from './services/checks';
 import { queueHandoff } from './services/handoff';
+import { queuePersonPush } from './services/push';
 import { requestUndo } from './services/undo';
 
 /** Gives a new tenant its CRM setting, HubSpot field mapping and polling schedules. */
@@ -60,5 +61,21 @@ export const crmAssignmentWithdrawn = defineConsumer({
   handle: async (e, ctx) => requestUndo(ctx, { assignmentId: e.data.assignmentId, kind: 'withdrawn', reasonLabel: null, by: e.data.by }),
 });
 
+/** A person added to a handed-off account goes to the CRM too (Ruling 22). */
+export const crmPersonAdded = defineConsumer({
+  name: 'crm.person_added',
+  event: personAdded,
+  orderedBy: (e) => e.data.accountId,
+  handle: async (e, ctx) => queuePersonPush(ctx, e.data.accountId, e.data.personId),
+});
+
 /** Every CRM consumer, for the worker's list. */
-export const crmConsumers = [crmTenantDefaults, crmAccountCreated, crmAccountUpdated, crmAssignmentCreated, crmAssignmentDeclined, crmAssignmentWithdrawn];
+export const crmConsumers = [
+  crmTenantDefaults,
+  crmAccountCreated,
+  crmAccountUpdated,
+  crmAssignmentCreated,
+  crmAssignmentDeclined,
+  crmAssignmentWithdrawn,
+  crmPersonAdded,
+];

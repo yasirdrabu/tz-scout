@@ -34,8 +34,28 @@ export {
   type OwnershipAction,
 } from './contracts/types';
 export { capabilitiesSchema, crmOperations, type CrmAdapter, type CrmCapabilities, type CrmDeal, type QualifiedLead } from './contracts/adapter';
-export { crmAccountCreated, crmAccountUpdated, crmAssignmentCreated, crmAssignmentDeclined, crmAssignmentWithdrawn, crmConsumers, crmTenantDefaults } from './consumers';
-export { companyCheckHandler, crmJobHandlers, handoffPushHandler, handoffUndoHandler, ownersSyncHandler } from './jobs';
+export {
+  crmAccountCreated,
+  crmAccountUpdated,
+  crmAssignmentCreated,
+  crmAssignmentDeclined,
+  crmAssignmentWithdrawn,
+  crmConsumers,
+  crmPersonAdded,
+  crmTenantDefaults,
+} from './consumers';
+export { companyCheckHandler, crmJobHandlers, handoffPushHandler, handoffUndoHandler, ownersSyncHandler, personPushHandler } from './jobs';
+export { ASSIGN_FIRST, push, queuePersonPush, runPersonPush } from './services/push';
+export { getHandoffs, lastActivityAt, latestHandoff, type HandoffRow, type HandoffsView } from './services/read';
+export {
+  DEFAULT_QUALIFIED_LEAD_RULE,
+  getCrmSettings,
+  setCrmSettings,
+  setUpHubSpotFields,
+  type CrmSettings,
+  type CrmSettingsPatch,
+  type QualifiedLeadRule,
+} from './services/settings';
 export { MAX_ATTEMPTS, queueHandoff, runPush } from './services/handoff';
 export { requestUndo, runUndo, type UndoReason } from './services/undo';
 export { batchFor, getBatch, listBatches, markCopied, refreshBatch, type BatchView } from './services/batches';

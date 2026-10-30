@@ -336,14 +336,24 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
 
 /**
  * Whom the company was really taken from. When its owner is the seller of an earlier handoff of this account
- * whose undo was requested (a reassign, Ruling 7), that handoff's own previous owner is the one to return to.
+ * that took ownership and whose undo was requested (a reassign, Ruling 7), that handoff's own previous owner
+ * is the one to return to, unless its undo already gave the company back (whoever owns it now got it later).
  */
 async function originalOwner(ctx: ModuleContext, h: Handoff, takenFrom: string | null): Promise<string | null> {
   if (!takenFrom) return null;
   const earlier = await ctx.tx
     .select()
     .from(handoff)
-    .where(and(eq(handoff.tenantId, ctx.tenantId), eq(handoff.accountId, h.accountId), ne(handoff.id, h.id), isNotNull(handoff.cancelRequestedAt)))
+    .where(
+      and(
+        eq(handoff.tenantId, ctx.tenantId),
+        eq(handoff.accountId, h.accountId),
+        ne(handoff.id, h.id),
+        isNotNull(handoff.cancelRequestedAt),
+        eq(handoff.ownershipAction, 'assign'),
+        sql`(${handoff.undone} is null or ${handoff.undone}->>'ownerReturnedTo' is null)`,
+      ),
+    )
     .orderBy(desc(handoff.queuedAt), desc(handoff.id));
   for (const e of earlier) {
     const owner = e.ownerExternalId ?? (e.sellerUserId ? await crmOwnerId(ctx, e.sellerUserId, h.system) : null);
