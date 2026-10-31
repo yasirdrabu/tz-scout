@@ -29,7 +29,7 @@ export const GET = v1Route({ permission: 'offers:read' }, async (req, principal,
   return { data: await listSignalRules(ctx, id) };
 });
 
-// PUT /v1/offers/{id}/signal-rules replaces the rules with exactly these, in this order.
+// PUT /api/v1/offers/{id}/signal-rules replaces the rules with exactly these, in this order.
 export const PUT = v1Route({ permission: 'scoring:manage' }, async (req, _principal, ctx) => {
   const { id, action } = idAndAction(req, 'offers');
   if (action) throw notFound();

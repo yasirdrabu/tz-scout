@@ -47,11 +47,11 @@ const apiKey = async () =>
       createApiKey(ctx, { name: 'k', environment: 'live', scopes: [] }, SYSTEM_GRANTOR),
     )
   ).secret;
-const withKey = (secret: string) => new Request('http://x/v1/y', { headers: { authorization: `Bearer ${secret}` } });
+const withKey = (secret: string) => new Request('http://x/api/v1/y', { headers: { authorization: `Bearer ${secret}` } });
 const withCookie = (cookies: Headers) => {
   const h = new Headers(cookies);
   h.set('x-scout-tenant', slug);
-  return new Request('http://localhost:4240/v1/y', { headers: h });
+  return new Request('http://localhost:4240/api/v1/y', { headers: h });
 };
 
 // The owner's person source is created the first time they act.

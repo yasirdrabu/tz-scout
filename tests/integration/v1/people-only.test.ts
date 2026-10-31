@@ -52,7 +52,7 @@ async function signIn(userId: string): Promise<string> {
 /** A cookie-signed-in request with the same-site headers the web app sends. */
 const as = (who: keyof typeof cookies, handler: (r: Request) => Promise<Response>, path: string, method: string, body?: unknown) =>
   handler(
-    new Request(`http://localhost:4240/v1/${path}`, {
+    new Request(`http://localhost:4240/api/v1/${path}`, {
       method,
       headers: {
         cookie: cookies[who],
@@ -114,7 +114,7 @@ describe('sources', () => {
     expect((await as('seller', patchSource, `sources/${ash.agentId}`, 'PATCH', { status: 'paused' })).status).toBe(403);
     const key = (await run((ctx) => createApiKey(ctx, { name: 'k', environment: 'live', scopes: ['sources:manage'], sourceId: ash.agentId }, SYSTEM_GRANTOR))).secret;
     const viaKey = await patchSource(
-      new Request(`http://x/v1/sources/${ash.agentId}`, {
+      new Request(`http://x/api/v1/sources/${ash.agentId}`, {
         method: 'PATCH',
         headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
         body: JSON.stringify({ status: 'active' }),
@@ -148,7 +148,7 @@ describe('saved mappings and the data limit', () => {
       )
     ).secret;
     const send = (handler: (r: Request) => Promise<Response>, path: string, method: string) =>
-      handler(new Request(`http://x/v1/${path}`, { method, headers: { authorization: `Bearer ${key}` } }));
+      handler(new Request(`http://x/api/v1/${path}`, { method, headers: { authorization: `Bearer ${key}` } }));
     expect((await send(listMappingsRoute, `sources/${bo.personId}/mappings`, 'GET')).status).toBe(404);
     expect((await send(deleteMappingRoute, `sources/${bo.personId}/mappings/${theirs.id}`, 'DELETE')).status).toBe(404);
     expect((await send(deleteMappingRoute, `sources/${ash.agentId}/mappings/${theirs.id}`, 'DELETE')).status).toBe(404);
@@ -236,7 +236,7 @@ describe('accounts', () => {
       )
     ).secret;
     const viaKey = await accountAction(
-      new Request(`http://x/v1/accounts/${keep}:merge`, {
+      new Request(`http://x/api/v1/accounts/${keep}:merge`, {
         method: 'POST',
         headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
         body: JSON.stringify({ merged_id: gone }),

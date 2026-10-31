@@ -39,7 +39,7 @@ const auditsBy = (actorId: string) =>
   adminDb.select().from(auditLog).where(and(eq(auditLog.tenantId, tenantId), eq(auditLog.actorId, actorId)));
 
 describe('support access is audited', () => {
-  it('a write by a platform admin without membership is marked support access (/v1)', async () => {
+  it('a write by a platform admin without membership is marked support access (/api/v1)', async () => {
     const admin = await seedUser({ admin: true, signedIn: true });
     const headers = await signedIn(admin.id);
     headers.set('x-scout-tenant', slug);
@@ -47,7 +47,7 @@ describe('support access is audited', () => {
       await addMember(ctx, { email: `${uniqueSlug()}@example.com`, role: 'seller' });
       return { ok: true };
     });
-    const res = await route(new Request('http://localhost:4240/v1/test', { headers }));
+    const res = await route(new Request('http://localhost:4240/api/v1/test', { headers }));
     expect(res.status).toBe(200);
     const rows = await auditsBy(admin.id);
     expect(rows.length).toBeGreaterThan(0);
@@ -61,7 +61,7 @@ describe('support access is audited', () => {
       await addMember(ctx, { email: `${uniqueSlug()}@example.com`, role: 'seller' });
       return { ok: true };
     });
-    expect((await route(new Request('http://localhost:4240/v1/test', { headers }))).status).toBe(200);
+    expect((await route(new Request('http://localhost:4240/api/v1/test', { headers }))).status).toBe(200);
     const rows = await auditsBy(ownerId);
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.some((r) => r.supportAccess)).toBe(false);

@@ -5,14 +5,14 @@
 | Concern | Choice | Notes |
 |---|---|---|
 | Language | TypeScript (strict), Node 22 LTS or newer | Specs stay language-neutral so a module can be rebuilt in .NET |
-| Web, API, MCP | Next.js (App Router) | UI pages, `/v1/*` route handlers, `/mcp` endpoint in one app |
+| Web, API, MCP | Next.js (App Router) | UI pages, `/api/v1/*` route handlers, `/mcp` endpoint in one app |
 | Worker, scheduler | Plain Node entry points in the same repo | `node dist/worker.js`, `node dist/scheduler.js` |
 | Database | PostgreSQL 17, UTF-8 | One database, one schema per module |
 | Data access | Drizzle ORM + drizzle-kit migrations | `pgSchema()` per module; SQL migration files committed and reviewed |
 | Messaging | NATS JetStream (nats.js client) | Events and work queues; see events-and-async.md |
 | Auth | better-auth | Microsoft Entra ID sign-in for people; API keys and OAuth 2.1 (for MCP clients) for agents |
 | Validation | Zod | Every boundary: API input, events, AI output, adapter responses |
-| API docs | OpenAPI 3.1 generated from Zod schemas | Served at `/v1/openapi.json`, rendered at `/developers` |
+| API docs | OpenAPI 3.1 generated from Zod schemas | Served at `/api/v1/openapi.json`, rendered at `/developers` |
 | MCP | Official MCP TypeScript SDK | Streamable HTTP at `/mcp`; local stdio package `@taazaa/scout-mcp` |
 | AI | Anthropic SDK through the AI tasks module | Versioned prompts, Zod-checked output, every call logged |
 | UI | Tailwind, the existing token set (warm neutrals, plum accent) | Design rules in [design-and-copy.md](design-and-copy.md) |
@@ -33,11 +33,11 @@ decimals; pure math modules with unit tests.
 
 ```
 apps/
-  web/                     Next.js app: pages, /v1 route handlers, /mcp, auth routes
+  web/                     Next.js app: pages, /api/v1 route handlers, /mcp, auth routes
   worker/                  worker entry: registers every module's consumers
   scheduler/               scheduler entry: publishes timed jobs
 packages/
-  mcp-local/               @taazaa/scout-mcp, stdio MCP server that calls /v1 with an API key
+  mcp-local/               @taazaa/scout-mcp, stdio MCP server that calls /api/v1 with an API key
 src/modules/<module>/
   index.ts                 the module's public interface (the ONLY import other modules may use)
   contracts/               Zod schemas for its commands, queries, events, API shapes
@@ -46,7 +46,7 @@ src/modules/<module>/
   db/migrations/           this module's SQL migrations
   services/                use cases; take a ModuleContext (tenant, actor, db, outbox)
   consumers/               NATS consumers for events and jobs this module handles
-  http/                    /v1 route definitions for this module (mounted by apps/web)
+  http/                    /api/v1 route definitions for this module (mounted by apps/web)
   mcp/                     MCP tools this module contributes
   adapters/<name>/         mock + live implementations of outside services it owns
   ui/                      React components and pages for this module
@@ -64,7 +64,7 @@ One container image, started in one of four roles by its command:
 
 | Role | Command | Scales | Does |
 |---|---|---|---|
-| web | `scout web` | horizontally, stateless | UI, `/v1`, `/mcp`, inbound webhooks |
+| web | `scout web` | horizontally, stateless | UI, `/api/v1`, `/mcp`, inbound webhooks |
 | worker | `scout worker` | horizontally, by queue depth | all NATS consumers |
 | scheduler | `scout scheduler` | exactly one | publishes timed jobs (pulls, scorecard, follow-through checks) |
 | relay | `scout relay` | exactly one active (leader lock in Postgres) | moves outbox rows to NATS |

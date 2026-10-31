@@ -4,7 +4,7 @@ import { idAndAction } from '../../_lib/path';
 import { byAction, v1Route } from '../../_lib/v1-route';
 import { MANAGE } from '../key';
 
-// POST /v1/integrations/{key}:test and :disconnect
+// POST /api/v1/integrations/{key}:test and :disconnect
 export const POST = byAction('integrations', {
   /** Runs the service's test (live when a credential is saved): `{ok, message, missing_permissions?, facts?, duration_ms}`. */
   test: v1Route(MANAGE, async (req, _principal, ctx) => {

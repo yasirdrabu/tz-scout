@@ -30,7 +30,7 @@ export const PATCH = v1Route({ permission: 'offers:manage' }, async (req, _princ
   return warning ? { ...offer, warning } : offer;
 });
 
-// POST /v1/offers/{id}:approve, :archive and :reset-signal-rules
+// POST /api/v1/offers/{id}:approve, :archive and :reset-signal-rules
 export const POST = byAction('offers', {
   approve: v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) => approveOffer(ctx, idAndAction(req, 'offers').id)),
   archive: v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) => archiveOffer(ctx, idAndAction(req, 'offers').id)),

@@ -4,9 +4,9 @@ Release R1
 
 ## Rules
 
-**Versioning.** Path version `/v1`. Within `/v1`, only compatible changes: new endpoints, new optional
+**Versioning.** Path version `/api/v1`. Within `/api/v1`, only compatible changes: new endpoints, new optional
 request fields, new response fields, new enum values (clients must ignore unknown values). Breaking
-changes go to `/v2`, which runs alongside `/v1` for at least six months; `/v1` responses then carry
+changes go to `/api/v2`, which runs alongside `/api/v1` for at least six months; `/api/v1` responses then carry
 `Deprecation` and `Sunset` headers.
 
 **Auth.** `Authorization: Bearer <api key or OAuth access token>`. Missing or bad token: 401. Valid

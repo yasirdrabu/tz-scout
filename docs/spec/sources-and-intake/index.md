@@ -109,24 +109,24 @@ As fixed in [public-api/index.md](../public-api/index.md):
 
 | Method and path | Scope | Notes |
 |---|---|---|
-| `GET /v1/sources` | `arrivals:read` | Sources visible to the principal (its own and children), with trust |
-| `POST /v1/sources` | `sources:manage` | Create a person, agent or vendor source |
-| `POST /v1/arrivals` | `arrivals:write` | One account. `202` with `arrival_id`, `status_url` |
-| `GET /v1/arrivals/{id}` | `arrivals:read` | Status, `waiting_on`, reason, account id, stage, feedback. The arrival's feedback (account and chain sources, one per cause) is shown to anyone who may see the arrival; the feedback feed shows the caller's own source only |
-| `GET /v1/arrivals?batch_id=&status=&since=&cursor=` | `arrivals:read` | Within the principal's data limit |
-| `POST /v1/batches` | `arrivals:write` | Batch fields plus 1 to 1,000 items |
-| `POST /v1/batches/{id}/files` | `arrivals:write` | Up to 25 MB per file, 10 per batch |
-| `GET /v1/batches/{id}` | `arrivals:read` | Counts by status and by stage, rejections, files |
-| `GET /v1/batches/{id}/items?cursor=` | `arrivals:read` | Per-item status with `external_ref` |
-| `POST /v1/imports` | `imports:run` | File upload; returns `imp_` id and proposed mapping |
-| `GET /v1/imports/{id}` | `imports:run` | |
-| `POST /v1/imports/{id}:confirm` | `imports:run` | Confirm or edit the mapping; starts the import |
+| `GET /api/v1/sources` | `arrivals:read` | Sources visible to the principal (its own and children), with trust |
+| `POST /api/v1/sources` | `sources:manage` | Create a person, agent or vendor source |
+| `POST /api/v1/arrivals` | `arrivals:write` | One account. `202` with `arrival_id`, `status_url` |
+| `GET /api/v1/arrivals/{id}` | `arrivals:read` | Status, `waiting_on`, reason, account id, stage, feedback. The arrival's feedback (account and chain sources, one per cause) is shown to anyone who may see the arrival; the feedback feed shows the caller's own source only |
+| `GET /api/v1/arrivals?batch_id=&status=&since=&cursor=` | `arrivals:read` | Within the principal's data limit |
+| `POST /api/v1/batches` | `arrivals:write` | Batch fields plus 1 to 1,000 items |
+| `POST /api/v1/batches/{id}/files` | `arrivals:write` | Up to 25 MB per file, 10 per batch |
+| `GET /api/v1/batches/{id}` | `arrivals:read` | Counts by status and by stage, rejections, files |
+| `GET /api/v1/batches/{id}/items?cursor=` | `arrivals:read` | Per-item status with `external_ref` |
+| `POST /api/v1/imports` | `imports:run` | File upload; returns `imp_` id and proposed mapping |
+| `GET /api/v1/imports/{id}` | `imports:run` | |
+| `POST /api/v1/imports/{id}:confirm` | `imports:run` | Confirm or edit the mapping; starts the import |
 
 Inbound webhooks are not part of the agent API and have their own auth (SRC-E6):
-`POST /v1/inbound/hubspot/{connectionId}` (HubSpot signature) and `POST /v1/inbound/forms/{sourceId}`
+`POST /api/v1/inbound/hubspot/{connectionId}` (HubSpot signature) and `POST /api/v1/inbound/forms/{sourceId}`
 (form token).
 
-Feedback to a source (SRC-E1-S4) is returned on `GET /v1/arrivals/{id}` and delivered as the
+Feedback to a source (SRC-E1-S4) is returned on `GET /api/v1/arrivals/{id}` and delivered as the
 `intake.feedback.recorded` webhook event. Warm-intro rules and source caps are managed in the web app.
 
 ## MCP tools

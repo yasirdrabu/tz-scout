@@ -37,7 +37,7 @@ const call = (
   extra: Record<string, string> = {},
 ) =>
   h(
-    new Request(`http://x/v1/${path}`, {
+    new Request(`http://x/api/v1/${path}`, {
       method,
       headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json', ...extra },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -53,7 +53,7 @@ const approved = async (name: string) => {
 };
 const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
 
-describe('offers on /v1', () => {
+describe('offers on /api/v1', () => {
   it('a read-only key sees approved offers only, in snake_case', async () => {
     const a = await approved('Visible');
     const d = await draft('Hidden');
@@ -143,7 +143,7 @@ describe('offers on /v1', () => {
   });
 });
 
-describe('case studies on /v1', () => {
+describe('case studies on /api/v1', () => {
   it('an agent list leaves out non-public case studies', async () => {
     const pub = await t.run((ctx) => createCaseStudy(ctx, { title: 'Public one', public: true }));
     const priv = await t.run((ctx) => createCaseStudy(ctx, { title: 'Private one' }));
@@ -164,7 +164,7 @@ describe('case studies on /v1', () => {
   });
 });
 
-describe('practices on /v1', () => {
+describe('practices on /api/v1', () => {
   it('lists as { data, next_cursor } and pages by limit and cursor', async () => {
     for (const n of ['P1', 'P2', 'P3']) await t.run((ctx) => createPractice(ctx, { name: n }));
     const one = await (await call(listPracticesRoute, readKey, 'practices?limit=2')).json();

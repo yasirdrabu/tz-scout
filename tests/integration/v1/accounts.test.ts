@@ -60,7 +60,7 @@ const asOwner = (
   body?: unknown,
 ) =>
   handler(
-    new Request(`http://localhost:4240/v1/${path}`, {
+    new Request(`http://localhost:4240/api/v1/${path}`, {
       method,
       headers: {
         cookie: ownerCookie,
@@ -106,7 +106,7 @@ const factsOf = (accountId: string, key: string, personId?: string) =>
     ),
   );
 
-describe('POST /v1/accounts/{id}/people', () => {
+describe('POST /api/v1/accounts/{id}/people', () => {
   it('ACC-E1-S4-AC1: returns the person_id in the same response, with 201', async () => {
     const acc = await seed(ash.agentId);
     const res = await call(addPerson, writeKey, `accounts/${acc.accountId}/people`, {
@@ -152,7 +152,7 @@ describe('POST /v1/accounts/{id}/people', () => {
   });
 });
 
-describe('POST /v1/accounts/{id}/signals', () => {
+describe('POST /api/v1/accounts/{id}/signals', () => {
   const signal = { type: 'trigger', title: 'Hired a new CIO', occurred_at: '2026-10-01', url: 'https://news.example.com/cio' };
 
   it('ACC-E4-S3-AC1: returns a signal id, and a repeat returns the existing id', async () => {

@@ -7,7 +7,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { ScoutError, toProblem } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { log } from '@/platform/log';
-import { METHODS, routes as allRoutes, V1, type RouteEntry } from './routes';
+import { METHODS, routes as allRoutes, type RouteEntry } from './routes';
 import { FILE_MAX_BYTES, FORM_SLACK } from './routes/v1/_lib/intake';
 import { notFound } from './routes/v1/_lib/path';
 import { webApp } from './web-app';
@@ -18,7 +18,7 @@ export const MAX_BODY_BYTES = FILE_MAX_BYTES + FORM_SLACK;
 const SHUTDOWN_GRACE_MS = 10_000;
 
 /** Paths that belong to the API and the health checks; what no route serves there is the API's 404. */
-const API_PREFIXES = [V1, '/api', '/healthz', '/readyz'];
+const API_PREFIXES = ['/api', '/healthz', '/readyz'];
 
 function problem(e: unknown): Response {
   const correlationId = newId('cor');

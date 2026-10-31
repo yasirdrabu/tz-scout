@@ -32,8 +32,8 @@ const KEYS = [
 function serve(keys: ApiKey[] = KEYS) {
   serveMe({ taazaa: { scopes: ['keys:manage', 'arrivals:read'], tenant: { id: 't1', slug: 'taazaa', name: 'Taazaa', currency: 'USD', timezone: 'America/New_York' } } });
   server.use(
-    http.get('/v1/api-keys', () => HttpResponse.json({ data: keys })),
-    http.get('/v1/sources', () => HttpResponse.json({ data: [{ id: 'src_rfp', name: 'RFP Watch' }, { id: 'src_conf', name: 'Conference contacts agent' }], next_cursor: null })),
+    http.get('/api/v1/api-keys', () => HttpResponse.json({ data: keys })),
+    http.get('/api/v1/sources', () => HttpResponse.json({ data: [{ id: 'src_rfp', name: 'RFP Watch' }, { id: 'src_conf', name: 'Conference contacts agent' }], next_cursor: null })),
   );
 }
 
@@ -57,7 +57,7 @@ describe('API keys list', () => {
 
   it('shows loading, error and empty states', async () => {
     serve();
-    server.use(http.get('/v1/api-keys', async () => {
+    server.use(http.get('/api/v1/api-keys', async () => {
       await delay('infinite');
       return HttpResponse.json({ data: [] });
     }));
@@ -65,14 +65,14 @@ describe('API keys list', () => {
     expect(await screen.findByText('Loading API keys')).toBeInTheDocument();
     first.unmount();
 
-    server.use(http.get('/v1/api-keys', () => problem(500, 'Something went wrong', { ref: 'cor_k1' })));
+    server.use(http.get('/api/v1/api-keys', () => problem(500, 'Something went wrong', { ref: 'cor_k1' })));
     const second = renderApp('/t/taazaa/settings/api-keys');
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("API keys didn't load");
     expect(within(alert).getByText('Error ref cor_k1')).toBeInTheDocument();
     second.unmount();
 
-    server.use(http.get('/v1/api-keys', () => HttpResponse.json({ data: [KEYS[2]] })));
+    server.use(http.get('/api/v1/api-keys', () => HttpResponse.json({ data: [KEYS[2]] })));
     renderApp('/t/taazaa/settings/api-keys');
     expect(await screen.findByRole('heading', { name: 'No API keys yet' })).toBeInTheDocument();
   });
@@ -99,7 +99,7 @@ describe('create a key', () => {
     serve();
     let body: unknown;
     server.use(
-      http.post('/v1/api-keys', async ({ request }) => {
+      http.post('/api/v1/api-keys', async ({ request }) => {
         body = await request.json();
         return HttpResponse.json({ ...key({ id: 'key_new', name: 'Conference agent' }), secret: 'scout_live_8Hq2vXsecret' }, { status: 201 });
       }),
@@ -124,7 +124,7 @@ describe('create a key', () => {
 
   it('shows the API words when creating fails', async () => {
     serve();
-    server.use(http.post('/v1/api-keys', () => problem(403, 'Forbidden', { detail: "You can't give a key permissions you don't have." })));
+    server.use(http.post('/api/v1/api-keys', () => problem(403, 'Forbidden', { detail: "You can't give a key permissions you don't have." })));
     const dialog = await openCreate();
     await userEvent.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Agent');
     await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'Source' }), 'RFP Watch');
@@ -137,14 +137,14 @@ describe('create a key', () => {
 describe('revoke and access log', () => {
   it('revokes after the confirm, and shows the failure', async () => {
     serve();
-    server.use(http.delete('/v1/api-keys/key_rfp', () => problem(404, 'Not found', { detail: 'That key is already revoked.' })));
+    server.use(http.delete('/api/v1/api-keys/key_rfp', () => problem(404, 'Not found', { detail: 'That key is already revoked.' })));
     renderApp('/t/taazaa/settings/api-keys');
     await userEvent.click(await screen.findByRole('button', { name: 'Revoke RFP Watch agent' }));
     const confirm = await screen.findByRole('dialog', { name: 'Revoke RFP Watch agent?' });
     await userEvent.click(within(confirm).getByRole('button', { name: 'Revoke' }));
     expect(await screen.findByText('That key is already revoked.')).toBeInTheDocument();
 
-    server.use(http.delete('/v1/api-keys/key_rfp', () => new HttpResponse(null, { status: 204 })));
+    server.use(http.delete('/api/v1/api-keys/key_rfp', () => new HttpResponse(null, { status: 204 })));
     await userEvent.click(within(confirm).getByRole('button', { name: 'Revoke' }));
     expect(await screen.findByText('RFP Watch agent revoked. Calls with it now fail.')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

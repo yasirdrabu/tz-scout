@@ -28,14 +28,14 @@ afterAll(closeDbs);
 const send = (key: string, items: unknown[], name = 'Weekly', headers: Record<string, string> = {}) =>
   call(postBatch, key, 'batches', { body: { name, items }, headers });
 
-describe('POST /v1/batches', () => {
+describe('POST /api/v1/batches', () => {
   it('SRC-E2-S2-AC1: answers 202 and returns the arrival ids in the order sent', async () => {
     const items = [validArrival({ external_ref: 'b-1' }), validArrival({ external_ref: 'b-2' }), validArrival({ external_ref: 'b-3' })];
     const res = await send(ashKey, items);
     expect(res.status).toBe(202);
     const body = await res.json();
     expect(body.batch_id).toMatch(/^bat_/);
-    expect(body.status_url).toMatch(new RegExp(`/v1/batches/${body.batch_id}$`));
+    expect(body.status_url).toMatch(new RegExp(`/api/v1/batches/${body.batch_id}$`));
     expect(body.item_count).toBe(3);
     expect(body.items.map((i: { external_ref: string }) => i.external_ref)).toEqual(['b-1', 'b-2', 'b-3']);
     expect(body.items[0]).toMatchObject({ arrival_id: expect.stringMatching(/^arr_/), status: 'received' });
@@ -133,7 +133,7 @@ describe('TEN-E3-S3-AC1: contact details without people:read', () => {
   });
 });
 
-describe('GET /v1/batches/{id} files', () => {
+describe('GET /api/v1/batches/{id} files', () => {
   it('lists the attached files', async () => {
     const { batch_id } = await (await send(ashKey, [validArrival()], 'Files')).json();
     await call(filesRoute, ashKey, `batches/${batch_id}/files`, { body: uploadForm('one.csv', 'a,b\n1,2\n') });

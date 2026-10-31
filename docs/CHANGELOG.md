@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-31: The API moves to /api/v1
+
+- **API at `/api/v1`** (spec C1): every endpoint moved from `/v1/...` to `/api/v1/...`, with no alias for the old path (nothing outside Scout calls it yet). Sign-in stays at `/api/auth`, developer sign-in at `/api/dev/sign-in`, and the health checks at `/healthz` and `/readyz`. `/v1/...` is now an app path: a GET gets the web app's `index.html`. The `status_url` of an arrival or batch points at `/api/v1`.
+- **HubSpot webhook**: subscriptions set up by hand in HubSpot must use `/api/v1/inbound/hubspot/{connectionId}`.
+- The web-ui app calls `/api/v1`; its dev server proxies `/api` and the health checks. The spec, README and sample requests use the new paths.
+
 ## 2026-10-31: The image serves the web app
 
 - The image now builds `web-ui/` and the `web` role serves it from the API's origin: the app at `/` with an `index.html` fallback for deep links (`/t/...`, `/admin/...`, `/signin`), hashed `/assets/*` cached for a year, and unknown `/v1` and `/api` paths still answered with the API's problem+json 404 (`GET /v1/{unknown}` was an empty 405). Interim, through a Next catch-all route, until the HTTP layer moves to Hono. CI checks `web-ui/` in its own job and the image smoke test asserts `/` and `/t/anything` return the app. Local dev still uses the Vite dev server with developer sign-in.

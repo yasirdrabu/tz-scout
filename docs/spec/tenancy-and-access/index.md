@@ -67,18 +67,18 @@ Consumes nothing.
 
 | Method and path | Scope | Notes |
 |---|---|---|
-| `GET /v1/me` | any | The calling principal: tenant, kind, scopes, data limit, source |
-| `GET /v1/members` | `members:read` | Members with role and permissions (no emails for agents without `people:read`) |
-| `GET /v1/api-keys` | `keys:manage` | Keys of the tenant, never the secret |
-| `POST /v1/api-keys` | `keys:manage` | Returns the secret once |
-| `POST /v1/api-keys/{id}:rotate` | `keys:manage` | New secret; old one valid for a grace period |
-| `POST /v1/api-keys/{id}:revoke` | `keys:manage` | |
+| `GET /api/v1/me` | any | The calling principal: tenant, kind, scopes, data limit, source |
+| `GET /api/v1/members` | `members:read` | Members with role and permissions (no emails for agents without `people:read`) |
+| `GET /api/v1/api-keys` | `keys:manage` | Keys of the tenant, never the secret |
+| `POST /api/v1/api-keys` | `keys:manage` | Returns the secret once |
+| `POST /api/v1/api-keys/{id}:rotate` | `keys:manage` | New secret; old one valid for a grace period |
+| `POST /api/v1/api-keys/{id}:revoke` | `keys:manage` | |
 
 Member and key management for people happens in the web app; the API exists so automation can do it.
 
 ## MCP tools
 
-None of its own. Every tool resolves its principal here. `GET /v1/me` is exposed to agents through
+None of its own. Every tool resolves its principal here. `GET /api/v1/me` is exposed to agents through
 the `whoami` resource in the MCP server (see mcp/).
 
 ## Open questions

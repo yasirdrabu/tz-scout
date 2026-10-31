@@ -6,7 +6,7 @@ import { adminByAction, adminRoute, noContent } from '../../../_lib/v1-route';
 
 const scheduleId = (req: Request) => idAndAction(req, 'schedules').id;
 
-// POST /v1/admin/schedules/{id}:pause, :resume and :run-now. Audited by the scheduler services.
+// POST /api/v1/admin/schedules/{id}:pause, :resume and :run-now. Audited by the scheduler services.
 export const POST = adminByAction('schedules', {
   pause: adminRoute({}, async (req, _person, ctx) => {
     await pauseSchedule(ctx, scheduleId(req));

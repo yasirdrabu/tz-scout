@@ -4,7 +4,7 @@ Release R1
 
 ## Rules
 
-- `/v1/openapi.json` is generated at build time from the Zod contracts of every module's `http/` and
+- `/api/v1/openapi.json` is generated at build time from the Zod contracts of every module's `http/` and
   committed as a snapshot; CI fails if the generated spec changes without the snapshot being updated
   (so API changes are always reviewed).
 - `/developers` is a public page (no sign-in needed to read) rendering the OpenAPI spec with a

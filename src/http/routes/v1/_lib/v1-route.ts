@@ -215,7 +215,7 @@ async function execute(
 }
 
 /**
- * Wraps a /v1 handler: resolves the principal (401 without one), checks the permission, runs the
+ * Wraps a /api/v1 handler: resolves the principal (401 without one), checks the permission, runs the
  * handler in the principal's tenant with `ctx.access` set, turns thrown errors into problem+json
  * and writes plain objects as snake_case JSON (200, or the status of `created`/`accepted`).
  * Always sets `x-correlation-id`.
@@ -281,7 +281,7 @@ function personRoute(opts: SessionOptions & { admin: boolean }, handler: Session
 }
 
 /**
- * Wraps a /v1 handler that needs a signed-in person but no workspace: cookie session only (API keys
+ * Wraps a /api/v1 handler that needs a signed-in person but no workspace: cookie session only (API keys
  * get 403), the same idle and age rules as tenant routes, CSRF by origin only (no `x-scout-tenant`).
  * The transaction is under tenant `t_platform`, where `Idempotency-Key`s are stored. Same
  * problem+json, snake_case and `x-correlation-id` handling as `v1Route`.
@@ -322,7 +322,7 @@ export function byAction(
   };
 }
 
-/** `byAction` for `/v1/admin` paths: an unknown action is a 404 for a platform admin (403 for anyone else). */
+/** `byAction` for `/api/v1/admin` paths: an unknown action is a 404 for a platform admin (403 for anyone else). */
 export function adminByAction(after: string, routes: Record<string, (req: Request) => Promise<Response>>): (req: Request) => Promise<Response> {
   return byAction(
     after,

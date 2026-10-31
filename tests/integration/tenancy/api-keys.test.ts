@@ -51,7 +51,7 @@ beforeAll(async () => {
 beforeEach(() => setPrincipalCacheTtl(0));
 
 const req = (secret: string, extra: Record<string, string> = {}) =>
-  new Request('http://x/v1/me', {
+  new Request('http://x/api/v1/me', {
     headers: { authorization: `Bearer ${secret}`, ...extra },
   });
 const make = (scopes: string[] = ['members:read'], environment: 'live' | 'test' = 'live') =>

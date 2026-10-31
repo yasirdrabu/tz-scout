@@ -89,7 +89,7 @@ describe('bounded reads', () => {
         cancelled = true;
       },
     });
-    const req = new Request('http://x/v1/arrivals', {
+    const req = new Request('http://x/api/v1/arrivals', {
       method: 'POST',
       headers: { authorization: 'Bearer ' + ashKey,'content-type': 'application/json', 'idempotency-key': 'big-3' },
       body,

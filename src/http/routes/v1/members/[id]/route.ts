@@ -20,7 +20,7 @@ import { byAction, noContent, v1Route } from '../../_lib/v1-route';
 
 const MANAGE = { permission: 'members:manage', peopleOnly: true } as const;
 
-/** The member as `GET /v1/members` lists them. */
+/** The member as `GET /api/v1/members` lists them. */
 async function view(ctx: ModuleContext, id: string) {
   const [m] = await memberList(ctx, id);
   return { ...m!, openAccountCount: (await openAssignmentCounts(ctx))[m!.userId] ?? 0 };
@@ -58,7 +58,7 @@ export const DELETE = v1Route(MANAGE, async (req, _principal, ctx) => {
   return noContent();
 });
 
-// POST /v1/members/{id}:suspend, :reactivate and :sign-out-everywhere
+// POST /api/v1/members/{id}:suspend, :reactivate and :sign-out-everywhere
 export const POST = byAction('members', {
   suspend: v1Route(MANAGE, async (req, _principal, ctx) => {
     const { id } = idAndAction(req, 'members');

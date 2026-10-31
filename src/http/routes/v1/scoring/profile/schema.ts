@@ -3,7 +3,7 @@ import { z } from 'zod';
 // Ranges are the service's to check, so a person gets the plain-words messages.
 const num = z.number();
 
-/** The fields of `PUT /v1/scoring/profile`, all optional. `parseBody` camelCases the top level; thresholds are converted here. */
+/** The fields of `PUT /api/v1/scoring/profile`, all optional. `parseBody` camelCases the top level; thresholds are converted here. */
 export const profilePatchBody = z
   .strictObject({
     fit_weight: num,

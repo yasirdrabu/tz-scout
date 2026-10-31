@@ -35,7 +35,7 @@ describe('web-ui app and fallback', () => {
       writeFileSync(path.join(dist, 'favicon.svg'), '<svg/>');
     });
 
-    it.each(['/', '/signin', '/t/acme/queue', '/admin/tenants', '/t/acme/accounts/acc_1', '/v1x', '/apiary', '/healthzz'])(
+    it.each(['/', '/signin', '/t/acme/queue', '/admin/tenants', '/t/acme/accounts/acc_1', '/v1/me', '/v1/nope/deeper', '/apiary', '/healthzz'])(
       'serves index.html for %s',
       async (p) => {
         const res = await get(p);

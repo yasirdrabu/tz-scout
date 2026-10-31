@@ -13,16 +13,16 @@ const run = (arg: string) =>
  * here (a 401 is fine: the route still compiles).
  */
 const WARM_ROUTES = [
-  `http://localhost:${E2E_PORT}/v1/auth/config`,
-  `http://localhost:${E2E_PORT}/v1/dev/users`,
-  `http://localhost:${E2E_PORT}/v1/me`,
-  `http://localhost:${E2E_PORT}/v1/me/counts`,
-  `http://localhost:${E2E_PORT}/v1/members`,
-  `http://localhost:${E2E_PORT}/v1/integrations`,
-  `http://localhost:${E2E_PORT}/v1/api-keys`,
-  `http://localhost:${E2E_PORT}/v1/audit`,
-  `http://localhost:${E2E_PORT}/v1/admin/tenants`,
-  `http://localhost:${E2E_PORT}/v1/admin/health`,
+  `http://localhost:${E2E_PORT}/api/v1/auth/config`,
+  `http://localhost:${E2E_PORT}/api/v1/dev/users`,
+  `http://localhost:${E2E_PORT}/api/v1/me`,
+  `http://localhost:${E2E_PORT}/api/v1/me/counts`,
+  `http://localhost:${E2E_PORT}/api/v1/members`,
+  `http://localhost:${E2E_PORT}/api/v1/integrations`,
+  `http://localhost:${E2E_PORT}/api/v1/api-keys`,
+  `http://localhost:${E2E_PORT}/api/v1/audit`,
+  `http://localhost:${E2E_PORT}/api/v1/admin/tenants`,
+  `http://localhost:${E2E_PORT}/api/v1/admin/health`,
 ];
 
 /** Requests each route once. The web servers are already up. */

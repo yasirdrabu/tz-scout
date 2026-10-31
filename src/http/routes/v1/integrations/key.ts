@@ -1,6 +1,6 @@
 import { idAndAction, notFound } from '../_lib/path';
 
-/** The service key in `/v1/integrations/{key}/...`; a path with an action there is a 404. */
+/** The service key in `/api/v1/integrations/{key}/...`; a path with an action there is a 404. */
 export function integrationKey(req: Request): string {
   const { id, action } = idAndAction(req, 'integrations');
   if (action) throw notFound();

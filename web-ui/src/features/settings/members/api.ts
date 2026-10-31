@@ -2,7 +2,7 @@ import { queryOptions } from '@tanstack/react-query';
 import { apiFetch } from '../../../api/client';
 import type { DataLimit } from '../../../api/me';
 
-// Members, roles and invites (src/app/v1/members, src/app/v1/roles). Member ids are membership ids.
+// Members, roles and invites (src/http/routes/v1/members, src/http/routes/v1/roles). Member ids are membership ids.
 
 export type MemberStatus = 'invited' | 'active' | 'suspended';
 

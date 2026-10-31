@@ -45,7 +45,7 @@ beforeEach(() => setPrincipalCacheTtl(0));
 const as = (p: Person, path: string, opts: Omit<ReqOpts, 'cookies' | 'tenant'> = {}) =>
   v1Req(path, { ...opts, cookies: cookies[p.id], tenant: t.slug });
 
-describe('/v1/api-keys (keys:manage)', () => {
+describe('/api/v1/api-keys (keys:manage)', () => {
   it('creates a key from an access choice, returns the secret once, and lists it masked with names', async () => {
     const res = await createKey(
       as(owner, '/api-keys', { method: 'POST', body: { name: 'Clay', source_id: sourceA, access: 'send_and_status' }, headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' } }),
@@ -64,7 +64,7 @@ describe('/v1/api-keys (keys:manage)', () => {
     expect(made.secret.startsWith(made.prefix)).toBe(true);
 
     // The key works.
-    const who = await me(new Request('http://x/v1/me', { headers: { authorization: `Bearer ${made.secret}` } }));
+    const who = await me(new Request('http://x/api/v1/me', { headers: { authorization: `Bearer ${made.secret}` } }));
     expect((await who.json()).source_id).toBe(sourceA);
 
     const list = await listKeys(as(owner, '/api-keys'));
@@ -92,7 +92,7 @@ describe('/v1/api-keys (keys:manage)', () => {
       createApiKey(ctx, { name: 'admin key', environment: 'live', scopes: ['keys:manage'] }, SYSTEM_GRANTOR),
     );
     const res = await createKey(
-      new Request('http://x/v1/api-keys', {
+      new Request('http://x/api/v1/api-keys', {
         method: 'POST',
         headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'x', source_id: sourceA, access: 'send_only' }),
@@ -117,13 +117,13 @@ describe('/v1/api-keys (keys:manage)', () => {
     expect(res.status).toBe(204);
     const [row] = await adminDb.select().from(apiKey).where(eq(apiKey.id, made.id));
     expect(row!.revokedAt).not.toBeNull();
-    const who = await me(new Request('http://x/v1/me', { headers: { authorization: `Bearer ${made.secret}` } }));
+    const who = await me(new Request('http://x/api/v1/me', { headers: { authorization: `Bearer ${made.secret}` } }));
     expect(who.status).toBe(401);
     expect((await revokeKey(as(owner, `/api-keys/${made.id}`, { method: 'DELETE' }))).status).toBe(404);
   });
 });
 
-describe('/v1/sources/{id}/keys (sources:manage)', () => {
+describe('/api/v1/sources/{id}/keys (sources:manage)', () => {
   it("lets an operator make and list that source's keys only", async () => {
     const res = await createSourceKey(as(operator, `/sources/${sourceB}/keys`, { method: 'POST', body: { name: 'Agent key' } }));
     expect(res.status).toBe(201);
@@ -149,7 +149,7 @@ describe('the secret is never stored for an Idempotency-Key', () => {
   const storedWith = async (secret: string) =>
     (await adminDb.execute(sql`select 1 from platform.idempotency_key where response_body::text like ${`%${secret}%`}`)).length;
 
-  it('POST /v1/api-keys keeps no stored response with the secret, and a repeat does not hand it out again', async () => {
+  it('POST /api/v1/api-keys keeps no stored response with the secret, and a repeat does not hand it out again', async () => {
     const send = () =>
       createKey(as(owner, '/api-keys', { method: 'POST', body: { name: 'Once', source_id: sourceA, access: 'read_only' }, headers: { 'idempotency-key': `once-${Date.now()}` } }));
     const first = await (await send()).json();
@@ -159,7 +159,7 @@ describe('the secret is never stored for an Idempotency-Key', () => {
     expect((await again.json()).secret).not.toBe(first.secret);
   });
 
-  it('POST /v1/sources/{id}/keys likewise', async () => {
+  it('POST /api/v1/sources/{id}/keys likewise', async () => {
     const key = `src-once-${Date.now()}`;
     const send = () => createSourceKey(as(operator, `/sources/${sourceA}/keys`, { method: 'POST', body: { name: 'Once' }, headers: { 'idempotency-key': key } }));
     const first = await (await send()).json();
@@ -169,7 +169,7 @@ describe('the secret is never stored for an Idempotency-Key', () => {
 });
 
 describe("another tenant's keys and sources are not found and left alone", () => {
-  it('DELETE /v1/api-keys/{id} and /v1/sources/{id}/keys answer 404', async () => {
+  it('DELETE /api/v1/api-keys/{id} and /api/v1/sources/{id}/keys answer 404', async () => {
     const admin = await seedUser({ admin: true });
     const o = await seedUser({ signedIn: true });
     const t2 = await tenantOwnedBy(admin, o.email, 'Other Co');

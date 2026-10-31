@@ -34,6 +34,6 @@ export const POST = v1Route({ permission: 'arrivals:write' }, async (req, princi
     channel: 'api',
     canDeclareWarmIntro: can(principal, 'warm_intro:declare'),
   });
-  const body = { arrivalId: r.arrivalId, statusUrl: new URL(`/v1/arrivals/${r.arrivalId}`, config.publicUrl).toString() };
+  const body = { arrivalId: r.arrivalId, statusUrl: new URL(`/api/v1/arrivals/${r.arrivalId}`, config.publicUrl).toString() };
   return r.duplicateOfRequest ? { ...body, duplicateOfRequest: true } : accepted(body);
 });

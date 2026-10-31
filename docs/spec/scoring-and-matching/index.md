@@ -72,12 +72,12 @@ JSON field names are snake_case (data-conventions.md).
 
 | Method and path | Scope | Does |
 |---|---|---|
-| `GET /v1/accounts/{id}/score` | `accounts:read` | The `explain_score` object (`account_id`, `offer`, `priority`, `fit`, `intent`, `tier`, `factors[]`, `warm_intro_points`, `would_raise[]`) plus `offer_id`, `summary` and the full explanation. 404 until the account is first scored |
-| `GET /v1/accounts/{id}/matches` | `accounts:read` | Every offer match for the account |
-| `GET /v1/accounts/{id}/score/history` | `accounts:read` | Score changes with causes |
-| `GET /v1/scoring/profile`, `PUT /v1/scoring/profile` | `scoring:manage` | Read or update weights and thresholds, with validation, ranges and an audit entry; PUT returns 202, rescoring runs in the background. The weights screen and preview are R2 |
-| `POST /v1/scoring/profile/reset` | `scoring:manage` | Back to the defaults; 202, it starts a rescore |
-| `POST /v1/rescore` | `scoring:manage` | Rescore the tenant or a filter (practice, source); 202 with job id. Progress is visible from R2 (SCO-E5-S4-AC1) |
+| `GET /api/v1/accounts/{id}/score` | `accounts:read` | The `explain_score` object (`account_id`, `offer`, `priority`, `fit`, `intent`, `tier`, `factors[]`, `warm_intro_points`, `would_raise[]`) plus `offer_id`, `summary` and the full explanation. 404 until the account is first scored |
+| `GET /api/v1/accounts/{id}/matches` | `accounts:read` | Every offer match for the account |
+| `GET /api/v1/accounts/{id}/score/history` | `accounts:read` | Score changes with causes |
+| `GET /api/v1/scoring/profile`, `PUT /api/v1/scoring/profile` | `scoring:manage` | Read or update weights and thresholds, with validation, ranges and an audit entry; PUT returns 202, rescoring runs in the background. The weights screen and preview are R2 |
+| `POST /api/v1/scoring/profile/reset` | `scoring:manage` | Back to the defaults; 202, it starts a rescore |
+| `POST /api/v1/rescore` | `scoring:manage` | Rescore the tenant or a filter (practice, source); 202 with job id. Progress is visible from R2 (SCO-E5-S4-AC1) |
 
 ## MCP tools
 

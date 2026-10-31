@@ -3,8 +3,8 @@ import { idAndAction, notFound } from '../_lib/path';
 import { noContent, publicRoute, sessionRoute } from '../_lib/v1-route';
 
 /**
- * Actions on a top-level resource, `POST /v1/{resource}:{action}`. Static routes such as `/v1/me`
- * win over this one, so it only sees paths with an action. Today: `POST /v1/me:sign-out-everywhere`
+ * Actions on a top-level resource, `POST /api/v1/{resource}:{action}`. Static routes such as `/api/v1/me`
+ * win over this one, so it only sees paths with an action. Today: `POST /api/v1/me:sign-out-everywhere`
  * ends every session of the caller, this one included, on every device and in every workspace.
  */
 export const POST = sessionRoute({}, async (req, person, { tx }) => {

@@ -101,7 +101,7 @@ import * as v1Sources from './routes/v1/sources/route';
 import * as v1Waiting from './routes/v1/waiting/route';
 
 /** Where the public API is mounted. */
-export const V1 = '/v1';
+export const V1 = '/api/v1';
 
 /** The methods a route module may export. HEAD is answered from GET, as Next did. */
 export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;

@@ -10,7 +10,7 @@ polling or webhook. Agents can send one account or a batch with run notes and fi
 ## Rules
 
 - Commands that start work return `202 Accepted` with the new resource and
-  `"status_url": "https://scout.taazaa.ai/v1/arrivals/arr_..."`. The resource itself is the status;
+  `"status_url": "https://scout.taazaa.ai/api/v1/arrivals/arr_..."`. The resource itself is the status;
   there is no separate operations resource.
 - Arrival status values: `received` → `resolving` → `resolved` (with `account_id`, `created_account`
   true or false, `duplicate_of` if it matched) or `rejected` (with `reason`: `invalid`, `excluded`,
@@ -21,7 +21,7 @@ polling or webhook. Agents can send one account or a batch with run notes and fi
 - **Batch request:**
 
 ```json
-POST /v1/batches
+POST /api/v1/batches
 {
   "name": "Florida transit agencies, week 43",
   "run_at": "2026-10-24T18:00:00Z",
@@ -42,7 +42,7 @@ POST /v1/batches
 }
 ```
 
-  Response `202 { "batch_id": "bat_...", "status_url": ".../v1/batches/bat_...", "item_count": 1 }`.
+  Response `202 { "batch_id": "bat_...", "status_url": ".../api/v1/batches/bat_...", "item_count": 1 }`.
 - A batch is accepted whole or rejected whole for request-level problems (bad JSON, over 1,000
   items, over size). Item-level problems reject only that item; the batch still runs.
 - Files attach after creation with `POST /batches/{id}/files` (multipart, up to 25 MB each, 10 per

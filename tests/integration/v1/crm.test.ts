@@ -39,7 +39,7 @@ async function signIn(userId: string): Promise<string> {
 
 const as = (who: Who, handler: (r: Request) => Promise<Response>, path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}) =>
   handler(
-    new Request(`http://localhost:4240/v1/${path}`, {
+    new Request(`http://localhost:4240/api/v1/${path}`, {
       method,
       headers: { cookie: cookies[who], 'x-scout-tenant': slug, origin: 'http://localhost:4240', 'content-type': 'application/json', ...headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -74,7 +74,7 @@ afterAll(closeDbs);
 const keyIn = async (scopes: Permission[]) => (await run((ctx) => createApiKey(ctx, { name: 'k', environment: 'live', scopes, dataLimit: { kind: 'all' } }, SYSTEM_GRANTOR))).secret;
 const viaKey = (key: string, handler: (r: Request) => Promise<Response>, path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}) =>
   handler(
-    new Request(`http://x/v1/${path}`, {
+    new Request(`http://x/api/v1/${path}`, {
       method,
       headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', ...headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),

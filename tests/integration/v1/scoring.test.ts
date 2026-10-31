@@ -69,7 +69,7 @@ const READS = [
   [getHistory, 'score/history'],
 ] as const;
 
-describe('GET /v1/accounts/{id}/score', () => {
+describe('GET /api/v1/accounts/{id}/score', () => {
   it('SCO-E4-S2-AC3: the explanation in snake_case, with would_raise and a summary', async () => {
     const w = await world();
     const key = await keyFor(w.t, READ, ALL);
@@ -274,7 +274,7 @@ describe('scoring profile', () => {
   });
 });
 
-describe('POST /v1/rescore', () => {
+describe('POST /api/v1/rescore', () => {
   it('returns 202 with a job id, for the tenant, a practice or a source', async () => {
     const w = await world();
     const key = await keyFor(w.t, MANAGE, ALL);

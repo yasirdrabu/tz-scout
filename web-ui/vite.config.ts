@@ -2,7 +2,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// The Scout backend. Today it is the Next app on port 4240 serving /v1 and /api/auth.
+// The Scout backend: the server on port 4240 (`npm run dev` at the repo root) serving the API at /api/v1,
+// sign-in at /api/auth and the health checks.
 const backend = process.env.SCOUT_BACKEND_URL ?? 'http://localhost:4240';
 
 type ProxyReq = { getHeader(n: string): unknown; setHeader(n: string, v: string): void };
@@ -31,7 +32,7 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    proxy: { '/v1': toBackend, '/api': toBackend, '/healthz': toBackend },
+    proxy: { '/api': toBackend, '/healthz': toBackend, '/readyz': toBackend },
   },
   test: {
     environment: 'jsdom',

@@ -45,7 +45,7 @@ moved.
 
 ### ANL-E3-S3 Agents see their own performance
 As an outside agent, I want to see how my submissions converted, so that I can send better accounts.
-- ANL-E3-S3-AC1 `get_source_performance` and `GET /v1/analytics/sources/{id}/performance` (proposed
+- ANL-E3-S3-AC1 `get_source_performance` and `GET /api/v1/analytics/sources/{id}/performance` (proposed
   addition to the public API) return the calling source's funnel counts, decline reasons and trust
   trend.
 - ANL-E3-S3-AC2 A principal limited to its own source cannot read another source's performance (403).

@@ -28,7 +28,7 @@ function signedUrl(req: Request): string {
 }
 
 /**
- * `POST /v1/inbound/hubspot/{connectionId}`. No principal: the connection id finds the tenant, and the v3 signature
+ * `POST /api/v1/inbound/hubspot/{connectionId}`. No principal: the connection id finds the tenant, and the v3 signature
  * made with that tenant's client secret is the authentication (Ruling 15). Every refusal is 401 and logged, so an
  * unknown, malformed or disabled connection looks the same as a wrong signature.
  */

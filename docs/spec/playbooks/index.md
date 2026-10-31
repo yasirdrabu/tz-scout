@@ -92,13 +92,13 @@ JSON field names are snake_case.
 
 | Method and path | Scope | Does |
 |---|---|---|
-| `GET /v1/accounts/{id}/brief` | `playbooks:read` | Brief sections with citations, custom fields, committee and gaps, plan summary |
-| `PATCH /v1/accounts/{id}/brief/sections/{key}` | `playbooks:write` | Edit a section (people and agents with the scope) |
-| `GET /v1/accounts/{id}/plan` | `playbooks:read` | The account plan and steps |
-| `PATCH /v1/plans/{id}/steps/{step_id}` | `playbooks:write` | Update a step (status, owner, due, note) |
-| `POST /v1/accounts/{id}/outcomes` | `playbooks:write` | Record a reply, meeting, opportunity, won or lost |
-| `GET /v1/playbooks`, `GET /v1/playbooks/{id}` | `playbooks:read` | Templates |
-| `POST /v1/playbooks`, `PATCH /v1/playbooks/{id}` | `playbooks:manage` | Create and edit templates; accept or reject proposals |
+| `GET /api/v1/accounts/{id}/brief` | `playbooks:read` | Brief sections with citations, custom fields, committee and gaps, plan summary |
+| `PATCH /api/v1/accounts/{id}/brief/sections/{key}` | `playbooks:write` | Edit a section (people and agents with the scope) |
+| `GET /api/v1/accounts/{id}/plan` | `playbooks:read` | The account plan and steps |
+| `PATCH /api/v1/plans/{id}/steps/{step_id}` | `playbooks:write` | Update a step (status, owner, due, note) |
+| `POST /api/v1/accounts/{id}/outcomes` | `playbooks:write` | Record a reply, meeting, opportunity, won or lost |
+| `GET /api/v1/playbooks`, `GET /api/v1/playbooks/{id}` | `playbooks:read` | Templates |
+| `POST /api/v1/playbooks`, `PATCH /api/v1/playbooks/{id}` | `playbooks:manage` | Create and edit templates; accept or reject proposals |
 
 ## MCP tools
 

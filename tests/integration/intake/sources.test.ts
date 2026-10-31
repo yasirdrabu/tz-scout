@@ -156,7 +156,7 @@ describe('archiving', () => {
       createApiKey(ctx, { name: 'agent key', environment: 'live', scopes: ['arrivals:write'], sourceId: agentId }, SYSTEM_GRANTOR),
     );
     const route = v1Route({}, async () => ({ ok: true }));
-    const call = () => route(new Request('http://x/v1/y', { headers: { authorization: `Bearer ${secret}` } }));
+    const call = () => route(new Request('http://x/api/v1/y', { headers: { authorization: `Bearer ${secret}` } }));
     expect((await call()).status).toBe(200);
 
     await t.run((ctx) => updateSource(ctx, agentId, { status: 'archived' }));
@@ -317,7 +317,7 @@ describe('ports', () => {
 });
 
 describe('access for signed-in people', () => {
-  it('a cookie-session /v1 request from a seller carries their person source and its children', async () => {
+  it('a cookie-session /api/v1 request from a seller carries their person source and its children', async () => {
     const admin = await seedUser({ admin: true });
     const owner = await seedUser({ signedIn: true });
     const slug = uniqueSlug();
@@ -349,7 +349,7 @@ describe('access for signed-in people', () => {
     });
     const h = new Headers(cookies);
     h.set('x-scout-tenant', slug);
-    expect((await route(new Request('http://localhost:4240/v1/y', { headers: h }))).status).toBe(200);
+    expect((await route(new Request('http://localhost:4240/api/v1/y', { headers: h }))).status).toBe(200);
     expect(seen).toMatchObject({ userId: seller.id, sourceId: personId, childSourceIds: [agentId] });
   });
 });

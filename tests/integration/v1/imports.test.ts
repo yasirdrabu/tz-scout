@@ -28,7 +28,7 @@ afterAll(closeDbs);
 const fixture = (name: string) => readFileSync(join(__dirname, '../../fixtures/imports', name));
 let n = 0;
 
-describe('/v1/imports', () => {
+describe('/api/v1/imports', () => {
   it('SRC-E4-S4-AC3: a research file is queued, runs and reports its counts', async () => {
     const res = await call(postImport, ashKey, 'imports', { body: uploadForm('research.csv', fixture('research-master.csv')) });
     expect(res.status).toBe(202);

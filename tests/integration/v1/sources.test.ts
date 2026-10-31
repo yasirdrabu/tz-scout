@@ -15,7 +15,7 @@ beforeAll(async () => {
 });
 afterAll(closeDbs);
 
-describe('POST /v1/sources with user_id (SRC-E1-S1-AC2)', () => {
+describe('POST /api/v1/sources with user_id (SRC-E1-S1-AC2)', () => {
   it('links a person source to a member', async () => {
     const seller = await seedUser();
     await t.run((ctx) => addMember(ctx, { email: seller.email, role: 'seller' }));

@@ -41,7 +41,7 @@ async function refusesNonAdmins(call: (opts: Parameters<typeof v1Req>[1]) => Pro
   expect((await call({ ...extra })).status).toBe(401);
 }
 
-describe('GET /v1/admin/tenants', () => {
+describe('GET /api/v1/admin/tenants', () => {
   it('lists every tenant with status, members, owner and created, plus the summary', async () => {
     const res = await listTenantsRoute(v1Req('/admin/tenants', as(admin)));
     expect(res.status).toBe(200);
@@ -67,7 +67,7 @@ describe('GET /v1/admin/tenants', () => {
   });
 });
 
-describe('POST /v1/admin/tenants', () => {
+describe('POST /api/v1/admin/tenants', () => {
   it('creates the tenant with its owner invited, and audits it', async () => {
     const slug = uniqueSlug();
     const email = `own-${slug}@example.com`;
@@ -114,7 +114,7 @@ describe('POST /v1/admin/tenants', () => {
   });
 });
 
-describe('POST /v1/admin/tenants/{id}:suspend and :resume', () => {
+describe('POST /api/v1/admin/tenants/{id}:suspend and :resume', () => {
   it('suspending stops sign-in, sessions and API keys; resuming brings them back', async () => {
     setPrincipalCacheTtl(60_000);
     const t = await tenantOwnedBy(admin, (await seedUser({ signedIn: true })).email, 'Suspendable');
@@ -159,7 +159,7 @@ describe('POST /v1/admin/tenants/{id}:suspend and :resume', () => {
   });
 });
 
-describe('/v1/admin/platform-admins', () => {
+describe('/api/v1/admin/platform-admins', () => {
   it('lists platform admins who are not turned off', async () => {
     const res = await listAdmins(v1Req('/admin/platform-admins', as(admin)));
     expect(res.status).toBe(200);

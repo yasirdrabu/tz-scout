@@ -10,7 +10,7 @@ export const PATCH = v1Route({ permission: 'offers:manage' }, async (req, _princ
   return updateCaseStudy(ctx, id, await parseBody(req, patchCaseStudyBody));
 });
 
-// POST /v1/case-studies/{id}:archive
+// POST /api/v1/case-studies/{id}:archive
 export const POST = v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) => {
   const { id, action } = idAndAction(req, 'case-studies');
   if (action !== 'archive') throw notFound();

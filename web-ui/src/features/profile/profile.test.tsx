@@ -20,7 +20,7 @@ function serve() {
       access_summary: ['Accounts in the Public sector practice'],
     },
   });
-  server.use(http.get('/v1/me/sessions', () => HttpResponse.json({ data: SESSIONS })));
+  server.use(http.get('/api/v1/me/sessions', () => HttpResponse.json({ data: SESSIONS })));
 }
 
 beforeEach(() => localStorage.clear());
@@ -44,7 +44,7 @@ describe('Profile', () => {
 
   it('shows loading and error states for sessions', async () => {
     serve();
-    server.use(http.get('/v1/me/sessions', async () => {
+    server.use(http.get('/api/v1/me/sessions', async () => {
       await delay('infinite');
       return HttpResponse.json({ data: [] });
     }));
@@ -52,7 +52,7 @@ describe('Profile', () => {
     expect(await screen.findByText('Loading your sessions')).toBeInTheDocument();
     first.unmount();
 
-    server.use(http.get('/v1/me/sessions', () => problem(500, 'Something went wrong', { ref: 'cor_s1' })));
+    server.use(http.get('/api/v1/me/sessions', () => problem(500, 'Something went wrong', { ref: 'cor_s1' })));
     renderApp('/t/taazaa/profile');
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Your sessions didn't load");
@@ -61,7 +61,7 @@ describe('Profile', () => {
 
   it('says when there are no sessions', async () => {
     serve();
-    server.use(http.get('/v1/me/sessions', () => HttpResponse.json({ data: [] })));
+    server.use(http.get('/api/v1/me/sessions', () => HttpResponse.json({ data: [] })));
     renderApp('/t/taazaa/profile');
     expect(await screen.findByText('No active sessions.')).toBeInTheDocument();
   });
@@ -69,7 +69,7 @@ describe('Profile', () => {
   it('signs out of every device after the confirm and goes to sign-in', async () => {
     serve();
     let called = false;
-    server.use(http.post(exactly('/v1/me:sign-out-everywhere'), () => {
+    server.use(http.post(exactly('/api/v1/me:sign-out-everywhere'), () => {
       called = true;
       return new HttpResponse(null, { status: 204 });
     }));
@@ -85,7 +85,7 @@ describe('Profile', () => {
 
   it('shows the API words when signing out everywhere fails', async () => {
     serve();
-    server.use(http.post(exactly('/v1/me:sign-out-everywhere'), () => problem(403, 'Forbidden', { detail: 'Only a person can do this.' })));
+    server.use(http.post(exactly('/api/v1/me:sign-out-everywhere'), () => problem(403, 'Forbidden', { detail: 'Only a person can do this.' })));
     renderApp('/t/taazaa/profile');
     await userEvent.click(await screen.findByRole('button', { name: 'Sign out of every device' }));
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Sign out everywhere' }));

@@ -4,14 +4,14 @@ The public API and the MCP server are two faces of the same module services. The
 services directly, not through the API. Endpoint and tool lists live in each module's index; the
 surfaces as a whole are specified in [public-api/](../public-api/index.md) and [mcp/](../mcp/index.md).
 
-## REST `/v1`
+## REST `/api/v1`
 
-- Base URL `https://scout.taazaa.ai/v1`. JSON only. Versioned in the path; breaking changes go to
-  `/v2`, which runs alongside `/v1` for at least six months.
-- OpenAPI 3.1 at `/v1/openapi.json`, generated from the Zod contracts. Human docs at `/developers`.
-- Resource style: plural nouns (`/v1/accounts`, `/v1/arrivals`, `/v1/batches`), sub-resources for
-  ownership (`/v1/accounts/{id}/people`), and verbs only for actions that are not plain updates
-  (`POST /v1/accounts/{id}:assign`).
+- Base URL `https://scout.taazaa.ai/api/v1`. JSON only. Versioned in the path; breaking changes go to
+  `/api/v2`, which runs alongside `/api/v1` for at least six months.
+- OpenAPI 3.1 at `/api/v1/openapi.json`, generated from the Zod contracts. Human docs at `/developers`.
+- Resource style: plural nouns (`/api/v1/accounts`, `/api/v1/arrivals`, `/api/v1/batches`), sub-resources for
+  ownership (`/api/v1/accounts/{id}/people`), and verbs only for actions that are not plain updates
+  (`POST /api/v1/accounts/{id}:assign`).
 - **Auth:** `Authorization: Bearer <token>`. Tokens are API keys (`scout_live_…`, `scout_test_…`) or
   OAuth 2.1 access tokens. Both resolve to a principal with a tenant, scopes and data limits.
 - **Scopes** (permission) and **data limits** (which rows) are separate; both are checked. Scope
@@ -43,7 +43,7 @@ surfaces as a whole are specified in [public-api/](../public-api/index.md) and [
 - **Hosted:** Streamable HTTP at `https://scout.taazaa.ai/mcp`. Clients (Claude, ChatGPT, others)
   connect by URL and sign in with OAuth 2.1 (dynamic client registration allowed per tenant setting);
   the grant carries the same scopes and data limits as an API key.
-- **Local:** `npx @taazaa/scout-mcp` (stdio), configured with an API key; it calls `/v1`.
+- **Local:** `npx @taazaa/scout-mcp` (stdio), configured with an API key; it calls `/api/v1`.
 - **Tools are agent-shaped, not endpoint mirrors.** Each tool has a clear verb-first name, a
   one-paragraph description written for a model, Zod input and output, and returns short,
   explainable results with ids the agent can use next. The tool list lives in `mcp/agent-tools.md`.

@@ -17,7 +17,7 @@ export const POST = v1Route({ permission: 'arrivals:write', maxBytes: BATCH_MAX_
   });
   return accepted({
     batchId: r.batchId,
-    statusUrl: new URL(`/v1/batches/${r.batchId}`, config.publicUrl).toString(),
+    statusUrl: new URL(`/api/v1/batches/${r.batchId}`, config.publicUrl).toString(),
     itemCount: r.items.length,
     items: r.items,
   });

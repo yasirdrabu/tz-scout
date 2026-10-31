@@ -41,7 +41,7 @@ const BODY = JSON.stringify([{ subscriptionType: 'contact.propertyChange', objec
 function send(id: string, opts: { body?: string; secret?: string; at?: number; signature?: string; query?: string; signedQuery?: string } = {}) {
   const body = opts.body ?? BODY;
   const timestamp = String(opts.at ?? Date.now());
-  const path = `/v1/inbound/hubspot/${id}`;
+  const path = `/api/v1/inbound/hubspot/${id}`;
   const signature =
     opts.signature ?? createHmac('sha256', opts.secret ?? SECRET).update(`POST${ORIGIN}${path}${opts.signedQuery ?? opts.query ?? ''}${body}${timestamp}`).digest('base64');
   return POST(
@@ -57,7 +57,7 @@ function send(id: string, opts: { body?: string; secret?: string; at?: number; s
 const queued = async () =>
   (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId))).filter((r) => (r.payload as { type: string }).type === leadQualified.type).length;
 
-describe('POST /v1/inbound/hubspot/{connectionId} (SRC-E6-S1-AC2)', () => {
+describe('POST /api/v1/inbound/hubspot/{connectionId} (SRC-E6-S1-AC2)', () => {
   it('a good request is 200, stores the receipt and enqueues the work', async () => {
     const before = await queued();
     const res = await send(conn);
@@ -78,7 +78,7 @@ describe('POST /v1/inbound/hubspot/{connectionId} (SRC-E6-S1-AC2)', () => {
       await send(conn, { signature: 'AAAA' }),
       await send(conn, { secret: 'someone-elses-secret' }),
       await send(conn, { at: Date.now() - 6 * 60_000 }),
-      await POST(new Request(`http://internal:3000/v1/inbound/hubspot/${conn}`, { method: 'POST', body: BODY })),
+      await POST(new Request(`http://internal:3000/api/v1/inbound/hubspot/${conn}`, { method: 'POST', body: BODY })),
     ]) {
       expect(r.status).toBe(401);
       expect(r.headers.get('content-type')).toContain('application/problem+json');

@@ -25,7 +25,7 @@ export const GET = v1Route({ permission: 'imports:run' }, async (req, principal,
   return { ...found, mapping, file };
 });
 
-// POST /v1/imports/{id}:preview and /v1/imports/{id}:confirm
+// POST /api/v1/imports/{id}:preview and /api/v1/imports/{id}:confirm
 export const POST = v1Route({ permission: 'imports:run' }, async (req, principal, ctx) => {
   const { id, action } = idAndAction(req, 'imports');
   if (action !== 'preview' && action !== 'confirm') throw notFound();

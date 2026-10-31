@@ -72,7 +72,7 @@ const req = (path: string, opts: { as?: Person; tenant?: string; method?: string
   if (opts.method && opts.method !== 'GET') h.set('origin', ORIGIN);
   if (opts.body !== undefined) h.set('content-type', 'application/json');
   for (const [k, v] of Object.entries(opts.headers ?? {})) h.set(k, v);
-  return new Request(`${ORIGIN}/v1${path}`, {
+  return new Request(`${ORIGIN}/api/v1${path}`, {
     method: opts.method ?? 'GET',
     headers: h,
     ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
@@ -86,7 +86,7 @@ const apiKey = async (scopes: string[] = []) =>
     )
   ).secret;
 
-describe('GET /v1/me', () => {
+describe('GET /api/v1/me', () => {
   it('gives a member the person, the tenant with currency and timezone, and their workspaces', async () => {
     const res = await me(req('/me', { as: seller, tenant: alpha.slug }));
     expect(res.status).toBe(200);
@@ -142,7 +142,7 @@ describe('GET /v1/me', () => {
     await inTenant(alpha.tenantId, owner.actor, (ctx) => addMember(ctx, { email: loner.email, role: 'seller' }));
     const h = await signedIn(loner.id);
     await adminDb.update(membership).set({ status: 'removed' }).where(eq(membership.userId, loner.id));
-    const body = await (await me(new Request(`${ORIGIN}/v1/me`, { headers: h }))).json();
+    const body = await (await me(new Request(`${ORIGIN}/api/v1/me`, { headers: h }))).json();
     expect(body).toMatchObject({ user: { id: loner.id, platform_admin: false }, tenant: null, workspaces: [], scopes: [] });
     expect((await me(req('/me'))).status).toBe(401);
   });
@@ -173,19 +173,19 @@ describe('sessionRoute and adminRoute', () => {
     await inTenant(alpha.tenantId, owner.actor, (ctx) => addMember(ctx, { email: p.email, role: 'seller' }));
     const h = await signedIn(p.id);
     await adminDb.update(session).set({ updatedAt: new Date(Date.now() - 13 * 3600_000) }).where(eq(session.userId, p.id));
-    expect((await echo(new Request(`${ORIGIN}/v1/x`, { headers: h }))).status).toBe(401);
+    expect((await echo(new Request(`${ORIGIN}/api/v1/x`, { headers: h }))).status).toBe(401);
   });
 
   it('applies the 7 day age rule, even to a session active a moment ago', async () => {
     const p = await seedUser({ signedIn: true });
     await inTenant(alpha.tenantId, owner.actor, (ctx) => addMember(ctx, { email: p.email, role: 'seller' }));
     const h = await signedIn(p.id);
-    expect((await echo(new Request(`${ORIGIN}/v1/x`, { headers: h }))).status).toBe(200);
+    expect((await echo(new Request(`${ORIGIN}/api/v1/x`, { headers: h }))).status).toBe(200);
     await adminDb
       .update(session)
       .set({ createdAt: new Date(Date.now() - 8 * 86_400_000), updatedAt: new Date() })
       .where(eq(session.userId, p.id));
-    expect((await echo(new Request(`${ORIGIN}/v1/x`, { headers: h }))).status).toBe(401);
+    expect((await echo(new Request(`${ORIGIN}/api/v1/x`, { headers: h }))).status).toBe(401);
   });
 
   it('refuses a disabled person and a disabled platform admin with a valid session', async () => {
@@ -194,14 +194,14 @@ describe('sessionRoute and adminRoute', () => {
     await inTenant(alpha.tenantId, owner.actor, (ctx) => addMember(ctx, { email: p.email, role: 'seller' }));
     const hp = await signedIn(p.id);
     const ha = await signedIn(a.id);
-    expect((await echo(new Request(`${ORIGIN}/v1/x`, { headers: hp }))).status).toBe(200);
-    expect((await adminOnly(new Request(`${ORIGIN}/v1/admin/x`, { headers: ha }))).status).toBe(200);
+    expect((await echo(new Request(`${ORIGIN}/api/v1/x`, { headers: hp }))).status).toBe(200);
+    expect((await adminOnly(new Request(`${ORIGIN}/api/v1/admin/x`, { headers: ha }))).status).toBe(200);
     await adminDb.update(user).set({ disabledAt: new Date() }).where(inArray(user.id, [p.id, a.id]));
     for (const h of [hp, ha]) {
-      expect((await echo(new Request(`${ORIGIN}/v1/x`, { headers: h }))).status).toBe(401);
-      expect((await me(new Request(`${ORIGIN}/v1/me`, { headers: h }))).status).toBe(401);
+      expect((await echo(new Request(`${ORIGIN}/api/v1/x`, { headers: h }))).status).toBe(401);
+      expect((await me(new Request(`${ORIGIN}/api/v1/me`, { headers: h }))).status).toBe(401);
     }
-    expect((await adminOnly(new Request(`${ORIGIN}/v1/admin/x`, { headers: ha }))).status).toBe(401);
+    expect((await adminOnly(new Request(`${ORIGIN}/api/v1/admin/x`, { headers: ha }))).status).toBe(401);
   });
 
   it('refuses a cross-site write before recording activity on the session', async () => {
@@ -213,12 +213,12 @@ describe('sessionRoute and adminRoute', () => {
     const evil = new Headers(h);
     evil.set('origin', 'https://evil.example');
     evil.set('content-type', 'application/json');
-    const res = await write(new Request(`${ORIGIN}/v1/x`, { method: 'POST', headers: evil, body: '{}' }));
+    const res = await write(new Request(`${ORIGIN}/api/v1/x`, { method: 'POST', headers: evil, body: '{}' }));
     expect(res.status).toBe(403);
     const [s] = await adminDb.select({ updatedAt: session.updatedAt }).from(session).where(eq(session.userId, p.id));
     expect(s!.updatedAt.getTime()).toBe(twoHoursAgo.getTime());
     const adminWrite = adminRoute({}, async () => ({ ok: true }));
-    expect((await adminWrite(new Request(`${ORIGIN}/v1/admin/x`, { method: 'POST', headers: evil, body: '{}' }))).status).toBe(403);
+    expect((await adminWrite(new Request(`${ORIGIN}/api/v1/admin/x`, { method: 'POST', headers: evil, body: '{}' }))).status).toBe(403);
     const [s2] = await adminDb.select({ updatedAt: session.updatedAt }).from(session).where(eq(session.userId, p.id));
     expect(s2!.updatedAt.getTime()).toBe(twoHoursAgo.getTime());
   });
@@ -240,7 +240,7 @@ describe('sessionRoute and adminRoute', () => {
     expect((await evil.json()).type).toMatch(/\/csrf$/);
     const h = new Headers(cookies[admin.id]);
     h.set('content-type', 'application/json');
-    expect((await write(new Request(`${ORIGIN}/v1/admin/x`, { method: 'POST', headers: h, body: '{}' }))).status).toBe(403);
+    expect((await write(new Request(`${ORIGIN}/api/v1/admin/x`, { method: 'POST', headers: h, body: '{}' }))).status).toBe(403);
   });
 
   it('a POST with an Idempotency-Key runs once', async () => {
@@ -257,7 +257,7 @@ describe('sessionRoute and adminRoute', () => {
   });
 
   it('assertSameOrigin checks only the origin', () => {
-    const post = (h: Record<string, string>, method = 'POST') => new Request(`${ORIGIN}/v1/y`, { method, headers: h });
+    const post = (h: Record<string, string>, method = 'POST') => new Request(`${ORIGIN}/api/v1/y`, { method, headers: h });
     expect(() => assertSameOrigin(post({ origin: ORIGIN }))).not.toThrow();
     expect(() => assertSameOrigin(post({}, 'GET'))).not.toThrow();
     expect(() => assertSameOrigin(post({}))).toThrow(expect.objectContaining({ slug: 'csrf', status: 403 }));
@@ -265,7 +265,7 @@ describe('sessionRoute and adminRoute', () => {
   });
 });
 
-describe('PUT /v1/me/workspace', () => {
+describe('PUT /api/v1/me/workspace', () => {
   it('writes the last used workspace, so /me and sign-in land there', async () => {
     const res = await putWorkspace(req('/me/workspace', { as: seller, method: 'PUT', body: { slug: beta.slug } }));
     expect(res.status).toBe(204);
@@ -303,7 +303,7 @@ describe('PUT /v1/me/workspace', () => {
   });
 });
 
-describe('GET /v1/me/counts', () => {
+describe('GET /api/v1/me/counts', () => {
   it('counts the review queue for review:act and new assignments for assignments:respond', async () => {
     await adminDb.insert(assignment).values({
       id: newId('asg'),

@@ -29,7 +29,7 @@ describe('invite dialog', () => {
     serve();
     let body: unknown;
     server.use(
-      http.post('/v1/members', async ({ request }) => {
+      http.post('/api/v1/members', async ({ request }) => {
         body = await request.json();
         return HttpResponse.json({
           results: [
@@ -66,7 +66,7 @@ describe('invite dialog', () => {
   it('keeps refused addresses in the form with their reasons', async () => {
     serve();
     server.use(
-      http.post('/v1/members', () =>
+      http.post('/api/v1/members', () =>
         HttpResponse.json({
           results: [{ email: 'dana@taazaa.com', ok: false, error: { slug: 'already-member', title: 'Already a member' } }],
           sign_in_url: 'https://api.example.com/signin',
@@ -82,7 +82,7 @@ describe('invite dialog', () => {
 
   it('shows the API words when the invite fails', async () => {
     serve();
-    server.use(http.post('/v1/members', fail));
+    server.use(http.post('/api/v1/members', fail));
     const dialog = await openInvite();
     await userEvent.type(within(dialog).getByRole('textbox', { name: 'Email addresses' }), 'x@taazaa.com');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Invite' }));
@@ -110,7 +110,7 @@ describe('Roles and permissions tab', () => {
 
   it('shows loading and error states', async () => {
     serve();
-    server.use(http.get('/v1/roles', async () => {
+    server.use(http.get('/api/v1/roles', async () => {
       await delay('infinite');
       return HttpResponse.json({});
     }));
@@ -120,7 +120,7 @@ describe('Roles and permissions tab', () => {
 
   it('says when the roles fail to load', async () => {
     serve();
-    server.use(http.get('/v1/roles', () => problem(500, 'Something went wrong', { ref: 'cor_r1' })));
+    server.use(http.get('/api/v1/roles', () => problem(500, 'Something went wrong', { ref: 'cor_r1' })));
     await openRoles();
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Roles and permissions didn't load");

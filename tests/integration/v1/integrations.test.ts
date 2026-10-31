@@ -82,7 +82,7 @@ async function disconnectEvents(provider: string, tenantId = t.tenantId): Promis
   }).length;
 }
 
-describe('GET /v1/integrations (integrations:manage)', () => {
+describe('GET /api/v1/integrations (integrations:manage)', () => {
   it('lists every workspace service with mode, status, usage and the credential label and last 4', async () => {
     await logCall('apollo', 'ok', 100);
     await logCall('apollo', 'error', 300);
@@ -127,7 +127,7 @@ describe('GET /v1/integrations (integrations:manage)', () => {
   });
 });
 
-describe('PUT /v1/integrations/{key}/credential', () => {
+describe('PUT /api/v1/integrations/{key}/credential', () => {
   it('stores the credential sealed, returns only the last 4, audits it and is never idempotency-stored', async () => {
     const secret = 'demo-secret-value-9a7b';
     const res = await save('demo', secret, 'api_key', { 'idempotency-key': 'cred-1' });
@@ -163,7 +163,7 @@ describe('PUT /v1/integrations/{key}/credential', () => {
       createApiKey(ctx, { name: 'int key', environment: 'live', scopes: ['integrations:manage'] }, SYSTEM_GRANTOR),
     );
     const res = await putCredential(
-      new Request('http://x/v1/integrations/demo/credential', {
+      new Request('http://x/api/v1/integrations/demo/credential', {
         method: 'PUT',
         headers: { authorization: `Bearer ${k.secret}`, 'content-type': 'application/json' },
         body: JSON.stringify({ kind: 'api_key', value: 'abc-def-1234' }),
@@ -173,7 +173,7 @@ describe('PUT /v1/integrations/{key}/credential', () => {
   });
 });
 
-describe('POST /v1/integrations/{key}:test and PUT /v1/integrations/{key}/mode', () => {
+describe('POST /api/v1/integrations/{key}:test and PUT /api/v1/integrations/{key}/mode', () => {
   it('tests with the round trip time, then live is allowed; a failing test lists missing permissions', async () => {
     // Live needs a saved credential (and a passing test).
     await adminDb.delete(credential).where(eq(credential.tenantId, t.tenantId));
@@ -209,7 +209,7 @@ describe('POST /v1/integrations/{key}:test and PUT /v1/integrations/{key}/mode',
   });
 });
 
-describe('PUT /v1/integrations/{key}/disabled', () => {
+describe('PUT /api/v1/integrations/{key}/disabled', () => {
   it('turns a service off and on', async () => {
     const off = await putDisabled(as(owner, '/integrations/apollo/disabled', { method: 'PUT', body: { disabled: true } }));
     expect(off.status).toBe(200);
@@ -221,7 +221,7 @@ describe('PUT /v1/integrations/{key}/disabled', () => {
   });
 });
 
-describe('POST /v1/integrations/{key}:disconnect', () => {
+describe('POST /api/v1/integrations/{key}:disconnect', () => {
   it('clears the credential, returns to sample data, audits and publishes connection.changed', async () => {
     await save('demo', 'good-token-0000-3333');
     await action(as(owner, '/integrations/demo:test', { method: 'POST' }));
@@ -272,7 +272,7 @@ describe('POST /v1/integrations/{key}:disconnect', () => {
   });
 });
 
-describe('GET /v1/integrations/{key}/calls', () => {
+describe('GET /api/v1/integrations/{key}/calls', () => {
   it('lists the last 50 calls newest first, or only the failed ones', async () => {
     for (let i = 0; i < 52; i++) await logCall('vibe', i % 4 === 0 ? 'rate_limited' : 'ok', i, new Date(Date.now() - i * 1000));
     const all = await calls(as(owner, '/integrations/vibe/calls'));
@@ -312,7 +312,7 @@ describe('GET /v1/integrations/{key}/calls', () => {
   });
 });
 
-describe('POST /v1/integrations/{key}:test scrubs the message', () => {
+describe('POST /api/v1/integrations/{key}:test scrubs the message', () => {
   it('a failure with a secret in the error does not echo it', async () => {
     registerAdapter(DEMO_PROVIDER, {
       mock: () => ({ test: async () => ({ ok: true, message: 'ok' }) }),

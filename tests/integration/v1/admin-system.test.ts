@@ -63,7 +63,7 @@ async function deadJobIn(tenantId: string): Promise<string> {
 const auditFor = (action: string, subjectId: string) =>
   adminDb.select().from(auditLog).where(and(eq(auditLog.action, action), eq(auditLog.subjectId, subjectId)));
 
-describe('GET /v1/admin/health', () => {
+describe('GET /api/v1/admin/health', () => {
   it('gives relay lag, queues with oldest age, dead jobs with tenant names, schedules and AI spend', async () => {
     const deadId = await deadJobIn(acme.tenantId);
     const scheduleId = await upsertSchedule(
@@ -98,7 +98,7 @@ describe('GET /v1/admin/health', () => {
   });
 });
 
-describe('POST /v1/admin/jobs/{id}:retry and :discard', () => {
+describe('POST /api/v1/admin/jobs/{id}:retry and :discard', () => {
   it('retry sends the job again and audits it', async () => {
     const t = newId('t');
     const id = await deadJobIn(t);
@@ -128,7 +128,7 @@ describe('POST /v1/admin/jobs/{id}:retry and :discard', () => {
   });
 });
 
-describe('POST /v1/admin/schedules/{id}:pause, :resume and :run-now', () => {
+describe('POST /api/v1/admin/schedules/{id}:pause, :resume and :run-now', () => {
   let id: string;
   beforeAll(async () => {
     id = await upsertSchedule(
@@ -165,7 +165,7 @@ describe('POST /v1/admin/schedules/{id}:pause, :resume and :run-now', () => {
   });
 });
 
-describe('POST /v1/admin/test-event', () => {
+describe('POST /api/v1/admin/test-event', () => {
   it('gives the round trip once the worker has handled the ping', async () => {
     const since = new Date();
     // Stand in for the relay and worker: answer the ping as soon as it is in the outbox.

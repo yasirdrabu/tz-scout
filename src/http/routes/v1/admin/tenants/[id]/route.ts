@@ -9,7 +9,7 @@ const setStatus = (status: 'active' | 'suspended') =>
     return (await adminTenants(ctx.tx)).find((t) => t.id === id)!;
   });
 
-// POST /v1/admin/tenants/{id}:suspend and :resume. A suspended tenant refuses sign-in, sessions and its API keys.
+// POST /api/v1/admin/tenants/{id}:suspend and :resume. A suspended tenant refuses sign-in, sessions and its API keys.
 export const POST = adminByAction('tenants', {
   suspend: setStatus('suspended'),
   resume: setStatus('active'),

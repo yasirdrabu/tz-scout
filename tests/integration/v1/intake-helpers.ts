@@ -27,7 +27,7 @@ export function call(
   const { body } = init;
   const isForm = body instanceof FormData;
   return handler(
-    new Request(`http://x/v1/${path}`, {
+    new Request(`http://x/api/v1/${path}`, {
       method: init.method ?? (body === undefined ? 'GET' : 'POST'),
       headers: {
         authorization: `Bearer ${secret}`,

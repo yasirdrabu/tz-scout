@@ -6,7 +6,7 @@ import { v1Route } from '../../../_lib/v1-route';
 
 const body = z.strictObject({ case_study_ids: z.array(z.string()) });
 
-// PUT /v1/offers/{id}/case-studies replaces the linked case studies with exactly these ids.
+// PUT /api/v1/offers/{id}/case-studies replaces the linked case studies with exactly these ids.
 export const PUT = v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) => {
   const { id, action } = idAndAction(req, 'offers');
   if (action) throw notFound();

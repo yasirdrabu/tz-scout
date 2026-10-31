@@ -31,7 +31,7 @@ beforeEach(() => setPrincipalCacheTtl(0));
 
 const call = (h: (r: Request) => Promise<Response>, secret: string, path: string, method = 'GET', body?: unknown) =>
   h(
-    new Request(`http://x/v1/${path}`, {
+    new Request(`http://x/api/v1/${path}`, {
       method,
       headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -52,7 +52,7 @@ const rule = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-describe('signal rules on /v1', () => {
+describe('signal rules on /api/v1', () => {
   it('AC0: PUT needs scoring:manage', async () => {
     const o = await draft('Locked');
     const before = await t.run((ctx) => listSignalRules(ctx, o.id));

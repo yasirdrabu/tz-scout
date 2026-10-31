@@ -46,8 +46,8 @@ const CALLS: Call[] = [
 function serve(rows: Integration[] = [HUBSPOT, APOLLO, GOVSPEND]) {
   serveMe({ taazaa: { scopes: ['integrations:manage'] } });
   server.use(
-    http.get('/v1/integrations', () => HttpResponse.json({ data: rows })),
-    http.get('/v1/integrations/:key/calls', ({ request }) => {
+    http.get('/api/v1/integrations', () => HttpResponse.json({ data: rows })),
+    http.get('/api/v1/integrations/:key/calls', ({ request }) => {
       const errorsOnly = new URL(request.url).searchParams.get('errors_only') === 'true';
       return HttpResponse.json({ data: errorsOnly ? CALLS.filter((c) => c.outcome !== 'ok') : CALLS });
     }),
@@ -87,7 +87,7 @@ describe('Integrations list', () => {
 
   it('shows loading, error and empty states', async () => {
     serve();
-    server.use(http.get('/v1/integrations', async () => {
+    server.use(http.get('/api/v1/integrations', async () => {
       await delay('infinite');
       return HttpResponse.json({ data: [] });
     }));
@@ -95,14 +95,14 @@ describe('Integrations list', () => {
     expect(await screen.findByText('Loading integrations')).toBeInTheDocument();
     first.unmount();
 
-    server.use(http.get('/v1/integrations', () => problem(500, 'Something went wrong', { ref: 'cor_i1' })));
+    server.use(http.get('/api/v1/integrations', () => problem(500, 'Something went wrong', { ref: 'cor_i1' })));
     const second = renderApp('/t/taazaa/settings/integrations');
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Integrations didn't load");
     expect(within(alert).getByText('Error ref cor_i1')).toBeInTheDocument();
     second.unmount();
 
-    server.use(http.get('/v1/integrations', () => HttpResponse.json({ data: [] })));
+    server.use(http.get('/api/v1/integrations', () => HttpResponse.json({ data: [] })));
     renderApp('/t/taazaa/settings/integrations');
     expect(await screen.findByRole('heading', { name: 'No services to connect' })).toBeInTheDocument();
   });
@@ -136,11 +136,11 @@ describe('manage panel', () => {
     serve();
     let saved: unknown;
     server.use(
-      http.put('/v1/integrations/govspend/credential', async ({ request }) => {
+      http.put('/api/v1/integrations/govspend/credential', async ({ request }) => {
         saved = await request.json();
         return HttpResponse.json({ ...GOVSPEND, credentials: [{ kind: 'api_key', label: 'Key', last4: '9z9z', saved_at: '2026-10-31T10:00:00Z' }] });
       }),
-      http.post(exactly('/v1/integrations/govspend:test'), () => HttpResponse.json({ ok: true, message: 'Read and write scopes granted.', duration_ms: 182 })),
+      http.post(exactly('/api/v1/integrations/govspend:test'), () => HttpResponse.json({ ok: true, message: 'Read and write scopes granted.', duration_ms: 182 })),
     );
     const drawer = await openService('Connect GovSpend');
     await userEvent.type(within(drawer).getByLabelText('Paste the Key'), 'gs-key-1234567890');
@@ -153,7 +153,7 @@ describe('manage panel', () => {
 
   it('shows the API words when saving fails', async () => {
     serve();
-    server.use(http.put('/v1/integrations/govspend/credential', () => problem(400, 'Paste the key or token to save it.')));
+    server.use(http.put('/api/v1/integrations/govspend/credential', () => problem(400, 'Paste the key or token to save it.')));
     const drawer = await openService('Connect GovSpend');
     await userEvent.type(within(drawer).getByLabelText('Paste the Key'), 'gs-key-1234567890');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Save and test' }));
@@ -163,7 +163,7 @@ describe('manage panel', () => {
   it('tests the connection and shows a failed result', async () => {
     serve();
     server.use(
-      http.post(exactly('/v1/integrations/hubspot:test'), () =>
+      http.post(exactly('/api/v1/integrations/hubspot:test'), () =>
         HttpResponse.json({ ok: false, message: 'HubSpot refused the token.', missing_permissions: ['crm.objects.deals.write'], duration_ms: 90 }),
       ),
     );
@@ -175,7 +175,7 @@ describe('manage panel', () => {
 
   it('shows the API words when the test call fails', async () => {
     serve();
-    server.use(http.post(exactly('/v1/integrations/hubspot:test'), () => problem(500, 'Something went wrong', { detail: 'Scout could not run the test.' })));
+    server.use(http.post(exactly('/api/v1/integrations/hubspot:test'), () => problem(500, 'Something went wrong', { detail: 'Scout could not run the test.' })));
     const drawer = await openService('Manage HubSpot');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Test connection' }));
     expect(await screen.findByText('Scout could not run the test.')).toBeInTheDocument();
@@ -183,7 +183,7 @@ describe('manage panel', () => {
 
   it('asks before switching to live, and shows the refusal', async () => {
     serve();
-    server.use(http.put('/v1/integrations/apollo/mode', fail));
+    server.use(http.put('/api/v1/integrations/apollo/mode', fail));
     const drawer = await openService('Manage Apollo');
     await userEvent.click(within(drawer).getByRole('radio', { name: 'Live' }));
     const confirm = await screen.findByRole('dialog', { name: 'Switch Apollo to live?' });
@@ -192,7 +192,7 @@ describe('manage panel', () => {
     expect(await screen.findByText('Run a passing test in the last 10 minutes before going live.')).toBeInTheDocument();
 
     let body: unknown;
-    server.use(http.put('/v1/integrations/apollo/mode', async ({ request }) => {
+    server.use(http.put('/api/v1/integrations/apollo/mode', async ({ request }) => {
       body = await request.json();
       return HttpResponse.json({ ...APOLLO, mode: 'live' });
     }));
@@ -204,7 +204,7 @@ describe('manage panel', () => {
   it('keeps sample data when the confirm is declined, and switches back without asking', async () => {
     serve();
     let calls = 0;
-    server.use(http.put('/v1/integrations/:key/mode', () => {
+    server.use(http.put('/api/v1/integrations/:key/mode', () => {
       calls += 1;
       return HttpResponse.json({ ...HUBSPOT, mode: 'mock' });
     }));
@@ -224,14 +224,14 @@ describe('manage panel', () => {
 
   it('disconnects after the confirm, and shows the failure', async () => {
     serve();
-    server.use(http.post(exactly('/v1/integrations/hubspot:disconnect'), () => problem(404, 'Not found', { detail: 'Scout has no such service.' })));
+    server.use(http.post(exactly('/api/v1/integrations/hubspot:disconnect'), () => problem(404, 'Not found', { detail: 'Scout has no such service.' })));
     const drawer = await openService('Manage HubSpot');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Disconnect' }));
     const confirm = await screen.findByRole('dialog', { name: 'Disconnect HubSpot?' });
     await userEvent.click(within(confirm).getByRole('button', { name: 'Disconnect' }));
     expect(await screen.findByText('Scout has no such service.')).toBeInTheDocument();
 
-    server.use(http.post(exactly('/v1/integrations/hubspot:disconnect'), () => HttpResponse.json({ ...HUBSPOT, credentials: [], mode: 'mock', status: 'not_set_up' })));
+    server.use(http.post(exactly('/api/v1/integrations/hubspot:disconnect'), () => HttpResponse.json({ ...HUBSPOT, credentials: [], mode: 'mock', status: 'not_set_up' })));
     await userEvent.click(within(confirm).getByRole('button', { name: 'Disconnect' }));
     expect(await screen.findByText('Disconnected HubSpot. Scout stopped calling it and switched to sample data.')).toBeInTheDocument();
   });
@@ -239,7 +239,7 @@ describe('manage panel', () => {
   it('turns a service off and on, and shows the failure', async () => {
     serve([HUBSPOT, { ...GOVSPEND, status: 'disabled' }]);
     let body: unknown;
-    server.use(http.put('/v1/integrations/:key/disabled', async ({ request }) => {
+    server.use(http.put('/api/v1/integrations/:key/disabled', async ({ request }) => {
       body = await request.json();
       return HttpResponse.json(HUBSPOT);
     }));
@@ -252,7 +252,7 @@ describe('manage panel', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Connect GovSpend' }));
     const gov = await screen.findByRole('dialog', { name: 'GovSpend' });
-    server.use(http.put('/v1/integrations/govspend/disabled', () => problem(403, 'Forbidden', { detail: 'Only owners can do this.' })));
+    server.use(http.put('/api/v1/integrations/govspend/disabled', () => problem(403, 'Forbidden', { detail: 'Only owners can do this.' })));
     await userEvent.click(within(gov).getByRole('button', { name: 'Turn on' }));
     expect(await screen.findByText('Only owners can do this.')).toBeInTheDocument();
   });
@@ -261,10 +261,10 @@ describe('manage panel', () => {
 describe('last 50 calls', () => {
   it('says when there are no calls, and when they fail to load', async () => {
     serve();
-    server.use(http.get('/v1/integrations/govspend/calls', () => HttpResponse.json({ data: [] })));
+    server.use(http.get('/api/v1/integrations/govspend/calls', () => HttpResponse.json({ data: [] })));
     const drawer = await openService('Connect GovSpend');
     expect(await within(drawer).findByText('No calls yet.')).toBeInTheDocument();
-    server.use(http.get('/v1/integrations/govspend/calls', () => problem(500, 'Something went wrong', { ref: 'cor_c1' })));
+    server.use(http.get('/api/v1/integrations/govspend/calls', () => problem(500, 'Something went wrong', { ref: 'cor_c1' })));
     await userEvent.click(within(drawer).getByRole('tab', { name: 'Errors only' }));
     expect(await within(drawer).findByText("Calls didn't load")).toBeInTheDocument();
   });

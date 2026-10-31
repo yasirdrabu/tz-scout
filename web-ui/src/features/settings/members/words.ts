@@ -1,7 +1,7 @@
 import type { DataLimit } from '../../../api/me';
 import type { Member, MemberLock, MemberStatus, Practice } from './api';
 
-// The API sends role keys only (GET /v1/roles has no role labels), so the screen names them here,
+// The API sends role keys only (GET /api/v1/roles has no role labels), so the screen names them here,
 // in the mockup's words. A role the app doesn't know shows its key, capitalised.
 const ROLE_NAMES: Record<string, { label: string; about: string }> = {
   owner: { label: 'Owner', about: 'Everything, including members, integrations, keys and settings.' },

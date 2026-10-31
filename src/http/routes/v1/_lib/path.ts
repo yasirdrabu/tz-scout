@@ -4,7 +4,7 @@ export const notFound = () => new ScoutError({ slug: 'not-found', status: 404, t
 
 /**
  * The id segment that follows `after` in the request path, split at ':' into id and action, for
- * example `/v1/offers/off_01J:approve` gives `{ id: 'off_01J', action: 'approve' }`.
+ * example `/api/v1/offers/off_01J:approve` gives `{ id: 'off_01J', action: 'approve' }`.
  * A path without that segment, or with a malformed one, is a 404.
  */
 export function idAndAction(req: Request, after: string): { id: string; action: string | null } {

@@ -29,7 +29,7 @@ queue with its scores and reasons, and a person decides (decision D6).
 ## Rules
 
 - Each web form is a source of kind `web_form` with its own token, and posts to
-  `POST /v1/inbound/forms/{sourceId}` (SRC-E6). Today's form body is accepted unchanged.
+  `POST /api/v1/inbound/forms/{sourceId}` (SRC-E6). Today's form body is accepted unchanged.
 - **Campaign attribution:** the form body may also carry `utm_source`, `utm_medium`, `utm_campaign`,
   `utm_content`, `campaign_id` and `statement_id`. SRC keeps them as `form_answer` facts on the
   arrival; Campaigns reads them through Accounts to tie a form fill to a message test or ad campaign.

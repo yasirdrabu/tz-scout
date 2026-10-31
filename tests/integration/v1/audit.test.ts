@@ -52,7 +52,7 @@ const get = async (query: string, as: Person = owner) => {
   return { status: res.status, body: await res.json() };
 };
 
-describe('GET /v1/audit', () => {
+describe('GET /api/v1/audit', () => {
   it('lists entries newest first with area, names and the IP of entries made through the API', async () => {
     const { status, body } = await get('');
     expect(status).toBe(200);

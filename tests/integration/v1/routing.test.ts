@@ -47,7 +47,7 @@ async function signIn(userId: string): Promise<string> {
 /** A cookie-signed-in request with the same-site headers the web app sends. */
 const as = (who: Who, handler: (r: Request) => Promise<Response>, path: string, method = 'GET', body?: unknown) =>
   handler(
-    new Request(`http://localhost:4240/v1/${path}`, {
+    new Request(`http://localhost:4240/api/v1/${path}`, {
       method,
       headers: { cookie: cookies[who], 'x-scout-tenant': slug, origin: 'http://localhost:4240', 'content-type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -86,7 +86,7 @@ const keyIn = async (scopes: Permission[], extra: Parameters<typeof createApiKey
   (await run((ctx) => createApiKey(ctx, { name: 'k', environment: 'live', scopes, ...extra }, SYSTEM_GRANTOR))).secret;
 const viaKey = (key: string, handler: (r: Request) => Promise<Response>, path: string, method = 'GET', body?: unknown) =>
   handler(
-    new Request(`http://x/v1/${path}`, {
+    new Request(`http://x/api/v1/${path}`, {
       method,
       headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),

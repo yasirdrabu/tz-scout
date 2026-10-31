@@ -82,18 +82,18 @@ Fixed in `public-api/index.md` (JSON is `snake_case`):
 
 | Method and path | Scope | Does |
 |---|---|---|
-| `GET /v1/analytics/funnel?by=source\|practice\|offer&from&to` | `analytics:read` | Funnel counts and conversion per stage. Optional extra query: `view` (cohort, activity), `attribution` (first, any), `source_level` (person, agent, vendor), `format=csv` |
-| `GET /v1/costs?from&to&source_id` | `analytics:read` | Cost lines, with totals by category and target; `format=csv` |
-| `POST /v1/costs` | `costs:write` | Add a manual cost line |
+| `GET /api/v1/analytics/funnel?by=source\|practice\|offer&from&to` | `analytics:read` | Funnel counts and conversion per stage. Optional extra query: `view` (cohort, activity), `attribution` (first, any), `source_level` (person, agent, vendor), `format=csv` |
+| `GET /api/v1/costs?from&to&source_id` | `analytics:read` | Cost lines, with totals by category and target; `format=csv` |
+| `POST /api/v1/costs` | `costs:write` | Add a manual cost line |
 
 Proposed additions (to be added to `public-api/index.md` before R3; not yet in the fixed list):
 
 | Method and path | Scope | Does |
 |---|---|---|
-| `POST /v1/costs/{id}:void` | `costs:write` | Void a line with a reason |
-| `GET /v1/analytics/sources/{id}/performance` | `analytics:read`, or `status:read` limited to own source | One source's funnel, decline reasons and trust over time (backs `get_source_performance`) |
-| `GET /v1/analytics/flywheel` | `analytics:read` | Quarterly trend numbers |
-| `GET /v1/analytics/scorecard` | `analytics:read` | Weeks, targets, colours, rolling average |
+| `POST /api/v1/costs/{id}:void` | `costs:write` | Void a line with a reason |
+| `GET /api/v1/analytics/sources/{id}/performance` | `analytics:read`, or `status:read` limited to own source | One source's funnel, decline reasons and trust over time (backs `get_source_performance`) |
+| `GET /api/v1/analytics/flywheel` | `analytics:read` | Quarterly trend numbers |
+| `GET /api/v1/analytics/scorecard` | `analytics:read` | Weeks, targets, colours, rolling average |
 
 ## MCP tools
 
