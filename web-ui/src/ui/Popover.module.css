@@ -1,0 +1,23 @@
+.content {
+  z-index: 30;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pop);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  animation: fade var(--duration) var(--ease);
+}
+
+.content:focus-visible {
+  box-shadow: var(--shadow-pop), var(--ring);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

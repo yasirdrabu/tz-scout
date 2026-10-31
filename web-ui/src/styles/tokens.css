@@ -1,0 +1,93 @@
+/* Scout design tokens: the mockups' overrides of the Dayko system (spec index.md, Look). Light only. */
+:root {
+  /* Accent: plum */
+  --accent-50: #f6edf3;
+  --accent-100: #edd8e7;
+  --accent-200: #ddb4d2;
+  --accent-300: #c78cba;
+  --accent-400: #a35a93;
+  --accent-500: #7b2d6b;
+  --accent-600: #6b2560;
+  --accent-700: #5b1f52;
+  --accent-800: #47183f;
+  --accent: var(--accent-500);
+  --accent-hover: var(--accent-600);
+  --on-accent: #ffffff;
+
+  /* Warm ink */
+  --ink-900: #1f1c19;
+  --ink-800: #332f2b;
+  --ink-700: #423d38;
+  --ink-600: #5a534c;
+  --ink-500: #7a736b;
+  --ink-400: #a39c93;
+  --ink-300: #cfcac2;
+  --ink-200: #e6e3dd;
+  --ink-150: #eeece7;
+  --ink-100: #f2f0ec;
+
+  /* Surfaces */
+  --canvas: #f6f5f2;
+  --sunken: #faf9f7;
+  --sidebar: #fbfaf8;
+  --surface: #ffffff;
+  --hover: var(--ink-100);
+  --line: var(--ink-200);
+  --line-soft: var(--ink-150);
+
+  /* Text */
+  --text: var(--ink-900);
+  --text-soft: var(--ink-700);
+  --text-muted: var(--ink-500);
+
+  /* Status, for meaning only */
+  --good: #18794e;
+  --good-soft: #e5f1ea;
+  --near: #a15c07;
+  --near-soft: #faefdf;
+  --bad: #b42318;
+  --bad-soft: #fbe9e7;
+  --none: var(--ink-500);
+  --none-soft: var(--ink-100);
+
+  /* Type */
+  --font-sans: 'Geist', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, Menlo, monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 24px;
+
+  /* Shape */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pop: 12px;
+  --radius-pill: 999px;
+  --control-sm: 30px;
+  --control-md: 36px;
+
+  /* Depth */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.14);
+  --shadow-toast: 0 12px 32px rgba(31, 28, 25, 0.3);
+  --ring: 0 0 0 3px rgba(123, 45, 107, 0.22);
+
+  /* Shell */
+  --sidebar-width: 240px;
+  --header-height: 60px;
+  --min-width: 1180px;
+
+  /* Motion */
+  --duration: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration: 0ms;
+  }
+}
