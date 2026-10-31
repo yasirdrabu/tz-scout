@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createRoute, useRouter } from '@tanstack/react-router';
-import { useId, useState, type FormEvent } from 'react';
-import { devSignIn, devUsers, safeReturnPath, startMicrosoftSignIn } from '../api/auth';
+import { useState } from 'react';
+import { authConfig, devSignIn, devUsers, safeReturnPath, startMicrosoftSignIn } from '../api/auth';
 import { ApiError } from '../api/errors';
 import { Button } from '../ui/Button';
 import { rootRoute } from './root';
@@ -37,7 +37,12 @@ function SignInPage() {
   const queryClient = useQueryClient();
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const dev = useQuery({ queryKey: ['dev-users'], queryFn: devUsers, retry: false, staleTime: Infinity });
+  // Which methods to offer comes from the API. If the config can't load, Microsoft is offered anyway.
+  const config = useQuery({ queryKey: ['auth-config'], queryFn: authConfig, retry: false, staleTime: Infinity });
+  const devOn = config.data?.dev_sign_in === true;
+  const microsoftOn = config.isError || (config.data?.methods.includes('microsoft') ?? false);
+  const dev = useQuery({ queryKey: ['dev-users'], queryFn: devUsers, retry: false, staleTime: Infinity, enabled: devOn });
+  const devList = devOn && dev.data && dev.data.length > 0 ? dev.data : null;
 
   const message = problem ?? (search.error ? errorCopy(search.error) : null);
 
@@ -77,13 +82,14 @@ function SignInPage() {
             {message}
           </p>
         )}
-        <Button className={styles.wide} onClick={() => void microsoft()} disabled={busy}>
-          Continue with Microsoft
-        </Button>
-        {dev.data && dev.data.length > 0 && <DevUserList users={dev.data} disabled={busy} onPick={signInAs} />}
-        {dev.isFetched && dev.data === null && import.meta.env.DEV && <DevUserIdForm disabled={busy} onSubmit={signInAs} />}
+        {microsoftOn && (
+          <Button className={styles.wide} onClick={() => void microsoft()} disabled={busy}>
+            Continue with Microsoft
+          </Button>
+        )}
+        {devList && <DevUserList users={devList} disabled={busy} onPick={signInAs} />}
       </div>
-      {dev.data && dev.data.length > 0 && (
+      {devList && (
         <p className={styles.footnote}>Developer sign-in is on. Turn it off before anyone outside the team can reach this app.</p>
       )}
     </main>
@@ -112,26 +118,3 @@ function DevUserList({ users, disabled, onPick }: DevProps & { users: { id: stri
   );
 }
 
-/** Local development only: the API has no dev user list yet, so take a user id. */
-function DevUserIdForm({ disabled, onSubmit }: DevProps & { onSubmit: (id: string) => void }) {
-  const id = useId();
-  const [userId, setUserId] = useState('');
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    if (userId.trim()) onSubmit(userId.trim());
-  }
-  return (
-    <form className={styles.dev} onSubmit={submit}>
-      <label htmlFor={id} className={styles.devTitle}>
-        Developer sign-in: user id
-      </label>
-      <div className={styles.devRow}>
-        <input id={id} className={styles.input} value={userId} onChange={(e) => setUserId(e.target.value)} autoComplete="off" />
-        <Button type="submit" size="sm" variant="secondary" disabled={disabled || !userId.trim()}>
-          Sign in as this user
-        </Button>
-      </div>
-      <p className={styles.hint}>Works when the backend has AUTH_DEV_SIGNIN=true.</p>
-    </form>
-  );
-}

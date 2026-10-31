@@ -27,6 +27,13 @@ export async function startMicrosoftSignIn(returnPath: string, go: (url: string)
   go(res.url);
 }
 
+/** `GET /v1/auth/config` (public): the sign-in methods this Scout offers and whether developer sign-in is on. */
+export type AuthConfig = { methods: string[]; dev_sign_in: boolean };
+
+export function authConfig(): Promise<AuthConfig> {
+  return request<AuthConfig>(`${API_BASE}/auth/config`);
+}
+
 export type DevUser = { id: string; email: string; name: string; platform_admin: boolean };
 
 /**

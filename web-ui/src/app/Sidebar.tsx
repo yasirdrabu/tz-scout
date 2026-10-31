@@ -1,6 +1,8 @@
+import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
-import type { Me } from '../api/me';
+import { countsQuery, type Counts, type Me } from '../api/me';
 import { cx } from '../lib/cx';
+import { Badge } from '../ui/Badge';
 import { allows, SETTINGS_RULE, visibleNav, visibleSettingsTabs, type NavItem } from './nav';
 import { ProfileMenu } from './ProfileMenu';
 import styles from './Sidebar.module.css';
@@ -8,6 +10,7 @@ import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 export function Sidebar({ me }: { me: Me }) {
   const tenant = me.tenant.slug;
+  const { data: counts } = useQuery(countsQuery(tenant));
   return (
     <aside className={styles.sidebar}>
       <WorkspaceSwitcher me={me} />
@@ -20,7 +23,7 @@ export function Sidebar({ me }: { me: Me }) {
             <ul aria-labelledby={`nav-${g.group}`} className={styles.items}>
               {g.items.map((item) => (
                 <li key={item.to}>
-                  <NavLink item={item} tenant={tenant} />
+                  <NavLink item={item} tenant={tenant} counts={counts} />
                 </li>
               ))}
             </ul>
@@ -35,7 +38,7 @@ export function Sidebar({ me }: { me: Me }) {
   );
 }
 
-function NavLink({ item, tenant }: { item: NavItem; tenant: string }) {
+function NavLink({ item, tenant, counts }: { item: NavItem; tenant: string; counts: Counts | undefined }) {
   if (item.kind === 'admin') {
     return (
       <Link to={item.to} className={styles.link}>
@@ -43,9 +46,16 @@ function NavLink({ item, tenant }: { item: NavItem; tenant: string }) {
       </Link>
     );
   }
+  const count = item.badge ? counts?.[item.badge.count] : null;
   return (
     <Link to={item.to} params={{ tenant }} className={styles.link}>
-      {item.label}
+      <span className={styles.label}>{item.label}</span>
+      {item.badge && typeof count === 'number' && count > 0 && (
+        <>
+          {' '}
+          <Badge count={count} label={item.badge.label} />
+        </>
+      )}
     </Link>
   );
 }

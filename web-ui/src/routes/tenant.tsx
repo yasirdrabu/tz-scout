@@ -5,6 +5,7 @@ import { landingPath } from '../app/nav';
 import { requireSession } from '../app/RequireSession';
 import { Shell } from '../app/Shell';
 import { rememberWorkspace } from '../lib/lastWorkspace';
+import { FormatProvider } from '../lib/useFormat';
 import { EmptyState } from '../ui/EmptyState';
 import { LoadingLine } from '../ui/LoadingLine';
 import styles from './Page.module.css';
@@ -32,9 +33,11 @@ function TenantLayout() {
     );
   }
   return (
-    <Shell me={me}>
-      <Outlet />
-    </Shell>
+    <FormatProvider currency={me.tenant.currency} timeZone={me.tenant.timezone}>
+      <Shell me={me}>
+        <Outlet />
+      </Shell>
+    </FormatProvider>
   );
 }
 

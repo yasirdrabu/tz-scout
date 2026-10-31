@@ -6,7 +6,7 @@ const MAX = 999;
 export function Badge({ count, label }: { count: number; label: string }) {
   return (
     <span className={styles.badge}>
-      {count > MAX ? `${MAX}+` : count}
+      {count > MAX ? `${MAX}+` : count}{' '}
       <span className="sr-only">{label}</span>
     </span>
   );

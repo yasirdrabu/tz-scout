@@ -6,14 +6,15 @@ import { server } from '../test/server';
 
 beforeEach(() => {
   localStorage.clear();
-  server.use(http.get('/v1/dev/users', () => new HttpResponse('Not found', { status: 404 })));
 });
+
+const devOn = () => http.get('/v1/auth/config', () => HttpResponse.json({ methods: ['microsoft'], dev_sign_in: true }));
 
 describe('sign-in', () => {
   it('offers Microsoft sign-in', async () => {
     renderApp('/signin');
     expect(await screen.findByRole('heading', { name: 'Sign in to Scout' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Continue with Microsoft' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Continue with Microsoft' })).toBeInTheDocument();
   });
 
   it.each([
@@ -24,6 +25,34 @@ describe('sign-in', () => {
   ])('explains the %s error', async (code, copy) => {
     renderApp(`/signin?error=${code}`);
     expect(await screen.findByRole('alert')).toHaveTextContent(copy);
+  });
+
+  it('offers only the methods the API reports', async () => {
+    server.use(
+      http.get('/v1/auth/config', () => HttpResponse.json({ methods: [], dev_sign_in: false })),
+      http.get('/v1/dev/users', () => HttpResponse.json([{ id: 'u1', email: 'dana@taazaa.com', name: 'Dana Whitfield', platform_admin: false }])),
+    );
+    renderApp('/signin');
+    expect(await screen.findByRole('heading', { name: 'Sign in to Scout' })).toBeInTheDocument();
+    await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Continue with Microsoft' })).toBeNull());
+    expect(screen.queryByRole('heading', { name: 'Sign in as' })).toBeNull();
+  });
+
+  it('offers Microsoft when the sign-in config does not load', async () => {
+    server.use(http.get('/v1/auth/config', () => new HttpResponse(null, { status: 500 })));
+    renderApp('/signin');
+    expect(await screen.findByRole('button', { name: 'Continue with Microsoft' })).toBeInTheDocument();
+  });
+
+  it('lists dev users when the API reports dev sign-in on', async () => {
+    server.use(
+      devOn(),
+      http.get('/v1/dev/users', () => HttpResponse.json([{ id: 'u1', email: 'dana@taazaa.com', name: 'Dana Whitfield', platform_admin: true }])),
+    );
+    renderApp('/signin');
+    expect(await screen.findByRole('heading', { name: 'Sign in as' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /dana@taazaa.com · Platform admin/ })).toBeInTheDocument();
+    expect(screen.getByText('Developer sign-in is on. Turn it off before anyone outside the team can reach this app.')).toBeInTheDocument();
   });
 
   it('starts Microsoft sign-in with the return path', async () => {
@@ -43,6 +72,7 @@ describe('sign-in', () => {
 
   it('signs in as a dev user and goes back to the return path', async () => {
     server.use(
+      devOn(),
       http.get('/v1/dev/users', () =>
         HttpResponse.json([{ id: 'u1', email: 'dana@taazaa.com', name: 'Dana Whitfield', platform_admin: false }]),
       ),
@@ -64,6 +94,7 @@ describe('sign-in', () => {
 
   it('shows the API detail when dev sign-in is refused', async () => {
     server.use(
+      devOn(),
       http.get('/v1/dev/users', () => HttpResponse.json([{ id: 'u9', email: 'gone@taazaa.com', name: 'Gone', platform_admin: false }])),
       http.post('/api/dev/sign-in', () =>
         HttpResponse.json(

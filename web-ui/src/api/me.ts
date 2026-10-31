@@ -14,7 +14,8 @@ export type DataLimit =
 
 /** The `GET /v1/me` fields the app types (src/app/v1/me/route.ts); the person fields are read below. */
 export type Me = {
-  tenant: { id: string; slug: string; name: string };
+  /** `currency` (ISO 4217) and `timezone` (IANA) feed lib/format; read as optional. */
+  tenant: { id: string; slug: string; name: string; currency?: string; timezone?: string };
   kind: 'user' | 'api_key' | 'oauth';
   id: string;
   scopes: Scope[];
@@ -39,6 +40,21 @@ export const meQuery = (tenant?: string) =>
 
 export const hasScope = (me: Me, scope: Scope) => me.scopes.includes(scope);
 
+/** Records the workspace the person switched to, so sign-in and `/` land there next time. */
+export function rememberWorkspaceOnServer(slug: string): Promise<void> {
+  return apiFetch<void>('/me/workspace', { method: 'PUT', body: { slug } });
+}
+
+/** Sidebar badges: null when the person cannot see that screen. */
+export type Counts = { review_queue: number | null; new_assignments: number | null };
+
+export const countsQuery = (tenant: string) =>
+  queryOptions({
+    queryKey: ['me-counts', tenant],
+    queryFn: () => apiFetch<Counts>('/me/counts', { tenant }),
+    staleTime: 60_000,
+  });
+
 // Fields `/me` sends for a person: `user { id, name, email, platform_admin }` (null for API keys)
 // and `workspaces`; `tenant` is null for a person with no workspace to land in (a platform admin
 // with no membership). They are read defensively.
@@ -53,6 +69,17 @@ const userOf = (me: Me): Loose => {
 export function personOf(me: Me): { name: string | null; email: string | null } {
   const u = userOf(me);
   return { name: text(u.name), email: text(u.email) };
+}
+
+/** The person's user id (the members list's `user_id`), or null for an API key. */
+export const userIdOf = (me: Me): string | null => text(userOf(me).id);
+
+/** What Profile shows beyond name and email: role here, sign-in method and the access lines. */
+export function profileOf(me: Me): { role: string | null; signInMethod: string | null; access: string[] } {
+  const loose = me as unknown as Loose;
+  const lines = loose.access_summary;
+  const access = Array.isArray(lines) ? lines.filter((l): l is string => typeof l === 'string') : [];
+  return { role: text(loose.role), signInMethod: text(userOf(me).sign_in_method), access };
 }
 
 /** True when `/me` says the person is a platform admin. */

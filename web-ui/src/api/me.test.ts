@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { server } from '../test/server';
-import { fetchMe, hasScope, isPlatformAdmin, personOf, workspacesOf, type Me } from './me';
+import { fetchMe, hasScope, isPlatformAdmin, personOf, profileOf, userIdOf, workspacesOf, type Me } from './me';
 
 const me: Me = {
   tenant: { id: 't1', slug: 'taazaa', name: 'Taazaa' },
@@ -51,5 +51,23 @@ describe('/me', () => {
     expect(isPlatformAdmin(later)).toBe(true);
     expect(workspacesOf(later).map((w) => w.slug)).toEqual(['taazaa', 'brightline']);
     expect(workspacesOf(later)[1]).toMatchObject({ member_count: 6, role: 'owner' });
+  });
+});
+
+describe('profile fields', () => {
+  it('reads the role, sign-in method, access lines and user id', () => {
+    const withProfile = {
+      ...me,
+      user: { id: 'usr_1', name: 'Dana', email: 'dana@taazaa.com', platform_admin: false, sign_in_method: 'microsoft' },
+      role: 'leader',
+      access_summary: ['Every account in this workspace', 7],
+    } as unknown as Me;
+    expect(profileOf(withProfile)).toEqual({ role: 'leader', signInMethod: 'microsoft', access: ['Every account in this workspace'] });
+    expect(userIdOf(withProfile)).toBe('usr_1');
+  });
+
+  it('reads them as absent for an API key', () => {
+    expect(profileOf(me)).toEqual({ role: null, signInMethod: null, access: [] });
+    expect(userIdOf(me)).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { hasScope, isPlatformAdmin, type Me, type Scope } from '../api/me';
+import { hasScope, isPlatformAdmin, type Counts, type Me, type Scope } from '../api/me';
 
 /** Who sees an item: every scope in `all`, or any scope in `any`, or platform admins only. */
 export type Rule = { all: Scope[] } | { any: Scope[] } | 'platform-admin';
@@ -17,8 +17,11 @@ export type TenantPath =
 
 export type AdminPath = '/admin/tenants' | '/admin/health' | '/admin/ai-runs';
 
+/** A count from `GET /me/counts` shown next to the item, and what it counts. */
+export type NavBadge = { count: keyof Counts; label: string };
+
 export type NavItem =
-  | { label: string; kind: 'tenant'; to: TenantPath; rule: Rule }
+  | { label: string; kind: 'tenant'; to: TenantPath; rule: Rule; badge?: NavBadge }
   | { label: string; kind: 'admin'; to: AdminPath; rule: Rule };
 
 export type NavGroup = { group: string; items: NavItem[] };
@@ -29,8 +32,20 @@ export const NAV: NavGroup[] = [
     group: 'Work',
     items: [
       { label: 'Overview', kind: 'tenant', to: '/t/$tenant/overview', rule: { all: ['analytics:read'] } },
-      { label: 'Review queue', kind: 'tenant', to: '/t/$tenant/queue', rule: { all: ['review:act'] } },
-      { label: 'My accounts', kind: 'tenant', to: '/t/$tenant/my', rule: { all: ['assignments:respond'] } },
+      {
+        label: 'Review queue',
+        kind: 'tenant',
+        to: '/t/$tenant/queue',
+        rule: { all: ['review:act'] },
+        badge: { count: 'review_queue', label: 'accounts waiting' },
+      },
+      {
+        label: 'My accounts',
+        kind: 'tenant',
+        to: '/t/$tenant/my',
+        rule: { all: ['assignments:respond'] },
+        badge: { count: 'new_assignments', label: 'new assignments' },
+      },
       { label: 'All accounts', kind: 'tenant', to: '/t/$tenant/accounts', rule: { all: ['accounts:read'] } },
     ],
   },
@@ -67,14 +82,14 @@ export const NAV: NavGroup[] = [
 
 /** Settings in the sidebar footer. */
 export const SETTINGS_RULE: Rule = {
-  any: ['members:read', 'integrations:manage', 'keys:manage', 'settings:manage', 'scoring:manage', 'audit:read'],
+  any: ['members:read', 'members:manage', 'integrations:manage', 'keys:manage', 'settings:manage', 'scoring:manage', 'audit:read'],
 };
 
 export type SettingsTab = { tab: string; label: string; section: string; tag: string; rule: Rule; hidden?: boolean };
 
 /** Settings tabs in order (screens.md §21). Pipeline stages and Scoring weights stay hidden until their redesigns land. */
 export const SETTINGS_TABS: SettingsTab[] = [
-  { tab: 'members', label: 'Members', section: '21a', tag: 'R1', rule: { all: ['members:read'] } },
+  { tab: 'members', label: 'Members', section: '21a', tag: 'R1', rule: { any: ['members:read', 'members:manage'] } },
   { tab: 'integrations', label: 'Integrations', section: '21b', tag: 'R1', rule: { all: ['integrations:manage'] } },
   { tab: 'api-keys', label: 'API keys', section: '21c', tag: 'R1', rule: { all: ['keys:manage'] } },
   { tab: 'review-statuses', label: 'Review statuses', section: '21d', tag: 'R1', rule: { all: ['settings:manage'] } },

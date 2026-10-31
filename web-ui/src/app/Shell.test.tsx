@@ -26,6 +26,24 @@ describe('shell navigation', () => {
     expect(screen.queryByText('Admin')).toBeNull();
   });
 
+  it('shows the /me/counts badges on Review queue and My accounts', async () => {
+    serveMe({ taazaa: { scopes: LEADER } });
+    server.use(http.get('/v1/me/counts', () => HttpResponse.json({ review_queue: 12, new_assignments: 3 })));
+    renderApp('/t/taazaa/queue');
+    const nav = await screen.findByRole('navigation', { name: 'Main' });
+    expect(await within(nav).findByRole('link', { name: 'Review queue 12 accounts waiting' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'My accounts 3 new assignments' })).toBeInTheDocument();
+  });
+
+  it('shows no badge for a zero or hidden count', async () => {
+    serveMe({ taazaa: { scopes: LEADER } });
+    server.use(http.get('/v1/me/counts', () => HttpResponse.json({ review_queue: 0, new_assignments: null })));
+    renderApp('/t/taazaa/queue');
+    const nav = await screen.findByRole('navigation', { name: 'Main' });
+    expect(within(nav).getByRole('link', { name: 'Review queue' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'My accounts' })).toBeInTheDocument();
+  });
+
   it('shows Settings with any settings permission, opening its first tab', async () => {
     serveMe({ taazaa: { scopes: ['accounts:read', 'audit:read'] } });
     renderApp('/t/taazaa/accounts');
@@ -118,9 +136,17 @@ describe('workspace switcher', () => {
       taazaa: { scopes: LEADER, tenant: { id: 't1', slug: 'taazaa', name: 'Taazaa' }, workspaces },
       brightline: { scopes: ['accounts:read'], tenant: { id: 't2', slug: 'brightline', name: 'Brightline Logistics' }, workspaces },
     });
+    let recorded: unknown;
+    server.use(
+      http.put('/v1/me/workspace', async ({ request }) => {
+        recorded = await request.json();
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
     const app = renderApp('/t/taazaa/queue');
     await screen.findByRole('heading', { level: 1, name: 'Review queue' });
     app.queryClient.setQueryData(['accounts', 'taazaa'], ['old']);
+    expect(screen.getByText('Scout · 14 members')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: /Switch workspace/ }));
     await userEvent.click(await screen.findByRole('menuitem', { name: /Brightline Logistics/ }));
@@ -130,6 +156,7 @@ describe('workspace switcher', () => {
     expect(app.queryClient.getQueryData(['accounts', 'taazaa'])).toBeUndefined();
     expect(screen.getByRole('status')).toHaveTextContent('Switched to Brightline Logistics');
     await waitFor(() => expect(localStorage.getItem('scout.workspace')).toBe('brightline'));
+    expect(recorded).toEqual({ slug: 'brightline' });
   });
 });
 
