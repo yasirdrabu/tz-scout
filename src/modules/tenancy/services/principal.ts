@@ -10,7 +10,7 @@ import { DataLimitSchema, defaultDataLimit, type DataLimit } from '../domain/dat
 import { PERMISSIONS, isPermission, permissionsFor } from '../domain/permissions';
 import { membership, session, tenant, user } from '../db/schema';
 import { landingPathFor } from './sign-in';
-import { authenticateKey, setKeyCacheTtl } from './api-keys';
+import { authenticateKey, forgetTenantKeys, setKeyCacheTtl } from './api-keys';
 
 /** A session with no activity for this long is over (global constraint: 12 hours). */
 export const SESSION_IDLE_MS = 12 * 3600_000;
@@ -34,6 +34,19 @@ export function setPrincipalCacheTtl(ms: number): void {
   ttlMs = Math.min(Math.max(ms, 0), 60_000);
   cache.clear();
   setKeyCacheTtl(ms);
+}
+
+/**
+ * Drops this instance's cached access for a tenant (suspended or resumed) and its keys, or for a
+ * person (platform admin flag changed). Other instances catch up within 60 seconds.
+ */
+export function forgetAccess(by: { tenantId?: string; userId?: string }): void {
+  for (const [k, v] of cache) {
+    if ((by.tenantId && v.value?.tenantId === by.tenantId) || (by.userId && k.startsWith(`${by.userId}\u0000`))) {
+      cache.delete(k);
+    }
+  }
+  if (by.tenantId) forgetTenantKeys(by.tenantId);
 }
 
 async function loadAccess(userId: string, tenantSlug: string): Promise<Access | null> {

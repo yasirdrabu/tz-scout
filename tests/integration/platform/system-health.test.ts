@@ -1,4 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
+import { AckPolicy } from '@nats-io/jetstream';
+import { connectNats } from '@/platform/nats/connection';
+import { ensureStreams } from '@/platform/nats/streams';
 import { closeDbs } from '@/platform/db/client';
 import { discardDeadJob, listDeadJobs, recordDeadJob } from '@/platform/dead-jobs';
 import type { Envelope } from '@/platform/events/envelope';
@@ -45,5 +48,31 @@ describe('systemHealth', () => {
     expect(h.consumersAvailable).toBe(false);
     expect(h.consumers).toEqual([]);
     expect(typeof h.deadJobs).toBe('number');
+  });
+});
+
+describe('systemHealth queue age', () => {
+  it('gives the age of the oldest unfinished message per consumer, and null when there is none', async () => {
+    const nats = await connectNats();
+    await ensureStreams(nats.jsm);
+    const tenantId = newId('t').toLowerCase();
+    const subject = `scout.${tenantId}.tenancy.health_probe`;
+    const durable = `health_probe_${tenantId}`;
+    const idle = `${durable}_idle`;
+    try {
+      await nats.js.publish(subject, '{}');
+      await nats.jsm.consumers.add('SCOUT_EVENTS', { durable_name: durable, filter_subject: subject, ack_policy: AckPolicy.Explicit });
+      await nats.jsm.consumers.add('SCOUT_EVENTS', { durable_name: idle, filter_subject: `${subject}.none`, ack_policy: AckPolicy.Explicit });
+      await new Promise((r) => setTimeout(r, 20));
+      const h = await systemHealth();
+      const mine = h.consumers.find((c) => c.name === durable)!;
+      expect(mine).toMatchObject({ pending: 1, ackPending: 0 });
+      expect(mine.oldestAgeMs).toBeGreaterThanOrEqual(0);
+      expect(mine.oldestAgeMs).toBeLessThan(60_000);
+      expect(h.consumers.find((c) => c.name === idle)!.oldestAgeMs).toBeNull();
+    } finally {
+      for (const d of [durable, idle]) await nats.jsm.consumers.delete('SCOUT_EVENTS', d).catch(() => {});
+      await nats.nc.close();
+    }
   });
 });

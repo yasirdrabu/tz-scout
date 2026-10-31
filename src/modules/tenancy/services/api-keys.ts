@@ -345,6 +345,11 @@ function evictPrefix(prefix: string): void {
   for (const k of verified.keys()) if (k.startsWith(`${prefix}\u0000`)) verified.delete(k);
 }
 
+/** Drops this instance's cached keys of a tenant, for example when it is suspended (other instances within 60 seconds). */
+export function forgetTenantKeys(tenantId: string): void {
+  for (const [k, v] of verified) if (v.value.principal.tenantId === tenantId) verified.delete(k);
+}
+
 /** Test hook: how long verified keys are cached (at most 60 seconds). Clears the cache. */
 export function setKeyCacheTtl(ms: number): void {
   ttlMs = Math.min(Math.max(ms, 0), 60_000);

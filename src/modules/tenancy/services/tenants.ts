@@ -1,4 +1,4 @@
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, desc, eq, sql } from 'drizzle-orm';
 import { platformAudit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb } from '@/platform/db/client';
@@ -8,6 +8,7 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { tenantCreated } from '../contracts/events';
 import { membership, tenant, user } from '../db/schema';
+import { forgetAccess } from './principal';
 
 export type CreateTenantInput = {
   slug: string;
@@ -156,4 +157,69 @@ export async function userIdForEmail(email: string): Promise<string | null> {
     .from(user)
     .where(eq(user.email, email.trim().toLowerCase()));
   return u?.id ?? null;
+}
+
+export type AdminTenantRow = TenantRow & {
+  createdAt: Date;
+  /** Invited and active members, as the Members screen counts them. */
+  memberCount: number;
+  /** The first owner by invite date, or null. */
+  owner: { name: string; email: string } | null;
+};
+
+/** Every tenant for the admin Tenants screen, newest first, with member count and owner. Platform admins only. */
+export async function adminTenants(): Promise<AdminTenantRow[]> {
+  const counted = sql<number>`(select count(*)::int from ${membership} m where m.tenant_id = tenancy.tenant.id and m.status in ('invited', 'active'))`;
+  const owner = sql<{ name: string; email: string } | null>`(
+    select json_build_object('name', u.name, 'email', u.email) from ${membership} m join ${user} u on u.id = m.user_id
+    where m.tenant_id = tenancy.tenant.id and m.role = 'owner' and m.status in ('invited', 'active')
+    order by m.created_at, m.id limit 1)`;
+  return adminDb
+    .select({
+      id: tenant.id,
+      slug: tenant.slug,
+      name: tenant.name,
+      currency: tenant.currency,
+      timezone: tenant.timezone,
+      status: tenant.status,
+      createdAt: tenant.createdAt,
+      memberCount: counted,
+      owner,
+    })
+    .from(tenant)
+    .orderBy(desc(tenant.createdAt), desc(tenant.id));
+}
+
+/** A platform admin acting outside any tenant: who, and the request's correlation id. */
+export type AdminActor = { actor: Actor; correlationId: string };
+
+/**
+ * Suspends or resumes a tenant. While suspended nobody in it can sign in to it and its API keys are
+ * refused (`sessionPrincipal`, `authenticateKey`, `checkSignIn` already read the status). Written to
+ * the platform audit log; this instance's cached principals are dropped after the commit.
+ * 404 for an unknown tenant, 409 when it is already in that state.
+ */
+export async function setTenantStatus(by: AdminActor, tenantId: string, status: 'active' | 'suspended'): Promise<void> {
+  await adminDb.transaction(async (tx) => {
+    const [t] = await tx.select({ status: tenant.status, slug: tenant.slug }).from(tenant).where(eq(tenant.id, tenantId)).for('update');
+    if (!t) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That tenant was not found.' });
+    if (t.status === status) {
+      throw status === 'suspended'
+        ? new ScoutError({ slug: 'not-active', status: 409, title: 'That tenant is already suspended.' })
+        : new ScoutError({ slug: 'not-suspended', status: 409, title: 'That tenant is not suspended.' });
+    }
+    await tx.update(tenant).set({ status }).where(eq(tenant.id, tenantId));
+    await platformAudit(
+      {
+        actor: by.actor,
+        correlationId: by.correlationId,
+        action: status === 'suspended' ? 'tenancy.tenant.suspended' : 'tenancy.tenant.resumed',
+        subject: { type: 'tenant', id: tenantId },
+        before: { status: t.status },
+        after: { status, slug: t.slug },
+      },
+      tx,
+    );
+  });
+  forgetAccess({ tenantId });
 }

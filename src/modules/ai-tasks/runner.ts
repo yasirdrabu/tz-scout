@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { connectionStatus, gateway } from '@/modules/integrations';
 import { config } from '@/platform/config';
@@ -382,7 +382,7 @@ export async function getRun(ctx: ModuleContext, runId: string): Promise<AiRunRo
   return row;
 }
 
-export type RunFilter = { task?: string; status?: AiStatus; mode?: AiMode; from?: Date; to?: Date; limit?: number };
+export type RunFilter = { task?: string; status?: AiStatus | AiStatus[]; mode?: AiMode; from?: Date; to?: Date; limit?: number };
 
 export async function listRuns(ctx: ModuleContext, f: RunFilter = {}): Promise<AiRunRow[]> {
   return ctx.tx
@@ -392,7 +392,7 @@ export async function listRuns(ctx: ModuleContext, f: RunFilter = {}): Promise<A
       and(
         eq(aiRun.tenantId, ctx.tenantId),
         f.task ? eq(aiRun.task, f.task) : undefined,
-        f.status ? eq(aiRun.status, f.status) : undefined,
+        f.status ? inArray(aiRun.status, ([] as AiStatus[]).concat(f.status)) : undefined,
         f.mode ? eq(aiRun.mode, f.mode) : undefined,
         f.from ? gte(aiRun.createdAt, f.from) : undefined,
         f.to ? lte(aiRun.createdAt, f.to) : undefined,

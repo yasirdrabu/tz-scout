@@ -55,3 +55,5 @@ export { AUDIT_AREAS, type AuditArea } from './domain/audit-areas';
 export { auditEntries, type AuditEntryView, type AuditQuery } from './services/audit';
 export { endSessions, listSessions, signInFacts, type SessionView, type SignInMethod } from './services/sessions';
 export { clientIp } from './services/principal';
+export { adminTenants, setTenantStatus, type AdminActor, type AdminTenantRow } from './services/tenants';
+export { addPlatformAdmin, platformAdmins, removePlatformAdmin, type PlatformAdmin } from './services/platform-admins';

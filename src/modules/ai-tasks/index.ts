@@ -20,3 +20,5 @@ export {
   type TaskDef,
 } from './runner';
 export type { AnthropicAdapter, CompleteRequest, CompleteResult } from './adapters/anthropic/contract';
+export { RUN_STATUSES, rawStatuses, runStatus, type RunStatus } from './domain/run-status';
+export { allRuns, anyRun, runsSummary, type AllRunsQuery, type RunsSummary } from './services/admin-runs';

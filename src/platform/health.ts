@@ -69,7 +69,13 @@ export type ScheduleView = {
   lastRunAt: Date | null;
 };
 
-export type ConsumerHealth = { name: string; pending: number; ackPending: number };
+export type ConsumerHealth = {
+  name: string;
+  pending: number;
+  ackPending: number;
+  /** Age of the oldest message the consumer has not finished; null when it has none or it could not be read. */
+  oldestAgeMs: number | null;
+};
 
 export type SystemHealth = {
   relayLagMs: number;
@@ -88,7 +94,14 @@ async function consumerNumbers(url: string): Promise<ConsumerHealth[]> {
     for (const s of STREAMS) {
       try {
         for await (const c of jsm.consumers.list(s.name)) {
-          out.push({ name: c.name, pending: c.num_pending, ackPending: c.num_ack_pending });
+          let oldestAgeMs: number | null = null;
+          if (c.num_pending + c.num_ack_pending > 0) {
+            // The first message on the consumer's subject after everything it has acknowledged.
+            const query = { seq: c.ack_floor.stream_seq + 1, next_by_subj: c.config.filter_subject ?? '>' };
+            const m = await jsm.streams.getMessage(s.name, query as never).catch(() => null);
+            if (m) oldestAgeMs = Math.max(0, Date.now() - m.time.getTime());
+          }
+          out.push({ name: c.name, pending: c.num_pending, ackPending: c.num_ack_pending, oldestAgeMs });
         }
       } catch (e) {
         // A stream that does not exist yet has no consumers.

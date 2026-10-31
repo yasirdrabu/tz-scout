@@ -303,10 +303,13 @@ export function publicRoute(handler: (req: Request) => Promise<object>): (req: R
  * One route file for the `id:action` paths under `after`: runs the route registered for the action in the path.
  * Each action is its own v1Route, so each has its own permission. An unknown action is a 404 (after sign-in).
  */
-export function byAction(after: string, routes: Record<string, (req: Request) => Promise<Response>>): (req: Request) => Promise<Response> {
-  const unknown = v1Route({}, async () => {
+export function byAction(
+  after: string,
+  routes: Record<string, (req: Request) => Promise<Response>>,
+  unknown: (req: Request) => Promise<Response> = v1Route({}, async () => {
     throw notFound();
-  });
+  }),
+): (req: Request) => Promise<Response> {
   return (req) => {
     let action: string | null = null;
     try {
@@ -316,4 +319,15 @@ export function byAction(after: string, routes: Record<string, (req: Request) =>
     }
     return (action && Object.hasOwn(routes, action) ? routes[action]! : unknown)(req);
   };
+}
+
+/** `byAction` for `/v1/admin` paths: an unknown action is a 404 for a platform admin (403 for anyone else). */
+export function adminByAction(after: string, routes: Record<string, (req: Request) => Promise<Response>>): (req: Request) => Promise<Response> {
+  return byAction(
+    after,
+    routes,
+    adminRoute({}, async () => {
+      throw notFound();
+    }),
+  );
 }
