@@ -88,7 +88,10 @@ import * as v1SettingsCrm from './routes/v1/settings/crm/route';
 import * as v1SettingsExclusionsListsKind from './routes/v1/settings/exclusions/lists/[kind]/route';
 import * as v1SettingsExclusions from './routes/v1/settings/exclusions/route';
 import * as v1SettingsExclusionsRulesKey from './routes/v1/settings/exclusions/rules/[key]/route';
+import * as v1SettingsReviewReasons from './routes/v1/settings/review/reasons/route';
 import * as v1SettingsReview from './routes/v1/settings/review/route';
+import * as v1SettingsReviewStatuses from './routes/v1/settings/review/statuses/route';
+import * as v1SettingsSetting from './routes/v1/settings/[setting]/route';
 import * as v1SettingsWarmIntrosKey from './routes/v1/settings/warm-intros/[key]/route';
 import * as v1SettingsWarmIntros from './routes/v1/settings/warm-intros/route';
 import * as v1SignalTypes from './routes/v1/signal-types/route';
@@ -197,7 +200,10 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/settings/exclusions/lists/:kind`, module: v1SettingsExclusionsListsKind },
   { path: `${V1}/settings/exclusions`, module: v1SettingsExclusions },
   { path: `${V1}/settings/exclusions/rules/:key`, module: v1SettingsExclusionsRulesKey },
+  { path: `${V1}/settings/review/reasons`, module: v1SettingsReviewReasons },
   { path: `${V1}/settings/review`, module: v1SettingsReview },
+  { path: `${V1}/settings/review/statuses`, module: v1SettingsReviewStatuses },
+  { path: `${V1}/settings/:setting`, module: v1SettingsSetting },
   { path: `${V1}/settings/warm-intros/:key`, module: v1SettingsWarmIntrosKey },
   { path: `${V1}/settings/warm-intros`, module: v1SettingsWarmIntros },
   { path: `${V1}/signal-types`, module: v1SignalTypes },

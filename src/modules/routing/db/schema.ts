@@ -23,7 +23,11 @@ export const reviewStatusDef = routing.table(
     isDeclined: boolean('is_declined').notNull().default(false),
     isInitial: boolean('is_initial').notNull().default(false),
     returnsToSource: boolean('returns_to_source').notNull().default(false),
-    tone: text('tone').notNull().default('neutral'), // neutral | near | good | bad
+    color: text('color').notNull().default('gray'), // plum | amber | green | red | gray
+    description: text('description').notNull().default(''),
+    setBy: text('set_by').notNull().default('reviewer'), // scout | reviewer
+    /** An account in the status longer than this is late; null is never (always null for a final status). */
+    flagAfterHours: integer('flag_after_hours'),
     archivedAt: at('archived_at'),
   },
   (t) => [uniqueIndex('review_status_def_key_uq').on(t.tenantId, t.key)],
@@ -48,7 +52,9 @@ export const declineReasonDef = routing.table(
     tenantId: text('tenant_id').notNull(),
     key: text('key').notNull(),
     label: text('label').notNull(),
-    appliesTo: text('applies_to').notNull(), // review | assignment | both
+    appliesTo: text('applies_to').notNull(), // review | assignment | both | send_back
+    noteRequired: boolean('note_required').notNull().default(false),
+    order: integer('order').notNull().default(0),
     archivedAt: at('archived_at'),
   },
   (t) => [uniqueIndex('decline_reason_def_key_uq').on(t.tenantId, t.key)],

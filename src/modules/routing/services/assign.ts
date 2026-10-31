@@ -75,7 +75,9 @@ async function plan(
   const statuses = await loadStatuses(ctx);
   const current = statuses.find((s) => s.key === row.statusKey);
   if (current?.isDeclined) throw conflict('Reopen it before assigning.');
-  const approve = current?.countsAsReviewed ? undefined : statuses.find((s) => !s.archivedAt && s.countsAsReviewed && !s.isDeclined);
+  // A sent-back account is reviewed but not approved, so assigning it approves it too.
+  const approved = current?.countsAsReviewed && !current.returnsToSource;
+  const approve = approved ? undefined : statuses.find((s) => !s.archivedAt && s.countsAsReviewed && !s.isDeclined && !s.returnsToSource);
   const preflight = await ownershipPreflight().check(ctx, row.accountId, sellerUserId, opts);
   const open = await openAssignment(ctx, row.accountId);
   return {

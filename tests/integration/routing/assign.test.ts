@@ -34,7 +34,7 @@ const snapshots = async (accountId: string) =>
 const rejects = async (p: Promise<unknown>) => p.then(() => null, (e: { status?: number; message: string }) => ({ status: e.status, title: e.message }));
 
 describe('assign (REV-E2-S1)', () => {
-  it('Approve and assign from Unvetted: the status and the owner both land in the summary (AC1)', async () => {
+  it('Approve and assign from Ready for review: the status and the owner both land in the summary (AC1)', async () => {
     const a = await arrivedAccount(t);
     const made = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: seller, notes: 'Call the CIO', leadOfferId: undefined }));
     expect(made).toMatchObject({ accountId: a, sellerUserId: seller, status: 'pending', ownershipDecision: 'assign' });
@@ -72,7 +72,7 @@ describe('assign (REV-E2-S1)', () => {
     expect(await assignmentsOf(a)).toEqual([]);
     expect((await reviewOf(a)).statusKey).toBe('unvetted');
     const preview = await asPerson(t, (ctx) => previewAssign(ctx, a, seller));
-    expect(preview).toMatchObject({ preflight: { result: 'stop' }, approvesTo: { key: 'reviewed', label: 'Reviewed' }, replaces: null });
+    expect(preview).toMatchObject({ preflight: { result: 'stop' }, approvesTo: { key: 'reviewed', label: 'Approved' }, replaces: null });
     const kept = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: seller, ownershipDecision: 'keep' }));
     expect(kept.ownershipDecision).toBe('keep');
     expect((await assignmentsOf(a))[0]!.ownershipDecision).toBe('keep');

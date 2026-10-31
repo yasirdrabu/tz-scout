@@ -233,8 +233,11 @@ export async function applyStatusChange(ctx: ModuleContext, row: ReviewRow, inpu
     .update(accountReview)
     .set({ statusKey: target.key, statusChangedAt: new Date(), statusChangedBy: by, flags: sql`${accountReview.flags} - 'declinedBySeller'` })
     .where(reviewWhere(ctx, accountId));
-  await ctx.tx.insert(statusChange).values({ id: changeId, tenantId: ctx.tenantId, accountId, fromKey: row.statusKey, toKey: target.key, note, reasonKey: target.isDeclined ? reasonKey : null, by });
-  const event = reopening ? 'reopened' : target.isDeclined ? 'declined' : target.countsAsReviewed ? 'reviewed' : null;
+  // A decline and a send back keep the reason picked (Decision 1).
+  const keptReason = target.isDeclined || target.returnsToSource ? reasonKey : null;
+  await ctx.tx.insert(statusChange).values({ id: changeId, tenantId: ctx.tenantId, accountId, fromKey: row.statusKey, toKey: target.key, note, reasonKey: keptReason, by });
+  // A send back leaves the stage where it is: the account goes back to its source, not on to a seller.
+  const event = reopening ? 'reopened' : target.isDeclined ? 'declined' : target.countsAsReviewed && !target.returnsToSource ? 'reviewed' : null;
   if (event) await moveStage(ctx, accountId, event, changeId);
   await publish(ctx, statusChanged, {
     accountId,
@@ -244,7 +247,7 @@ export async function applyStatusChange(ctx: ModuleContext, row: ReviewRow, inpu
     isDeclined: target.isDeclined,
     returnsToSource: target.returnsToSource,
     note,
-    reasonKey: target.isDeclined ? reasonKey : null,
+    reasonKey: keptReason,
     by,
   });
   return true;

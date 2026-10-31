@@ -34,10 +34,11 @@ describe('routing.tenant_defaults', () => {
   it('seeds statuses, both reason lists, the setting and the hourly schedule once, however often it runs', async () => {
     await runOutbox(a.tenantId);
     expect((await statuses(a)).map((s) => [s.key, s.label, s.countsAsReviewed, s.isDeclined])).toEqual([
-      ['unvetted', 'Unvetted', false, false],
-      ['needs_review', 'Needs review', false, false],
-      ['reviewed', 'Reviewed', true, false],
-      ['declined', 'Declined', true, true],
+      ['unvetted', 'Ready for review', false, false],
+      ['needs_review', 'In review', false, false],
+      ['reviewed', 'Approved', true, false],
+      ['declined', 'Not pursued', true, true],
+      ['sent_back', 'Sent back to source', true, false],
     ]);
     const rs = await reasons(a);
     const labels = (applies: string[]) => rs.filter((r) => applies.includes(r.appliesTo)).map((r) => r.label).sort();
@@ -47,14 +48,18 @@ describe('routing.tenant_defaults', () => {
     expect(labels(['assignment', 'both'])).toEqual(
       ['Already talking to them', 'Not a fit', 'Not my territory', 'Other', 'Too much on my plate'].sort(),
     );
+    expect(rs.filter((r) => r.appliesTo === 'send_back').sort((x, y) => x.order - y.order).map((r) => r.label)).toEqual(
+      ['Not our kind of customer', 'Already a customer', 'Duplicate of another account', 'Bad or missing contact', 'Wrong practice'],
+    );
+    expect(rs.filter((r) => r.noteRequired).map((r) => r.key)).toEqual(['other']);
     expect(await settings(a)).toMatchObject([{ tenantId: a.tenantId, autoAcceptWorkingDays: 2 }]);
     const s = await hourly(a.tenantId);
     expect(s).toHaveLength(1);
     expect(s[0]).toMatchObject({ cron: '0 * * * *' });
 
     await a.run((ctx) => seedRoutingDefaults(ctx));
-    expect(await statuses(a)).toHaveLength(4);
-    expect(await reasons(a)).toHaveLength(10);
+    expect(await statuses(a)).toHaveLength(5);
+    expect(await reasons(a)).toHaveLength(15);
     expect(await settings(a)).toHaveLength(1);
     expect(await hourly(a.tenantId)).toHaveLength(1);
   });
@@ -74,7 +79,7 @@ describe('routing.tenant_defaults', () => {
   it('keeps tenants apart', async () => {
     await runOutbox(b.tenantId);
     const before = await statuses(b);
-    expect(before).toHaveLength(4);
+    expect(before).toHaveLength(5);
     const seen = await b.run((ctx) => ctx.tx.select().from(reviewStatusDef).where(eq(reviewStatusDef.tenantId, a.tenantId)));
     expect(seen).toEqual([]);
     expect(before.every((s) => s.tenantId === b.tenantId)).toBe(true);

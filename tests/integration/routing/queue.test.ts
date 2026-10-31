@@ -33,13 +33,13 @@ describe('the queue (REV-E1-S1)', () => {
     expect(page.data[0]?.flags.newFrom).toMatchObject({ sourceId: agentId, sourceName: 'Newsy agent' });
   });
 
-  it('an account from an agent arrival shows as Unvetted (AC1)', async () => {
+  it('an account from an agent arrival shows as Ready for review (AC1)', async () => {
     const { agentId } = await personAndAgent(t, 'Yasir');
     const sent = await asSource(t, agentId, (ctx) => submitArrival(ctx, { account: { name: 'Agent Co', domain: domain() } }, { channel: 'api' }));
     await runOutbox(t.tenantId);
     const [row] = await t.run((ctx) => ctx.tx.select().from(arrival).where(eq(arrival.id, sent.arrivalId)));
     const page = await asPerson(t, (ctx) => listQueue(ctx, { sourceId: agentId }));
-    expect(page.data).toEqual([expect.objectContaining({ accountId: row!.accountId, reviewStatusKey: 'unvetted', reviewStatusLabel: 'Unvetted' })]);
+    expect(page.data).toEqual([expect.objectContaining({ accountId: row!.accountId, reviewStatusKey: 'unvetted', reviewStatusLabel: 'Ready for review' })]);
   });
 
   it('by default shows unassigned accounts not yet reviewed, and ones a seller declined, by priority then newest', async () => {

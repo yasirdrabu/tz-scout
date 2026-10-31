@@ -124,7 +124,7 @@ describe('scout CLI', () => {
       };
     };
     const before = await read();
-    expect(before).toMatchObject({ profiles: 1, statuses: 4, settings: 1 });
+    expect(before).toMatchObject({ profiles: 1, statuses: 5, settings: 1 });
     expect(before.schedules).toBeGreaterThanOrEqual(2);
     expect(before.rules).toBeGreaterThan(0);
     const r = await scout(['backfill-r1b', 'taazaa']).done;

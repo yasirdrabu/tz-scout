@@ -30,7 +30,8 @@ export {
 export { routingAccountMerged, routingArrivalResolved, routingConsumers, routingCrmActivity, routingCrmDeal, routingCrmHandoffCancelled, routingCrmHandoffCompleted, routingCrmHandoffFailed, routingCrmHandoffNeedsDecision, routingMemberRemoved, routingTenantDefaults } from './consumers';
 export { DEFAULT_AUTO_ACCEPT_WORKING_DAYS, DEFAULT_REASONS, DEFAULT_STATUSES, seedRoutingDefaults } from './defaults';
 export { nextStage, type StageEvent } from './domain/stages';
-export { declineProblems, reasonNeedsNote, statusChangeProblems, type ReasonDef, type StatusDefRules } from './domain/status-rules';
+export { declineProblems, inList, REASON_LISTS, statusChangeProblems, type ReasonDef, type ReasonList, type StatusDefRules } from './domain/status-rules';
+export { STATUS_COLORS, STATUS_SET_BY, type ReasonEdit, type StatusEdit } from './domain/review-settings';
 export { addWorkingDays } from './domain/working-days';
 export { autoAcceptHandler } from './jobs';
 export { backfillReviews } from './services/backfill';
@@ -42,4 +43,4 @@ export { accept, autoAccept, decline, markSeen, MAX_AUTO_ACCEPT, withdraw, type 
 export { countQueue, listQueue, type QueueFilters, type QueueRow } from './services/queue';
 export { countNewAssignments, getAccountStatus, getAssignment, listAssignments, openAssignmentCounts, type AccountStatus, type AssignmentFilters, type AssignmentRow } from './services/read';
 export { changeStatus, ensureReview, setInsights, type InsightsView, type StatusChangeInput } from './services/review';
-export { getReviewSettings, setAutoAcceptWorkingDays, type ReviewSettings } from './services/settings';
+export { getReviewSettings, listReasons, listStatuses, resetReviewSettings, saveReasons, saveStatuses, setAutoAcceptWorkingDays, type ReasonView, type ReviewSettings, type StatusView } from './services/settings';
