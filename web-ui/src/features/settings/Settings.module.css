@@ -181,3 +181,48 @@
   font-weight: 500;
   text-align: left;
 }
+
+.logo {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--ink-100);
+  color: var(--text-soft);
+  font-weight: 600;
+}
+
+.segment {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+}
+
+.segment label {
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.segment input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segment input:checked + label {
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  font-weight: 600;
+}
+
+.segment input:focus-visible + label {
+  box-shadow: var(--ring);
+}
