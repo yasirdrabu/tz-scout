@@ -60,6 +60,7 @@ describe('nav', () => {
     expect(visibleSettingsTabs(meWith(['members:read', 'settings:manage', 'scoring:manage'])).map((t) => t.tab)).toEqual([
       'members',
       'review-statuses',
+      'ai-runs',
     ]);
   });
 });

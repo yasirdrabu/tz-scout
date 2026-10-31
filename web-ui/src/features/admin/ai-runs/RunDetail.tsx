@@ -6,9 +6,12 @@ import { runQuery } from './api';
 
 const shown = (output: unknown) => (typeof output === 'string' ? output : JSON.stringify(output, null, 2));
 
-/** A run expanded: what Scout sent (the subject and a fingerprint), what came back, and the error. */
-export function RunDetail({ id }: { id: string }) {
-  const run = useQuery(runQuery(id));
+/**
+ * A run expanded: what Scout sent (the subject and a fingerprint), what came back, and the error.
+ * With `tenant`, one of that workspace's runs (`/v1/ai-runs/{id}`), else any tenant's (admin).
+ */
+export function RunDetail({ id, tenant }: { id: string; tenant?: string }) {
+  const run = useQuery(runQuery(id, tenant));
   if (run.isPending) return <LoadingRows rows={2}>Loading the run</LoadingRows>;
   if (run.isError) return <LoadFailed title="This run didn't load" error={run.error} onRetry={() => void run.refetch()} />;
   const r = run.data;

@@ -1,7 +1,6 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight } from 'lucide-react';
 import { getRouteApi } from '@tanstack/react-router';
-import { Fragment, useId } from 'react';
+import { useId } from 'react';
 import { cx } from '../../../lib/cx';
 import { useFormat } from '../../../lib/useFormat';
 import { useSearchText } from '../../../lib/useSearchText';
@@ -10,20 +9,15 @@ import page from '../../../routes/Page.module.css';
 import { Button } from '../../../ui/Button';
 import { EmptyState } from '../../../ui/EmptyState';
 import { Field } from '../../../ui/Field';
-import { Pill, type PillTone } from '../../../ui/Pill';
 import table from '../../../ui/Table.module.css';
 import { LoadFailed, LoadingRows } from '../../settings/shared';
 import styles from '../Admin.module.css';
 import { tenantsQuery } from '../tenants/api';
-import { runsQuery, STATUSES, statusLabel, taskLabel, type AiRun, type RunFilters, type RunsSummary, type RunStatus } from './api';
-import { RunDetail } from './RunDetail';
+import { runsQuery, STATUSES, taskLabel, type RunFilters, type RunsSummary, type RunStatus } from './api';
+import { RunRow } from './RunRow';
 
-/** A run slower than this shows its time in red. */
-const SLOW_MS = 30_000;
 /** The failed share the Failed tile aims under, in percent. */
 const FAILED_TARGET_PCT = 3;
-
-const TONE: Record<RunStatus, PillTone> = { succeeded: 'good', failed: 'bad', stopped_by_limit: 'near' };
 
 const route = getRouteApi('/admin/ai-runs');
 
@@ -142,7 +136,7 @@ export function AiRunsScreen() {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <Row key={r.id} run={r} expanded={open === r.id} onToggle={() => update({ open: open === r.id ? undefined : r.id })} />
+                <RunRow key={r.id} run={r} expanded={open === r.id} onToggle={() => update({ open: open === r.id ? undefined : r.id })} />
               ))}
             </tbody>
           </table>
@@ -187,52 +181,5 @@ function Tiles({ summary: s }: { summary: RunsSummary }) {
         <div className={styles.tileNote}>All tenants</div>
       </div>
     </div>
-  );
-}
-
-function Row({ run: r, expanded, onToggle }: { run: AiRun; expanded: boolean; onToggle: () => void }) {
-  const f = useFormat();
-  const detailId = useId();
-  return (
-    <Fragment>
-      <tr>
-        <td>
-          <button type="button" className={cx(table.open, table.mono)} aria-expanded={expanded} aria-controls={detailId} onClick={onToggle}>
-            {expanded ? <ChevronDown aria-hidden="true" size={14} /> : <ChevronRight aria-hidden="true" size={14} />} {r.id}
-          </button>
-        </td>
-        <td>
-          <div className={styles.stack}>
-            <Pill tone={TONE[r.status]}>{statusLabel(r.status)}</Pill>
-            {r.outcome === 'invalid_output' && <span className={table.muted}>Answer rejected</span>}
-          </div>
-        </td>
-        <td>
-          <div className={styles.stack}>
-            <span>{taskLabel(r.task)}</span>
-            <span className={table.muted}>{r.subject ? `${r.subject.type} ${r.subject.id}` : 'No account'}</span>
-          </div>
-        </td>
-        <td>
-          <div className={styles.stack}>
-            <span>{r.tenant_name ?? r.tenant_id}</span>
-            <span className={table.muted}>{r.model ?? 'Rules, no model'}</span>
-          </div>
-        </td>
-        <td className={table.num}>
-          {f.compact(r.input_tokens)} in · {f.compact(r.output_tokens)} out
-        </td>
-        <td className={table.num}>{f.money(r.cost_cents)}</td>
-        <td className={cx(table.num, r.duration_ms > SLOW_MS && styles.bad)}>{f.duration(r.duration_ms)}</td>
-        <td className={table.muted}>{f.dateTime(r.created_at)}</td>
-      </tr>
-      {expanded && (
-        <tr id={detailId}>
-          <td colSpan={8}>
-            <RunDetail id={r.id} />
-          </td>
-        </tr>
-      )}
-    </Fragment>
   );
 }

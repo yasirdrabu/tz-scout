@@ -5,6 +5,7 @@ import type { Me } from '../../api/me';
 import { visibleSettingsTabs, type SettingsTab } from '../../app/nav';
 import page from '../../routes/Page.module.css';
 import { EmptyState } from '../../ui/EmptyState';
+import { AiRunsTab } from './ai-runs/AiRunsTab';
 import { ApiKeysTab } from './keys/ApiKeysTab';
 import { AuditTab } from './audit/AuditTab';
 import { IntegrationsTab } from './integrations/IntegrationsTab';
@@ -19,6 +20,7 @@ const SCREENS: Record<string, (props: TabProps) => ReactNode> = {
   integrations: (p) => <IntegrationsTab {...p} />,
   'api-keys': (p) => <ApiKeysTab {...p} />,
   'audit-log': (p) => <AuditTab {...p} />,
+  'ai-runs': (p) => <AiRunsTab {...p} />,
 };
 
 /** `/t/:tenant/settings/:tab`: the tab bar (tabs by permission) and the tab (screens.md §21). */

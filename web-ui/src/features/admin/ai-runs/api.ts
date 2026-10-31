@@ -69,10 +69,14 @@ export const runsQuery = (f: RunFilters) =>
     getNextPageParam: (last) => last.next_cursor,
   });
 
-export const runQuery = (id: string) =>
+/** One run: any tenant's (platform admins), or with `tenant` one of that workspace's (`settings:manage`). */
+export const runQuery = (id: string, tenant?: string) =>
   queryOptions({
-    queryKey: ['admin', 'ai-run', id],
-    queryFn: () => apiFetch<AiRunDetail>(`/admin/ai-runs/${encodeURIComponent(id)}`),
+    queryKey: tenant ? ['ai-run', tenant, id] : ['admin', 'ai-run', id],
+    queryFn: () =>
+      tenant
+        ? apiFetch<AiRunDetail>(`/ai-runs/${encodeURIComponent(id)}`, { tenant })
+        : apiFetch<AiRunDetail>(`/admin/ai-runs/${encodeURIComponent(id)}`),
     staleTime: Infinity,
   });
 

@@ -20,7 +20,7 @@ describe('Settings tabs', () => {
     serve();
     renderApp('/t/taazaa/settings/members');
     const nav = await screen.findByRole('navigation', { name: 'Settings' });
-    expect(within(nav).getAllByRole('link').map((l) => l.textContent)).toEqual(['Members', 'Integrations', 'API keys', 'Review statuses', 'Audit log']);
+    expect(within(nav).getAllByRole('link').map((l) => l.textContent)).toEqual(['Members', 'Integrations', 'API keys', 'Review statuses', 'Audit log', 'AI runs']);
     expect(within(nav).getByRole('link', { name: 'Members' })).toHaveAttribute('aria-current', 'page');
   });
 

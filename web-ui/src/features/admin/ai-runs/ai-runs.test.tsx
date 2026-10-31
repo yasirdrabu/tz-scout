@@ -55,7 +55,7 @@ function serve(summary: RunsSummary = SUMMARY) {
           { id: 't_taazaa', slug: 'taazaa', name: 'Taazaa', currency: 'USD', timezone: 'America/New_York', status: 'active', created_at: '2026-01-01T00:00:00Z', member_count: 14, owner: null },
           { id: 't_harbor', slug: 'harbor', name: 'Harbor Health Partners', currency: 'USD', timezone: 'America/New_York', status: 'active', created_at: '2026-01-01T00:00:00Z', member_count: 22, owner: null },
         ],
-        summary: { active: 2, suspended: 0 },
+        summary: { total: 2, active: 2, suspended: 0 },
       }),
     ),
   );

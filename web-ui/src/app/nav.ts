@@ -96,6 +96,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   { tab: 'pipeline-stages', label: 'Pipeline stages', section: '21e', tag: 'Redesign', rule: { all: ['settings:manage'] }, hidden: true },
   { tab: 'scoring-weights', label: 'Scoring weights', section: '21f', tag: 'Redesign', rule: { all: ['scoring:manage'] }, hidden: true },
   { tab: 'audit-log', label: 'Audit log', section: '21g', tag: 'R1', rule: { all: ['audit:read'] } },
+  { tab: 'ai-runs', label: 'AI runs', section: '21h', tag: 'R1', rule: { all: ['settings:manage'] } },
 ];
 
 export function allows(me: Me, rule: Rule): boolean {

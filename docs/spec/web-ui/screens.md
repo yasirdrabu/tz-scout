@@ -635,7 +635,8 @@ playbook when an AE accepts them." Offer, tier checkboxes with "Already uses thi
 **Route** `/t/:tenant/settings/:tab` · Tabs in order, each shown with its permission: Members
 (`members:read`), Integrations (`integrations:manage`), API keys (`keys:manage`), Review statuses
 (`settings:manage`), Pipeline stages (`settings:manage`, once the stages plan lands), Scoring weights
-(`scoring:manage`, once the scoring redesign lands), Audit log (`audit:read`).
+(`scoring:manage`, once the scoring redesign lands), Audit log (`audit:read`), AI runs
+(`settings:manage`).
 
 ### 21a. Members
 
@@ -787,6 +788,15 @@ and, with more detail, in Members > Login history. Search "Find an
 action, person or target"; Filter Area (Tenants, Members, Sign-in, API keys, Settings, Integrations, Sources)
 and Who. Columns When, Who, Area chip, What happened ("{action} · {target}" and detail), IP address.
 `Export CSV`. Empty "No events match".
+
+### 21h. AI runs
+
+**Tag** R1 · **Who** `settings:manage`
+
+This workspace's own runs, as the old Settings, AI page (`GET /v1/ai-runs`, `/v1/ai-runs/{id}`). The §23
+list without the tenant column, tiles or search: filters Status and Task (in the URL), the expandable
+row (what Scout sent, what came back, the error), "Showing {n} runs, newest first", and a This month
+table of runs, tokens and cost per task from the API. Empty "No AI runs yet"; filtered "No runs match".
 
 ## 22. Admin: Tenants
 

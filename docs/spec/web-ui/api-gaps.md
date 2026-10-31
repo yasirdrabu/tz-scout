@@ -1201,7 +1201,8 @@ user can overturn them.
 11. **Stage targets.** (Call) The target field ships with the pipeline stages plan, since the mockup
     edits it there; the pace and progress that use it come with R3 analytics.
 12. **Budget permission.** (Call) `costs:write`, as screens.md says.
-13. **Tenant owners' AI runs.** (Call) API only for now; no tenant screen.
+13. **Tenant owners' AI runs.** (Call) Settings > AI runs (`settings:manage`, screens.md §21h) shows
+    the workspace's runs from `GET /v1/ai-runs` and `/v1/ai-runs/{id}`; the admin list stays cross-tenant.
 
 Still open for the user: item 5, whether the Scoring weights tab shows today's model (fit and intent
 balance, fit parts, trust cap, thresholds) until the scoring redesign lands, or stays hidden.
