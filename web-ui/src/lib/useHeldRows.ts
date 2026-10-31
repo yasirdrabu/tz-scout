@@ -16,12 +16,14 @@ export function countUpdates<T>(shown: T[], latest: T[], idOf: (row: T) => strin
  * Rows that stay as shown while a background refetch brings changes, so nothing moves under the
  * pointer (C14). `updates` says how many rows the latest data changed and `apply` shows them.
  * Call `follow` before the person's own change (or Show more): the next data then shows at once.
- * A new `view` (other filters) shows its rows at once.
+ * `drop` takes rows the person's own action removed out at once, and keeps them out while the
+ * API's read model catches up. A new `view` (other filters) shows its rows at once.
  */
 export function useHeldRows<T>(latest: T[] | undefined, view: string, idOf: (row: T) => string) {
   const [held, setHeld] = useState<{ view: string; rows: T[] } | null>(null);
   const [seen, setSeen] = useState<T[] | undefined>(undefined);
   const [following, setFollowing] = useState(false);
+  const [dropped, setDropped] = useState<{ view: string; ids: Set<string> }>({ view, ids: new Set() });
 
   if (latest !== seen) {
     setSeen(latest);
@@ -31,13 +33,17 @@ export function useHeldRows<T>(latest: T[] | undefined, view: string, idOf: (row
     }
   }
 
-  const current = held && held.view === view ? held.rows : latest;
+  const gone = dropped.view === view ? dropped.ids : new Set<string>();
+  const keep = (rows: T[] | undefined) => rows?.filter((r) => !gone.has(idOf(r)));
+  const current = keep(held && held.view === view ? held.rows : latest);
+  const fresh = keep(latest);
   const rows = current ?? [];
-  const updates = current && latest && current !== latest ? countUpdates(current, latest, idOf) : 0;
+  const updates = current && fresh && held?.rows !== latest ? countUpdates(current, fresh, idOf) : 0;
   return {
     rows,
     updates,
     apply: () => latest && setHeld({ view, rows: latest }),
     follow: () => setFollowing(true),
+    drop: (ids: string[]) => setDropped((d) => ({ view, ids: new Set([...(d.view === view ? d.ids : []), ...ids]) })),
   };
 }

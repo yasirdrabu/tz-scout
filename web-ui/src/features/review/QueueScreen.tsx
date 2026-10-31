@@ -108,6 +108,8 @@ function Queue({ tenant, me }: { tenant: string; me: Me }) {
     const names = new Map(from.map((r) => [r.account_id, r.name]));
     setSelected((s) => new Set([...s].filter((id) => !done.includes(id))));
     setRefused(refusedNow.map((r) => ({ ...r, name: names.get(r.account_id) ?? r.account_id })));
+    // Assigned or sent back: it leaves the queue view now, before the API's read model catches up.
+    held.drop(done);
     setCapped(false);
     if (search.peek && done.includes(search.peek)) {
       const i = rows.findIndex((r) => r.account_id === search.peek);

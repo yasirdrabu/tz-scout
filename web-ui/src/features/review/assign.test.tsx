@@ -52,6 +52,11 @@ describe('Assign dialog', () => {
     await userEvent.click(go);
     expect(await screen.findByText('Assigned to Ash Patel. Sending Miami-Dade County DTPW to HubSpot.')).toBeInTheDocument();
     expect(body).toEqual({ seller_user_id: 'usr_ash', notes: 'Jarice knows you from APTA.' });
+    // The API still lists it until its read model catches up; the row leaves at once all the same.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Miami-Dade County DTPW', hidden: true })).toBeNull());
+    // The peek moves on to the next account.
+    expect(await screen.findByRole('dialog', { name: 'Coastline Credit Union' })).toBeInTheDocument();
+    expect(screen.queryByText(/updates?$/)).toBeNull();
   });
 
   it('warns when Scout can’t take over the HubSpot owner, and keeps the owner when assigning', async () => {
