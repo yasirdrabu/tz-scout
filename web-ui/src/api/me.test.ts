@@ -13,10 +13,10 @@ const me: Me = {
 };
 
 describe('/me', () => {
-  it('fetches today’s /v1/me for a tenant', async () => {
+  it('fetches today’s /api/v1/me for a tenant', async () => {
     let tenant: string | null = null;
     server.use(
-      http.get('/v1/me', ({ request }) => {
+      http.get('/api/v1/me', ({ request }) => {
         tenant = request.headers.get('x-scout-tenant');
         return HttpResponse.json(me);
       }),

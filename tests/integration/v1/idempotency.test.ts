@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { accepted, created, v1Route } from '@/app/v1/_lib/v1-route';
+import { accepted, created, v1Route } from '@/http/routes/v1/_lib/v1-route';
 import { SYSTEM_GRANTOR, createApiKey, createTenant, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
 import { adminDb } from '@/platform/db/client';
@@ -42,7 +42,7 @@ const route = v1Route({ idempotent: true }, async (req, _p, ctx) => {
 });
 
 const request = (secret: string, key: string | null, body: unknown) =>
-  new Request('http://x/v1/y', {
+  new Request('http://x/api/v1/y', {
     method: 'POST',
     headers: {
       authorization: `Bearer ${secret}`,
@@ -130,7 +130,7 @@ describe('statuses and problem bodies', () => {
   it('answers 201 for created, and problems carry the correlation id', async () => {
     const secret = await newKey();
     const get = (id: string) =>
-      new Request('http://x/v1/y', { headers: { authorization: `Bearer ${secret}`, 'x-correlation-id': id } });
+      new Request('http://x/api/v1/y', { headers: { authorization: `Bearer ${secret}`, 'x-correlation-id': id } });
     const res = await v1Route({}, async () => created({ madeBy: 'me' }))(get('cor_a'));
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ made_by: 'me' });

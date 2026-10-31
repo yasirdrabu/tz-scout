@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { POST as devSignInRoute } from '@/app/api/dev/sign-in/route';
+import { POST as devSignInRoute } from '@/http/routes/api/dev/sign-in/route';
 import {
   NOT_SET_UP,
   SIGN_IN_FAILED,

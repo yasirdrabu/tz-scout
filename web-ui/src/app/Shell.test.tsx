@@ -7,7 +7,7 @@ import { server } from '../test/server';
 
 beforeEach(() => {
   localStorage.clear();
-  server.use(http.get('/v1/dev/users', () => new HttpResponse('Not found', { status: 404 })));
+  server.use(http.get('/api/v1/dev/users', () => new HttpResponse('Not found', { status: 404 })));
 });
 
 const LEADER = ['review:act', 'assign:act', 'accounts:read', 'assignments:respond', 'analytics:read', 'offers:read', 'playbooks:read'];
@@ -28,7 +28,7 @@ describe('shell navigation', () => {
 
   it('shows the /me/counts badges on Review queue and My accounts', async () => {
     serveMe({ taazaa: { scopes: LEADER } });
-    server.use(http.get('/v1/me/counts', () => HttpResponse.json({ review_queue: 12, new_assignments: 3 })));
+    server.use(http.get('/api/v1/me/counts', () => HttpResponse.json({ review_queue: 12, new_assignments: 3 })));
     renderApp('/t/taazaa/queue');
     const nav = await screen.findByRole('navigation', { name: 'Main' });
     expect(await within(nav).findByRole('link', { name: 'Review queue 12 accounts waiting' })).toBeInTheDocument();
@@ -37,7 +37,7 @@ describe('shell navigation', () => {
 
   it('shows no badge for a zero or hidden count', async () => {
     serveMe({ taazaa: { scopes: LEADER } });
-    server.use(http.get('/v1/me/counts', () => HttpResponse.json({ review_queue: 0, new_assignments: null })));
+    server.use(http.get('/api/v1/me/counts', () => HttpResponse.json({ review_queue: 0, new_assignments: null })));
     renderApp('/t/taazaa/queue');
     const nav = await screen.findByRole('navigation', { name: 'Main' });
     expect(within(nav).getByRole('link', { name: 'Review queue' })).toBeInTheDocument();
@@ -102,7 +102,7 @@ describe('session', () => {
 
   it('shows the API detail and error ref when /me fails', async () => {
     server.use(
-      http.get('/v1/me', () =>
+      http.get('/api/v1/me', () =>
         HttpResponse.json(
           { type: 'https://scout.taazaa.ai/problems/internal', title: 'Something went wrong', status: 500, detail: 'The database is down.', correlation_id: 'cor_7f31c2' },
           { status: 500, headers: { 'content-type': 'application/problem+json' } },
@@ -138,7 +138,7 @@ describe('workspace switcher', () => {
     });
     let recorded: unknown;
     server.use(
-      http.put('/v1/me/workspace', async ({ request }) => {
+      http.put('/api/v1/me/workspace', async ({ request }) => {
         recorded = await request.json();
         return new HttpResponse(null, { status: 204 });
       }),
@@ -195,9 +195,9 @@ describe('admin area', () => {
   // The admin screens' own calls, answered with nothing to show.
   beforeEach(() => {
     server.use(
-      http.get('/v1/admin/tenants', () => HttpResponse.json({ data: [], summary: { active: 0, suspended: 0 } })),
-      http.get('/v1/admin/platform-admins', () => HttpResponse.json({ data: [] })),
-      http.get('/v1/admin/health', () =>
+      http.get('/api/v1/admin/tenants', () => HttpResponse.json({ data: [], summary: { active: 0, suspended: 0 } })),
+      http.get('/api/v1/admin/platform-admins', () => HttpResponse.json({ data: [] })),
+      http.get('/api/v1/admin/health', () =>
         HttpResponse.json({ relay_lag_ms: 0, queues_available: true, pending_total: 0, queues: [], dead_job_count: 0, dead_jobs: [], schedules: [], ai_spend_today_cents: 0 }),
       ),
     );

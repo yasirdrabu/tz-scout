@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GET as getArrivalRoute } from '@/app/v1/arrivals/[id]/route';
-import { GET as getBatchRoute } from '@/app/v1/batches/[id]/route';
-import { GET as feedbackRoute } from '@/app/v1/feedback/route';
+import { GET as getArrivalRoute } from '@/http/routes/v1/arrivals/[id]/route';
+import { GET as getBatchRoute } from '@/http/routes/v1/batches/[id]/route';
+import { GET as feedbackRoute } from '@/http/routes/v1/feedback/route';
 import { accountSummary } from '@/modules/accounts/db/schema';
 import { arrival } from '@/modules/intake/db/schema';
 import { getArrival, submitArrival, submitBatch } from '@/modules/intake';
@@ -66,7 +66,7 @@ async function declined() {
   return { arrivalId: a.arrivalId, accountId };
 }
 
-describe('GET /v1/arrivals/{id}', () => {
+describe('GET /api/v1/arrivals/{id}', () => {
   it('adds stage, review_status, feedback and, with status:read, owner_name', async () => {
     const { arrivalId } = await declined();
     const withName = await (await get(getArrivalRoute, ashStatusKey, `arrivals/${arrivalId}`)).json();
@@ -85,7 +85,7 @@ describe('GET /v1/arrivals/{id}', () => {
   });
 });
 
-describe('GET /v1/batches/{id}', () => {
+describe('GET /api/v1/batches/{id}', () => {
   it('adds counts_by_stage', async () => {
     const d = domain();
     const out = await asSource(t, ash.agentId, (ctx) =>
@@ -99,7 +99,7 @@ describe('GET /v1/batches/{id}', () => {
   });
 });
 
-describe('GET /v1/feedback', () => {
+describe('GET /api/v1/feedback', () => {
   it('returns the principal own feedback with reason and note, and nothing of another source', async () => {
     const { accountId } = await declined();
     const mine = await (await get(feedbackRoute, ashKey, 'feedback?limit=200')).json();

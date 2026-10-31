@@ -8,7 +8,7 @@ Cross-cutting rules every module follows. Module specs reference these instead o
 | [module-boundaries.md](module-boundaries.md) | What a module is, how modules talk, how boundaries are enforced |
 | [events-and-async.md](events-and-async.md) | Outbox, NATS JetStream, subjects, event envelope, retries, scheduling, rescoring |
 | [data-conventions.md](data-conventions.md) | Tenancy in data, ids, money, time, provenance, deletion |
-| [api-and-mcp-conventions.md](api-and-mcp-conventions.md) | REST `/v1`, auth, scopes, async pattern, errors, webhooks out, MCP |
+| [api-and-mcp-conventions.md](api-and-mcp-conventions.md) | REST `/api/v1`, auth, scopes, async pattern, errors, webhooks out, MCP |
 | [deployment-and-iac.md](deployment-and-iac.md) | Container roles, compose, VM, Kubernetes, OpenTofu, secrets, observability |
 | [design-and-copy.md](design-and-copy.md) | Palette, tokens, type, copy rules, value formatting |
 | [event-catalog.md](event-catalog.md) | Every event type, funnel stage triggers, every MCP tool |
@@ -20,7 +20,7 @@ definitions and the audit log. Its stories live in [platform-stories.md](platfor
 ```mermaid
 flowchart LR
   subgraph In[Ways in]
-    UI[Web app] --- API["/v1 REST"] --- MCP[MCP server] --- WH[Inbound webhooks]
+    UI[Web app] --- API["/api/v1 REST"] --- MCP[MCP server] --- WH[Inbound webhooks]
   end
   subgraph Web[web role]
     SVC[Module services]

@@ -5,7 +5,7 @@ a leader review and assign them, and hands them to the CRM with context. It is m
 Taazaa is the first tenant.
 
 This branch holds the R0 foundation: platform plumbing (outbox, relay, NATS, worker, scheduler, dead
-jobs), tenancy and sign-in, API keys with `/v1/me`, integrations on mock adapters, the AI task runner and
+jobs), tenancy and sign-in, API keys with `/api/v1/me`, integrations on mock adapters, the AI task runner and
 admin screens. Specs are in `docs/spec/` (start at `docs/spec/README.md`); release scope is in
 `docs/spec/migration-and-rollout/release-plan.md`; changes are in `docs/CHANGELOG.md`.
 
@@ -20,13 +20,13 @@ npm run services:local      # Postgres 17 and NATS, no Docker. Leave it running.
 npm run scout -- migrate
 npm run scout -- seed       # prints a development API key for the taazaa tenant
 npm run scout -- all-background   # worker, relay and scheduler (second terminal)
-npm run dev                 # the backend: /v1 and /api on http://localhost:4240 (third terminal)
+npm run dev                 # the backend on http://localhost:4240, reloads on change (third terminal)
 cd web-ui && npm install && npm run dev   # the app: http://localhost:5173 (fourth terminal)
 ```
 
 The screens live in `web-ui/` (React and Vite, its own npm package; see `web-ui/README.md`). Its dev
-server proxies `/v1`, `/api` and `/healthz` to the backend. The backend has no pages of its own: open
-the app on 5173, not 4240.
+server proxies `/api` and the health checks to the backend. Open the app on 5173: the backend on 4240
+serves only the last built copy of the app (`npm run build`), if any.
 
 With Docker instead of `services:local`: `docker compose -f infra/compose/docker-compose.yml up -d`.
 
@@ -53,14 +53,14 @@ npm run scout -- backfill-r1c taazaa
 Send an arrival with the development key that seed printed (it is bound to the Local development agent):
 
 ```bash
-curl -X POST http://localhost:4240/v1/arrivals \
+curl -X POST http://localhost:4240/api/v1/arrivals \
   -H "Authorization: Bearer <key from seed>" -H "Content-Type: application/json" \
   -d @tests/fixtures/imports/miami-dade-arrival.json
 ```
 
-The answer has a `status_url`. Fetch it with the same key until `status` is `resolved` and it shows an `account_id`. With the worker running, read the explained score at `GET /v1/accounts/{account_id}/score` and where it stands at `GET /v1/accounts/{account_id}/status` (it reads "Waiting for review." until a person approves and assigns it).
+The answer has a `status_url`. Fetch it with the same key until `status` is `resolved` and it shows an `account_id`. With the worker running, read the explained score at `GET /api/v1/accounts/{account_id}/score` and where it stands at `GET /api/v1/accounts/{account_id}/status` (it reads "Waiting for review." until a person approves and assigns it).
 
-Check it: `curl -H "Authorization: Bearer <key from seed>" http://localhost:4240/v1/me` returns the tenant.
+Check it: `curl -H "Authorization: Bearer <key from seed>" http://localhost:4240/api/v1/me` returns the tenant.
 Open http://localhost:5173 and sign in with developer sign-in (needs `AUTH_DEV_SIGNIN=true` on the backend,
 never in production). In Admin, System health, "Send test event" shows the round trip through the outbox,
 NATS and the worker.
@@ -84,11 +84,12 @@ cd web-ui && npm run typecheck && npm run lint && npm test && npm run build   # 
 ## Build
 
 ```bash
-npm run build     # the web-ui app (build in web-ui/; install its packages first with `npm --prefix web-ui ci`), the Next.js standalone build, plus dist/cli.js
+npm run build     # the web-ui app into web-ui/dist (install its packages first with `npm --prefix web-ui ci`), then dist/cli.js
 node dist/cli.js <migrate | seed | backfill-r1b | backfill-r1c | worker | relay | scheduler | all-background | web>
 ```
 
-The container image (`infra/docker/`) runs the same CLI; the role is picked by the command.
+`npm run dev` runs `scout web` from source with `tsx watch` and reads `.env`; `npm start` runs the built
+`dist/cli.js web`. The container image (`infra/docker/`) runs the same CLI; the role is picked by the command.
 
 ## Deploy
 
@@ -96,11 +97,12 @@ Design and runbook: `docs/spec/architecture/deployment-and-iac.md`. The single V
 `infra/compose/docker-compose.vm.yml` with Caddy or a Cloudflare Tunnel in front. Hosting is not decided
 yet, so nothing is deployed.
 
-The image serves the web-ui app and the API from one origin (spec W2): the app at `/`, the API at `/v1`,
+The image serves the web-ui app and the API from one origin (spec W2): the app at `/`, the API at `/api/v1`,
 sign-in at `/api/auth`, health at `/healthz` and `/readyz`. The app's hashed files under `/assets` cache
 for a year; every other GET (deep links under `/t/...`, `/admin/...`, `/signin`) gets the app's
-`index.html` with `no-cache`. This is interim: the Next server does it through a catch-all route
-(`src/app/[[...app]]/route.ts`) until the HTTP layer moves to Hono.
+`index.html` with `no-cache`; unknown `/api` paths get the API's problem+json 404. `scout web` is one Node
+HTTP server (Hono) that does all of it; it reads the app from `WEB_UI_DIST` (default `web-ui/dist`; the
+image sets it) and stops gracefully on SIGTERM, finishing in-flight requests for up to 10 seconds.
 
 Local development does not use this: run the app from its Vite dev server (`cd web-ui && npm run dev`,
 port 5173, proxying to the backend on 4240) and sign in with developer sign-in. `npm run build` uses
@@ -114,7 +116,7 @@ Notes for the VM:
   so a plain `up -d` starts the edge service.
 - `POSTGRES_PASSWORD`, `SCOUT_APP_DB_PASSWORD` and `SCOUT_ADMIN_DB_PASSWORD` end up inside database URLs, so
   they must be URL-safe. Use `openssl rand -hex 32` for each.
-- Set `SCOUT_ENV=production`. Next's standalone server forces `NODE_ENV=production`, so Scout's own
+- Set `SCOUT_ENV=production`. The image sets `NODE_ENV=production`, so Scout's own
   production rules (no dev sign-in, secure cookies, required secrets) follow `SCOUT_ENV` first, then
   `NODE_ENV`. A laptop leaves it empty.
 - `AZURE_AD_ALLOWED_TENANT_IDS` lists the Microsoft tenant ids whose people may be matched by email the
@@ -125,7 +127,7 @@ Notes for the VM:
 ## Code map
 
 `src/platform` (outbox, relay, worker, scheduler, audit), `src/modules/*` (tenancy, integrations, ai),
-`src/app` (Next.js route handlers: `/v1`, `/api`, health), `web-ui/` (the app's screens), `src/entry` (the `scout` CLI and seed). Modules talk through their
+`src/http` (the Hono server, its route table and the route handlers: `/api/v1`, `/api/auth`, health), `web-ui/` (the app's screens), `src/entry` (the `scout` CLI and seed). Modules talk through their
 public interface; lint enforces the boundaries.
 
 The previous version of this tool (v1) is described in `docs/ARCHITECTURE.md` and the older entries of

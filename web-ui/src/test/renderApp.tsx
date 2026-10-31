@@ -15,10 +15,10 @@ export const ME: Me = {
   environment: null,
 };
 
-/** `/v1/me` answering per tenant header; a missing entry is a 401. */
+/** `/api/v1/me` answering per tenant header; a missing entry is a 401. */
 export function serveMe(byTenant: Record<string, Partial<Me> & Record<string, unknown>>, fallback?: string) {
   server.use(
-    http.get('/v1/me', ({ request }) => {
+    http.get('/api/v1/me', ({ request }) => {
       const slug = request.headers.get('x-scout-tenant') ?? fallback;
       const me = slug ? byTenant[slug] : undefined;
       if (!me) {
@@ -41,7 +41,7 @@ export function renderApp(path: string) {
 export const ADMIN_USER = { id: 'usr_sam', name: 'Sam Okafor', email: 'sam@taazaa.com', platform_admin: true };
 
 /**
- * `/v1/me` for a person with no workspace to land in (a platform admin with no membership): no
+ * `/api/v1/me` for a person with no workspace to land in (a platform admin with no membership): no
  * tenant, no scopes, every active tenant in `workspaces`. A tenant header is answered by `byTenant`.
  */
 export function serveNoTenantMe(
@@ -50,7 +50,7 @@ export function serveNoTenantMe(
   byTenant: Record<string, Partial<Me> & Record<string, unknown>> = {},
 ) {
   server.use(
-    http.get('/v1/me', ({ request }) => {
+    http.get('/api/v1/me', ({ request }) => {
       const slug = request.headers.get('x-scout-tenant');
       if (!slug) return HttpResponse.json({ ...ME, user, tenant: null, workspaces, scopes: [], data_limit: null });
       const me = byTenant[slug];

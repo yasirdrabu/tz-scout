@@ -9,7 +9,7 @@ and talks to the backend only over HTTP. Screen by screen detail is in [screens.
 
 ## Why
 
-Scout's backend (R0 to R1c) exposes everything through `/v1` (moving to `/api/v1`, C1), but the only UI is a handful of
+Scout's backend (R0 to R1c) exposes everything through `/api/v1` (moved from `/v1`, C1), but the only UI is a handful of
 server-rendered admin pages. The people who decide (leaders), the people who sell (AEs), the people
 who run sources (operators) and the people who pay (owners) have no screens for their work. The
 mockups define those screens. A separate app keeps the backend a plain API that agents, MCP and the
@@ -61,7 +61,7 @@ owner reads results, all without touching the old pages or the database.
 
 | # | Call | Why |
 |---|---|---|
-| C1 | The API moves from `/v1` to `/api/v1` with no alias for the old path: nothing outside Scout calls it yet (the live cutover has not happened). API keys, the MCP server, the HubSpot webhook URL and the developer docs move with it. Local dev runs Vite with a proxy for `/api`, so it is same-origin there too. Deep links under `/t/...` and `/admin/...` fall back to `index.html`. | Follows W2. Moving before go-live costs nothing; after go-live it would need an alias. |
+| C1 | The API moves from `/v1` to `/api/v1` with no alias for the old path: nothing outside Scout calls it yet (the live cutover has not happened). API keys, the MCP server, the HubSpot webhook URL and the developer docs move with it. Local dev runs Vite with a proxy for `/api`, so it is same-origin there too. Deep links under `/t/...` and `/admin/...` fall back to `index.html`. **Status (2026-10-31):** done with the HTTP layer plan (`docs/plans/2026-10-31-http-hono.md`): the API answers only at `/api/v1`, `/v1/...` is an app path, and the web-ui, its dev proxy (`/api` and the health checks), tests, CI, the HubSpot webhook path and the spec moved with it. | Follows W2. Moving before go-live costs nothing; after go-live it would need an alias. |
 | C2 | Stack: React 19, Vite, TypeScript strict, TanStack Router, TanStack Query, React Hook Form with zod, Radix primitives, CSS Modules over design tokens, Vitest with Testing Library and MSW, Playwright. | Typed routes and search params, a cache that fits a read-heavy app, accessible primitives without a visual library to fight. |
 | C3 | API types are generated from the backend's OpenAPI document into `web-ui/src/api/schema.ts`; no hand-written response types. | One source of truth for the contract. OpenAPI is an R1d item; until it lands the gap pass decides per module. |
 | C4 | Navigation and actions are driven by the permissions in `GET /api/v1/me`, never by role names. | Roles are tenant-configurable in the mockup; permissions are the stable contract. |
@@ -72,7 +72,7 @@ owner reads results, all without touching the old pages or the database.
 | C9 | Where the backend has no data yet for a section (for example cost per win before R3), the section shows its empty state with the reason, never sample data. | Anti-goal 2. |
 | C10 | URL shape: `/t/:tenant/...` for workspace screens, `/admin/...` for platform admin, `/signin`. Filters, tabs, sort and the peek drawer's account live in the URL's search params. | Shareable links, back button works, reload keeps your place. |
 | C11 | Claude builds `web-ui/` as well as the backend changes (the user's direction of 2026-10-30). | Replaces the earlier "backend only" rule. |
-| C12 | Switch-over: the web-ui foundation starts now against today's Next-hosted `/v1` through the Vite dev proxy. The old Next pages keep running until the new app covers their screens (sign-in, Tenants, System health, Members, Integrations, Profile); they are deleted in the plan that lands the last of those. **Status (2026-10-31):** done; the admin parity plan (`docs/plans/2026-10-31-web-ui-admin-parity.md`) retired the old pages, their server actions and `src/components`, and Next serves `/v1`, `/api`, `/healthz` and `/readyz`. **Interim (2026-10-31):** so the image can be deployed before the Hono move, the Next server also serves the built app at `/`: the image builds `web-ui/`, its static files are served from `public/` (`/assets/*` with a one-year immutable cache) and a catch-all route (`src/app/[[...app]]/route.ts`) answers every other GET with `index.html` (`no-cache`); unknown `/v1` and `/api` paths still get the API's problem+json 404. Local dev still runs the app from the Vite dev server with developer sign-in. The HTTP layer move to Hono runs as its own plan and takes over serving the app (and the catch-all goes). | No screen goes missing in between, and front-end work is not blocked on the server move. |
+| C12 | Switch-over: the web-ui foundation starts now against today's Next-hosted `/v1` through the Vite dev proxy. The old Next pages keep running until the new app covers their screens (sign-in, Tenants, System health, Members, Integrations, Profile); they are deleted in the plan that lands the last of those. **Status (2026-10-31):** done; the admin parity plan (`docs/plans/2026-10-31-web-ui-admin-parity.md`) retired the old pages, their server actions and `src/components`, and Next serves `/v1`, `/api`, `/healthz` and `/readyz`. **Status (2026-10-31, HTTP layer plan):** Next is gone. `scout web` is one Hono server that serves the built app at `/` from `web-ui/dist` (`/assets/*` with a one-year immutable cache, `index.html` with `no-cache` for every other GET or HEAD outside the API), the API at `/api/v1`, sign-in at `/api/auth` and the health checks; unknown `/api` paths get the API's problem+json 404. The interim Next catch-all route is gone. Local dev still runs the app from the Vite dev server with developer sign-in. | No screen goes missing in between, and front-end work is not blocked on the server move. |
 | C13 | "In review by {name}" is a review status a reviewer sets, shown with who set it. It is not a lock: anyone with `review:act` can still act, and the last write wins with the change log showing both. | Simplest thing that matches the mockup; a claim or lock can come later if two reviewers keep colliding. |
 | C14 | Freshness by polling, no push channel: refetch on window focus everywhere; the queue and My accounts every 30 s; import Resolve every 2 s while running (tenant creation is instant in R1; provisioning polling comes with the per-tenant infrastructure project); System health every 15 s. A refetch never moves rows under the pointer: new or changed rows show a "{n} updates" bar to apply them, and an account someone else decided while you had it open shows "Assigned by Dana a moment ago" in place of the actions. | Meets the "no jumpy queue" anti-goal without new backend infrastructure. |
 
@@ -207,10 +207,10 @@ web-ui/
 
 Recorded here so the backend plans pick them up; the gap pass lists them per module.
 
-1. **HTTP layer off Next.js** (W4): a plain Node server (Hono, my call) hosting `/api/v1`, auth and the
+1. **HTTP layer off Next.js** (W4), done 2026-10-31: a plain Node server (Hono, my call) hosting `/api/v1`, auth and the
    inbound webhooks. Route handlers already take a `Request` and return a `Response`, so most carry
    over as they are. Its own plan, before the web-ui plans that need new endpoints.
-2. **Paths and static files** (W2, C1): `/v1` becomes `/api/v1`, auth stays at `/api/auth`, dev
+2. **Paths and static files** (W2, C1), done 2026-10-31: `/v1` becomes `/api/v1`, auth stays at `/api/auth`, dev
    sign-in stays at `/api/dev/sign-in` (outside both, so the proxy and the Hono server must carry it),
    the health checks stay at `/healthz` and `/readyz`; the server (or the proxy in front of it) serves the
    built app with an `index.html` fallback. Cookies stay first-party; cookie-authenticated writes keep
@@ -255,8 +255,8 @@ that need them; api-gaps.md lists them per module.
 2. API gap pass, module by module ([api-gaps.md](api-gaps.md)). Done; decisions taken 2026-10-31.
 3. Backend HTTP layer move and `/api/v1` (backend changes 1, 2 and 4, with the cross-cutting items of
    api-gaps.md: no-tenant session route, CSRF rule, `/me` shape, sign-in return paths). In parallel,
-   the web-ui foundation (shell, sign-in, design system, API client) against today's `/v1` through
-   the Vite proxy (C12). The move blocks the first production deploy and every plan that adds
+   the web-ui foundation (shell, sign-in, design system, API client) against the then `/v1` through
+   the Vite proxy (C12). Done 2026-10-31. The move blocks the first production deploy and every plan that adds
    endpoints.
 4. Review queue, peek drawer, Send back, Assign and My accounts, with their routing, accounts and
    scoring changes (send-back reasons, notes, manual tier, best offer, best match).

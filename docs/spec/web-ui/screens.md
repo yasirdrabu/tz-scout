@@ -793,7 +793,7 @@ and Who. Columns When, Who, Area chip, What happened ("{action} · {target}" and
 
 **Tag** R1 · **Who** `settings:manage`
 
-This workspace's own runs, as the old Settings, AI page (`GET /v1/ai-runs`, `/v1/ai-runs/{id}`). The §23
+This workspace's own runs, as the old Settings, AI page (`GET /api/v1/ai-runs`, `/api/v1/ai-runs/{id}`). The §23
 list without the tenant column, tiles or search: filters Status and Task (in the URL), the expandable
 row (what Scout sent, what came back, the error), "Showing {n} runs, newest first", and a This month
 table of runs, tokens and cost per task from the API. Empty "No AI runs yet"; filtered "No runs match".

@@ -42,4 +42,4 @@ As an agent, I want to find accounts by criteria, so that I can enrich or report
 `find_accounts`, as defined in [mcp/agent-tools.md](../mcp/agent-tools.md): input `query`, `domain`,
 `practice`, `offer`, `tier`, `stage`, `signal_type` (a kind), `limit`, `cursor`; output items with
 `account_id`, `name`, `domain`, `tier`, `priority`, `best_offer`, `stage`, plus `next_cursor` and
-`summary`. The web app and `GET /v1/accounts` support the fuller filter list above.
+`summary`. The web app and `GET /api/v1/accounts` support the fuller filter list above.

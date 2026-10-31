@@ -111,7 +111,7 @@ export async function feedbackForArrival(ctx: ModuleContext, arrivalId: string):
 }
 
 /**
- * The feed (`GET /v1/feedback`): feedback for the principal's own source and its children, newest
+ * The feed (`GET /api/v1/feedback`): feedback for the principal's own source and its children, newest
  * first. A row is also held back when its account is outside the principal's data limit.
  */
 export async function listFeedback(

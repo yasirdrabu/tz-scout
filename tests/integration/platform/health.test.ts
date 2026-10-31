@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { readyResponse } from '@/platform/health';
-import { GET as healthz } from '@/app/healthz/route';
+import { closeHealthConnections, readyResponse } from '@/platform/health';
+import { GET as healthz } from '@/http/routes/healthz/route';
 
 describe('health endpoints', () => {
   it('/healthz is always ok', async () => {
@@ -21,5 +21,13 @@ describe('health endpoints', () => {
     const res = await readyResponse();
     expect(await res.json()).toEqual({ ok: true });
     expect(res.status).toBe(200);
+  });
+
+  it('closes its NATS connection on shutdown and opens a new one when asked again', async () => {
+    await readyResponse();
+    await closeHealthConnections();
+    const res = await readyResponse();
+    expect(res.status).toBe(200);
+    await closeHealthConnections();
   });
 });

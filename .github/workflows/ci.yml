@@ -201,8 +201,8 @@ jobs:
           fi
           curl -fsS http://localhost:4240/healthz
           echo
-          # The web role serves the web-ui app (interim, until the Hono move): / and deep links get its index.html.
-          for path in / /t/anything; do
+          # One origin (spec W2): the app at / with its index.html for deep links, the API at /api/v1.
+          for path in / /t/x /t/anything/queue; do
             body="$(curl -fsS "http://localhost:4240${path}")"
             if ! grep -q '<div id="root"></div>' <<<"$body" || ! grep -q '<title>Scout</title>' <<<"$body"; then
               docker logs web
@@ -212,8 +212,20 @@ jobs:
             echo "GET ${path} serves the app"
           done
           asset="$(curl -fsS http://localhost:4240/ | grep -oE '/assets/[^"]+\.js' | head -n1)"
-          curl -fsS -o /dev/null "http://localhost:4240${asset}"
+          if ! curl -fsS -D - -o /dev/null "http://localhost:4240${asset}" | grep -qi '^cache-control: public, max-age=31536000, immutable'; then
+            docker logs web
+            echo "GET ${asset} failed or is not cached as immutable" >&2
+            exit 1
+          fi
           echo "GET ${asset} ok"
+          status="$(curl -sS -o /tmp/me.json -w '%{http_code} %{content_type}' http://localhost:4240/api/v1/me)"
+          if [ "$status" != "401 application/problem+json" ]; then
+            docker logs web
+            echo "GET /api/v1/me answered ${status}, not 401 application/problem+json" >&2
+            cat /tmp/me.json >&2
+            exit 1
+          fi
+          echo "GET /api/v1/me is 401 problem+json"
       - name: Log in to ghcr.io
         if: env.PUSH == 'true'
         uses: docker/login-action@v3

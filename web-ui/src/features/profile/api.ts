@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiFetch } from '../../api/client';
 
-// The signed-in person's sessions (src/app/v1/me/sessions, no workspace needed).
+// The signed-in person's sessions (src/http/routes/v1/me/sessions, no workspace needed).
 
 export type Session = {
   id: string;

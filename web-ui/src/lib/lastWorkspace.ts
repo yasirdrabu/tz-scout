@@ -1,4 +1,4 @@
-// The last used workspace in this browser. The switcher also records it with PUT /v1/me/workspace.
+// The last used workspace in this browser. The switcher also records it with PUT /api/v1/me/workspace.
 const KEY = 'scout.workspace';
 
 export function lastWorkspace(): string | null {

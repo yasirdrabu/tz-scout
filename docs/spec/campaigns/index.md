@@ -68,12 +68,12 @@ All internal (not public webhook types).
 
 | Method and path | Scope | Does |
 |---|---|---|
-| `GET /v1/message-tests`, `GET /v1/message-tests/{id}` | `campaigns:read` | Tests with statements and verdicts |
-| `GET /v1/statements/library?segment_id=` | `campaigns:read` | Winning statements |
-| `GET /v1/meetings?account_id=` | `accounts:read` | Meetings for an account |
-| `POST /v1/inbound/booking/{connectionId}` | booking provider signature | Booking provider events (follows the inbound webhook pattern in public-api/index.md) |
+| `GET /api/v1/message-tests`, `GET /api/v1/message-tests/{id}` | `campaigns:read` | Tests with statements and verdicts |
+| `GET /api/v1/statements/library?segment_id=` | `campaigns:read` | Winning statements |
+| `GET /api/v1/meetings?account_id=` | `accounts:read` | Meetings for an account |
+| `POST /api/v1/inbound/booking/{connectionId}` | booking provider signature | Booking provider events (follows the inbound webhook pattern in public-api/index.md) |
 
-Form fills come in through Sources and intake's `POST /v1/inbound/forms/{sourceId}` (SRC-E6); this
+Form fills come in through Sources and intake's `POST /api/v1/inbound/forms/{sourceId}` (SRC-E6); this
 module owns no form endpoint.
 
 ## MCP tools

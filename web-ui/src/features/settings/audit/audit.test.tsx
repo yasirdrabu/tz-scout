@@ -33,14 +33,14 @@ function serve(scopes = ['audit:read', 'members:read']) {
   seen = [];
   serveMe({ taazaa: { scopes, tenant: { id: 't1', slug: 'taazaa', name: 'Taazaa', currency: 'USD', timezone: 'America/New_York' } } });
   server.use(
-    http.get('/v1/audit', ({ request }) => {
+    http.get('/api/v1/audit', ({ request }) => {
       const p = new URL(request.url).searchParams;
       seen.push(p);
       if (p.get('q') === 'nothing') return HttpResponse.json({ data: [], next_cursor: null });
       if (p.get('cursor') === 'c2') return HttpResponse.json({ data: PAGE_2, next_cursor: null });
       return HttpResponse.json({ data: PAGE_1, next_cursor: 'c2' });
     }),
-    http.get('/v1/members', () =>
+    http.get('/api/v1/members', () =>
       HttpResponse.json({ data: [{ id: 'mbr_priya', user_id: 'usr_priya', name: 'Priya Raman', email: 'priya@taazaa.com', role: 'owner', status: 'active' }] }),
     ),
   );
@@ -114,7 +114,7 @@ describe('Audit log', () => {
 
   it('shows loading and error states', async () => {
     serve();
-    server.use(http.get('/v1/audit', async () => {
+    server.use(http.get('/api/v1/audit', async () => {
       await delay('infinite');
       return HttpResponse.json({ data: [], next_cursor: null });
     }));
@@ -122,7 +122,7 @@ describe('Audit log', () => {
     expect(await screen.findByText('Loading the audit log')).toBeInTheDocument();
     first.unmount();
 
-    server.use(http.get('/v1/audit', () => problem(400, 'Check the request.', { detail: 'That cursor is not valid.', ref: 'cor_a1' })));
+    server.use(http.get('/api/v1/audit', () => problem(400, 'Check the request.', { detail: 'That cursor is not valid.', ref: 'cor_a1' })));
     renderApp('/t/taazaa/settings/audit-log');
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("The audit log didn't load");

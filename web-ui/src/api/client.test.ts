@@ -5,13 +5,13 @@ import { ApiError, UnauthorizedError } from './errors';
 
 describe('apiFetch', () => {
   it('uses one base path', () => {
-    expect(API_BASE).toBe('/v1');
+    expect(API_BASE).toBe('/api/v1');
   });
 
   it('sends the tenant, a new correlation id per request and includes credentials', async () => {
     const seen: Request[] = [];
     server.use(
-      http.get('/v1/me', ({ request }) => {
+      http.get('/api/v1/me', ({ request }) => {
         seen.push(request);
         return HttpResponse.json({ ok: true });
       }),
@@ -31,7 +31,7 @@ describe('apiFetch', () => {
   it('leaves out the tenant header when there is no tenant', async () => {
     let tenant: string | null = 'unset';
     server.use(
-      http.get('/v1/me', ({ request }) => {
+      http.get('/api/v1/me', ({ request }) => {
         tenant = request.headers.get('x-scout-tenant');
         return HttpResponse.json({});
       }),
@@ -43,7 +43,7 @@ describe('apiFetch', () => {
   it('sends JSON and an Idempotency-Key on POST', async () => {
     let request: Request | undefined;
     server.use(
-      http.post('/v1/things', async ({ request: r }) => {
+      http.post('/api/v1/things', async ({ request: r }) => {
         request = r.clone();
         return HttpResponse.json({ id: 't1' }, { status: 201 });
       }),
@@ -55,13 +55,13 @@ describe('apiFetch', () => {
   });
 
   it('returns undefined for 204', async () => {
-    server.use(http.delete('/v1/things/t1', () => new HttpResponse(null, { status: 204 })));
+    server.use(http.delete('/api/v1/things/t1', () => new HttpResponse(null, { status: 204 })));
     expect(await apiFetch('/things/t1', { tenant: 'taazaa', method: 'DELETE' })).toBeUndefined();
   });
 
   it('maps problem+json to ApiError with the detail and the correlation id as the ref', async () => {
     server.use(
-      http.get('/v1/accounts', () =>
+      http.get('/api/v1/accounts', () =>
         HttpResponse.json(
           {
             type: 'https://scout.taazaa.ai/problems/forbidden',
@@ -82,7 +82,7 @@ describe('apiFetch', () => {
 
   it('types a 401 as UnauthorizedError', async () => {
     server.use(
-      http.get('/v1/me', () =>
+      http.get('/api/v1/me', () =>
         HttpResponse.json(
           { type: 'https://scout.taazaa.ai/problems/unauthenticated', title: 'Sign in or send a valid API key.', status: 401 },
           { status: 401, headers: { 'content-type': 'application/problem+json' } },
@@ -98,7 +98,7 @@ describe('apiFetch', () => {
   it('maps a non-JSON error to an ApiError with the request correlation id', async () => {
     let sent: string | null = null;
     server.use(
-      http.get('/v1/broken', ({ request }) => {
+      http.get('/api/v1/broken', ({ request }) => {
         sent = request.headers.get('x-correlation-id');
         return new HttpResponse('<html>oops</html>', { status: 502, headers: { 'content-type': 'text/html' } });
       }),
@@ -109,7 +109,7 @@ describe('apiFetch', () => {
   });
 
   it('maps a network failure to an ApiError with status 0', async () => {
-    server.use(http.get('/v1/down', () => HttpResponse.error()));
+    server.use(http.get('/api/v1/down', () => HttpResponse.error()));
     const error = await apiFetch('/down').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ status: 0, code: 'network', title: "Scout can't be reached" });

@@ -2,7 +2,7 @@ import type { Permission } from './permissions';
 
 /**
  * What a key can do, as offered on the API keys screen (§21c), and the scopes each choice gives.
- * `GET /v1/arrivals/{id}` needs `arrivals:read`; `status:read` adds the owner name and account status.
+ * `GET /api/v1/arrivals/{id}` needs `arrivals:read`; `status:read` adds the owner name and account status.
  */
 export const KEY_ACCESS = {
   send_and_status: ['arrivals:write', 'arrivals:read', 'status:read'],

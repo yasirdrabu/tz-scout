@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GET as getArrivalRoute } from '@/app/v1/arrivals/[id]/route';
-import { GET as itemsRoute } from '@/app/v1/batches/[id]/items/route';
-import { POST as postImport } from '@/app/v1/imports/route';
-import { GET as getImportRoute, POST as importAction } from '@/app/v1/imports/[id]/route';
+import { GET as getArrivalRoute } from '@/http/routes/v1/arrivals/[id]/route';
+import { GET as itemsRoute } from '@/http/routes/v1/batches/[id]/items/route';
+import { POST as postImport } from '@/http/routes/v1/imports/route';
+import { GET as getImportRoute, POST as importAction } from '@/http/routes/v1/imports/[id]/route';
 import { closeDbs } from '@/platform/db/client';
 import { runOutbox } from '../helpers/run-outbox';
 import { call, freshTenant, keyFor, personAndAgent, uploadForm, type Tenant } from './intake-helpers';
@@ -28,7 +28,7 @@ afterAll(closeDbs);
 const fixture = (name: string) => readFileSync(join(__dirname, '../../fixtures/imports', name));
 let n = 0;
 
-describe('/v1/imports', () => {
+describe('/api/v1/imports', () => {
   it('SRC-E4-S4-AC3: a research file is queued, runs and reports its counts', async () => {
     const res = await call(postImport, ashKey, 'imports', { body: uploadForm('research.csv', fixture('research-master.csv')) });
     expect(res.status).toBe(202);

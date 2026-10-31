@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { GET as me } from '@/app/v1/me/route';
-import { assertSameSite, v1Route } from '@/app/v1/_lib/v1-route';
+import { GET as me } from '@/http/routes/v1/me/route';
+import { assertSameSite, v1Route } from '@/http/routes/v1/_lib/v1-route';
 import { SYSTEM_GRANTOR, createApiKey, createTenant, revokeApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
 import { adminDb } from '@/platform/db/client';
@@ -32,7 +32,7 @@ beforeEach(() => setPrincipalCacheTtl(0));
 
 const call = (h: (r: Request) => Promise<Response>, secret?: string, headers: Record<string, string> = {}) =>
   h(
-    new Request('http://x/v1/me', {
+    new Request('http://x/api/v1/me', {
       headers: {
         ...(secret ? { authorization: `Bearer ${secret}` } : {}),
         ...headers,
@@ -48,7 +48,7 @@ const make = (scopes: string[]) =>
     }),
   );
 
-describe('GET /v1/me', () => {
+describe('GET /api/v1/me', () => {
   it('returns the key identity in snake_case with a correlation id', async () => {
     const { id, secret } = await make(['members:read', 'status:read']);
     const res = await call(me, secret, { 'x-correlation-id': 'cor_mine' });
@@ -148,7 +148,7 @@ describe('hardening', () => {
   });
 
   it('blocks cookie writes without our origin and a tenant header (CSRF)', () => {
-    const post = (h: Record<string, string>, method = 'POST') => new Request('http://x/v1/y', { method, headers: h });
+    const post = (h: Record<string, string>, method = 'POST') => new Request('http://x/api/v1/y', { method, headers: h });
     const origin = 'http://localhost:4240';
     expect(() => assertSameSite(post({}))).toThrow(expect.objectContaining({ slug: 'csrf', status: 403 }));
     expect(() => assertSameSite(post({ origin, 'x-scout-tenant': 'a' }, 'GET'))).not.toThrow();
@@ -158,6 +158,6 @@ describe('hardening', () => {
       expect.objectContaining({ slug: 'csrf' }),
     );
     expect(() => assertSameSite(post({ origin, 'x-scout-tenant': 'a' }))).not.toThrow();
-    expect(() => assertSameSite(new Request('http://x/v1/y', { method: 'GET' }))).not.toThrow();
+    expect(() => assertSameSite(new Request('http://x/api/v1/y', { method: 'GET' }))).not.toThrow();
   });
 });

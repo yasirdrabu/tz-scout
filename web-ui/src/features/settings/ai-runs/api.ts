@@ -2,7 +2,7 @@ import { queryOptions } from '@tanstack/react-query';
 import { apiFetch } from '../../../api/client';
 import type { AiRun, RunStatus } from '../../admin/ai-runs/api';
 
-// This workspace's AI runs (src/app/v1/ai-runs, settings:manage): the admin list's rows without the
+// This workspace's AI runs (src/http/routes/v1/ai-runs, settings:manage): the admin list's rows without the
 // tenant name, newest first, and this month's totals per task.
 
 export type WorkspaceRun = Omit<AiRun, 'tenant_name'>;

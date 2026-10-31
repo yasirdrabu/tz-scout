@@ -41,7 +41,7 @@ function serve(runs = RUNS, scopes = ['settings:manage']) {
   seen = [];
   serveMe({ taazaa: { scopes } });
   server.use(
-    http.get('/v1/ai-runs', ({ request }) => {
+    http.get('/api/v1/ai-runs', ({ request }) => {
       seen.push(new URL(request.url).searchParams);
       return HttpResponse.json({ data: runs, totals: runs.length ? TOTALS : [] });
     }),
@@ -100,7 +100,7 @@ describe('Settings > AI runs', () => {
   it('shows the loading line', async () => {
     serve();
     server.use(
-      http.get('/v1/ai-runs', async () => {
+      http.get('/api/v1/ai-runs', async () => {
         await delay('infinite');
         return HttpResponse.json({});
       }),
@@ -111,7 +111,7 @@ describe('Settings > AI runs', () => {
 
   it('says what failed, with Try again', async () => {
     serve();
-    server.use(http.get('/v1/ai-runs', () => problem(500, 'Something went wrong', { detail: 'The database is down.', ref: 'cor_r1' })));
+    server.use(http.get('/api/v1/ai-runs', () => problem(500, 'Something went wrong', { detail: 'The database is down.', ref: 'cor_r1' })));
     renderApp('/t/taazaa/settings/ai-runs');
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("AI runs didn't load");
@@ -124,7 +124,7 @@ describe('Settings > AI runs', () => {
     const detail: AiRunDetail = { ...RUNS[1]!, tenant_name: null, input_hash: 'sha256:ab12', output: { columns: 4 }, error: 'The answer had no columns.' };
     let asked: string | null = null;
     server.use(
-      http.get('/v1/ai-runs/run_8f1c', ({ request }) => {
+      http.get('/api/v1/ai-runs/run_8f1c', ({ request }) => {
         asked = request.headers.get('x-scout-tenant');
         return HttpResponse.json(detail);
       }),

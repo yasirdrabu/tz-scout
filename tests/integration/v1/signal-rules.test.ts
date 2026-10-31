@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { POST as offerAction } from '@/app/v1/offers/[id]/route';
-import { GET as getRules, PUT as putRules } from '@/app/v1/offers/[id]/signal-rules/route';
-import { GET as getSignalTypes } from '@/app/v1/signal-types/route';
+import { POST as offerAction } from '@/http/routes/v1/offers/[id]/route';
+import { GET as getRules, PUT as putRules } from '@/http/routes/v1/offers/[id]/signal-rules/route';
+import { GET as getSignalTypes } from '@/http/routes/v1/signal-types/route';
 import { approveOffer, createOffer, createPractice, listSignalRules } from '@/modules/offers';
 import { SYSTEM_GRANTOR, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { closeDbs } from '@/platform/db/client';
@@ -31,7 +31,7 @@ beforeEach(() => setPrincipalCacheTtl(0));
 
 const call = (h: (r: Request) => Promise<Response>, secret: string, path: string, method = 'GET', body?: unknown) =>
   h(
-    new Request(`http://x/v1/${path}`, {
+    new Request(`http://x/api/v1/${path}`, {
       method,
       headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -52,7 +52,7 @@ const rule = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-describe('signal rules on /v1', () => {
+describe('signal rules on /api/v1', () => {
   it('AC0: PUT needs scoring:manage', async () => {
     const o = await draft('Locked');
     const before = await t.run((ctx) => listSignalRules(ctx, o.id));

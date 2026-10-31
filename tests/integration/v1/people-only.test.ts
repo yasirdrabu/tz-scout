@@ -1,21 +1,21 @@
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import '@/entry/compose';
-import { PATCH as patchSource } from '@/app/v1/sources/[id]/route';
-import { GET as listMappingsRoute } from '@/app/v1/sources/[id]/mappings/route';
-import { DELETE as deleteMappingRoute } from '@/app/v1/sources/[id]/mappings/[mappingId]/route';
-import { GET as waitingRoute } from '@/app/v1/waiting/route';
-import { POST as arrivalAction } from '@/app/v1/arrivals/[id]/route';
-import { POST as batchAction } from '@/app/v1/batches/[id]/route';
-import { POST as accountAction } from '@/app/v1/accounts/[id]/route';
-import { PUT as putPractices } from '@/app/v1/accounts/[id]/practices/route';
-import { DELETE as deleteOverride } from '@/app/v1/accounts/[id]/exclusion-override/route';
-import { POST as signalAction } from '@/app/v1/signals/[id]/route';
-import { GET as getExclusions } from '@/app/v1/settings/exclusions/route';
-import { PUT as putRule } from '@/app/v1/settings/exclusions/rules/[key]/route';
-import { PUT as putList } from '@/app/v1/settings/exclusions/lists/[kind]/route';
-import { GET as getWarmIntros } from '@/app/v1/settings/warm-intros/route';
-import { PUT as putWarmIntro } from '@/app/v1/settings/warm-intros/[key]/route';
+import { PATCH as patchSource } from '@/http/routes/v1/sources/[id]/route';
+import { GET as listMappingsRoute } from '@/http/routes/v1/sources/[id]/mappings/route';
+import { DELETE as deleteMappingRoute } from '@/http/routes/v1/sources/[id]/mappings/[mappingId]/route';
+import { GET as waitingRoute } from '@/http/routes/v1/waiting/route';
+import { POST as arrivalAction } from '@/http/routes/v1/arrivals/[id]/route';
+import { POST as batchAction } from '@/http/routes/v1/batches/[id]/route';
+import { POST as accountAction } from '@/http/routes/v1/accounts/[id]/route';
+import { PUT as putPractices } from '@/http/routes/v1/accounts/[id]/practices/route';
+import { DELETE as deleteOverride } from '@/http/routes/v1/accounts/[id]/exclusion-override/route';
+import { POST as signalAction } from '@/http/routes/v1/signals/[id]/route';
+import { GET as getExclusions } from '@/http/routes/v1/settings/exclusions/route';
+import { PUT as putRule } from '@/http/routes/v1/settings/exclusions/rules/[key]/route';
+import { PUT as putList } from '@/http/routes/v1/settings/exclusions/lists/[kind]/route';
+import { GET as getWarmIntros } from '@/http/routes/v1/settings/warm-intros/route';
+import { PUT as putWarmIntro } from '@/http/routes/v1/settings/warm-intros/[key]/route';
 import { getAccount, getSignals, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { account } from '@/modules/accounts/db/schema';
 import { listMappings, saveMapping, submitBatch } from '@/modules/intake';
@@ -52,7 +52,7 @@ async function signIn(userId: string): Promise<string> {
 /** A cookie-signed-in request with the same-site headers the web app sends. */
 const as = (who: keyof typeof cookies, handler: (r: Request) => Promise<Response>, path: string, method: string, body?: unknown) =>
   handler(
-    new Request(`http://localhost:4240/v1/${path}`, {
+    new Request(`http://localhost:4240/api/v1/${path}`, {
       method,
       headers: {
         cookie: cookies[who],
@@ -114,7 +114,7 @@ describe('sources', () => {
     expect((await as('seller', patchSource, `sources/${ash.agentId}`, 'PATCH', { status: 'paused' })).status).toBe(403);
     const key = (await run((ctx) => createApiKey(ctx, { name: 'k', environment: 'live', scopes: ['sources:manage'], sourceId: ash.agentId }, SYSTEM_GRANTOR))).secret;
     const viaKey = await patchSource(
-      new Request(`http://x/v1/sources/${ash.agentId}`, {
+      new Request(`http://x/api/v1/sources/${ash.agentId}`, {
         method: 'PATCH',
         headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
         body: JSON.stringify({ status: 'active' }),
@@ -148,7 +148,7 @@ describe('saved mappings and the data limit', () => {
       )
     ).secret;
     const send = (handler: (r: Request) => Promise<Response>, path: string, method: string) =>
-      handler(new Request(`http://x/v1/${path}`, { method, headers: { authorization: `Bearer ${key}` } }));
+      handler(new Request(`http://x/api/v1/${path}`, { method, headers: { authorization: `Bearer ${key}` } }));
     expect((await send(listMappingsRoute, `sources/${bo.personId}/mappings`, 'GET')).status).toBe(404);
     expect((await send(deleteMappingRoute, `sources/${bo.personId}/mappings/${theirs.id}`, 'DELETE')).status).toBe(404);
     expect((await send(deleteMappingRoute, `sources/${ash.agentId}/mappings/${theirs.id}`, 'DELETE')).status).toBe(404);
@@ -236,7 +236,7 @@ describe('accounts', () => {
       )
     ).secret;
     const viaKey = await accountAction(
-      new Request(`http://x/v1/accounts/${keep}:merge`, {
+      new Request(`http://x/api/v1/accounts/${keep}:merge`, {
         method: 'POST',
         headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
         body: JSON.stringify({ merged_id: gone }),

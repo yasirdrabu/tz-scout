@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiFetch } from '../../../api/client';
 
-// Tenants and platform admins (src/app/v1/admin/tenants, platform-admins). Platform admins only.
+// Tenants and platform admins (src/http/routes/v1/admin/tenants, platform-admins). Platform admins only.
 
 export type AdminTenant = {
   id: string;

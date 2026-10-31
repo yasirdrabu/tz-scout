@@ -14,7 +14,7 @@ Release R1
 - Unauthenticated requests get 401 with `WWW-Authenticate` pointing to the resource metadata, so
   clients start the OAuth flow by themselves.
 - **Local:** package `@taazaa/scout-mcp`, published to npm (public, MIT). Config: `SCOUT_API_KEY`
-  (required), `SCOUT_BASE_URL` (default `https://scout.taazaa.ai`). It calls `/v1` and maps API errors
+  (required), `SCOUT_BASE_URL` (default `https://scout.taazaa.ai`). It calls `/api/v1` and maps API errors
   to tool errors. Works with test keys against the sandbox.
 - Tool errors are returned as tool results with `isError: true` and a short sentence the model can act
   on ("This account isn't one your source sent, so its details aren't available."), never stack traces.

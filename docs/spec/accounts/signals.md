@@ -66,7 +66,7 @@ reason to buy in seconds.
 
 ### ACC-E4-S3 Agents add signals
 As an agent, I want to add a signal I found to an account, so that its timing is up to date.
-- ACC-E4-S3-AC1 `add_signal(account_id, signal)` and `POST /v1/accounts/{id}/signals` submit an inline
+- ACC-E4-S3-AC1 `add_signal(account_id, signal)` and `POST /api/v1/accounts/{id}/signals` submit an inline
   targeted arrival through SRC and return `signal_id` in the same call; a repeat returns the existing
   id.
 - ACC-E4-S3-AC2 A missing `occurred_at` is rejected with "Add the date it happened"; a missing `url` is

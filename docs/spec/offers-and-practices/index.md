@@ -76,13 +76,13 @@ JSON field names are snake_case.
 
 | Method and path | Scope | Does |
 |---|---|---|
-| `GET /v1/practices` | `offers:read` | List practices |
-| `GET /v1/offers?practice_id&status` | `offers:read` | List offers; approved only unless the principal has `offers:manage` |
-| `GET /v1/offers/{id}` | `offers:read` | One offer with case studies and signal rules |
-| `POST /v1/offers`, `PATCH /v1/offers/{id}` | `offers:manage` | Create, edit |
-| `POST /v1/offers/{id}:approve`, `:archive` | `offers:manage` | Approve also requires the owner role |
-| `PUT /v1/offers/{id}/signal-rules` | `scoring:manage` | Replace an offer's signal rules |
-| `GET /v1/case-studies` | `offers:read` | Agent principals see only buyer-visible case studies |
+| `GET /api/v1/practices` | `offers:read` | List practices |
+| `GET /api/v1/offers?practice_id&status` | `offers:read` | List offers; approved only unless the principal has `offers:manage` |
+| `GET /api/v1/offers/{id}` | `offers:read` | One offer with case studies and signal rules |
+| `POST /api/v1/offers`, `PATCH /api/v1/offers/{id}` | `offers:manage` | Create, edit |
+| `POST /api/v1/offers/{id}:approve`, `:archive` | `offers:manage` | Approve also requires the owner role |
+| `PUT /api/v1/offers/{id}/signal-rules` | `scoring:manage` | Replace an offer's signal rules |
+| `GET /api/v1/case-studies` | `offers:read` | Agent principals see only buyer-visible case studies |
 
 ## MCP tools
 

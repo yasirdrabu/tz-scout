@@ -29,7 +29,7 @@ TEN (principal, scopes, data limits), INT (caps), every module's public interfac
 
 ## Endpoints
 
-All under `https://scout.taazaa.ai/v1`. "Owner" is the module that implements the handler. Async means
+All under `https://scout.taazaa.ai/api/v1`. "Owner" is the module that implements the handler. Async means
 `202 Accepted` with a `status_url`.
 
 ### Who am I
@@ -182,4 +182,4 @@ None; the MCP server is a sibling surface (see mcp/).
 ## Open questions
 
 - Should list endpoints also support a filter language (`?filter=tier eq "act_now"`)? Spec's call: no;
-  named query parameters only in `/v1`.
+  named query parameters only in `/api/v1`.

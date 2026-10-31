@@ -71,7 +71,7 @@ the key's tolerance:
 As a leader, I want to see where any value came from, so that I can judge it.
 - ACC-E3-S1-AC1 Hovering or tapping any account or person value shows source chain, date observed,
   link and arrival; "History" lists every fact for that key.
-- ACC-E3-S1-AC2 `GET /v1/accounts/{id}/facts?include=history` returns the same.
+- ACC-E3-S1-AC2 `GET /api/v1/accounts/{id}/facts?include=history` returns the same.
 
 ### ACC-E3-S2 Current value rules
 As the system, I want one deterministic rule for which value is shown, so that the same facts always
@@ -93,5 +93,5 @@ source learns.
 - ACC-E3-S4-AC1 Keeping a value pins it, archives the others, closes the conflict, and publishes
   `accounts.conflict.resolved` with losing sources.
 - ACC-E3-S4-AC2 The audit log shows who resolved it and the note.
-- ACC-E3-S4-AC3 `POST /v1/conflicts/{id}:resolve` from an API key or OAuth grant returns `403` with
+- ACC-E3-S4-AC3 `POST /api/v1/conflicts/{id}:resolve` from an API key or OAuth grant returns `403` with
   "Only a person can settle a disagreement between sources."

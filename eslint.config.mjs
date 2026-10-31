@@ -1,7 +1,5 @@
-import { FlatCompat } from "@eslint/eslintrc";
 import boundaries from "eslint-plugin-boundaries";
-
-const compat = new FlatCompat({ baseDirectory: import.meta.dirname });
+import tseslint from "typescript-eslint";
 
 const sameModule = { moduleName: "${from.moduleName}" };
 
@@ -16,7 +14,7 @@ export const boundariesConfig = {
       { type: "module", pattern: "src/modules/*/**", mode: "file", capture: ["moduleName"] },
       { type: "platform", pattern: "src/platform/**", mode: "file" },
       { type: "lib", pattern: "src/lib/**", mode: "file" },
-      { type: "app", pattern: ["src/app/**", "src/entry/**"], mode: "file" },
+      { type: "app", pattern: ["src/http/**", "src/entry/**"], mode: "file" },
     ],
   },
   rules: {
@@ -52,7 +50,7 @@ export const ADMIN_DB_ALLOWED = [
   // An unauthenticated webhook has no tenant until its connection is found (connectionTenant).
   "src/modules/integrations/services/inbound.ts",
   // adminRoute: platform-admin requests have no tenant and run on adminDb, after the admin check.
-  "src/app/v1/_lib/v1-route.ts",
+  "src/http/routes/v1/_lib/v1-route.ts",
   "src/entry/**",
 ];
 const LIVE_ADAPTERS = ["src/modules/*/adapters/*/live*", "src/modules/*/adapters/*/live*/**"];
@@ -91,16 +89,14 @@ const config = [
   {
     ignores: [
       "reference/**",
-      ".next/**",
       "dist/**",
       "node_modules/**",
-      "next-env.d.ts",
       "playwright-report/**",
       "test-results/**",
       "web-ui/**",
     ],
   },
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  ...tseslint.configs.recommended,
   {
     rules: {
       "@typescript-eslint/no-unused-vars": [

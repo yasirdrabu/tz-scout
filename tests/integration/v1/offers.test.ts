@@ -1,11 +1,11 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { GET as listPracticesRoute, POST as createPracticeRoute } from '@/app/v1/practices/route';
-import { PATCH as patchPractice, POST as practiceAction } from '@/app/v1/practices/[id]/route';
-import { GET as listOffersRoute, POST as createOfferRoute } from '@/app/v1/offers/route';
-import { GET as getOfferRoute, PATCH as patchOffer, POST as offerAction } from '@/app/v1/offers/[id]/route';
-import { PUT as putOfferCases } from '@/app/v1/offers/[id]/case-studies/route';
-import { GET as listCasesRoute, POST as createCaseRoute } from '@/app/v1/case-studies/route';
-import { POST as caseAction } from '@/app/v1/case-studies/[id]/route';
+import { GET as listPracticesRoute, POST as createPracticeRoute } from '@/http/routes/v1/practices/route';
+import { PATCH as patchPractice, POST as practiceAction } from '@/http/routes/v1/practices/[id]/route';
+import { GET as listOffersRoute, POST as createOfferRoute } from '@/http/routes/v1/offers/route';
+import { GET as getOfferRoute, PATCH as patchOffer, POST as offerAction } from '@/http/routes/v1/offers/[id]/route';
+import { PUT as putOfferCases } from '@/http/routes/v1/offers/[id]/case-studies/route';
+import { GET as listCasesRoute, POST as createCaseRoute } from '@/http/routes/v1/case-studies/route';
+import { POST as caseAction } from '@/http/routes/v1/case-studies/[id]/route';
 import { approveOffer, createCaseStudy, createOffer, createPractice } from '@/modules/offers';
 import { SYSTEM_GRANTOR, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { completeOffer, freshTenant } from '../offers/helpers';
@@ -37,7 +37,7 @@ const call = (
   extra: Record<string, string> = {},
 ) =>
   h(
-    new Request(`http://x/v1/${path}`, {
+    new Request(`http://x/api/v1/${path}`, {
       method,
       headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json', ...extra },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -53,7 +53,7 @@ const approved = async (name: string) => {
 };
 const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
 
-describe('offers on /v1', () => {
+describe('offers on /api/v1', () => {
   it('a read-only key sees approved offers only, in snake_case', async () => {
     const a = await approved('Visible');
     const d = await draft('Hidden');
@@ -143,7 +143,7 @@ describe('offers on /v1', () => {
   });
 });
 
-describe('case studies on /v1', () => {
+describe('case studies on /api/v1', () => {
   it('an agent list leaves out non-public case studies', async () => {
     const pub = await t.run((ctx) => createCaseStudy(ctx, { title: 'Public one', public: true }));
     const priv = await t.run((ctx) => createCaseStudy(ctx, { title: 'Private one' }));
@@ -164,7 +164,7 @@ describe('case studies on /v1', () => {
   });
 });
 
-describe('practices on /v1', () => {
+describe('practices on /api/v1', () => {
   it('lists as { data, next_cursor } and pages by limit and cursor', async () => {
     for (const n of ['P1', 'P2', 'P3']) await t.run((ctx) => createPractice(ctx, { name: n }));
     const one = await (await call(listPracticesRoute, readKey, 'practices?limit=2')).json();

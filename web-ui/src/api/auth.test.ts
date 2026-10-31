@@ -68,7 +68,7 @@ describe('developer sign-in', () => {
 
   it('lists dev users when the API offers them', async () => {
     server.use(
-      http.get('/v1/dev/users', () =>
+      http.get('/api/v1/dev/users', () =>
         HttpResponse.json([{ id: 'u1', email: 'dana@taazaa.com', name: 'Dana Whitfield', platform_admin: false }]),
       ),
     );
@@ -76,7 +76,7 @@ describe('developer sign-in', () => {
   });
 
   it('reports no list when the endpoint is missing', async () => {
-    server.use(http.get('/v1/dev/users', () => new HttpResponse('Not found', { status: 404 })));
+    server.use(http.get('/api/v1/dev/users', () => new HttpResponse('Not found', { status: 404 })));
     expect(await devUsers()).toBeNull();
   });
 });

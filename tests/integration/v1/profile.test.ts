@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { DELETE as resourceDelete, GET as resourceGet, POST as resourceAction } from '@/app/v1/[resource]/route';
-import { GET as me } from '@/app/v1/me/route';
-import { GET as sessions } from '@/app/v1/me/sessions/route';
+import { DELETE as resourceDelete, GET as resourceGet, POST as resourceAction } from '@/http/routes/v1/[resource]/route';
+import { GET as me } from '@/http/routes/v1/me/route';
+import { GET as sessions } from '@/http/routes/v1/me/sessions/route';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { inTenant, seedUser } from '../tenancy/helpers';
 import { signedIn, tenantOwnedBy, v1Req, type Person } from './session-helpers';
@@ -23,7 +23,7 @@ async function member(): Promise<Person> {
   return p;
 }
 
-describe('GET /v1/me profile fields', () => {
+describe('GET /api/v1/me profile fields', () => {
   it('gives the role, how they sign in and the access in plain words', async () => {
     const body = await (await me(v1Req('/me', { cookies: await signedIn(owner.id), tenant: t.slug }))).json();
     expect(body).toMatchObject({
@@ -34,7 +34,7 @@ describe('GET /v1/me profile fields', () => {
   });
 });
 
-describe('GET /v1/me/sessions', () => {
+describe('GET /api/v1/me/sessions', () => {
   it("lists the caller's sessions, marks the current one and never returns the token", async () => {
     const p = await member();
     await signedIn(p.id, { 'user-agent': 'Laptop' });
@@ -59,7 +59,7 @@ describe('GET /v1/me/sessions', () => {
   });
 });
 
-describe('POST /v1/me:sign-out-everywhere', () => {
+describe('POST /api/v1/me:sign-out-everywhere', () => {
   it('ends every session of the caller, this one included', async () => {
     const p = await member();
     const laptop = await signedIn(p.id);
@@ -81,7 +81,7 @@ describe('POST /v1/me:sign-out-everywhere', () => {
   });
 });
 
-describe('/v1/{unknown}', () => {
+describe('/api/v1/{unknown}', () => {
   it('answers other methods with the problem+json 404', async () => {
     for (const handler of [resourceGet, resourceDelete]) {
       const res = await handler(v1Req('/nope', { method: handler === resourceGet ? 'GET' : 'DELETE' }));
