@@ -21,7 +21,7 @@ import { backfillCrm, seedCrmDefaults, seedMockCrm } from '@/modules/crm';
 import { listConnections } from '@/modules/integrations';
 import { listSources, personSourceFor, registerSource, seedIntakeDefaults } from '@/modules/intake';
 import { seedMissingSignalRules, seedOffers } from '@/modules/offers';
-import { backfillReviews, seedRoutingDefaults } from '@/modules/routing';
+import { backfillLeadOffers, backfillReviews, seedRoutingDefaults } from '@/modules/routing';
 import { requestRescore, seedScoringDefaults } from '@/modules/scoring';
 
 export const ADMIN_EMAIL = 'yasir@taazaa.com';
@@ -89,6 +89,14 @@ export async function backfillR1c(ctx: ModuleContext): Promise<void> {
 }
 
 /**
+ * Brings a workspace from before the review flow up to date: lead offers picked earlier reach the account summary,
+ * so the offer filter and facets find them. Safe to run again. Background context only.
+ */
+export async function backfillReviewFlow(ctx: ModuleContext): Promise<void> {
+  await backfillLeadOffers(ctx);
+}
+
+/**
  * Local development data: one platform admin, two tenants, a few people, a person source for each, a development agent and a dev API key bound to it. Safe to
  * run again. Also schedules the hourly credential cleanup. Returns a fresh key for `taazaa` on each run, because
  * a key's secret is only shown once.
@@ -135,6 +143,7 @@ export async function seed(): Promise<{ devApiKey: string }> {
       await seedIntakeDefaults(ctx(tx));
       await backfillR1b(ctx(tx));
       await backfillR1c(ctx(tx));
+      await backfillReviewFlow(ctx(tx));
     });
     // Sources come after the first transaction commits, so the sellers' users exist.
     const emails = [ADMIN_EMAIL, t.ownerEmail, ...t.sellers.map((s) => s.email)];

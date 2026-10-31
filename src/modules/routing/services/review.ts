@@ -203,7 +203,8 @@ export async function applyStatusChange(ctx: ModuleContext, row: ReviewRow, inpu
   if (!target) throw invalid('Pick a review status from your list.', 'to');
   const current = statuses.find((s) => s.key === row.statusKey);
 
-  const reopening = !!current?.isDeclined && !target.isDeclined;
+  // Leaving a declined status reopens the account, except a send back: that goes straight back to the source with its reason.
+  const reopening = !!current?.isDeclined && !target.isDeclined && !target.returnsToSource;
   if (reopening) {
     if (!note) throw invalid("Add a note saying why you're reopening it.", 'note');
     target = statuses.find((s) => s.key === 'needs_review' && !s.archivedAt) ?? statuses.find((s) => !s.archivedAt && !s.countsAsReviewed) ?? target;

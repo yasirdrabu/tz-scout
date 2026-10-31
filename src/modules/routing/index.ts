@@ -34,7 +34,7 @@ export { declineProblems, inList, REASON_LISTS, statusChangeProblems, type Reaso
 export { STATUS_COLORS, STATUS_SET_BY, type ReasonEdit, type StatusEdit } from './domain/review-settings';
 export { addWorkingDays } from './domain/working-days';
 export { autoAcceptHandler } from './jobs';
-export { backfillReviews } from './services/backfill';
+export { backfillLeadOffers, backfillReviews } from './services/backfill';
 export { publishReviewSnapshot } from './services/snapshot';
 export { moveStage } from './services/stage';
 export { routingReviewStatusValidator } from './services/status-validator';

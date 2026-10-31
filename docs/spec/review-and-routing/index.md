@@ -15,7 +15,7 @@ People decide (D6). Nothing reaches a CRM without an assignment made by a person
 
 | Table | Key fields |
 |---|---|
-| `review_status_def` | `id`, `tenant_id`, `key`, `label`, `order`, `counts_as_reviewed` (bool), `is_declined` (bool), `is_initial` (bool), `returns_to_source` (bool), `tone` (`neutral`, `near`, `good`, `bad`), `archived_at` |
+| `review_status_def` | `id`, `tenant_id`, `key`, `label`, `order`, `counts_as_reviewed` (bool), `is_declined` (bool), `is_initial` (bool), `returns_to_source` (bool), `color` (`plum`, `amber`, `green`, `red`, `gray`), `description`, `set_by` (`scout`, `reviewer`), `flag_after_hours` (null for never or final), `archived_at` |
 | `initial_status_rule` | `tenant_id`, `source_kind` (`agent`, `vendor`, `person`, `import`, `crm`, `form`), `source_id` (nullable, overrides kind), `status_key` |
 | `decline_reason_def` | `id`, `tenant_id`, `key`, `label`, `applies_to` (`review`, `assignment`, `both`), `archived_at` |
 | `account_review` | `account_id` (pk with tenant), `status_key`, `status_changed_at`, `status_changed_by`, `lead_offer_override_id`, `insights` (markdown, leader notes), `insights_by`, `insights_at`, `current_assignment_id`, `stage`, `stage_changed_at`, `flags` (json: `newFrom {sourceId, at}`, `declinedBySeller {assignmentId, sellerUserId, sellerName, reasonKey, reasonLabel, at}`, `handoff {handoffId, assignmentId, state, reason?, currentOwnerName?, at}` where `state` is `sending`, `in_crm`, `needs_decision`, `failed` or `cancelled`; a later `at` wins, and an event for an assignment that is not the account's latest is ignored; `conflicts`, `enrichment_requested`, `low_trust` come later), `version` (bumped by every write), `merged_into` (set when merged away; the row is then read-only) |
@@ -46,7 +46,7 @@ with plans (spec's call, D27).
 
 | Epic | File | Release |
 |---|---|---|
-| REV-E1 Review statuses and queue | [review-statuses-and-queue.md](review-statuses-and-queue.md) | R1 (configurable statuses R2) |
+| REV-E1 Review statuses and queue | [review-statuses-and-queue.md](review-statuses-and-queue.md) | R1 (configurable statuses in R1, Decision 2) |
 | REV-E2 Assignment, acceptance and decline | [assignment-and-decline.md](assignment-and-decline.md) | R1 |
 | REV-E3 Ownership and handoff trigger | [ownership-and-handoff-trigger.md](ownership-and-handoff-trigger.md) | R1 |
 | REV-E4 Stage tracking and account status | [stage-tracking-and-status.md](stage-tracking-and-status.md) | R1 |
@@ -91,7 +91,10 @@ JSON field names are snake_case.
 | Method and path | Scope | Does |
 |---|---|---|
 | `GET /api/v1/review-queue?status&practice_id&offer_id&source_id&tier&flag&cursor` | `review:act` | The queue, data-scoped |
-| `PATCH /api/v1/accounts/{id}/review-status` | `review:act` | Change review status with note or reason (send back, decline, reopen) |
+| `PATCH /api/v1/accounts/{id}/review-status` | `review:act` | Change review status with reason and note (send back and decline need a reason; the note only when the reason requires it; reopen needs a note) |
+| `PUT /api/v1/accounts/{id}/lead-offer` | `review:act` | Pick the lead offer (approved offers only) or null for Scout's best offer (Decision 5) |
+| `GET/POST /api/v1/accounts/{id}/notes` | `accounts:read` / `review:act` or `accounts:write` | The account's notes (Decision 3; table `accounts.account_note`) |
+| `GET/PUT /api/v1/settings/review/statuses`, `/reasons`; `POST /api/v1/settings/review:reset` | read: `review:act`, `assignments:respond` or `settings:manage`; write: `settings:manage` | Status and reason editor (Decision 2) |
 | `PUT /api/v1/accounts/{id}/insights` | `review:act` | Leader insights |
 | `POST /api/v1/accounts/{id}:assign` | `assign:act` | Create an assignment; 202 |
 | `POST /api/v1/assignments/{id}:accept` | `assignments:respond` | Seller accepts own assignment (checked by ownership of the assignment, not account visibility; another seller gets 404) |

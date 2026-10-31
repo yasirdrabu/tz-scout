@@ -7,7 +7,14 @@ import { POST as accountAction } from '@/http/routes/v1/accounts/[id]/route';
 import { PUT as putTier } from '@/http/routes/v1/accounts/[id]/tier/route';
 import { GET as sellersRoute } from '@/http/routes/v1/assignable-sellers/route';
 import { GET as assignmentsRoute } from '@/http/routes/v1/assignments/route';
+import { PATCH as patchReviewStatus } from '@/http/routes/v1/accounts/[id]/review-status/route';
+import { POST as bulkRoute } from '@/http/routes/v1/review-queue/bulk/route';
+import { GET as facetsRoute } from '@/http/routes/v1/review-queue/facets/route';
 import { GET as queueRoute } from '@/http/routes/v1/review-queue/route';
+import { backfillReviewFlow } from '@/entry/seed';
+import { accountSummary } from '@/modules/accounts/db/schema';
+import { sourceFeedback } from '@/modules/intake/db/schema';
+import { statusChange } from '@/modules/routing/db/schema';
 import { activity } from '@/modules/crm/db/schema';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
 import { scoreAccount } from '@/modules/scoring';
@@ -235,5 +242,66 @@ describe('My accounts reads', () => {
       last_activity: { kind: 'email', at: '2026-10-27T09:00:00.000Z' },
       handoff: { state: expect.any(String) },
     });
+  });
+});
+
+describe('fix round', () => {
+  it('backfill-review-flow: a lead offer picked before the snapshot carried it reaches the offer filter and facet', async () => {
+    const a = await w.account('Old Pick Co');
+    expect((await w.as(leader, accountAction, `accounts/${a}:assign`, 'POST', { seller_user_id: seller, lead_offer_id: aiOffer })).status).toBe(202);
+    await w.deliver();
+    // As it was before this branch: the summary never got the pick.
+    await adminDb.update(accountSummary).set({ leadOfferOverrideId: null }).where(eq(accountSummary.accountId, a));
+    const path = `review-queue?status=reviewed&offer_id=${aiOffer}`;
+    expect(await queueRow(a, path)).toBeUndefined();
+    await w.run((ctx) => backfillReviewFlow(ctx));
+    await w.deliver();
+    expect(await queueRow(a, path)).toMatchObject({ lead_offer_override_id: aiOffer });
+    const facets = await json(w.as(leader, facetsRoute, 'review-queue/facets?status=reviewed'));
+    expect(facets.offers.find((o: { value: string }) => o.value === aiOffer)?.count).toBeGreaterThanOrEqual(1);
+  });
+
+  it('a send back of a Not pursued account goes back to the source with its reason, not to In review', async () => {
+    const a = await w.sent({ name: 'Declined Back Co' });
+    expect((await w.as(leader, patchReviewStatus, `accounts/${a}/review-status`, 'PATCH', { to: 'declined', reason_key: 'duplicate' })).status).toBe(200);
+    const noReason = await w.as(leader, patchReviewStatus, `accounts/${a}/review-status`, 'PATCH', { to: 'sent_back' });
+    expect(await noReason.json()).toMatchObject({ title: 'Pick a reason' });
+    const res = await w.as(leader, patchReviewStatus, `accounts/${a}/review-status`, 'PATCH', { to: 'sent_back', reason_key: 'wrong_practice' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ review_status_key: 'sent_back' });
+    const [move] = await w.run((ctx) => ctx.tx.select().from(statusChange).where(and(eq(statusChange.accountId, a), eq(statusChange.toKey, 'sent_back'))));
+    expect(move).toMatchObject({ fromKey: 'declined', reasonKey: 'wrong_practice' });
+    await w.deliver();
+    const feedback = await w.run((ctx) => ctx.tx.select().from(sourceFeedback).where(eq(sourceFeedback.accountId, a)));
+    expect(feedback.map((f) => [f.kind, f.reasonKey])).toContainEqual(['sent_back', 'wrong_practice']);
+  });
+
+  it('bulk: a declined account in a send back is sent back like the others', async () => {
+    const [a, b] = [await w.account('Bulk Declined'), await w.account('Bulk Fresh')];
+    await w.as(leader, patchReviewStatus, `accounts/${a}/review-status`, 'PATCH', { to: 'declined', reason_key: 'bad_data' });
+    const res = await json(w.as(leader, bulkRoute, 'review-queue/bulk', 'POST', { account_ids: [a, b], action: 'status', to: 'sent_back', reason_key: 'bad_contact' }));
+    expect(res.results).toEqual([
+      { account_id: a, ok: true },
+      { account_id: b, ok: true },
+    ]);
+    await w.deliver();
+    for (const id of [a, b]) expect((await w.run((ctx) => ctx.tx.select().from(accountSummary).where(eq(accountSummary.accountId, id))))[0]!.reviewStatusKey).toBe('sent_back');
+  });
+
+  it("last_reviewed_at only looks at accounts the caller can see", async () => {
+    const p = await w.run((ctx) => createPractice(ctx, { name: 'Limited Practice', slug: slug('lim') }));
+    const reviewer = await w.person('leader', { name: 'Pat Practice', dataLimit: { kind: 'practices', ids: [p.id] } });
+    const seen = await w.account('Seen Co');
+    await adminDb.update(accountSummary).set({ practiceIds: [p.id] }).where(eq(accountSummary.accountId, seen));
+    await w.as(leader, patchReviewStatus, `accounts/${seen}/review-status`, 'PATCH', { to: 'reviewed' });
+    const [mine] = await w.run((ctx) => ctx.tx.select().from(statusChange).where(and(eq(statusChange.accountId, seen), eq(statusChange.toKey, 'reviewed'))));
+    // Someone reviews an account outside the practice afterwards.
+    const outside = await w.account('Outside Co');
+    await w.as(leader, patchReviewStatus, `accounts/${outside}/review-status`, 'PATCH', { to: 'reviewed' });
+    await w.deliver();
+    const limitedView = await json(w.as(reviewer, facetsRoute, 'review-queue/facets'));
+    expect(limitedView.last_reviewed_at).toBe(mine!.at.toISOString());
+    const full = await json(w.as(leader, facetsRoute, 'review-queue/facets'));
+    expect(Date.parse(full.last_reviewed_at)).toBeGreaterThan(mine!.at.getTime());
   });
 });

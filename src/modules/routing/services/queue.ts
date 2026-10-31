@@ -1,5 +1,5 @@
-import { and, eq, inArray, max } from 'drizzle-orm';
-import { countAccounts, countAccountsBy, oldestCreatedAt, search, type SearchQuery, type SearchRow } from '@/modules/accounts';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { countAccounts, countAccountsBy, filterVisibleAccountIds, oldestCreatedAt, search, type SearchQuery, type SearchRow } from '@/modules/accounts';
 import { companyChecks } from '@/modules/crm';
 import { batchAccountIds, firstSources, sourceNames } from '@/modules/intake';
 import { TIER_NAMES, TIERS, tierDetails } from '@/modules/scoring';
@@ -189,22 +189,49 @@ export async function queueFacets(ctx: ModuleContext, f: QueueFilters = {}): Pro
   const sourceLabels = await sourceNames(ctx, [...sourceCounts.keys()].filter((k): k is string => k !== null));
   const base = await queryFor(ctx, f, statuses);
   const reviewedKeys = statuses.filter((s) => s.countsAsReviewed).map((s) => s.key);
-  const [last] = reviewedKeys.length
-    ? await ctx.tx
-        .select({ at: max(statusChange.at) })
-        .from(statusChange)
-        .where(and(eq(statusChange.tenantId, ctx.tenantId), inArray(statusChange.toKey, reviewedKeys)))
-    : [];
+  const lastReviewedAt = await lastReviewed(ctx, reviewedKeys);
   return {
     total: await countAccounts(ctx, base),
     oldestArrivedAt: await oldestCreatedAt(ctx, base),
-    lastReviewedAt: last?.at ?? null,
+    lastReviewedAt,
     tiers: [...TIERS].reverse().map((t) => ({ value: t, label: TIER_NAMES[t], count: tierCounts.get(t) ?? 0 })),
     practices: options(practiceCounts, (id) => names.practice(id), f.practiceId),
     offers: options(offerCounts, (id) => names.offer(id)?.name ?? null, f.offerId),
     sources: options(sourceCounts, (id) => sourceLabels.get(id) ?? null, f.sourceId),
     statuses: live.map((s) => ({ value: s.key, label: s.label, color: s.color, count: statusCounts.get(s.key) ?? 0 })),
   };
+}
+
+const REVIEWED_PAGE = 200;
+const REVIEWED_PAGES = 5;
+
+/**
+ * "Last account reviewed {when}" over the accounts the caller can see: the newest move to a status that
+ * counts as reviewed, read newest first a page at a time. Null when none is found in the pages read.
+ */
+async function lastReviewed(ctx: ModuleContext, reviewedKeys: string[]): Promise<Date | null> {
+  if (reviewedKeys.length === 0) return null;
+  let before: { at: Date; id: string } | null = null;
+  for (let page = 0; page < REVIEWED_PAGES; page++) {
+    const rows: { accountId: string; at: Date; id: string }[] = await ctx.tx
+      .select({ accountId: statusChange.accountId, at: statusChange.at, id: statusChange.id })
+      .from(statusChange)
+      .where(
+        and(
+          eq(statusChange.tenantId, ctx.tenantId),
+          inArray(statusChange.toKey, reviewedKeys),
+          before ? sql`(${statusChange.at}, ${statusChange.id}) < (${before.at.toISOString()}::timestamptz, ${before.id})` : undefined,
+        ),
+      )
+      .orderBy(desc(statusChange.at), desc(statusChange.id))
+      .limit(REVIEWED_PAGE);
+    if (rows.length === 0) return null;
+    const visible = new Set(await filterVisibleAccountIds(ctx, [...new Set(rows.map((r) => r.accountId))]));
+    const hit = rows.find((r) => visible.has(r.accountId));
+    if (hit) return hit.at;
+    before = rows[rows.length - 1]!;
+  }
+  return null;
 }
 
 const COLUMNS_KEY = 'review_queue_columns';

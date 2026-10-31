@@ -14,7 +14,7 @@ Stages and what moves them (from `architecture/event-catalog.md`):
 | Stage | Entered on |
 |---|---|
 | `arrived` | `intake.arrival.resolved` for a new account |
-| `reviewed` | `routing.status.changed` to a status that counts as reviewed (not declined) |
+| `reviewed` | `routing.status.changed` to a status that counts as reviewed (not declined, not a send back: a send back keeps the stage) |
 | `assigned` | `routing.assignment.accepted` |
 | `engaged` | first reply or meeting (`crm.activity.observed` or `playbooks.outcome.recorded`) |
 | `opportunity` | first open deal (`crm.deal.changed`) |
