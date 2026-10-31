@@ -22,13 +22,17 @@ export const queueRoute = createRoute({
 export const myRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'my',
-  component: () => <Placeholder screen={SCREENS.my} />,
+  component: lazyRouteComponent(() => import('../features/accounts/MyAccountsScreen'), 'MyAccountsScreen'),
 });
+
+/** All accounts' stage tab, search and filters (`owner` is a user id or `unassigned`), so the URL keeps them (C10). */
+export type AccountsSearch = { stage?: string; q?: string; owner?: string; practice?: string; source?: string };
 
 export const accountsRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'accounts',
-  component: () => <Placeholder screen={SCREENS.accounts} />,
+  validateSearch: (search: Record<string, unknown>): AccountsSearch => pickStrings(search, ['stage', 'q', 'owner', 'practice', 'source']),
+  component: lazyRouteComponent(() => import('../features/accounts/AllAccountsScreen'), 'AllAccountsScreen'),
 });
 
 export const accountRoute = createRoute({
