@@ -7,7 +7,7 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { memberAdded, memberRemoved, memberRoleChanged } from '../contracts/events';
 import { ROLES, CRM_OWNER_TAKEN, type DataLimit, type Member, type MembershipStatus, type Role } from '../contracts/members';
-import { DataLimitSchema } from '../domain/data-limit';
+import { DEFAULT_DATA_LIMIT, DataLimitSchema, isWithin } from '../domain/data-limit';
 import { memberActionRefusal, type MemberAction } from '../domain/member-rules';
 import { PERMISSIONS, isPermission, permissionsFor, type Permission } from '../domain/permissions';
 import { membership, tenant, user } from '../db/schema';
@@ -42,22 +42,47 @@ function assertAllowed(ctx: ModuleContext, action: MemberAction, m: typeof membe
   }
 }
 
-/** What the actor may hand out: owners and platform admins (and the platform itself) may make owners. */
-type Powers = { makesOwners: boolean; permissions: readonly Permission[] };
+/**
+ * What the actor may hand out: owners and platform admins (and the platform itself) may make owners
+ * and give any role. `dataLimit` is the actor's own (null: nothing can be given).
+ */
+type Powers = { makesOwners: boolean; permissions: readonly Permission[]; dataLimit: DataLimit | null };
+
+const EVERYTHING: DataLimit = { kind: 'all' };
 
 /** The actor's own powers in this tenant, read fresh: nobody grants more than they hold. */
 async function actorPowers(ctx: ModuleContext): Promise<Powers> {
-  if (ctx.actor.kind === 'system') return { makesOwners: true, permissions: PERMISSIONS };
-  if (ctx.actor.kind !== 'user') return { makesOwners: false, permissions: [] };
+  const none: Powers = { makesOwners: false, permissions: [], dataLimit: null };
+  if (ctx.actor.kind === 'system') return { makesOwners: true, permissions: PERMISSIONS, dataLimit: EVERYTHING };
+  if (ctx.actor.kind !== 'user') return none;
   const [u] = await ctx.tx.select({ platformAdmin: user.platformAdmin }).from(user).where(eq(user.id, ctx.actor.id));
-  if (u?.platformAdmin) return { makesOwners: true, permissions: PERMISSIONS };
+  if (u?.platformAdmin) return { makesOwners: true, permissions: PERMISSIONS, dataLimit: EVERYTHING };
+  // Invited counts too: no request reaches here from an invited membership (a principal needs an
+  // active one), but in-process callers such as a new tenant's invited owner still act.
   const [m] = await ctx.tx
-    .select({ role: membership.role, extra: membership.extraPermissions })
+    .select({ role: membership.role, extra: membership.extraPermissions, dataLimit: membership.dataLimit })
     .from(membership)
-    .where(and(eq(membership.tenantId, ctx.tenantId), eq(membership.userId, ctx.actor.id), eq(membership.status, 'active')));
-  if (!m) return { makesOwners: false, permissions: [] };
+    .where(
+      and(
+        eq(membership.tenantId, ctx.tenantId),
+        eq(membership.userId, ctx.actor.id),
+        inArray(membership.status, ['invited', 'active']),
+      ),
+    );
+  if (!m) return none;
   const role = m.role as Role;
-  return { makesOwners: role === 'owner', permissions: permissionsFor(role, (m.extra ?? []).filter(isPermission), false) };
+  return {
+    makesOwners: role === 'owner',
+    permissions: permissionsFor(role, (m.extra ?? []).filter(isPermission), false),
+    dataLimit: effectiveLimit(role, m.dataLimit),
+  };
+}
+
+/** The limit a membership works under: its own, else the role default. null when the stored one is invalid. */
+function effectiveLimit(role: Role, stored: unknown): DataLimit | null {
+  if (stored === null || stored === undefined) return DEFAULT_DATA_LIMIT[role];
+  const parsed = DataLimitSchema.safeParse(stored);
+  return parsed.success ? parsed.data : null;
 }
 
 const ownersOnly = () =>
@@ -75,6 +100,23 @@ function assertGrantable(powers: Powers, perms: readonly Permission[]): void {
       status: 403,
       title: 'Not available to you',
       detail: `You can't give the \`${missing}\` permission because you don't have it.`,
+    });
+  }
+}
+
+/** Nobody but an owner or platform admin gives a role holding a permission they lack. */
+function assertRoleGrantable(powers: Powers, role: Role): void {
+  if (!powers.makesOwners) assertGrantable(powers, permissionsFor(role, [], false));
+}
+
+/** Nobody gives practice access (data limit) wider than their own. */
+function assertLimitGrantable(powers: Powers, limit: DataLimit | null): void {
+  if (!limit || !powers.dataLimit || !isWithin(limit, powers.dataLimit)) {
+    throw new ScoutError({
+      slug: 'data-limit-not-yours',
+      status: 403,
+      title: 'Not available to you',
+      detail: "You can't give access to more accounts than you can see.",
     });
   }
 }
@@ -157,10 +199,14 @@ async function isLastActiveOwner(ctx: ModuleContext, m: typeof membership.$infer
  */
 export async function addMember(
   ctx: ModuleContext,
-  input: { email: string; role: Role; crmOwnerIds?: Record<string, string> },
+  input: { email: string; role: Role; crmOwnerIds?: Record<string, string>; dataLimit?: DataLimit | null },
 ): Promise<string> {
   assertRole(input.role);
-  if (input.role === 'owner' && !(await actorPowers(ctx)).makesOwners) throw ownersOnly();
+  const dataLimit = input.dataLimit ?? null;
+  const powers = await actorPowers(ctx);
+  if (input.role === 'owner' && !powers.makesOwners) throw ownersOnly();
+  assertRoleGrantable(powers, input.role);
+  assertLimitGrantable(powers, dataLimit ?? DEFAULT_DATA_LIMIT[input.role]);
   const email = input.email.trim().toLowerCase();
   const crmIds = cleanCrmIds(input.crmOwnerIds ?? {});
   await lockTenant(ctx, 'crm');
@@ -191,7 +237,7 @@ export async function addMember(
         status,
         crmOwnerIds: crmIds,
         extraPermissions: [],
-        dataLimit: null,
+        dataLimit,
         invitedBy: ctx.actor.id,
         updatedAt: new Date(),
       })
@@ -205,6 +251,7 @@ export async function addMember(
       role: input.role,
       status,
       crmOwnerIds: crmIds,
+      dataLimit,
       invitedBy: ctx.actor.id,
     });
   }
@@ -213,7 +260,7 @@ export async function addMember(
   await audit(ctx, {
     action: 'tenancy.member.added',
     subject,
-    after: { userId: u!.id, email, role: input.role, status, crmOwnerIds: crmIds },
+    after: { userId: u!.id, email, role: input.role, status, crmOwnerIds: crmIds, ...(dataLimit ? { dataLimit } : {}) },
   });
   return id;
 }
@@ -269,10 +316,16 @@ export async function changeMember(
     change.extraPermissions !== undefined && (added.length > 0 || new Set(change.extraPermissions).size !== current.size);
   if (roleChanges) assertAllowed(ctx, 'change_role', m);
   if (extrasChange) assertAllowed(ctx, 'change_permissions', m);
-  if ((roleChanges && (change.role === 'owner' || m.role === 'owner')) || added.length > 0) {
+  const newRole = (change.role ?? m.role) as Role;
+  const limitBefore = effectiveLimit(m.role as Role, m.dataLimit);
+  const limitAfter = effectiveLimit(newRole, change.dataLimit === undefined ? m.dataLimit : change.dataLimit);
+  const limitChanges = JSON.stringify(limitAfter) !== JSON.stringify(limitBefore);
+  if (roleChanges || added.length > 0 || limitChanges) {
     const powers = await actorPowers(ctx);
     if (roleChanges && (change.role === 'owner' || m.role === 'owner') && !powers.makesOwners) throw ownersOnly();
+    if (roleChanges) assertRoleGrantable(powers, newRole);
     assertGrantable(powers, added);
+    if (limitChanges) assertLimitGrantable(powers, limitAfter);
   }
   if (change.role && change.role !== 'owner' && (await isLastActiveOwner(ctx, m))) throw lastOwner();
 
@@ -543,11 +596,14 @@ export async function inviteMembers(
   input: { emails: string[]; role: Role; dataLimit?: DataLimit | null },
 ): Promise<InviteResult[]> {
   assertRole(input.role);
-  // Checked once for the whole request; addMember checks it again per address.
-  if (input.role === 'owner' && !(await actorPowers(ctx)).makesOwners) throw ownersOnly();
   if (input.dataLimit && !DataLimitSchema.safeParse(input.dataLimit).success) {
     throw new ScoutError({ slug: 'validation', status: 400, title: 'Check the data limit.' });
   }
+  // Checked once for the whole request; addMember checks them again per address.
+  const powers = await actorPowers(ctx);
+  if (input.role === 'owner' && !powers.makesOwners) throw ownersOnly();
+  assertRoleGrantable(powers, input.role);
+  assertLimitGrantable(powers, input.dataLimit ?? DEFAULT_DATA_LIMIT[input.role]);
   const emails = [...new Set(input.emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
   const out: InviteResult[] = [];
   for (const email of emails) {
@@ -557,12 +613,9 @@ export async function inviteMembers(
     }
     try {
       // A savepoint, so one refused address leaves the others' work in place.
-      const id = await ctx.tx.transaction(async (sp) => {
-        const c = { ...ctx, tx: sp };
-        const added = await addMember(c, { email, role: input.role });
-        if (input.dataLimit) await changeMember(c, added, { dataLimit: input.dataLimit });
-        return added;
-      });
+      const id = await ctx.tx.transaction((sp) =>
+        addMember({ ...ctx, tx: sp }, { email, role: input.role, dataLimit: input.dataLimit ?? null }),
+      );
       const [m] = await ctx.tx.select({ status: membership.status }).from(membership).where(eq(membership.id, id));
       out.push({ email, ok: true, membershipId: id, status: m!.status as 'invited' | 'active' });
     } catch (e) {

@@ -6,7 +6,7 @@ import { GET as roles } from '@/app/v1/roles/route';
 import { GET as me } from '@/app/v1/me/route';
 import { ACCOUNT_TURNED_OFF, ROLE_PERMISSIONS, addMember, checkSignIn, completeSignIn, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { assignment } from '@/modules/routing/db/schema';
-import { membership, session } from '@/modules/tenancy/db/schema';
+import { membership, session, user } from '@/modules/tenancy/db/schema';
 import { adminDb } from '@/platform/db/client';
 import { auditLog } from '@/platform/db/schema';
 import { newId } from '@/platform/ids';
@@ -285,9 +285,79 @@ describe('members:manage held as an extra permission cannot escalate', () => {
     expect((await patch(as(manager, `/members/${p.membershipId}`, { method: 'PATCH', body: { extra_permissions: ['assign:act'] } }))).status).toBe(200);
   });
 
+  it('refuses giving a role with a permission the manager does not hold, and allows one within theirs', async () => {
+    const p = await freshSeller();
+    const up = await patch(as(manager, `/members/${p.membershipId}`, { method: 'PATCH', body: { role: 'operator' } }));
+    expect(up.status).toBe(403);
+    expect((await up.json()).type).toMatch(/\/permission-not-yours$/);
+    const [m] = await adminDb.select().from(membership).where(eq(membership.id, p.membershipId));
+    expect(m!.role).toBe('seller');
+    const email = `op-${newId('usr')}@example.com`.toLowerCase();
+    const inv = await invite(as(manager, '/members', { method: 'POST', body: { emails: [email], role: 'operator' } }));
+    expect(inv.status).toBe(403);
+    expect((await inv.json()).type).toMatch(/\/permission-not-yours$/);
+    expect(await adminDb.select().from(membership).innerJoin(user, eq(user.id, membership.userId)).where(eq(user.email, email))).toHaveLength(0);
+    await expect(
+      inTenant(t.tenantId, manager.actor, (ctx) => addMember(ctx, { email, role: 'operator' })),
+    ).rejects.toMatchObject({ slug: 'permission-not-yours' });
+    // A leader holds every seller permission, so a seller can become a leader.
+    expect((await patch(as(manager, `/members/${p.membershipId}`, { method: 'PATCH', body: { role: 'leader' } }))).status).toBe(200);
+  });
+
   it('an owner can still make owners', async () => {
     const p = await freshSeller();
     const res = await patch(as(owner, `/members/${p.membershipId}`, { method: 'PATCH', body: { role: 'owner' } }));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('a member manager cannot give practice access wider than their own', () => {
+  let manager: Person & { membershipId: string };
+  const mine = { kind: 'practices', ids: ['prc_mine'] };
+  beforeAll(async () => {
+    const p = await seedUser({ signedIn: true });
+    const id = await inTenant(t.tenantId, owner.actor, (ctx) => addMember(ctx, { email: p.email, role: 'leader' }));
+    await adminDb.update(membership).set({ extraPermissions: ['members:manage'], dataLimit: mine }).where(eq(membership.id, id));
+    cookies[p.id] = await signedIn(p.id);
+    manager = { ...p, membershipId: id };
+  });
+
+  it('PATCH refuses a wider limit and the wider role default, and allows one within theirs', async () => {
+    const p = await freshSeller();
+    const path = `/members/${p.membershipId}`;
+    for (const data_limit of [{ kind: 'all' }, { kind: 'practices', ids: ['prc_mine', 'prc_other'] }]) {
+      const res = await patch(as(manager, path, { method: 'PATCH', body: { data_limit } }));
+      expect(res.status).toBe(403);
+      expect((await res.json()).type).toMatch(/\/data-limit-not-yours$/);
+    }
+    expect((await patch(as(manager, path, { method: 'PATCH', body: { data_limit: mine } }))).status).toBe(200);
+    // Back to the seller default (their own accounts, wherever they are) or a leader's (everything) is wider.
+    expect((await patch(as(manager, path, { method: 'PATCH', body: { data_limit: null } }))).status).toBe(403);
+    expect((await patch(as(manager, path, { method: 'PATCH', body: { role: 'leader', data_limit: null } }))).status).toBe(403);
+    // A role change that keeps the limit is fine.
+    expect((await patch(as(manager, path, { method: 'PATCH', body: { role: 'leader' } }))).status).toBe(200);
+    const [m] = await adminDb.select().from(membership).where(eq(membership.id, p.membershipId));
+    expect(m).toMatchObject({ role: 'leader', dataLimit: mine });
+  });
+
+  it('invite refuses a wider limit or none, and allows one within theirs', async () => {
+    const email = () => `dl-${newId('usr')}@example.com`.toLowerCase();
+    for (const data_limit of [{ kind: 'practices', ids: ['prc_other'] }, null]) {
+      const res = await invite(as(manager, '/members', { method: 'POST', body: { emails: [email()], role: 'seller', data_limit } }));
+      expect(res.status).toBe(403);
+      expect((await res.json()).type).toMatch(/\/data-limit-not-yours$/);
+    }
+    const ok = await invite(as(manager, '/members', { method: 'POST', body: { emails: [email()], role: 'seller', data_limit: mine } }));
+    expect(ok.status).toBe(200);
+    const [r] = (await ok.json()).results;
+    expect(r.ok).toBe(true);
+    const [m] = await adminDb.select().from(membership).where(eq(membership.id, r.membership_id));
+    expect(m!.dataLimit).toEqual(mine);
+  });
+
+  it('an owner (who sees everything) can give any limit', async () => {
+    const p = await freshSeller();
+    const res = await patch(as(owner, `/members/${p.membershipId}`, { method: 'PATCH', body: { data_limit: { kind: 'practices', ids: ['prc_other'] } } }));
     expect(res.status).toBe(200);
   });
 });
