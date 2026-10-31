@@ -26,7 +26,8 @@ const createBody = z.strictObject({
 });
 
 /** A key for this source, sending and checking status unless `access` says otherwise. The secret is in this response only. */
-export const POST = v1Route({ permission: 'sources:manage', peopleOnly: true }, async (req, principal, ctx) => {
+// Not idempotent: a stored response would keep the secret, and a replay would hand it out again.
+export const POST = v1Route({ permission: 'sources:manage', peopleOnly: true, idempotent: false }, async (req, principal, ctx) => {
   const id = sourceId(req);
   await assertSourceExists(ctx, id);
   const body = await parseBody<{ name: string; access?: KeyAccess; environment?: 'live' | 'test' }>(req, createBody);

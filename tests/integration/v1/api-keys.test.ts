@@ -1,5 +1,11 @@
-import { and, eq } from 'drizzle-orm';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { and, eq, sql } from 'drizzle-orm';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// 2 trusted proxy hops in front of Scout, so X-Forwarded-For is read.
+vi.mock('@/platform/config', async (orig) => {
+  const real = await orig<typeof import('@/platform/config')>();
+  return { ...real, config: new Proxy(real.config, { get: (t, p) => (p === 'trustedProxyHops' ? 2 : (t as never)[p]) }) };
+});
 import { GET as listKeys, POST as createKey } from '@/app/v1/api-keys/route';
 import { DELETE as revokeKey } from '@/app/v1/api-keys/[id]/route';
 import { GET as listSourceKeys, POST as createSourceKey } from '@/app/v1/sources/[id]/keys/route';
@@ -136,5 +142,46 @@ describe('/v1/sources/{id}/keys (sources:manage)', () => {
     expect((await listSourceKeys(as(seller, `/sources/${sourceA}/keys`))).status).toBe(403);
     expect((await listSourceKeys(as(operator, '/sources/src_nope/keys'))).status).toBe(404);
     expect((await createSourceKey(as(operator, `/sources/${sourceA}/keys`, { method: 'POST', body: { name: 'x', scopes: ['keys:manage'] } }))).status).toBe(400);
+  });
+});
+
+describe('the secret is never stored for an Idempotency-Key', () => {
+  const storedWith = async (secret: string) =>
+    (await adminDb.execute(sql`select 1 from platform.idempotency_key where response_body::text like ${`%${secret}%`}`)).length;
+
+  it('POST /v1/api-keys keeps no stored response with the secret, and a repeat does not hand it out again', async () => {
+    const send = () =>
+      createKey(as(owner, '/api-keys', { method: 'POST', body: { name: 'Once', source_id: sourceA, access: 'read_only' }, headers: { 'idempotency-key': `once-${Date.now()}` } }));
+    const first = await (await send()).json();
+    expect(await storedWith(first.secret)).toBe(0);
+    const again = await send();
+    expect(again.headers.get('idempotent-replayed')).toBeNull();
+    expect((await again.json()).secret).not.toBe(first.secret);
+  });
+
+  it('POST /v1/sources/{id}/keys likewise', async () => {
+    const key = `src-once-${Date.now()}`;
+    const send = () => createSourceKey(as(operator, `/sources/${sourceA}/keys`, { method: 'POST', body: { name: 'Once' }, headers: { 'idempotency-key': key } }));
+    const first = await (await send()).json();
+    expect(await storedWith(first.secret)).toBe(0);
+    expect((await (await send()).json()).secret).not.toBe(first.secret);
+  });
+});
+
+describe("another tenant's keys and sources are not found and left alone", () => {
+  it('DELETE /v1/api-keys/{id} and /v1/sources/{id}/keys answer 404', async () => {
+    const admin = await seedUser({ admin: true });
+    const o = await seedUser({ signedIn: true });
+    const t2 = await tenantOwnedBy(admin, o.email, 'Other Co');
+    const { keyId, sourceId } = await inTenant(t2.tenantId, o.actor, async (ctx) => {
+      const s = await registerSource(ctx, { kind: 'person', name: 'Theirs' });
+      const k = await createApiKey(ctx, { name: 'theirs', environment: 'live', scopes: ['status:read'], sourceId: s.id }, SYSTEM_GRANTOR);
+      return { keyId: k.id, sourceId: s.id };
+    });
+    expect((await revokeKey(as(owner, `/api-keys/${keyId}`, { method: 'DELETE' }))).status).toBe(404);
+    expect((await listSourceKeys(as(operator, `/sources/${sourceId}/keys`))).status).toBe(404);
+    expect((await createSourceKey(as(operator, `/sources/${sourceId}/keys`, { method: 'POST', body: { name: 'sneaky' } }))).status).toBe(404);
+    const theirs = await adminDb.select().from(apiKey).where(eq(apiKey.sourceId, sourceId));
+    expect(theirs.map((k) => [k.id, k.revokedAt])).toEqual([[keyId, null]]);
   });
 });

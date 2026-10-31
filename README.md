@@ -61,6 +61,9 @@ System, "Send test event" shows the round trip through the outbox, NATS and the 
 
 Generate the secrets with `openssl rand -base64 32` (master key) and `openssl rand -hex 32` (auth secret).
 Set `SCOUT_FORCE_MOCK=true` to keep every outside service on its mock.
+Behind a load balancer or reverse proxy, set `SCOUT_TRUSTED_PROXY_HOPS` to the number of proxies that
+append to `X-Forwarded-For` (usually 1). With the default 0 the header is ignored, because a client can
+forge it, and audit entries and API key "last used" record no IP.
 
 ## Tests and checks
 

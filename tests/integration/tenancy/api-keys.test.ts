@@ -2,6 +2,12 @@ import { eq, sql } from 'drizzle-orm';
 import * as argon2 from '@node-rs/argon2';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// 2 trusted proxy hops in front of Scout, so X-Forwarded-For is read.
+vi.mock('@/platform/config', async (orig) => {
+  const real = await orig<typeof import('@/platform/config')>();
+  return { ...real, config: new Proxy(real.config, { get: (t, p) => (p === 'trustedProxyHops' ? 2 : (t as never)[p]) }) };
+});
+
 vi.mock('@node-rs/argon2', async (orig) => {
   const real = await orig<typeof import('@node-rs/argon2')>();
   return { ...real, verify: vi.fn(real.verify) };

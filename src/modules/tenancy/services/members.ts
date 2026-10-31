@@ -9,7 +9,7 @@ import { memberAdded, memberRemoved, memberRoleChanged } from '../contracts/even
 import { ROLES, CRM_OWNER_TAKEN, type DataLimit, type Member, type MembershipStatus, type Role } from '../contracts/members';
 import { DataLimitSchema } from '../domain/data-limit';
 import { memberActionRefusal, type MemberAction } from '../domain/member-rules';
-import { isPermission, permissionsFor, type Permission } from '../domain/permissions';
+import { PERMISSIONS, isPermission, permissionsFor, type Permission } from '../domain/permissions';
 import { membership, tenant, user } from '../db/schema';
 import { endSessions, signInFacts, type SignInMethod } from './sessions';
 
@@ -23,6 +23,7 @@ const crmTaken = () => new ScoutError({ slug: 'crm-owner-taken', status: 409, ti
 
 const SELF: Record<MemberAction, string> = {
   change_role: "You can't change your own role.",
+  change_permissions: "You can't change your own permissions.",
   suspend: "You can't suspend yourself.",
   remove: "You can't remove yourself.",
 };
@@ -37,6 +38,43 @@ function assertAllowed(ctx: ModuleContext, action: MemberAction, m: typeof membe
       slug: 'owner-protected',
       status: 409,
       title: "Owners can't be suspended or removed. Change their role first.",
+    });
+  }
+}
+
+/** What the actor may hand out: owners and platform admins (and the platform itself) may make owners. */
+type Powers = { makesOwners: boolean; permissions: readonly Permission[] };
+
+/** The actor's own powers in this tenant, read fresh: nobody grants more than they hold. */
+async function actorPowers(ctx: ModuleContext): Promise<Powers> {
+  if (ctx.actor.kind === 'system') return { makesOwners: true, permissions: PERMISSIONS };
+  if (ctx.actor.kind !== 'user') return { makesOwners: false, permissions: [] };
+  const [u] = await ctx.tx.select({ platformAdmin: user.platformAdmin }).from(user).where(eq(user.id, ctx.actor.id));
+  if (u?.platformAdmin) return { makesOwners: true, permissions: PERMISSIONS };
+  const [m] = await ctx.tx
+    .select({ role: membership.role, extra: membership.extraPermissions })
+    .from(membership)
+    .where(and(eq(membership.tenantId, ctx.tenantId), eq(membership.userId, ctx.actor.id), eq(membership.status, 'active')));
+  if (!m) return { makesOwners: false, permissions: [] };
+  const role = m.role as Role;
+  return { makesOwners: role === 'owner', permissions: permissionsFor(role, (m.extra ?? []).filter(isPermission), false) };
+}
+
+const ownersOnly = () =>
+  new ScoutError({
+    slug: 'owners-only',
+    status: 403,
+    title: "Only an owner can make someone an owner or change an owner's role.",
+  });
+
+function assertGrantable(powers: Powers, perms: readonly Permission[]): void {
+  const missing = perms.find((p) => !powers.permissions.includes(p));
+  if (missing) {
+    throw new ScoutError({
+      slug: 'permission-not-yours',
+      status: 403,
+      title: 'Not available to you',
+      detail: `You can't give the \`${missing}\` permission because you don't have it.`,
     });
   }
 }
@@ -122,6 +160,7 @@ export async function addMember(
   input: { email: string; role: Role; crmOwnerIds?: Record<string, string> },
 ): Promise<string> {
   assertRole(input.role);
+  if (input.role === 'owner' && !(await actorPowers(ctx)).makesOwners) throw ownersOnly();
   const email = input.email.trim().toLowerCase();
   const crmIds = cleanCrmIds(input.crmOwnerIds ?? {});
   await lockTenant(ctx, 'crm');
@@ -223,7 +262,18 @@ export async function changeMember(
   }
   await lockTenant(ctx, 'owners');
   const m = await load(ctx, membershipId);
-  if (change.role !== undefined && change.role !== m.role) assertAllowed(ctx, 'change_role', m);
+  const roleChanges = change.role !== undefined && change.role !== m.role;
+  const current = new Set<string>(m.extraPermissions ?? []);
+  const added = (change.extraPermissions ?? []).filter((p) => !current.has(p)) as Permission[];
+  const extrasChange =
+    change.extraPermissions !== undefined && (added.length > 0 || new Set(change.extraPermissions).size !== current.size);
+  if (roleChanges) assertAllowed(ctx, 'change_role', m);
+  if (extrasChange) assertAllowed(ctx, 'change_permissions', m);
+  if ((roleChanges && (change.role === 'owner' || m.role === 'owner')) || added.length > 0) {
+    const powers = await actorPowers(ctx);
+    if (roleChanges && (change.role === 'owner' || m.role === 'owner') && !powers.makesOwners) throw ownersOnly();
+    assertGrantable(powers, added);
+  }
   if (change.role && change.role !== 'owner' && (await isLastActiveOwner(ctx, m))) throw lastOwner();
 
   const set: Partial<typeof membership.$inferInsert> = { updatedAt: new Date() };
@@ -493,6 +543,8 @@ export async function inviteMembers(
   input: { emails: string[]; role: Role; dataLimit?: DataLimit | null },
 ): Promise<InviteResult[]> {
   assertRole(input.role);
+  // Checked once for the whole request; addMember checks it again per address.
+  if (input.role === 'owner' && !(await actorPowers(ctx)).makesOwners) throw ownersOnly();
   if (input.dataLimit && !DataLimitSchema.safeParse(input.dataLimit).success) {
     throw new ScoutError({ slug: 'validation', status: 400, title: 'Check the data limit.' });
   }

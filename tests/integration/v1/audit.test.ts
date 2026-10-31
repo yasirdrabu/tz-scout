@@ -1,4 +1,10 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// 1 trusted proxy hop in front of Scout, so X-Forwarded-For is read.
+vi.mock('@/platform/config', async (orig) => {
+  const real = await orig<typeof import('@/platform/config')>();
+  return { ...real, config: new Proxy(real.config, { get: (t, p) => (p === 'trustedProxyHops' ? 1 : (t as never)[p]) }) };
+});
 import { GET as listAuditRoute } from '@/app/v1/audit/route';
 import { POST as invite } from '@/app/v1/members/route';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
@@ -26,7 +32,7 @@ beforeAll(async () => {
       tenant: t.slug,
       method: 'POST',
       body: { emails: ['audited@example.com'], role: 'seller' },
-      headers: { 'x-forwarded-for': '198.51.100.7' },
+      headers: { 'x-forwarded-for': '6.6.6.6, 198.51.100.7' }, // the client forged 6.6.6.6
     }),
   );
   expect(res.status).toBe(200);
@@ -72,6 +78,16 @@ describe('GET /v1/audit', () => {
     expect((await get('?q=api_key.created')).body.data).toHaveLength(1);
     expect((await get(`?q=${encodeURIComponent('100%')}`)).body.data).toHaveLength(1);
     expect((await get(`?q=${encodeURIComponent('%')}`)).body.data).toHaveLength(1);
+  });
+
+  it('finds a member of this tenant by name', async () => {
+    const tag = `quentin${Date.now()}`;
+    const q = await seedUser({ email: `${tag}@example.com`, signedIn: true });
+    await inTenant(t.tenantId, owner.actor, (ctx) => addMember(ctx, { email: q.email, role: 'leader' }));
+    await inTenant(t.tenantId, q.actor, (ctx) => audit(ctx, { action: 'routing.settings.updated' }));
+    const found = (await get(`?q=${tag.toUpperCase()}`)).body.data;
+    expect(found.map((e: { actor_id: string; action: string }) => [e.actor_id, e.action])).toEqual([[q.id, 'routing.settings.updated']]);
+    expect(found[0].actor_name).toBe(tag);
   });
 
   it('filters by who and pages with a cursor', async () => {

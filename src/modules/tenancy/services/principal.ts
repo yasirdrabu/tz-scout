@@ -1,9 +1,11 @@
 import { and, eq, sql } from 'drizzle-orm';
+import { config } from '@/platform/config';
 import { adminDb } from '@/platform/db/client';
 import { log } from '@/platform/log';
 import { SESSION_MAX_SECONDS, SESSION_UPDATE_AGE_SECONDS, auth } from '../auth';
 import type { Principal } from '../contracts/principal';
 import type { Role } from '../contracts/members';
+import { forwardedClientIp } from '../domain/client-ip';
 import { DataLimitSchema, defaultDataLimit, type DataLimit } from '../domain/data-limit';
 import { PERMISSIONS, isPermission, permissionsFor } from '../domain/permissions';
 import { membership, session, tenant, user } from '../db/schema';
@@ -144,10 +146,12 @@ export async function sessionPrincipal(headers: Headers, tenantSlug: string): Pr
   return principal;
 }
 
-/** The caller's IP address: the first `x-forwarded-for` hop, else `x-real-ip`, else null. */
+/**
+ * The caller's IP address from `X-Forwarded-For`, trusting only `SCOUT_TRUSTED_PROXY_HOPS` proxies
+ * (null with the default 0: the client could forge the header).
+ */
 export function clientIp(req: Request): string | null {
-  const forwarded = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return forwarded || req.headers.get('x-real-ip') || null;
+  return forwardedClientIp(req.headers.get('x-forwarded-for'), config.trustedProxyHops);
 }
 
 /**

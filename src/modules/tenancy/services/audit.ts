@@ -1,8 +1,8 @@
-import { and, eq, ilike, inArray, or } from 'drizzle-orm';
+import { and, eq, ilike, inArray, isNotNull, or } from 'drizzle-orm';
 import { escapeLike, listAudit, type AuditRow } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { areaOf, areaPrefixes, type AuditArea } from '../domain/audit-areas';
-import { apiKey, user } from '../db/schema';
+import { apiKey, membership, user } from '../db/schema';
 
 export type AuditEntryView = AuditRow & {
   area: AuditArea;
@@ -23,8 +23,6 @@ export type AuditQuery = {
   limit?: number;
 };
 
-const MAX_NAME_MATCHES = 500;
-
 /** The tenant's audit log, newest first, with the area of each entry and the names behind the ids. */
 export async function auditEntries(
   ctx: ModuleContext,
@@ -34,16 +32,22 @@ export async function auditEntries(
   let search: { text: string; actorIds: string[] } | undefined;
   if (text) {
     const pattern = `%${escapeLike(text)}%`;
+    // People who can act here: this tenant's members (any status, so history still matches) and
+    // platform admins (support access). Keys: this tenant's.
     const people = await ctx.tx
-      .select({ id: user.id })
+      .selectDistinct({ id: user.id })
       .from(user)
-      .where(or(ilike(user.name, pattern), ilike(user.email, pattern)))
-      .limit(MAX_NAME_MATCHES);
+      .leftJoin(membership, and(eq(membership.userId, user.id), eq(membership.tenantId, ctx.tenantId)))
+      .where(
+        and(
+          or(isNotNull(membership.id), eq(user.platformAdmin, true)),
+          or(ilike(user.name, pattern), ilike(user.email, pattern)),
+        ),
+      );
     const keys = await ctx.tx
       .select({ id: apiKey.id })
       .from(apiKey)
-      .where(and(eq(apiKey.tenantId, ctx.tenantId), ilike(apiKey.name, pattern)))
-      .limit(MAX_NAME_MATCHES);
+      .where(and(eq(apiKey.tenantId, ctx.tenantId), ilike(apiKey.name, pattern)));
     search = { text, actorIds: [...people, ...keys].map((r) => r.id) };
   }
   const area = query.area;

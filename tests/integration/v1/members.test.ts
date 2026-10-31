@@ -242,3 +242,74 @@ describe('GET /v1/roles', () => {
     expect((await roles(as(seller, '/roles'))).status).toBe(403);
   });
 });
+
+describe('members:manage held as an extra permission cannot escalate', () => {
+  let manager: Person & { membershipId: string };
+  beforeAll(async () => {
+    const p = await seedUser({ signedIn: true });
+    const id = await inTenant(t.tenantId, owner.actor, (ctx) => addMember(ctx, { email: p.email, role: 'leader' }));
+    await adminDb.update(membership).set({ extraPermissions: ['members:manage'] }).where(eq(membership.id, id));
+    cookies[p.id] = await signedIn(p.id);
+    manager = { ...p, membershipId: id };
+  });
+
+  it('refuses changing your own extra permissions', async () => {
+    const res = await patch(as(manager, `/members/${manager.membershipId}`, { method: 'PATCH', body: { extra_permissions: ['members:manage', 'audit:read'] } }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).type).toMatch(/\/not-yourself$/);
+    // Sending your current set unchanged is fine.
+    expect((await patch(as(manager, `/members/${manager.membershipId}`, { method: 'PATCH', body: { extra_permissions: ['members:manage'] } }))).status).toBe(200);
+  });
+
+  it('refuses inviting an owner', async () => {
+    const res = await invite(as(manager, '/members', { method: 'POST', body: { emails: [`o-${newId('usr')}@example.com`.toLowerCase()], role: 'owner' } }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).type).toMatch(/\/owners-only$/);
+  });
+
+  it("refuses making someone an owner or changing an owner's role", async () => {
+    const p = await freshSeller();
+    const up = await patch(as(manager, `/members/${p.membershipId}`, { method: 'PATCH', body: { role: 'owner' } }));
+    expect(up.status).toBe(403);
+    expect((await up.json()).type).toMatch(/\/owners-only$/);
+    expect((await patch(as(manager, `/members/${ids[owner.id]}`, { method: 'PATCH', body: { role: 'seller' } }))).status).toBe(403);
+    const [m] = await adminDb.select().from(membership).where(eq(membership.id, p.membershipId));
+    expect(m!.role).toBe('seller');
+  });
+
+  it('refuses granting a permission the manager does not hold, and allows one they do', async () => {
+    const p = await freshSeller();
+    const res = await patch(as(manager, `/members/${p.membershipId}`, { method: 'PATCH', body: { extra_permissions: ['audit:read'] } }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).type).toMatch(/\/permission-not-yours$/);
+    expect((await patch(as(manager, `/members/${p.membershipId}`, { method: 'PATCH', body: { extra_permissions: ['assign:act'] } }))).status).toBe(200);
+  });
+
+  it('an owner can still make owners', async () => {
+    const p = await freshSeller();
+    const res = await patch(as(owner, `/members/${p.membershipId}`, { method: 'PATCH', body: { role: 'owner' } }));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("another tenant's ids are not found and left alone", () => {
+  let other: { tenantId: string; membershipId: string };
+  beforeAll(async () => {
+    const admin = await seedUser({ admin: true });
+    const o = await seedUser({ signedIn: true });
+    const t2 = await tenantOwnedBy(admin, o.email, 'Other Co');
+    const s = await seedUser({ signedIn: true });
+    const membershipId = await inTenant(t2.tenantId, o.actor, (ctx) => addMember(ctx, { email: s.email, role: 'seller' }));
+    other = { tenantId: t2.tenantId, membershipId };
+  });
+
+  it('PATCH, suspend, sign out everywhere and DELETE answer 404', async () => {
+    const id = other.membershipId;
+    expect((await patch(as(owner, `/members/${id}`, { method: 'PATCH', body: { role: 'leader' } }))).status).toBe(404);
+    expect((await act(as(owner, `/members/${id}:suspend`, { method: 'POST' }))).status).toBe(404);
+    expect((await act(as(owner, `/members/${id}:sign-out-everywhere`, { method: 'POST' }))).status).toBe(404);
+    expect((await remove(as(owner, `/members/${id}`, { method: 'DELETE' }))).status).toBe(404);
+    const [m] = await adminDb.select().from(membership).where(eq(membership.id, id));
+    expect(m).toMatchObject({ role: 'seller', status: 'active' });
+  });
+});

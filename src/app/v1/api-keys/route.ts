@@ -22,7 +22,8 @@ const createBody = z.strictObject({
 });
 
 /** Creates a key for one source from an access choice (Decision 14). The secret is in this response only. */
-export const POST = v1Route({ permission: 'keys:manage', peopleOnly: true }, async (req, principal, ctx) => {
+// Not idempotent: a stored response would keep the secret, and a replay would hand it out again.
+export const POST = v1Route({ permission: 'keys:manage', peopleOnly: true, idempotent: false }, async (req, principal, ctx) => {
   const body = await parseBody<{ name: string; sourceId: string; access: KeyAccess; environment?: 'live' | 'test' }>(req, createBody);
   return created(await createKeyWithAccess(ctx, body, principal));
 });
