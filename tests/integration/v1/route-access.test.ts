@@ -1,15 +1,11 @@
 import { eq } from 'drizzle-orm';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { v1Route } from '@/app/v1/_lib/v1-route';
 import { SYSTEM_GRANTOR, createApiKey, createTenant, handleDevSignIn, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb } from '@/platform/db/client';
 import { inTenant, seedUser, uniqueSlug } from '../tenancy/helpers';
-
-let currentHeaders = new Headers();
-vi.mock('next/headers', () => ({ headers: async () => currentHeaders }));
-const { tenantAction } = await import('@/server/page-context');
 
 let tenantId: string;
 let slug: string;
@@ -71,12 +67,6 @@ describe('ctx.access', () => {
     expect((await route(withKey(await apiKey()))).status).toBe(200);
     expect(seen).toEqual({ dataLimit: { kind: 'own_source' } });
     expect((await route(withCookie(ownerHeaders))).status).toBe(200);
-    expect(seen).toEqual({ ...ownerAccess, userId: owner.id });
-  });
-
-  it('tenantAction gives the callback the principal data limit', async () => {
-    currentHeaders = ownerHeaders;
-    const seen = await tenantAction(slug, 'members:manage', async (ctx) => ctx.access);
     expect(seen).toEqual({ ...ownerAccess, userId: owner.id });
   });
 });

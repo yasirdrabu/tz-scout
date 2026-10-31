@@ -1,6 +1,7 @@
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { config } from '@/platform/config';
+import type { Tx } from './tenant';
 
 export type Db = PostgresJsDatabase<Record<string, never>>;
 
@@ -31,6 +32,14 @@ export const appDb: Db = lazy(() =>
  * that serves one tenant.
  */
 export const adminDb: Db = lazy(() => drizzle(postgres(config.databaseAdminUrl, { onnotice: () => {} })));
+
+/**
+ * Runs `fn` in a savepoint of `tx` when one is given (a platform admin request's `adminDb`
+ * transaction, so the request holds one connection), else in a new `adminDb` transaction.
+ */
+export function adminTransaction<T>(tx: Tx | undefined, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return tx ? tx.transaction(fn) : adminDb.transaction(fn);
+}
 
 /** Close both pools. Only needed by scripts and tests. Safe to call when never used. */
 export async function closeDbs(): Promise<void> {

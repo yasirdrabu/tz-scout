@@ -1,12 +1,13 @@
 import { betterAuth, type BetterAuthPlugin } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { APIError, createAuthEndpoint } from 'better-auth/api';
+import { APIError, createAuthEndpoint, createAuthMiddleware } from 'better-auth/api';
 import { setSessionCookie } from 'better-auth/cookies';
 import { z } from 'zod';
 import { config, type Config } from '@/platform/config';
 import { adminDb } from '@/platform/db/client';
 import { newId, type IdPrefix } from '@/platform/ids';
 import { account, session, user, verification } from './db/schema';
+import { safeReturnPath, signInErrorUrl } from './domain/return-path';
 import { log } from '@/platform/log';
 import {
   NOT_SET_UP,
@@ -95,6 +96,18 @@ export function createAuth(overrides: { azureAd?: Config['azureAd'] } = {}) {
     basePath: '/api/auth',
     secret: config.authSecret,
     disabledPaths: DISABLED_PATHS,
+    // better-auth's own /error page is off: failures with no error URL of their own land on ours.
+    onAPIError: { errorURL: signInErrorUrl(config.publicUrl, '/') },
+    hooks: {
+      // Social sign-in returns only to a safe in-app path; failures go to our sign-in page with the
+      // error code and that path (`/signin?return=...&error=<code>`), whatever the client asked for.
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== '/sign-in/social') return;
+        const body = (ctx.body ?? {}) as Record<string, unknown>;
+        const back = safeReturnPath(body.callbackURL);
+        return { context: { body: { ...body, callbackURL: back, errorCallbackURL: signInErrorUrl(config.publicUrl, back) } } };
+      }),
+    },
     database: drizzleAdapter(adminDb, {
       provider: 'pg',
       schema: { user, session, account, verification },

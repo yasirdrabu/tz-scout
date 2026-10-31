@@ -20,7 +20,7 @@ describe('permissions', () => {
   });
 
   it.each([
-    ['review:act', { owner: true, leader: true, seller: false, operator: false }],
+    ['review:act', { owner: true, leader: true, seller: false, operator: true }],
     ['assign:act', { owner: true, leader: true, seller: false, operator: false }],
     ['offers:manage', { owner: true, leader: false, seller: false, operator: true }],
     ['integrations:manage', { owner: true, leader: false, seller: false, operator: false }],

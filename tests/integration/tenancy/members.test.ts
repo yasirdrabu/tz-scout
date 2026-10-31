@@ -90,30 +90,44 @@ describe('addMember / removeMember', () => {
     expect(again).toBe(id);
   });
 
-  it('refuses to remove or demote the last active owner (TEN-E1-S2-AC3)', async () => {
+  it('refuses to demote the last active owner (TEN-E1-S2-AC3)', async () => {
     const t = await newTenant();
-    const a = t.owner.actor;
-    await expect(inTenant(t.tenantId, a, (ctx) => removeMember(ctx, t.ownerMembershipId))).rejects.toThrow(
-      'A tenant needs at least one owner.',
-    );
+    const admin = (await seedUser({ admin: true })).actor;
     await expect(
-      inTenant(t.tenantId, a, (ctx) => changeMember(ctx, t.ownerMembershipId, { role: 'leader' })),
+      inTenant(t.tenantId, admin, (ctx) => changeMember(ctx, t.ownerMembershipId, { role: 'leader' })),
     ).rejects.toThrow('A tenant needs at least one owner.');
   });
 
-  it('allows removing an owner when another active owner exists, and does not count invited owners', async () => {
+  it('refuses removing an active owner or yourself, and changing your own role', async () => {
     const t = await newTenant();
     const a = t.owner.actor;
     const second = await seedUser({ signedIn: true });
     const secondId = await inTenant(t.tenantId, a, (ctx) => addMember(ctx, { email: second.email, role: 'owner' }));
-    await inTenant(t.tenantId, a, (ctx) => removeMember(ctx, secondId)); // fine: first owner remains
+    await expect(inTenant(t.tenantId, a, (ctx) => removeMember(ctx, secondId))).rejects.toThrow(
+      "Owners can't be suspended or removed. Change their role first.",
+    );
+    await expect(inTenant(t.tenantId, a, (ctx) => removeMember(ctx, t.ownerMembershipId))).rejects.toThrow(
+      "You can't remove yourself.",
+    );
+    await expect(
+      inTenant(t.tenantId, a, (ctx) => changeMember(ctx, t.ownerMembershipId, { role: 'leader' })),
+    ).rejects.toThrow("You can't change your own role.");
+    // Demoted first, the second owner can be removed.
+    await inTenant(t.tenantId, a, (ctx) => changeMember(ctx, secondId, { role: 'leader' }));
+    await inTenant(t.tenantId, a, (ctx) => removeMember(ctx, secondId));
+  });
+
+  it('does not count invited owners, and removing an invited owner revokes the invite', async () => {
+    const t = await newTenant();
+    const a = t.owner.actor;
+    const admin = (await seedUser({ admin: true })).actor;
     const invitedOwner = await inTenant(t.tenantId, a, (ctx) =>
       addMember(ctx, { email: 'inv@example.com', role: 'owner' }),
     );
     // Invited owner does not count, so the active owner is still the last one.
-    await expect(inTenant(t.tenantId, a, (ctx) => removeMember(ctx, t.ownerMembershipId))).rejects.toThrow(
-      'A tenant needs at least one owner.',
-    );
+    await expect(
+      inTenant(t.tenantId, admin, (ctx) => changeMember(ctx, t.ownerMembershipId, { role: 'leader' })),
+    ).rejects.toThrow('A tenant needs at least one owner.');
     await inTenant(t.tenantId, a, (ctx) => removeMember(ctx, invitedOwner)); // removing an invited owner is fine
   });
 

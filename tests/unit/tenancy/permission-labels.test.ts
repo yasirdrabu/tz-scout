@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { PERMISSIONS } from '@/modules/tenancy/domain/permissions';
-import { PERMISSION_LABELS, permissionLabel } from '@/modules/tenancy/domain/permission-labels';
+import { PERMISSION_GROUP_NAMES, PERMISSION_LABELS, permissionGroup, permissionLabel } from '@/modules/tenancy/domain/permission-labels';
 
 it('every permission has a plain-words label', () => {
   expect(PERMISSIONS).toHaveLength(35);
@@ -17,4 +17,9 @@ it('every permission has a plain-words label', () => {
 it('labels are unique', () => {
   const labels = PERMISSIONS.map(permissionLabel);
   expect(new Set(labels).size).toBe(labels.length);
+});
+
+it('every permission has a group of the roles matrix', () => {
+  expect(PERMISSION_GROUP_NAMES).toEqual(['Accounts', 'Review and sources', 'Offers and playbooks', 'Pipeline and money', 'Workspace']);
+  for (const p of PERMISSIONS) expect(PERMISSION_GROUP_NAMES, p).toContain(permissionGroup(p));
 });

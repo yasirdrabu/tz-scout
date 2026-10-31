@@ -34,7 +34,28 @@ export { SYSTEM_GRANTOR, createApiKey, createKeyFromCli, revokeActiveKeysNamed, 
 export { resolvePrincipal } from './services/principal';
 export { registerSourceValidator, type SourceValidator } from './contracts/source-validator';
 export { listTenants, ensurePlatformAdmin, userIdForEmail, type TenantRow } from './services/tenants';
-export { memberAccess, type MemberAccess } from './services/members';
 export { devSignInUsers, type DevSignInUser } from './services/dev-sign-in';
 export { sessionUser, type SessionUser } from './services/principal';
 export { completeSignIn } from './services/sign-in';
+export { personSummary, setLastWorkspace, workspacesFor, type Workspace } from './services/workspaces';
+export {
+  inviteMembers,
+  memberList,
+  memberCounts,
+  reactivateMember,
+  signOutMemberEverywhere,
+  suspendMember,
+  type InviteResult,
+  type MemberRow,
+  type MemberCounts,
+  type MemberLock,
+} from './services/members';
+export { PERMISSION_GROUP_NAMES, permissionGroup, type PermissionGroup } from './domain/permission-labels';
+export { KEY_ACCESS, KEY_ACCESS_CHOICES, type KeyAccess } from './domain/key-access';
+export { assertSourceExists, createKeyWithAccess, listApiKeys, type ApiKeyView } from './services/api-keys';
+export { AUDIT_AREAS, type AuditArea } from './domain/audit-areas';
+export { auditEntries, type AuditEntryView, type AuditQuery } from './services/audit';
+export { endSessions, listSessions, signInFacts, type SessionView, type SignInMethod } from './services/sessions';
+export { clientIp } from './services/principal';
+export { adminTenants, setTenantStatus, type AdminActor, type AdminTenantRow } from './services/tenants';
+export { addPlatformAdmin, platformAdmins, removePlatformAdmin, type PlatformAdmin } from './services/platform-admins';

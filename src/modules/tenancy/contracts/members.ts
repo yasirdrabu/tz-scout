@@ -4,7 +4,7 @@ import type { Permission } from '../domain/permissions';
 export const ROLES = ['owner', 'leader', 'seller', 'operator'] as const;
 export type Role = (typeof ROLES)[number];
 
-export type MembershipStatus = 'invited' | 'active' | 'removed';
+export type MembershipStatus = 'invited' | 'active' | 'suspended' | 'removed';
 
 /** One person in a tenant. `permissions` is the effective set: role defaults plus extras. */
 export type Member = {

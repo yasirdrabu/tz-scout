@@ -16,7 +16,7 @@ export const boundariesConfig = {
       { type: "module", pattern: "src/modules/*/**", mode: "file", capture: ["moduleName"] },
       { type: "platform", pattern: "src/platform/**", mode: "file" },
       { type: "lib", pattern: "src/lib/**", mode: "file" },
-      { type: "app", pattern: ["src/app/**", "src/entry/**", "src/components/**"], mode: "file" },
+      { type: "app", pattern: ["src/app/**", "src/entry/**"], mode: "file" },
     ],
   },
   rules: {
@@ -51,6 +51,8 @@ export const ADMIN_DB_ALLOWED = [
   "src/modules/integrations/jobs.ts",
   // An unauthenticated webhook has no tenant until its connection is found (connectionTenant).
   "src/modules/integrations/services/inbound.ts",
+  // adminRoute: platform-admin requests have no tenant and run on adminDb, after the admin check.
+  "src/app/v1/_lib/v1-route.ts",
   "src/entry/**",
 ];
 const LIVE_ADAPTERS = ["src/modules/*/adapters/*/live*", "src/modules/*/adapters/*/live*/**"];
@@ -95,6 +97,7 @@ const config = [
       "next-env.d.ts",
       "playwright-report/**",
       "test-results/**",
+      "web-ui/**",
     ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),

@@ -420,10 +420,10 @@ describe('Microsoft callback through better-auth (fake Microsoft)', () => {
   afterAll(() => vi.unstubAllGlobals());
 
   /** Runs sign-in and the callback; returns the redirect location, its error code and the cookies set. */
-  async function signInWith(profile: Record<string, unknown>) {
+  async function signInWith(profile: Record<string, unknown>, urls: { callbackURL?: string; errorCallbackURL?: string } = {}) {
     claims = profile;
     const { headers, response } = await app.api.signInSocial({
-      body: { provider: 'microsoft', callbackURL: '/welcome', errorCallbackURL: '/sign-in' },
+      body: { provider: 'microsoft', callbackURL: '/welcome', errorCallbackURL: '/sign-in', ...urls },
       returnHeaders: true,
     });
     const authUrl = new URL(response.url!);
@@ -480,11 +480,31 @@ describe('Microsoft callback through better-auth (fake Microsoft)', () => {
 
   it('refuses a non-member with the message and creates no user or session', async () => {
     const r = await signInWith({ oid: 'oid-nobody', email: 'nobody2@taazaa.com' });
-    expect(new URL(r.location, config.publicUrl).pathname).toBe('/sign-in');
+    expect(r.location.startsWith(`${config.publicUrl}/signin?`)).toBe(true);
     expect(r.error).toBe('not_set_up');
     expect(r.description).toBe(NOT_SET_UP);
     expect(r.setCookie.some((c) => /session_token=[^;]/.test(c))).toBe(false);
     expect(await adminDb.select().from(user).where(eq(user.email, 'nobody2@taazaa.com'))).toHaveLength(0);
+  });
+
+  it('failures go to the app sign-in page with the error code and the validated return path', async () => {
+    const nobody = { oid: 'oid-nobody3', email: 'nobody3@taazaa.com' };
+    const r = await signInWith(nobody, { callbackURL: '/t/acme/queue?x=1', errorCallbackURL: 'https://evil.example/x' });
+    const loc = new URL(r.location);
+    expect(loc.origin + loc.pathname).toBe(`${config.publicUrl}/signin`);
+    expect(loc.searchParams.get('return')).toBe('/t/acme/queue?x=1');
+    expect(loc.searchParams.get('error')).toBe('not_set_up');
+    for (const unsafe of ['//evil.example/x', 'https://evil.example/x', '/\\evil.example', 'javascript:alert(1)', 'welcome']) {
+      const u = new URL((await signInWith(nobody, { callbackURL: unsafe })).location);
+      expect(u.origin + u.pathname).toBe(`${config.publicUrl}/signin`);
+      expect(u.searchParams.get('return')).toBeNull();
+      expect(u.searchParams.get('error')).toBe('not_set_up');
+    }
+  });
+
+  it('an unsafe return path is replaced by the home page', async () => {
+    await newTenant('ray@taazaa.com');
+    expect((await signInWith({ oid: 'oid-ray', email: 'ray@taazaa.com' }, { callbackURL: '//evil.example/x' })).location).toBe('/');
   });
 
   it('refuses a foreign Entra tenant claiming the email of an unpinned member', async () => {
@@ -582,6 +602,12 @@ describe('better-auth HTTP surface', () => {
     expect((await at('/get-session')).status).toBe(200);
     // The disabled paths are off in better-auth itself too, not only in our route.
     expect((await auth.handler(new Request(`${config.publicUrl}/api/auth/ok`))).status).toBe(404);
+  });
+
+  it('a callback with no state goes to the app sign-in page, not a 404', async () => {
+    const res = await authHandler(new Request(`${config.publicUrl}/api/auth/callback/microsoft`));
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(`${config.publicUrl}/signin?error=state_not_found`);
   });
 
   it('uses plain cookie names outside production', async () => {

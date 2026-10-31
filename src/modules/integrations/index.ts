@@ -8,6 +8,7 @@ export {
   TEST_FIRST,
   connectionSettings,
   connectionStatus,
+  disconnect,
   ensureConnectionId,
   listConnections,
   recentCalls,
@@ -32,6 +33,12 @@ export {
   type Provider,
   type TestResult,
 } from './providers';
+export {
+  integration,
+  listIntegrations,
+  type IntegrationCredential,
+  type IntegrationRow,
+} from './services/overview';
 export { connectionTenant } from './services/inbound';
 export { MASTER_KEY_MISSING } from './services/vault';
 export { credentialsCleanupHandler, credentialsCleanupJob } from './jobs';

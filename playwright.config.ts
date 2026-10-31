@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { e2eEnv, E2E_PORT } from './tests/e2e/env';
+import { e2eEnv, E2E_APP_PORT, E2E_PORT } from './tests/e2e/env';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -12,13 +12,23 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   reporter: [['list']],
   globalSetup: './tests/e2e/global-setup.ts',
-  use: { baseURL: `http://localhost:${E2E_PORT}`, trace: 'retain-on-failure' },
+  // The specs drive the web-ui app; it reaches the backend through its dev proxy.
+  use: { baseURL: `http://localhost:${E2E_APP_PORT}`, trace: 'retain-on-failure' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command: `npx next dev -p ${E2E_PORT}`,
-    url: `http://localhost:${E2E_PORT}/healthz`,
-    reuseExistingServer: false,
-    timeout: 120_000,
-    env: e2eEnv,
-  },
+  webServer: [
+    {
+      command: `npx next dev -p ${E2E_PORT}`,
+      url: `http://localhost:${E2E_PORT}/healthz`,
+      reuseExistingServer: false,
+      timeout: 120_000,
+      env: e2eEnv,
+    },
+    {
+      command: `npm --prefix web-ui run dev -- --port ${E2E_APP_PORT}`,
+      url: `http://localhost:${E2E_APP_PORT}/signin`,
+      reuseExistingServer: false,
+      timeout: 120_000,
+      env: { SCOUT_BACKEND_URL: `http://localhost:${E2E_PORT}` },
+    },
+  ],
 });

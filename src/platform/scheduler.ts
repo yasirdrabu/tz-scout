@@ -1,6 +1,6 @@
 import { and, eq, lte } from 'drizzle-orm';
 import { CronExpressionParser } from 'cron-parser';
-import { adminDb } from './db/client';
+import { adminDb, adminTransaction } from './db/client';
 import { schedule } from './db/schema';
 import { platformAudit } from './audit';
 import type { AdminCtx } from './dead-jobs';
@@ -114,7 +114,7 @@ export async function upsertSchedule(adminCtx: AdminCtx, input: ScheduleInput, n
 }
 
 async function setEnabled(adminCtx: AdminCtx, id: string, enabled: boolean, now = new Date()): Promise<void> {
-  await adminDb.transaction(async (tx) => {
+  await adminTransaction(adminCtx.tx, async (tx) => {
     const [row] = await tx.select().from(schedule).where(eq(schedule.id, id)).for('update');
     if (!row) throw notFound(id);
     if (row.enabled === enabled) return;
@@ -141,7 +141,7 @@ export const resumeSchedule = (adminCtx: AdminCtx, id: string) => setEnabled(adm
 
 /** Publishes the job now. Leaves `next_run_at` and `last_run_at` alone. Returns the job id. */
 export async function runNow(adminCtx: AdminCtx, id: string): Promise<string> {
-  return adminDb.transaction(async (tx) => {
+  return adminTransaction(adminCtx.tx, async (tx) => {
     const [row] = await tx.select().from(schedule).where(eq(schedule.id, id));
     if (!row) throw notFound(id);
     const jobId = await enqueueFor(tx, row, adminCtx.correlationId);

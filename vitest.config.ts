@@ -23,6 +23,7 @@ export default defineConfig({
           exclude: ["reference/**", "node_modules/**"],
           environment: "node",
           globalSetup: "tests/integration/setup.ts",
+          setupFiles: ["tests/integration/close-dbs.ts"],
           pool: "forks",
           poolOptions: { forks: { singleFork: true } },
           testTimeout: 30000,

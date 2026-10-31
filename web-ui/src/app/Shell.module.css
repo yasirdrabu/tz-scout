@@ -1,0 +1,41 @@
+.shell {
+  display: flex;
+  height: 100vh;
+  min-width: var(--min-width);
+  background: var(--canvas);
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.content {
+  flex: 1;
+  overflow: auto;
+}
+
+.content:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.skip {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--ink-900);
+  color: #ffffff;
+  transform: translateY(-200%);
+}
+
+.skip:focus-visible {
+  transform: none;
+  color: #ffffff;
+  text-decoration: none;
+}

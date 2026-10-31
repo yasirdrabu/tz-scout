@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNull, ne, sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import { config } from '@/platform/config';
 import type { ModuleContext } from '@/platform/context';
@@ -38,7 +38,7 @@ export const HINT_MIN_LENGTH = 12;
 const TEST_VALID_MS = 10 * 60_000;
 const TEST_TIMEOUT_MS = 10_000;
 
-function requireProvider(provider: string): void {
+export function requireProvider(provider: string): void {
   if (!isKnownProvider(provider)) {
     throw new ScoutError({ slug: 'unknown-provider', status: 404, title: 'Unknown integration' });
   }
@@ -187,7 +187,7 @@ class TestFailed extends Error {
  * sample data), stores the result and publishes `integrations.connection.tested`.
  * Call it before this transaction writes to the same connection: the gateway commits in its own transaction.
  */
-export async function testConnection(ctx: ModuleContext, provider: string): Promise<TestResult> {
+export async function testConnection(ctx: ModuleContext, provider: string): Promise<TestResult & { durationMs: number }> {
   requireProvider(provider);
   const started = performance.now();
   let result: TestResult;
@@ -248,7 +248,7 @@ export async function testConnection(ctx: ModuleContext, provider: string): Prom
     { connectionId: conn.id, provider, ok: result.ok, message: result.message, durationMs },
     { type: 'connection', id: conn.id },
   );
-  return result;
+  return { ...result, durationMs };
 }
 
 /** The decrypted HubSpot-style `client_secret` that verifies inbound webhooks, or null when none is stored. */
@@ -384,6 +384,46 @@ export async function setDisabled(ctx: ModuleContext, provider: string, disabled
   );
 }
 
+/**
+ * Disconnects a service: every credential it holds is marked replaced (the cleanup job deletes them an hour
+ * later), the connection goes back to sample data and its test result is cleared, so going live needs a new
+ * credential and test. A turned-off connection stays turned off.
+ */
+export async function disconnect(ctx: ModuleContext, provider: string): Promise<void> {
+  requireProvider(provider);
+  const conn = await ensureConnection(ctx.tx, ctx.tenantId, provider, ctx.actor.id);
+  await ctx.tx
+    .update(credential)
+    .set({ replacedAt: sql`now()` })
+    .where(and(eq(credential.tenantId, ctx.tenantId), eq(credential.connectionId, conn.id), isNull(credential.replacedAt)));
+  const status: ConnectionStatus = conn.status === 'disabled' ? 'disabled' : 'not_set_up';
+  await ctx.tx
+    .update(connection)
+    .set({
+      credentialId: null,
+      mode: 'mock',
+      status,
+      lastTestedAt: null,
+      lastTestResult: null,
+      lastError: null,
+      consecutiveFailures: 0,
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(connection.tenantId, ctx.tenantId), eq(connection.id, conn.id)));
+  await audit(ctx, {
+    action: 'integrations.connection.disconnected',
+    subject: { type: 'connection', id: conn.id },
+    before: { mode: conn.mode, status: conn.status },
+    after: { provider, mode: 'mock', status },
+  });
+  await publish(
+    ctx,
+    connectionChanged,
+    { connectionId: conn.id, provider, mode: 'mock', status, changedBy: ctx.actor.id },
+    { type: 'connection', id: conn.id },
+  );
+}
+
 /** Mode, status and last error for one provider (sample data, not set up when there is no row yet). */
 export async function connectionStatus(
   ctx: ModuleContext,
@@ -413,8 +453,13 @@ export type CallView = {
   errorMessage: string | null;
 };
 
-/** The newest calls to one provider, newest first (at most 200). */
-export async function recentCalls(ctx: ModuleContext, provider: string, limit = 50): Promise<CallView[]> {
+/** The newest calls to one provider, newest first (at most 200); `errorsOnly` keeps the calls that did not work. */
+export async function recentCalls(
+  ctx: ModuleContext,
+  provider: string,
+  limit = 50,
+  opts: { errorsOnly?: boolean } = {},
+): Promise<CallView[]> {
   requireProvider(provider);
   return ctx.tx
     .select({
@@ -427,7 +472,13 @@ export async function recentCalls(ctx: ModuleContext, provider: string, limit = 
       errorMessage: callLog.errorMessage,
     })
     .from(callLog)
-    .where(and(eq(callLog.tenantId, ctx.tenantId), eq(callLog.provider, provider)))
+    .where(
+      and(
+        eq(callLog.tenantId, ctx.tenantId),
+        eq(callLog.provider, provider),
+        opts.errorsOnly ? ne(callLog.outcome, 'ok') : undefined,
+      ),
+    )
     .orderBy(desc(callLog.at), desc(callLog.id))
     .limit(Math.min(Math.max(limit, 1), 200));
 }

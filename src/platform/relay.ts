@@ -183,8 +183,8 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
 }
 
 /** Age in milliseconds of the oldest unsent outbox row, 0 when none. */
-export async function relayLagMs(): Promise<number> {
-  const rows = await adminDb.execute(
+export async function relayLagMs(db: Pick<typeof adminDb, 'execute'> = adminDb): Promise<number> {
+  const rows = await db.execute(
     sql`select coalesce(extract(epoch from (clock_timestamp() - min(created_at))) * 1000, 0)::float8 as lag from platform.outbox where sent_at is null`,
   );
   return Math.max(0, Math.round(Number((rows[0] as { lag: number | string }).lag)));

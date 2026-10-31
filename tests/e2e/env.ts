@@ -1,7 +1,10 @@
 // Shared by playwright.config.ts (web server env) and global-setup.ts (database + seed).
 
 export const E2E_DB = 'scout_e2e';
+/** The backend (Next, serving /v1 and /api). */
 export const E2E_PORT = 4240;
+/** The web-ui Vite dev server the specs drive. It proxies /v1, /api and /healthz to the backend. */
+export const E2E_APP_PORT = 5273;
 
 function withDatabase(url: string, database: string): string {
   const u = new URL(url);

@@ -1,4 +1,7 @@
 import { eq } from 'drizzle-orm';
+import { PLATFORM_TENANT } from './audit';
+import { withTenant, type Tx } from './db/tenant';
+import type { Actor } from './events/envelope';
 import { z } from 'zod';
 import type { ModuleContext } from './context';
 import { adminDb } from './db/client';
@@ -27,10 +30,30 @@ export function sendPing(ctx: ModuleContext): Promise<string> {
 }
 
 /** The handled ping, or null while it has not arrived. */
-export async function pingResult(id: string): Promise<{ sentAt: Date; handledAt: Date } | null> {
-  const [row] = await adminDb
+export async function pingResult(id: string, db: Tx | typeof adminDb = adminDb): Promise<{ sentAt: Date; handledAt: Date } | null> {
+  const [row] = await db
     .select({ sentAt: pingResultTable.sentAt, handledAt: pingResultTable.handledAt })
     .from(pingResultTable)
     .where(eq(pingResultTable.id, id));
   return row ?? null;
+}
+
+/**
+ * Sends a ping through the outbox, relay, NATS and worker under tenant `t_platform`, and waits up
+ * to `timeoutMs` for the answer. Returns the round trip in ms, or null when nothing answered. The ping
+ * is committed on its own; with `tx` (a READ COMMITTED `adminDb` transaction, such as an admin
+ * request's) the answer is read through it, so waiting takes no second admin connection.
+ */
+export async function testEventRoundTrip(
+  by: { actor: Actor; correlationId: string; tx?: Tx },
+  timeoutMs = 10_000,
+): Promise<number | null> {
+  const id = await withTenant(PLATFORM_TENANT, (tx) => sendPing({ tenantId: PLATFORM_TENANT, actor: by.actor, correlationId: by.correlationId, tx }));
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await pingResult(id, by.tx);
+    if (r) return Math.max(0, r.handledAt.getTime() - r.sentAt.getTime());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return null;
 }

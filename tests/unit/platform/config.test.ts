@@ -82,6 +82,11 @@ describe('SCOUT_ENV', () => {
       'AUTH_DEV_SIGNIN must be false in production',
     );
   });
+  it('trusts no proxy hops unless SCOUT_TRUSTED_PROXY_HOPS says so', () => {
+    expect(loadConfig({}).trustedProxyHops).toBe(0);
+    expect(loadConfig({ SCOUT_TRUSTED_PROXY_HOPS: '2' }).trustedProxyHops).toBe(2);
+    expect(() => loadConfig({ SCOUT_TRUSTED_PROXY_HOPS: '-1' })).toThrow('SCOUT_TRUSTED_PROXY_HOPS');
+  });
   it('falls back to NODE_ENV', () => {
     expect(loadConfig(prod).isProduction).toBe(true);
     expect(loadConfig({}).isProduction).toBe(false);

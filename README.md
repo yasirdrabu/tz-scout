@@ -20,8 +20,13 @@ npm run services:local      # Postgres 17 and NATS, no Docker. Leave it running.
 npm run scout -- migrate
 npm run scout -- seed       # prints a development API key for the taazaa tenant
 npm run scout -- all-background   # worker, relay and scheduler (second terminal)
-npm run dev                 # http://localhost:4240 (third terminal)
+npm run dev                 # the backend: /v1 and /api on http://localhost:4240 (third terminal)
+cd web-ui && npm install && npm run dev   # the app: http://localhost:5173 (fourth terminal)
 ```
+
+The screens live in `web-ui/` (React and Vite, its own npm package; see `web-ui/README.md`). Its dev
+server proxies `/v1`, `/api` and `/healthz` to the backend. The backend has no pages of its own: open
+the app on 5173, not 4240.
 
 With Docker instead of `services:local`: `docker compose -f infra/compose/docker-compose.yml up -d`.
 
@@ -56,11 +61,15 @@ curl -X POST http://localhost:4240/v1/arrivals \
 The answer has a `status_url`. Fetch it with the same key until `status` is `resolved` and it shows an `account_id`. With the worker running, read the explained score at `GET /v1/accounts/{account_id}/score` and where it stands at `GET /v1/accounts/{account_id}/status` (it reads "Waiting for review." until a person approves and assigns it).
 
 Check it: `curl -H "Authorization: Bearer <key from seed>" http://localhost:4240/v1/me` returns the tenant.
-Sign in with the developer sign-in form (needs `AUTH_DEV_SIGNIN=true`, never in production). In Admin,
-System, "Send test event" shows the round trip through the outbox, NATS and the worker.
+Open http://localhost:5173 and sign in with developer sign-in (needs `AUTH_DEV_SIGNIN=true` on the backend,
+never in production). In Admin, System health, "Send test event" shows the round trip through the outbox,
+NATS and the worker.
 
 Generate the secrets with `openssl rand -base64 32` (master key) and `openssl rand -hex 32` (auth secret).
 Set `SCOUT_FORCE_MOCK=true` to keep every outside service on its mock.
+Behind a load balancer or reverse proxy, set `SCOUT_TRUSTED_PROXY_HOPS` to the number of proxies that
+append to `X-Forwarded-For` (usually 1). With the default 0 the header is ignored, because a client can
+forge it, and audit entries and API key "last used" record no IP.
 
 ## Tests and checks
 
@@ -68,13 +77,14 @@ Set `SCOUT_FORCE_MOCK=true` to keep every outside service on its mock.
 npm run typecheck
 npm run lint
 npm test          # unit and integration (needs the local services running)
-npm run e2e       # Playwright; starts its own server on 4240 and a throwaway database
+npm run e2e       # Playwright; starts the backend on 4240, the web-ui dev server on 5273 and a throwaway database
+cd web-ui && npm run typecheck && npm run lint && npm test && npm run build   # the app's own checks
 ```
 
 ## Build
 
 ```bash
-npm run build     # Next.js standalone build plus dist/cli.js
+npm run build     # the web-ui app (build in web-ui/; install its packages first with `npm --prefix web-ui ci`), the Next.js standalone build, plus dist/cli.js
 node dist/cli.js <migrate | seed | backfill-r1b | backfill-r1c | worker | relay | scheduler | all-background | web>
 ```
 
@@ -85,6 +95,16 @@ The container image (`infra/docker/`) runs the same CLI; the role is picked by t
 Design and runbook: `docs/spec/architecture/deployment-and-iac.md`. The single VM stack is
 `infra/compose/docker-compose.vm.yml` with Caddy or a Cloudflare Tunnel in front. Hosting is not decided
 yet, so nothing is deployed.
+
+The image serves the web-ui app and the API from one origin (spec W2): the app at `/`, the API at `/v1`,
+sign-in at `/api/auth`, health at `/healthz` and `/readyz`. The app's hashed files under `/assets` cache
+for a year; every other GET (deep links under `/t/...`, `/admin/...`, `/signin`) gets the app's
+`index.html` with `no-cache`. This is interim: the Next server does it through a catch-all route
+(`src/app/[[...app]]/route.ts`) until the HTTP layer moves to Hono.
+
+Local development does not use this: run the app from its Vite dev server (`cd web-ui && npm run dev`,
+port 5173, proxying to the backend on 4240) and sign in with developer sign-in. `npm run build` uses
+the packages already installed in `web-ui/`, so it is safe while the dev server runs.
 
 Notes for the VM:
 
@@ -105,7 +125,7 @@ Notes for the VM:
 ## Code map
 
 `src/platform` (outbox, relay, worker, scheduler, audit), `src/modules/*` (tenancy, integrations, ai),
-`src/app` (Next.js screens and `/v1`), `src/entry` (the `scout` CLI and seed). Modules talk through their
+`src/app` (Next.js route handlers: `/v1`, `/api`, health), `web-ui/` (the app's screens), `src/entry` (the `scout` CLI and seed). Modules talk through their
 public interface; lint enforces the boundaries.
 
 The previous version of this tool (v1) is described in `docs/ARCHITECTURE.md` and the older entries of

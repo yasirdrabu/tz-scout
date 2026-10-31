@@ -3,6 +3,7 @@ import { connect, type NatsConnection } from '@nats-io/transport-node';
 import { config } from '@/platform/config';
 import { jetstreamManager } from '@nats-io/jetstream';
 import { adminDb, appDb } from '@/platform/db/client';
+import type { Tx } from '@/platform/db/tenant';
 import { deadJob, schedule } from '@/platform/db/schema';
 import { STREAMS } from '@/platform/nats/streams';
 import { relayLagMs } from '@/platform/relay';
@@ -69,7 +70,13 @@ export type ScheduleView = {
   lastRunAt: Date | null;
 };
 
-export type ConsumerHealth = { name: string; pending: number; ackPending: number };
+export type ConsumerHealth = {
+  name: string;
+  pending: number;
+  ackPending: number;
+  /** Age of the oldest message the consumer has not finished; null when it has none or it could not be read. */
+  oldestAgeMs: number | null;
+};
 
 export type SystemHealth = {
   relayLagMs: number;
@@ -88,7 +95,14 @@ async function consumerNumbers(url: string): Promise<ConsumerHealth[]> {
     for (const s of STREAMS) {
       try {
         for await (const c of jsm.consumers.list(s.name)) {
-          out.push({ name: c.name, pending: c.num_pending, ackPending: c.num_ack_pending });
+          let oldestAgeMs: number | null = null;
+          if (c.num_pending + c.num_ack_pending > 0) {
+            // The first message on the consumer's subject after everything it has acknowledged.
+            const query = { seq: c.ack_floor.stream_seq + 1, next_by_subj: c.config.filter_subject ?? '>' };
+            const m = await jsm.streams.getMessage(s.name, query as never).catch(() => null);
+            if (m) oldestAgeMs = Math.max(0, Date.now() - m.time.getTime());
+          }
+          out.push({ name: c.name, pending: c.num_pending, ackPending: c.num_ack_pending, oldestAgeMs });
         }
       } catch (e) {
         // A stream that does not exist yet has no consumers.
@@ -104,12 +118,13 @@ async function consumerNumbers(url: string): Promise<ConsumerHealth[]> {
  * What the System page shows: relay lag, queue numbers per consumer, dead jobs and schedules. When NATS
  * does not answer, the database parts still come back and `consumersAvailable` is false.
  */
-export async function systemHealth(opts: { natsUrl?: string } = {}): Promise<SystemHealth> {
+export async function systemHealth(opts: { natsUrl?: string; tx?: Tx } = {}): Promise<SystemHealth> {
   const url = opts.natsUrl ?? config.natsUrl;
+  const db = opts.tx ?? adminDb;
   const [lag, dead, schedules, consumers] = await Promise.all([
-    relayLagMs(),
-    adminDb.select({ n: sql<number>`count(*)::int` }).from(deadJob),
-    adminDb.select().from(schedule).orderBy(schedule.jobName, schedule.tenantId),
+    relayLagMs(db),
+    db.select({ n: sql<number>`count(*)::int` }).from(deadJob),
+    db.select().from(schedule).orderBy(schedule.jobName, schedule.tenantId),
     consumerNumbers(url).then(
       (c) => ({ ok: true as const, c }),
       () => ({ ok: false as const, c: [] as ConsumerHealth[] }),

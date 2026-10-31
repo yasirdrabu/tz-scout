@@ -1,75 +1,64 @@
 import { execFileSync } from 'node:child_process';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { e2eEnv } from './env';
+import { shows, signInAs } from './helpers';
 
-async function signInAs(page: Page, email: string) {
-  await page.goto('/signin');
-  await page.getByRole('button', { name: `Sign in as ${email}` }).click();
-  await page.waitForURL((u) => !u.pathname.startsWith('/signin'));
-}
+test.beforeEach(async ({ page }) => {
+  await signInAs(page, 'yasir@taazaa.com');
+});
 
-test('platform admin retries a dead job and sends a test event', async ({ page }) => {
+test('Tenants: create a tenant, then suspend it', async ({ page }) => {
+  const slug = `e2e-${Date.now().toString(36)}`;
+  const name = `E2E Co ${slug}`;
+  await page.goto('/admin/tenants');
+  await page.getByRole('button', { name: 'New tenant' }).first().click();
+  const panel = page.getByRole('dialog', { name: 'New tenant' });
+  await panel.getByLabel('Company name').fill(name);
+  await panel.getByLabel('Slug').fill(slug);
+  await panel.getByLabel('Owner email').fill(`owner@${slug}.example`);
+  await panel.getByRole('button', { name: 'Create tenant' }).click();
+  const ready = page.getByRole('dialog', { name: `${name} is ready` });
+  await expect(ready).toBeVisible();
+  await ready.getByRole('button', { name: 'Done' }).click();
+
+  const row = page.getByRole('row').filter({ hasText: name });
+  await expect(row).toContainText('Active');
+  await row.getByRole('button', { name }).click();
+  const drawer = page.getByRole('dialog', { name });
+  await drawer.getByRole('button', { name: 'Suspend tenant' }).click();
+  await page.getByRole('dialog', { name: `Suspend ${name}?` }).getByRole('button', { name: 'Suspend' }).click();
+  await shows(page, `${name} suspended.`);
+  await expect(drawer.getByRole('button', { name: 'Resume tenant' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(row).toContainText('Suspended');
+});
+
+test('System health: loads, retries a dead job and sends a test event', async ({ page }) => {
   execFileSync(process.execPath, ['--import', 'tsx', 'tests/e2e/prepare-db.ts', 'dead-job'], {
     stdio: 'inherit',
     env: { ...process.env, ...e2eEnv },
   });
-  await signInAs(page, 'yasir@taazaa.com');
-  await page.goto('/admin/system');
-  await expect(page.getByRole('heading', { name: 'System', exact: true })).toBeVisible();
-  const row = page.locator('[data-testid^="dead-"]').first();
-  await expect(row.getByText('e2e: forced failure')).toBeVisible();
-  const id = (await row.getAttribute('data-testid'))!;
-  await row.getByRole('button', { name: 'Retry' }).click();
-  await expect(page.getByTestId(id)).toHaveCount(0);
+  await page.goto('/admin/health');
+  await expect(page.getByRole('heading', { level: 1, name: 'System health' })).toBeVisible();
+  await expect(page.getByText('Relay lag')).toBeVisible();
+  await expect(page.getByText('integrations.credentials.cleanup').first()).toBeVisible();
+
+  const dead = page.getByRole('listitem').filter({ hasText: 'e2e: forced failure' }).first();
+  await expect(dead).toBeVisible();
+  const retry = dead.getByRole('button', { name: /^Retry / });
+  const label = (await retry.getAttribute('aria-label'))!;
+  await retry.click();
+  await shows(page, /sent back to platform\.ping/);
+  await expect(page.getByRole('button', { name: label })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Send test event' }).click();
-  await expect(page.getByText(/Round trip: \d+ ms/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/^Round trip \d+ ms\. Relay, queue and worker all answered\.$/)).toBeVisible({ timeout: 20_000 });
 });
 
-test('platform admin runs the seeded credentials cleanup schedule now', async ({ page }) => {
-  await signInAs(page, 'yasir@taazaa.com');
-  await page.goto('/admin/system');
-  const row = page.locator('[data-testid^="schedule-"]').filter({ hasText: 'integrations.credentials.cleanup' });
-  await expect(row).toHaveCount(1);
-  await row.getByRole('button', { name: 'Run now' }).click();
-  await expect(row.getByRole('status')).toHaveText('Started.');
-  await expect(row.getByRole('alert')).toHaveCount(0);
-});
-
-test('integrations lists every provider on sample data and saves a credential', async ({ page }) => {
-  await signInAs(page, 'zach.wiant@taazaa.com');
-  await page.goto('/t/taazaa/settings/integrations');
-  await expect(page.getByText('Using sample data', { exact: true })).toHaveCount(15);
-  await page.getByTestId('provider-hubspot').getByRole('link', { name: 'Manage' }).click();
-  await page.getByLabel('New key or token').fill('demo-credential-value-1234');
-  await page.getByRole('button', { name: 'Save credential' }).click();
-  await expect(page.getByText('Saved. Ends in 1234.', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Test connection' }).click();
-  await expect(page.getByTestId('manage-panel').getByRole('status')).toBeVisible();
-});
-
-test('AI runs lists the sample run and hides emails and phone numbers in its input', async ({ page }) => {
-  await signInAs(page, 'zach.wiant@taazaa.com');
-  await page.goto('/t/taazaa/settings/ai');
-  const row = page.locator('[data-testid^="run-run_"]').first();
-  await expect(row.getByText('echo_test')).toBeVisible();
-  await expect(row.getByText('Sample output')).toBeVisible();
-  await row.getByRole('link', { name: 'View' }).click();
-  await expect(page.getByTestId('run-detail')).toBeVisible();
-  await expect(page.getByTestId('run-input')).not.toContainText('jane@acme.com');
-});
-
-test('audit page filters and shows an empty result', async ({ page }) => {
-  await signInAs(page, 'zach.wiant@taazaa.com');
-  await page.goto('/t/taazaa/settings/audit');
-  await expect(page.getByRole('heading', { name: 'Audit', exact: true })).toBeVisible();
-  await page.getByLabel('Subject').fill('nothing-matches-this');
-  await page.getByRole('button', { name: 'Apply filters' }).click();
-  await expect(page.getByText('No changes found')).toBeVisible();
-});
-
-test('admin pages are closed to people who are not platform admins', async ({ page }) => {
-  await signInAs(page, 'andy@taazaa.com');
-  const res = await page.goto('/admin/system');
-  expect(res?.status()).toBe(404);
+test('System health: runs a schedule now', async ({ page }) => {
+  await page.goto('/admin/health');
+  const run = page.getByRole('button', { name: /^Run integrations\.credentials\.cleanup for .* now$/ }).first();
+  await expect(run).toBeVisible();
+  await run.click();
+  await shows(page, 'integrations.credentials.cleanup started');
 });

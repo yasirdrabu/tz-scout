@@ -8,14 +8,28 @@ const run = (arg: string) =>
     env: { ...process.env, ...e2eEnv },
   });
 
-/** Routes the specs visit first. next dev compiles a route on its first request, so we pay that here. */
-const WARM_ROUTES = ['/signin', '/t/taazaa', '/admin/system'];
+/**
+ * Backend routes the specs call first. next dev compiles a route on its first request, so we pay that
+ * here (a 401 is fine: the route still compiles).
+ */
+const WARM_ROUTES = [
+  `http://localhost:${E2E_PORT}/v1/auth/config`,
+  `http://localhost:${E2E_PORT}/v1/dev/users`,
+  `http://localhost:${E2E_PORT}/v1/me`,
+  `http://localhost:${E2E_PORT}/v1/me/counts`,
+  `http://localhost:${E2E_PORT}/v1/members`,
+  `http://localhost:${E2E_PORT}/v1/integrations`,
+  `http://localhost:${E2E_PORT}/v1/api-keys`,
+  `http://localhost:${E2E_PORT}/v1/audit`,
+  `http://localhost:${E2E_PORT}/v1/admin/tenants`,
+  `http://localhost:${E2E_PORT}/v1/admin/health`,
+];
 
-/** Requests each route once (redirects are fine: the route still compiles). The web server is already up. */
+/** Requests each route once. The web servers are already up. */
 async function warmRoutes(): Promise<void> {
   for (const route of WARM_ROUTES) {
     try {
-      await fetch(`http://localhost:${E2E_PORT}${route}`, { redirect: 'manual', signal: AbortSignal.timeout(120_000) });
+      await fetch(route, { redirect: 'manual', signal: AbortSignal.timeout(120_000) });
     } catch (e) {
       console.warn(`warm-up of ${route} failed: ${(e as Error).message}`);
     }
@@ -35,7 +49,7 @@ export default async function globalSetup() {
     run('drop');
     throw e;
   }
-  // Playwright starts the web server before global setup, so it is up by now.
+  // Playwright starts the web servers before global setup, so they are up by now.
   await warmRoutes();
   return async () => {
     await background.stop();

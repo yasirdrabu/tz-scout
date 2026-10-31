@@ -27,6 +27,8 @@ export type Config = {
    */
   azureAd?: { tenantId: string; clientId: string; clientSecret: string; allowedTenantIds: string[] };
   publicUrl: string;
+  /** Proxies in front of Scout that append to `X-Forwarded-For`; 0 ignores the header (the client could forge it). */
+  trustedProxyHops: number;
 };
 
 const bool = z
@@ -55,6 +57,7 @@ const schema = z.object({
   AZURE_AD_CLIENT_SECRET: z.string().min(1).optional(),
   AZURE_AD_ALLOWED_TENANT_IDS: z.string().optional(),
   APP_PUBLIC_URL: z.string().min(1).optional(),
+  SCOUT_TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
 });
 
 function parseKey(name: string, value: string | undefined): Buffer | undefined {
@@ -134,6 +137,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     forceMock: e.SCOUT_FORCE_MOCK,
     azureAd,
     publicUrl: e.APP_PUBLIC_URL ?? 'http://localhost:4240',
+    trustedProxyHops: e.SCOUT_TRUSTED_PROXY_HOPS,
   };
 }
 

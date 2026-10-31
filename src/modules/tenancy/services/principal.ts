@@ -1,14 +1,16 @@
 import { and, eq, sql } from 'drizzle-orm';
+import { config } from '@/platform/config';
 import { adminDb } from '@/platform/db/client';
 import { log } from '@/platform/log';
 import { SESSION_MAX_SECONDS, SESSION_UPDATE_AGE_SECONDS, auth } from '../auth';
 import type { Principal } from '../contracts/principal';
 import type { Role } from '../contracts/members';
+import { forwardedClientIp } from '../domain/client-ip';
 import { DataLimitSchema, defaultDataLimit, type DataLimit } from '../domain/data-limit';
 import { PERMISSIONS, isPermission, permissionsFor } from '../domain/permissions';
 import { membership, session, tenant, user } from '../db/schema';
 import { landingPathFor } from './sign-in';
-import { authenticateKey, setKeyCacheTtl } from './api-keys';
+import { authenticateKey, forgetTenantKeys, setKeyCacheTtl } from './api-keys';
 
 /** A session with no activity for this long is over (global constraint: 12 hours). */
 export const SESSION_IDLE_MS = 12 * 3600_000;
@@ -32,6 +34,19 @@ export function setPrincipalCacheTtl(ms: number): void {
   ttlMs = Math.min(Math.max(ms, 0), 60_000);
   cache.clear();
   setKeyCacheTtl(ms);
+}
+
+/**
+ * Drops this instance's cached access for a tenant (suspended or resumed) and its keys, or for a
+ * person (platform admin flag changed). Other instances catch up within 60 seconds.
+ */
+export function forgetAccess(by: { tenantId?: string; userId?: string }): void {
+  for (const [k, v] of cache) {
+    if ((by.tenantId && v.value?.tenantId === by.tenantId) || (by.userId && k.startsWith(`${by.userId}\u0000`))) {
+      cache.delete(k);
+    }
+  }
+  if (by.tenantId) forgetTenantKeys(by.tenantId);
 }
 
 async function loadAccess(userId: string, tenantSlug: string): Promise<Access | null> {
@@ -144,9 +159,12 @@ export async function sessionPrincipal(headers: Headers, tenantSlug: string): Pr
   return principal;
 }
 
-function clientIp(req: Request): string | null {
-  const forwarded = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return forwarded || req.headers.get('x-real-ip') || null;
+/**
+ * The caller's IP address from `X-Forwarded-For`, trusting only `SCOUT_TRUSTED_PROXY_HOPS` proxies
+ * (null with the default 0: the client could forge the header).
+ */
+export function clientIp(req: Request): string | null {
+  return forwardedClientIp(req.headers.get('x-forwarded-for'), config.trustedProxyHops);
 }
 
 /**
@@ -173,19 +191,27 @@ export async function resolvePrincipal(req: Request, tenantSlug?: string): Promi
   return sessionPrincipal(req.headers, slug);
 }
 
-export type SessionUser = { userId: string; name: string; email: string; platformAdmin: boolean };
+export type SessionUser = { userId: string; name: string; email: string; platformAdmin: boolean; sessionId: string };
 
 /** The signed-in person regardless of tenant (same idle and age rules), or null. */
 export async function sessionUser(headers: Headers): Promise<SessionUser | null> {
   const found = await auth.api.getSession({ headers, query: { disableRefresh: true } });
   if (!found) return null;
   const now = Date.now();
-  if (now - new Date(found.session.updatedAt).getTime() > SESSION_IDLE_MS) return null;
+  const lastActive = new Date(found.session.updatedAt).getTime();
+  if (now - lastActive > SESSION_IDLE_MS) return null;
   if (now - new Date(found.session.createdAt).getTime() > SESSION_MAX_SECONDS * 1000) return null;
   const [u] = await adminDb
     .select({ id: user.id, name: user.name, email: user.email, platformAdmin: user.platformAdmin, disabledAt: user.disabledAt })
     .from(user)
     .where(eq(user.id, found.user.id));
   if (!u || u.disabledAt) return null;
-  return { userId: u.id, name: u.name, email: u.email, platformAdmin: u.platformAdmin };
+  // Record activity as sessionPrincipal does, so pages with no tenant keep the idle clock going too.
+  if (now - lastActive > SESSION_UPDATE_AGE_SECONDS * 1000) {
+    await adminDb
+      .update(session)
+      .set({ updatedAt: sql`now()` })
+      .where(eq(session.id, found.session.id));
+  }
+  return { userId: u.id, name: u.name, email: u.email, platformAdmin: u.platformAdmin, sessionId: found.session.id };
 }

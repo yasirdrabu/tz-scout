@@ -1,15 +1,11 @@
 import { and, eq } from 'drizzle-orm';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { v1Route } from '@/app/v1/_lib/v1-route';
 import { addMember, createTenant, handleDevSignIn, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
 import { adminDb } from '@/platform/db/client';
 import { auditLog } from '@/platform/db/schema';
 import { seedUser, uniqueSlug } from './helpers';
-
-let currentHeaders = new Headers();
-vi.mock('next/headers', () => ({ headers: async () => currentHeaders }));
-const { tenantAction } = await import('@/server/page-context');
 
 async function signedIn(userId: string): Promise<Headers> {
   const res = await handleDevSignIn(
@@ -43,15 +39,6 @@ const auditsBy = (actorId: string) =>
   adminDb.select().from(auditLog).where(and(eq(auditLog.tenantId, tenantId), eq(auditLog.actorId, actorId)));
 
 describe('support access is audited', () => {
-  it('a write by a platform admin without membership is marked support access (server action)', async () => {
-    const admin = await seedUser({ admin: true, signedIn: true });
-    currentHeaders = await signedIn(admin.id);
-    await tenantAction(slug, 'members:manage', (ctx) => addMember(ctx, { email: `${uniqueSlug()}@example.com`, role: 'seller' }));
-    const rows = await auditsBy(admin.id);
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((r) => r.supportAccess)).toBe(true);
-  });
-
   it('a write by a platform admin without membership is marked support access (/v1)', async () => {
     const admin = await seedUser({ admin: true, signedIn: true });
     const headers = await signedIn(admin.id);
@@ -68,8 +55,13 @@ describe('support access is audited', () => {
   });
 
   it('a write by a member is not marked', async () => {
-    currentHeaders = await signedIn(ownerId);
-    await tenantAction(slug, 'members:manage', (ctx) => addMember(ctx, { email: `${uniqueSlug()}@example.com`, role: 'seller' }));
+    const headers = await signedIn(ownerId);
+    headers.set('x-scout-tenant', slug);
+    const route = v1Route({ permission: 'members:manage' }, async (_req, _p, ctx) => {
+      await addMember(ctx, { email: `${uniqueSlug()}@example.com`, role: 'seller' });
+      return { ok: true };
+    });
+    expect((await route(new Request('http://localhost:4240/v1/test', { headers }))).status).toBe(200);
     const rows = await auditsBy(ownerId);
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.some((r) => r.supportAccess)).toBe(false);

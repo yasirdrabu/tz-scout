@@ -1,0 +1,50 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
+  background: var(--ink-100);
+  color: var(--text-soft);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.icon {
+  display: inline-flex;
+}
+
+.icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -4px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.remove:hover {
+  background: var(--ink-200);
+  color: var(--text);
+}
+
+.remove:focus-visible {
+  box-shadow: var(--ring);
+}
+
+.remove svg {
+  width: 12px;
+  height: 12px;
+}
