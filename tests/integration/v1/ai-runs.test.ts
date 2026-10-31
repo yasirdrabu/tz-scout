@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as adminRuns } from '@/app/v1/admin/ai-runs/route';
 import { GET as adminRun } from '@/app/v1/admin/ai-runs/[id]/route';
@@ -117,6 +118,24 @@ describe('GET /v1/admin/ai-runs', () => {
     const second = await get(`limit=3&cursor=${first.next_cursor}`);
     expect(idsOf(second)).toEqual([ids.a_ok]);
     expect(second.next_cursor).toBeNull();
+  });
+
+  it('pages through runs with equal and sub-millisecond times without losing or repeating any', async () => {
+    const fine = `${task}_fine`;
+    const times = ['2026-01-01 00:00:00.000300+00', '2026-01-01 00:00:00.000300+00', '2026-01-01 00:00:00.000200+00', '2026-01-01 00:00:00.000100+00', '2026-01-01 00:00:00+00'];
+    for (const at of times) await run(alpha.tenantId, newId('cor'), 'ok', { task: fine, createdAt: sql`${at}::timestamptz` as never });
+    const get = async (qs: string) => (await (await adminRuns(v1Req(`/admin/ai-runs?task=${fine}&${qs}`, as(admin)))).json());
+    const all = idsOf(await get('limit=200'));
+    expect(all).toHaveLength(5);
+    const paged: string[] = [];
+    let cursor = '';
+    for (let i = 0; i < 6; i++) {
+      const page = await get(`limit=2${cursor ? `&cursor=${cursor}` : ''}`);
+      paged.push(...idsOf(page));
+      if (!page.next_cursor) break;
+      cursor = page.next_cursor;
+    }
+    expect(paged).toEqual(all);
   });
 
   it('gives 400 for a bad status, limit or cursor', async () => {

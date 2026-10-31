@@ -6,13 +6,14 @@ import { adminRoute } from '../../_lib/v1-route';
 
 export const dynamic = 'force-dynamic';
 
-/** The (created at, id) a cursor carries; a cursor without them is a 400. */
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d{1,6})?([+-]\d{2}(:?\d{2})?|Z)$/;
+
+/** The (created at as Postgres text, id) a cursor carries; a cursor without them is a 400. */
 function afterParam(raw: string | null) {
   const c = decodeCursor(raw);
   if (!c) return undefined;
-  const createdAt = typeof c.at === 'string' ? new Date(c.at) : null;
-  if (!createdAt || Number.isNaN(createdAt.getTime()) || typeof c.id !== 'string') decodeCursor('!');
-  return { createdAt: createdAt!, id: c.id as string };
+  if (typeof c.at !== 'string' || !TIMESTAMP.test(c.at) || typeof c.id !== 'string') decodeCursor('!');
+  return { at: c.at as string, id: c.id as string };
 }
 
 /**
@@ -32,7 +33,7 @@ export const GET = adminRoute({}, async (req, _person, { tx }) => {
     after: afterParam(p.get('cursor')),
     limit: limit + 1,
   });
-  const { items, nextCursor } = page(rows, limit, (r) => ({ at: r.createdAt.toISOString(), id: r.id }));
+  const { items, nextCursor } = page(rows, limit, (r) => ({ at: r.atText, id: r.id }));
   const names = new Map((await listTenants()).map((t) => [t.id, t.name]));
   return {
     data: items.map((r) => ({ ...runRow(r), tenantName: names.get(r.tenantId) ?? null })),

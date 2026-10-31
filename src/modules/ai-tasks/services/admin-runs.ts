@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ilike, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, gte, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Tx } from '@/platform/db/tenant';
 import { aiRun } from '../db/schema';
 import { rawStatuses, type RunStatus } from '../domain/run-status';
@@ -14,15 +14,15 @@ export type AllRunsQuery = {
   status?: RunStatus;
   task?: string;
   tenantId?: string;
-  /** Rows strictly older than this (created at, id), newest first. */
-  after?: { createdAt: Date; id: string };
+  /** Rows strictly older than this (created at as Postgres text, so microseconds survive; id), newest first. */
+  after?: { at: string; id: string };
   limit: number;
 };
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
-/** Up to `limit` runs, newest first, across every tenant. */
-export async function allRuns(tx: Tx, f: AllRunsQuery): Promise<AiRunRow[]> {
+/** Up to `limit` runs, newest first, across every tenant. `atText` is `created_at` as Postgres text, for a cursor. */
+export async function allRuns(tx: Tx, f: AllRunsQuery): Promise<(AiRunRow & { atText: string })[]> {
   const text = f.q?.trim();
   const like = text ? `%${escapeLike(text)}%` : undefined;
   const conditions: (SQL | undefined)[] = [
@@ -32,12 +32,10 @@ export async function allRuns(tx: Tx, f: AllRunsQuery): Promise<AiRunRow[]> {
     like
       ? or(ilike(aiRun.id, like), ilike(aiRun.task, like), ilike(sql`${aiRun.inputRef}->'subject'->>'id'`, like))
       : undefined,
-    f.after
-      ? or(lt(aiRun.createdAt, f.after.createdAt), and(eq(aiRun.createdAt, f.after.createdAt), lt(aiRun.id, f.after.id)))
-      : undefined,
+    f.after ? sql`(${aiRun.createdAt}, ${aiRun.id}) < (${f.after.at}::timestamptz, ${f.after.id})` : undefined,
   ];
   return tx
-    .select()
+    .select({ ...getTableColumns(aiRun), atText: sql<string>`${aiRun.createdAt}::text` })
     .from(aiRun)
     .where(and(...conditions))
     .orderBy(desc(aiRun.createdAt), desc(aiRun.id))
