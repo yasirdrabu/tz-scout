@@ -59,6 +59,7 @@ describe('GET /v1/admin/tenants', () => {
     expect(Date.parse(row.created_at)).not.toBeNaN();
     expect(body.summary.active).toBeGreaterThanOrEqual(1);
     expect(typeof body.summary.suspended).toBe('number');
+    expect(body.summary.total).toBe(body.data.length);
   });
 
   it('refuses a tenant owner, an API key and anonymous callers', async () => {

@@ -23,12 +23,13 @@ const createBody = z.strictObject({
   timezone: z.string().trim().refine(validTimezone, 'Use a timezone such as America/New_York.').default('America/New_York'),
 });
 
-/** Every tenant, newest first, with member count, owner and the active and suspended totals. */
+/** Every tenant, newest first, with member count, owner and the total, active and suspended counts. */
 export const GET = adminRoute({}, async (_req, _person, { tx }) => {
   const data = await adminTenants(tx);
   return {
     data,
     summary: {
+      total: data.length,
       active: data.filter((t) => t.status === 'active').length,
       suspended: data.filter((t) => t.status === 'suspended').length,
     },
