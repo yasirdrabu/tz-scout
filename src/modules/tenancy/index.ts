@@ -41,11 +41,14 @@ export { personSummary, setLastWorkspace, workspacesFor, type Workspace } from '
 export {
   inviteMembers,
   memberList,
+  memberCounts,
   reactivateMember,
   signOutMemberEverywhere,
   suspendMember,
   type InviteResult,
   type MemberRow,
+  type MemberCounts,
+  type MemberLock,
 } from './services/members';
 export { PERMISSION_GROUP_NAMES, permissionGroup, type PermissionGroup } from './domain/permission-labels';
 export { KEY_ACCESS, KEY_ACCESS_CHOICES, type KeyAccess } from './domain/key-access';

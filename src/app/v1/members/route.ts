@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { openAssignmentCounts } from '@/modules/routing';
-import { DataLimitSchema, ROLES, inviteMembers, memberList, type DataLimit, type Role } from '@/modules/tenancy';
+import { DataLimitSchema, ROLES, inviteMembers, memberCounts, memberList, type DataLimit, type Role } from '@/modules/tenancy';
 import { config } from '@/platform/config';
 import { parseBody } from '../_lib/body';
 import { requireMembersRead } from '../_lib/members';
@@ -8,11 +8,13 @@ import { v1Route } from '../_lib/v1-route';
 
 export const dynamic = 'force-dynamic';
 
-// Invited, active and suspended members with sign-in facts, practice access and their open accounts.
+// Invited, active and suspended members with sign-in facts, practice access, their open accounts and
+// what the caller may do to each; `counts` per status and active members per sign-in method.
 export const GET = v1Route({}, async (_req, principal, ctx) => {
   requireMembersRead(principal);
   const open = await openAssignmentCounts(ctx);
-  return { data: (await memberList(ctx)).map((m) => ({ ...m, openAccountCount: open[m.userId] ?? 0 })) };
+  const rows = await memberList(ctx);
+  return { data: rows.map((m) => ({ ...m, openAccountCount: open[m.userId] ?? 0 })), counts: memberCounts(rows) };
 });
 
 const inviteBody = z.strictObject({

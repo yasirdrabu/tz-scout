@@ -8,7 +8,7 @@ import { newId } from '@/platform/ids';
 import { memberAdded, memberRemoved, memberRoleChanged } from '../contracts/events';
 import { ROLES, CRM_OWNER_TAKEN, type DataLimit, type Member, type MembershipStatus, type Role } from '../contracts/members';
 import { DEFAULT_DATA_LIMIT, DataLimitSchema, isWithin } from '../domain/data-limit';
-import { memberActionRefusal, type MemberAction } from '../domain/member-rules';
+import { memberActionRefusal, type MemberAction, type MemberActor, type MemberRefusal } from '../domain/member-rules';
 import { PERMISSIONS, isPermission, permissionsFor, type Permission } from '../domain/permissions';
 import { membership, tenant, user } from '../db/schema';
 import { endSessions, signInFacts, type SignInMethod } from './sessions';
@@ -26,12 +26,20 @@ const SELF: Record<MemberAction, string> = {
   change_permissions: "You can't change your own permissions.",
   suspend: "You can't suspend yourself.",
   remove: "You can't remove yourself.",
+  sign_out: '',
 };
 
+/** The rules' view of the context's actor. */
+async function ruleActor(ctx: ModuleContext): Promise<MemberActor> {
+  const powers = await actorPowers(ctx);
+  return { userId: ctx.actor.id, makesOwners: powers.makesOwners, platformAdmin: powers.platformAdmin };
+}
+
 /** Throws when the member rules refuse `action` on `m` by the context's actor. */
-function assertAllowed(ctx: ModuleContext, action: MemberAction, m: typeof membership.$inferSelect): void {
-  const target = { userId: m.userId, role: m.role as Role, status: m.status as MembershipStatus };
-  const refusal = memberActionRefusal(action, ctx.actor.id, target);
+async function assertAllowed(ctx: ModuleContext, action: MemberAction, m: typeof membership.$inferSelect): Promise<void> {
+  const [u] = await ctx.tx.select({ platformAdmin: user.platformAdmin }).from(user).where(eq(user.id, m.userId));
+  const target = { userId: m.userId, role: m.role as Role, status: m.status as MembershipStatus, platformAdmin: !!u?.platformAdmin };
+  const refusal = memberActionRefusal(action, await ruleActor(ctx), target);
   if (refusal === 'self') throw new ScoutError({ slug: 'not-yourself', status: 403, title: SELF[action] });
   if (refusal === 'owner') {
     throw new ScoutError({
@@ -40,23 +48,36 @@ function assertAllowed(ctx: ModuleContext, action: MemberAction, m: typeof membe
       title: "Owners can't be suspended or removed. Change their role first.",
     });
   }
+  if (refusal === 'owners_only') {
+    if (action === 'sign_out') {
+      throw new ScoutError({ slug: 'owners-only', status: 403, title: 'Only an owner can sign an owner out everywhere.' });
+    }
+    throw ownersOnly();
+  }
+  if (refusal === 'platform_admin') {
+    throw new ScoutError({
+      slug: 'platform-admin-protected',
+      status: 403,
+      title: 'Only a platform admin can sign a platform admin out everywhere.',
+    });
+  }
 }
 
 /**
  * What the actor may hand out: owners and platform admins (and the platform itself) may make owners
  * and give any role. `dataLimit` is the actor's own (null: nothing can be given).
  */
-type Powers = { makesOwners: boolean; permissions: readonly Permission[]; dataLimit: DataLimit | null };
+type Powers = { makesOwners: boolean; platformAdmin: boolean; permissions: readonly Permission[]; dataLimit: DataLimit | null };
 
 const EVERYTHING: DataLimit = { kind: 'all' };
 
 /** The actor's own powers in this tenant, read fresh: nobody grants more than they hold. */
 async function actorPowers(ctx: ModuleContext): Promise<Powers> {
-  const none: Powers = { makesOwners: false, permissions: [], dataLimit: null };
-  if (ctx.actor.kind === 'system') return { makesOwners: true, permissions: PERMISSIONS, dataLimit: EVERYTHING };
+  const none: Powers = { makesOwners: false, platformAdmin: false, permissions: [], dataLimit: null };
+  if (ctx.actor.kind === 'system') return { makesOwners: true, platformAdmin: true, permissions: PERMISSIONS, dataLimit: EVERYTHING };
   if (ctx.actor.kind !== 'user') return none;
   const [u] = await ctx.tx.select({ platformAdmin: user.platformAdmin }).from(user).where(eq(user.id, ctx.actor.id));
-  if (u?.platformAdmin) return { makesOwners: true, permissions: PERMISSIONS, dataLimit: EVERYTHING };
+  if (u?.platformAdmin) return { makesOwners: true, platformAdmin: true, permissions: PERMISSIONS, dataLimit: EVERYTHING };
   // Invited counts too: no request reaches here from an invited membership (a principal needs an
   // active one), but in-process callers such as a new tenant's invited owner still act.
   const [m] = await ctx.tx
@@ -73,6 +94,7 @@ async function actorPowers(ctx: ModuleContext): Promise<Powers> {
   const role = m.role as Role;
   return {
     makesOwners: role === 'owner',
+    platformAdmin: false,
     permissions: permissionsFor(role, (m.extra ?? []).filter(isPermission), false),
     dataLimit: effectiveLimit(role, m.dataLimit),
   };
@@ -272,7 +294,7 @@ export async function addMember(
 export async function removeMember(ctx: ModuleContext, membershipId: string): Promise<void> {
   await lockTenant(ctx, 'owners');
   const m = await load(ctx, membershipId);
-  assertAllowed(ctx, 'remove', m);
+  await assertAllowed(ctx, 'remove', m);
   if (await isLastActiveOwner(ctx, m)) throw lastOwner();
   await ctx.tx
     .update(membership)
@@ -314,8 +336,8 @@ export async function changeMember(
   const added = (change.extraPermissions ?? []).filter((p) => !current.has(p)) as Permission[];
   const extrasChange =
     change.extraPermissions !== undefined && (added.length > 0 || new Set(change.extraPermissions).size !== current.size);
-  if (roleChanges) assertAllowed(ctx, 'change_role', m);
-  if (extrasChange) assertAllowed(ctx, 'change_permissions', m);
+  if (roleChanges) await assertAllowed(ctx, 'change_role', m);
+  if (extrasChange) await assertAllowed(ctx, 'change_permissions', m);
   const newRole = (change.role ?? m.role) as Role;
   const limitBefore = effectiveLimit(m.role as Role, m.dataLimit);
   const limitAfter = effectiveLimit(newRole, change.dataLimit === undefined ? m.dataLimit : change.dataLimit);
@@ -514,12 +536,26 @@ export type MemberRow = {
   dataLimit: DataLimit | null;
   crmOwnerIds: Record<string, string>;
   extraPermissions: Permission[];
+  /** What the caller may do to this member; `lockReasons` says why not (null where allowed). */
+  canChangeRole: boolean;
+  canSuspend: boolean;
+  canRemove: boolean;
+  canSignOut: boolean;
+  lockReasons: Record<'changeRole' | 'suspend' | 'remove' | 'signOut', MemberLock | null>;
 };
 
-/** Invited, active and suspended members by name, with sign-in facts; or just `membershipId` (404 when not one). */
+/** Why the caller may not act on a member: the member rules, the only active owner, or no `members:manage`. */
+export type MemberLock = MemberRefusal | 'last_owner' | 'no_permission';
+
+const LOCKED_ACTIONS = { changeRole: 'change_role', suspend: 'suspend', remove: 'remove', signOut: 'sign_out' } as const;
+
+/**
+ * Invited, active and suspended members by name, with sign-in facts and what the caller may do to
+ * each (from the caller's own powers); or just `membershipId` (404 when not one).
+ */
 export async function memberList(ctx: ModuleContext, membershipId?: string): Promise<MemberRow[]> {
   const rows = await ctx.tx
-    .select({ m: membership, name: user.name, email: user.email })
+    .select({ m: membership, name: user.name, email: user.email, platformAdmin: user.platformAdmin })
     .from(membership)
     .innerJoin(user, eq(user.id, membership.userId))
     .where(
@@ -532,9 +568,25 @@ export async function memberList(ctx: ModuleContext, membershipId?: string): Pro
     .orderBy(asc(user.name), asc(user.email));
   if (membershipId && rows.length === 0) throw notFound();
   const facts = await signInFacts(ctx.tx, rows.map((r) => r.m.userId));
-  return rows.map(({ m, name, email }) => {
+  const powers = await actorPowers(ctx);
+  const actor: MemberActor = { userId: ctx.actor.id, makesOwners: powers.makesOwners, platformAdmin: powers.platformAdmin };
+  const manages = powers.permissions.includes('members:manage');
+  const [owners] = await ctx.tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(membership)
+    .where(and(eq(membership.tenantId, ctx.tenantId), eq(membership.role, 'owner'), eq(membership.status, 'active')));
+  return rows.map(({ m, name, email, platformAdmin }) => {
     const limit = m.dataLimit === null ? null : DataLimitSchema.safeParse(m.dataLimit);
     const f = facts.get(m.userId);
+    const target = { userId: m.userId, role: m.role as Role, status: m.status as MembershipStatus, platformAdmin };
+    const onlyOwner = target.role === 'owner' && target.status === 'active' && (owners?.n ?? 0) <= 1;
+    const lock = (key: keyof typeof LOCKED_ACTIONS): MemberLock | null => {
+      if (!manages) return 'no_permission';
+      const refusal = memberActionRefusal(LOCKED_ACTIONS[key], actor, target);
+      if (refusal) return refusal;
+      return key === 'changeRole' && onlyOwner ? 'last_owner' : null;
+    };
+    const lockReasons = { changeRole: lock('changeRole'), suspend: lock('suspend'), remove: lock('remove'), signOut: lock('signOut') };
     return {
       id: m.id,
       userId: m.userId,
@@ -547,8 +599,34 @@ export async function memberList(ctx: ModuleContext, membershipId?: string): Pro
       dataLimit: limit && limit.success ? limit.data : null,
       crmOwnerIds: (m.crmOwnerIds ?? {}) as Record<string, string>,
       extraPermissions: (m.extraPermissions ?? []).filter(isPermission),
+      canChangeRole: !lockReasons.changeRole,
+      canSuspend: !lockReasons.suspend,
+      canRemove: !lockReasons.remove,
+      canSignOut: !lockReasons.signOut,
+      lockReasons,
     };
   });
+}
+
+export type MemberCounts = {
+  all: number;
+  active: number;
+  invited: number;
+  suspended: number;
+  activeBySignInMethod: { microsoft: number; dev: number };
+};
+
+/** The Members screen's numbers: members per status, and active members per sign-in method. */
+export function memberCounts(rows: MemberRow[]): MemberCounts {
+  const n = (keep: (m: MemberRow) => boolean) => rows.filter(keep).length;
+  const active = (method: SignInMethod) => n((m) => m.status === 'active' && m.signInMethod === method);
+  return {
+    all: rows.length,
+    active: n((m) => m.status === 'active'),
+    invited: n((m) => m.status === 'invited'),
+    suspended: n((m) => m.status === 'suspended'),
+    activeBySignInMethod: { microsoft: active('microsoft'), dev: active('dev') },
+  };
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -604,7 +682,7 @@ async function setStatus(
 ): Promise<void> {
   await lockTenant(ctx, 'owners');
   const m = await load(ctx, membershipId);
-  if (to === 'suspended') assertAllowed(ctx, 'suspend', m);
+  if (to === 'suspended') await assertAllowed(ctx, 'suspend', m);
   if (m.status !== from) {
     throw new ScoutError({
       slug: to === 'suspended' ? 'not-active' : 'not-suspended',
@@ -634,9 +712,14 @@ export async function reactivateMember(ctx: ModuleContext, membershipId: string)
   await setStatus(ctx, membershipId, 'suspended', 'active');
 }
 
-/** Ends every session of the member's person: on every device and in every workspace. */
+/**
+ * Ends every session of the member's person: on every device and in every workspace. Sessions are
+ * platform-wide, so only someone who makes owners signs out an owner, and only a platform admin
+ * signs out a platform admin.
+ */
 export async function signOutMemberEverywhere(ctx: ModuleContext, membershipId: string): Promise<void> {
   const m = await load(ctx, membershipId);
+  await assertAllowed(ctx, 'sign_out', m);
   const ended = await endSessions(ctx.tx, m.userId);
   await audit(ctx, {
     action: 'tenancy.member.signed_out_everywhere',

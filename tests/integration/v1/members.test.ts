@@ -79,6 +79,83 @@ describe('GET /v1/members', () => {
     expect(inv).toMatchObject({ status: 'invited', sign_in_method: null, last_active_at: null, open_account_count: 0 });
   });
 
+  it('counts members per status and active members per sign-in method', async () => {
+    const { data, counts } = await (await listMembers(as(owner, '/members'))).json();
+    const n = (st: string) => data.filter((m: { status: string }) => m.status === st).length;
+    expect(counts).toEqual({
+      all: data.length,
+      active: n('active'),
+      invited: n('invited'),
+      suspended: n('suspended'),
+      active_by_sign_in_method: {
+        microsoft: data.filter((m: { status: string; sign_in_method: string }) => m.status === 'active' && m.sign_in_method === 'microsoft').length,
+        dev: data.filter((m: { status: string; sign_in_method: string }) => m.status === 'active' && m.sign_in_method === 'dev').length,
+      },
+    });
+    expect(counts.active_by_sign_in_method.dev).toBeGreaterThanOrEqual(3);
+  });
+
+  it("says per member what the caller may do, from the caller's powers", async () => {
+    const flags = (m: Record<string, unknown>) => ({
+      can_change_role: m.can_change_role,
+      can_suspend: m.can_suspend,
+      can_remove: m.can_remove,
+      can_sign_out: m.can_sign_out,
+      lock_reasons: m.lock_reasons,
+    });
+    const byId = async (p: Person) => {
+      const { data } = await (await listMembers(as(p, '/members'))).json();
+      return (id: string) => flags(data.find((m: { id: string }) => m.id === id));
+    };
+    const asOwner = await byId(owner);
+    expect(asOwner(ids[seller.id]!)).toEqual({
+      can_change_role: true,
+      can_suspend: true,
+      can_remove: true,
+      can_sign_out: true,
+      lock_reasons: { change_role: null, suspend: null, remove: null, sign_out: null },
+    });
+    expect(asOwner(ids[owner.id]!)).toEqual({
+      can_change_role: false,
+      can_suspend: false,
+      can_remove: false,
+      can_sign_out: true,
+      lock_reasons: { change_role: 'self', suspend: 'self', remove: 'self', sign_out: null },
+    });
+    // A leader reads members but cannot manage them.
+    expect((await byId(leader))(ids[seller.id]!)).toEqual({
+      can_change_role: false,
+      can_suspend: false,
+      can_remove: false,
+      can_sign_out: false,
+      lock_reasons: { change_role: 'no_permission', suspend: 'no_permission', remove: 'no_permission', sign_out: 'no_permission' },
+    });
+  });
+
+  it('flags the only active owner, an owner for a non-owner manager, and a platform admin', async () => {
+    const t2 = await tenantOwnedBy(admin, owner.email);
+    const asOwner2 = (path: string) => v1Req(path, { cookies: cookies[owner.id], tenant: t2.slug });
+    const only = (await (await listMembers(asOwner2('/members'))).json()).data.find((m: { id: string }) => m.id === t2.ownerMembershipId);
+    expect(only.lock_reasons.change_role).toBe('self');
+    const adminCookies = await signedIn(admin.id);
+    const seenByAdmin = (await (await listMembers(v1Req('/members', { cookies: adminCookies, tenant: t2.slug }))).json()).data;
+    expect(seenByAdmin.find((m: { id: string }) => m.id === t2.ownerMembershipId).lock_reasons.change_role).toBe('last_owner');
+
+    const mgr = await seedUser({ signedIn: true });
+    const mgrId = await inTenant(t2.tenantId, owner.actor, (ctx) => addMember(ctx, { email: mgr.email, role: 'leader' }));
+    await adminDb.update(membership).set({ extraPermissions: ['members:manage'] }).where(eq(membership.id, mgrId));
+    const pa = await seedUser({ admin: true, signedIn: true });
+    const paId = await inTenant(t2.tenantId, owner.actor, (ctx) => addMember(ctx, { email: pa.email, role: 'seller' }));
+    const mgrCookies = await signedIn(mgr.id);
+    const { data } = await (await listMembers(v1Req('/members', { cookies: mgrCookies, tenant: t2.slug }))).json();
+    const ownerRow = data.find((m: { id: string }) => m.id === t2.ownerMembershipId);
+    expect(ownerRow).toMatchObject({ can_change_role: false, can_sign_out: false });
+    expect(ownerRow.lock_reasons).toEqual({ change_role: 'owners_only', suspend: 'owner', remove: 'owner', sign_out: 'owners_only' });
+    const paRow = data.find((m: { id: string }) => m.id === paId);
+    expect(paRow).toMatchObject({ can_change_role: true, can_sign_out: false });
+    expect(paRow.lock_reasons.sign_out).toBe('platform_admin');
+  });
+
   it('is open to members:read (leader) and refused to a seller', async () => {
     expect((await listMembers(as(leader, '/members'))).status).toBe(200);
     expect((await listMembers(as(seller, '/members'))).status).toBe(403);
@@ -206,6 +283,33 @@ describe('POST /v1/members/{id}:sign-out-everywhere', () => {
     expect(await adminDb.select().from(session).where(eq(session.userId, p.id))).toHaveLength(0);
     expect((await me(as(p, '/me'))).status).toBe(401);
     expect((await act(as(leader, `/members/${ids[seller.id]}:sign-out-everywhere`, { method: 'POST' }))).status).toBe(403);
+  });
+
+  it('refuses signing out an owner unless you can make owners', async () => {
+    const p = await seedUser({ signedIn: true });
+    const id = await inTenant(t.tenantId, owner.actor, (ctx) => addMember(ctx, { email: p.email, role: 'leader' }));
+    await adminDb.update(membership).set({ extraPermissions: ['members:manage'] }).where(eq(membership.id, id));
+    cookies[p.id] = await signedIn(p.id);
+    const other = await seedUser({ signedIn: true });
+    const otherOwner = await inTenant(t.tenantId, owner.actor, (ctx) => addMember(ctx, { email: other.email, role: 'owner' }));
+    await signedIn(other.id);
+    const res = await act(as(p, `/members/${otherOwner}:sign-out-everywhere`, { method: 'POST' }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).type).toMatch(/\/owners-only$/);
+    expect(await adminDb.select().from(session).where(eq(session.userId, other.id))).toHaveLength(1);
+    expect((await act(as(owner, `/members/${otherOwner}:sign-out-everywhere`, { method: 'POST' }))).status).toBe(204);
+  });
+
+  it('refuses signing out a platform admin unless you are one', async () => {
+    const pa = await seedUser({ admin: true, signedIn: true });
+    const id = await inTenant(t.tenantId, owner.actor, (ctx) => addMember(ctx, { email: pa.email, role: 'seller' }));
+    await signedIn(pa.id);
+    const res = await act(as(owner, `/members/${id}:sign-out-everywhere`, { method: 'POST' }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).type).toMatch(/\/platform-admin-protected$/);
+    expect(await adminDb.select().from(session).where(eq(session.userId, pa.id))).toHaveLength(1);
+    cookies[admin.id] = await signedIn(admin.id);
+    expect((await act(as(admin, `/members/${id}:sign-out-everywhere`, { method: 'POST' }))).status).toBe(204);
   });
 });
 
