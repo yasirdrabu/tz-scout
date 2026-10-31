@@ -153,16 +153,36 @@ function Queues({ health }: { health: Health }) {
   );
 }
 
-function DeadJobs({ jobs, total }: { jobs: DeadJob[]; total: number }) {
+/** How many dead jobs were added, removed or changed between the list shown and the latest one. */
+function countUpdates(shown: DeadJob[], latest: DeadJob[]): number {
+  const before = new Map(shown.map((j) => [j.id, JSON.stringify(j)]));
+  let n = 0;
+  for (const j of latest) {
+    const was = before.get(j.id);
+    if (was !== JSON.stringify(j)) n++;
+    before.delete(j.id);
+  }
+  return n + before.size;
+}
+
+/**
+ * The list stays as shown while the 15 s refresh brings changes, so rows never move under the
+ * pointer (C14); a "{n} updates" bar applies them. The person's own Retry and Discard apply at once.
+ */
+function DeadJobs({ jobs: latest, total }: { jobs: DeadJob[]; total: number }) {
   const f = useFormat();
   const queryClient = useQueryClient();
   const { run, busy } = useRun();
+  const [jobs, setJobs] = useState(latest);
   const [discarding, setDiscarding] = useState<DeadJob | null>(null);
+  const updates = countUpdates(jobs, latest);
   const refresh = () => queryClient.invalidateQueries({ queryKey: healthQuery().queryKey });
+  const drop = (id: string) => setJobs((shown) => shown.filter((j) => j.id !== id));
 
   async function discard(job: DeadJob) {
     const ok = await run(async () => {
       await discardJob(job.id);
+      drop(job.id);
       await refresh();
     }, `${job.id} discarded`);
     if (ok) setDiscarding(null);
@@ -173,6 +193,14 @@ function DeadJobs({ jobs, total }: { jobs: DeadJob[]; total: number }) {
       <h2 id="dead-jobs" className={styles.sectionTitle}>
         Dead jobs
       </h2>
+      {updates > 0 && (
+        <div className={styles.updates} role="status">
+          <span className={styles.grow}>{updates === 1 ? '1 update' : `${updates} updates`}</span>
+          <Button size="sm" variant="secondary" onClick={() => setJobs(latest)}>
+            Show
+          </Button>
+        </div>
+      )}
       {jobs.length === 0 ? (
         <p className={styles.note}>No dead jobs. Jobs that fail every try show here so you can retry or discard them.</p>
       ) : (
@@ -197,6 +225,7 @@ function DeadJobs({ jobs, total }: { jobs: DeadJob[]; total: number }) {
                     onClick={() =>
                       void run(async () => {
                         await retryJob(j.id);
+                        drop(j.id);
                         await refresh();
                       }, `${j.id} sent back to ${j.name}`)
                     }

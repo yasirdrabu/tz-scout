@@ -203,6 +203,50 @@ describe('dead jobs', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
+  it('keeps the rows in place when a refresh changes them, and applies them from the updates bar', async () => {
+    serve();
+    const NEW = { ...HEALTH.dead_jobs[1]!, id: 'job_80aa01', name: 'scoring' };
+    const app = renderApp('/admin/health');
+    await screen.findByRole('button', { name: 'Retry job_7f3a19' });
+    expect(screen.queryByText(/updates?$/)).toBeNull();
+
+    // The next refresh: job_7f3a19 is gone, job_7f2c04 failed again, job_80aa01 is new.
+    server.use(
+      http.get('/v1/admin/health', () =>
+        HttpResponse.json({ ...HEALTH, dead_job_count: 2, dead_jobs: [NEW, { ...HEALTH.dead_jobs[1]!, attempts: 7 }] }),
+      ),
+    );
+    await act(() => app.queryClient.invalidateQueries());
+    expect(await screen.findByText('3 updates')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry job_7f3a19' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry job_80aa01' })).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show' }));
+    expect(screen.queryByRole('button', { name: 'Retry job_7f3a19' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Retry job_80aa01' })).toBeInTheDocument();
+    expect(screen.getByText('Failed 7 times and stopped retrying')).toBeInTheDocument();
+    expect(screen.queryByText(/updates?$/)).toBeNull();
+  });
+
+  it('drops a retried job at once, with no updates bar', async () => {
+    serve();
+    let retried = false;
+    server.use(
+      http.post(exactly('/v1/admin/jobs/job_7f3a19:retry'), () => {
+        retried = true;
+        return HttpResponse.json({ sent_id: 'evt_1' });
+      }),
+      http.get('/v1/admin/health', () =>
+        HttpResponse.json(retried ? { ...HEALTH, dead_job_count: 1, dead_jobs: [HEALTH.dead_jobs[1]] } : HEALTH),
+      ),
+    );
+    renderApp('/admin/health');
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry job_7f3a19' }));
+    expect(await screen.findByText('job_7f3a19 sent back to hubspot-push')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry job_7f3a19' })).toBeNull();
+    expect(screen.queryByText(/updates?$/)).toBeNull();
+  });
+
   it('cancels the discard with Esc and returns focus', async () => {
     serve();
     renderApp('/admin/health');

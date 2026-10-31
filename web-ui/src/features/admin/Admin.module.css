@@ -127,6 +127,17 @@
   font-weight: 500;
 }
 
+.updates {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  background: var(--accent-50);
+  color: var(--accent);
+  font-weight: 500;
+}
+
 .warn {
   color: var(--near);
 }
