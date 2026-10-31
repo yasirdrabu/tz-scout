@@ -104,9 +104,13 @@ export function allows(me: Me, rule: Rule): boolean {
   return rule.any.some((s) => hasScope(me, s));
 }
 
-/** The groups and items this person may see; empty groups are dropped. Hidden, never disabled (C4). */
+/**
+ * The groups and items this person may see; empty groups are dropped. Hidden, never disabled (C4).
+ * Workspace items need a workspace: with none (a platform admin with no membership) only Admin shows.
+ */
 export function visibleNav(me: Me): NavGroup[] {
-  return NAV.map((g) => ({ group: g.group, items: g.items.filter((i) => allows(me, i.rule)) })).filter((g) => g.items.length > 0);
+  const shown = (i: NavItem) => (i.kind === 'admin' || me.tenant !== null) && allows(me, i.rule);
+  return NAV.map((g) => ({ group: g.group, items: g.items.filter(shown) })).filter((g) => g.items.length > 0);
 }
 
 export const visibleSettingsTabs = (me: Me) => SETTINGS_TABS.filter((t) => !t.hidden && allows(me, t.rule));

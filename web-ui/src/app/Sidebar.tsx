@@ -9,8 +9,8 @@ import styles from './Sidebar.module.css';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 export function Sidebar({ me }: { me: Me }) {
-  const tenant = me.tenant.slug;
-  const { data: counts } = useQuery(countsQuery(tenant));
+  const tenant = me.tenant?.slug ?? null;
+  const { data: counts } = useQuery({ ...countsQuery(tenant ?? ''), enabled: tenant !== null });
   return (
     <aside className={styles.sidebar}>
       <WorkspaceSwitcher me={me} />
@@ -31,15 +31,15 @@ export function Sidebar({ me }: { me: Me }) {
         ))}
       </nav>
       <div className={styles.footer}>
-        {allows(me, SETTINGS_RULE) && <SettingsLink me={me} />}
+        {tenant && allows(me, SETTINGS_RULE) && <SettingsLink me={me} tenant={tenant} />}
         <ProfileMenu me={me} />
       </div>
     </aside>
   );
 }
 
-function NavLink({ item, tenant, counts }: { item: NavItem; tenant: string; counts: Counts | undefined }) {
-  if (item.kind === 'admin') {
+function NavLink({ item, tenant, counts }: { item: NavItem; tenant: string | null; counts: Counts | undefined }) {
+  if (item.kind === 'admin' || !tenant) {
     return (
       <Link to={item.to} className={styles.link}>
         {item.label}
@@ -60,8 +60,7 @@ function NavLink({ item, tenant, counts }: { item: NavItem; tenant: string; coun
   );
 }
 
-function SettingsLink({ me }: { me: Me }) {
-  const tenant = me.tenant.slug;
+function SettingsLink({ me, tenant }: { me: Me; tenant: string }) {
   const onSettings = useRouterState({ select: (s) => s.location.pathname.startsWith(`/t/${tenant}/settings/`) });
   const tab = visibleSettingsTabs(me)[0]?.tab ?? 'members';
   return (

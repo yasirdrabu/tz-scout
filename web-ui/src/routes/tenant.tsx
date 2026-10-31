@@ -17,7 +17,7 @@ export const tenantRoute = createRoute({
   path: '/t/$tenant',
   beforeLoad: async ({ context, params, location }) => {
     const me = await requireSession(context.queryClient, params.tenant, location.href);
-    rememberWorkspace(me.tenant.slug);
+    if (me.tenant) rememberWorkspace(me.tenant.slug);
   },
   component: TenantLayout,
 });
@@ -25,7 +25,7 @@ export const tenantRoute = createRoute({
 function TenantLayout() {
   const { tenant } = tenantRoute.useParams();
   const { data: me } = useQuery(meQuery(tenant));
-  if (!me) {
+  if (!me?.tenant) {
     return (
       <div className={styles.centered}>
         <LoadingLine>Loading your workspace</LoadingLine>

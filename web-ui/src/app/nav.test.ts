@@ -44,6 +44,11 @@ describe('nav', () => {
     expect(labels(meWith([], { user: { id: 'm1', name: 'Dana', email: 'dana@taazaa.com', platform_admin: true } }))).toEqual(['Tenants', 'System health', 'AI runs']);
   });
 
+  it('shows only Admin with no workspace', () => {
+    const admin = { user: { id: 'm1', name: 'Sam', email: 'sam@taazaa.com', platform_admin: true }, tenant: null };
+    expect(labels(meWith(['accounts:read'], admin))).toEqual(['Tenants', 'System health', 'AI runs']);
+  });
+
   it('lands on the first of Review queue, My accounts, All accounts', () => {
     expect(landingPath(meWith(['accounts:read', 'assignments:respond', 'review:act']))).toBe('/t/$tenant/queue');
     expect(landingPath(meWith(['accounts:read', 'assignments:respond']))).toBe('/t/$tenant/my');

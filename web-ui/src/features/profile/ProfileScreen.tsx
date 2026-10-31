@@ -45,7 +45,7 @@ export function ProfileScreen({ me }: { me: Me }) {
     <div className={page.page}>
       <div>
         <h1 className={page.title}>Profile</h1>
-        <p className={page.sub}>{`${name ?? email ?? 'You'} in ${me.tenant.name}`}</p>
+        <p className={page.sub}>{`${name ?? email ?? 'You'} in ${me.tenant?.name ?? 'Scout'}`}</p>
       </div>
       <Card title="You">
         <dl className={styles.facts}>

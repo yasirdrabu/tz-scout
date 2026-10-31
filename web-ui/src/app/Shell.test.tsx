@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { rememberWorkspace } from '../lib/lastWorkspace';
-import { renderApp, serveMe } from '../test/renderApp';
+import { ADMIN_USER, renderApp, serveMe, serveNoTenantMe } from '../test/renderApp';
 import { server } from '../test/server';
 
 beforeEach(() => {
@@ -188,5 +188,73 @@ describe('profile menu', () => {
     expect(await screen.findByRole('heading', { name: 'Sign in to Scout' })).toBeInTheDocument();
     expect(signedOut).toHaveBeenCalledOnce();
     expect(app.queryClient.getQueryData(['me', 'taazaa'])).toBeUndefined();
+  });
+});
+
+describe('admin area', () => {
+  const WORKSPACES = [
+    { id: 't1', slug: 'taazaa', name: 'Taazaa', role: null, member_count: 14 },
+    { id: 't2', slug: 'brightline', name: 'Brightline Logistics', role: null, member_count: 6 },
+  ];
+
+  it('opens /admin for a platform admin with no workspace, with only the Admin group', async () => {
+    serveNoTenantMe(ADMIN_USER, WORKSPACES);
+    renderApp('/admin/health');
+    const nav = await screen.findByRole('navigation', { name: 'Main' });
+    expect(within(nav).getByRole('link', { name: 'Tenants' })).toHaveAttribute('href', '/admin/tenants');
+    expect(within(nav).getByRole('link', { name: 'System health' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: 'AI runs' })).toBeInTheDocument();
+    expect(within(nav).queryByRole('link', { name: 'All accounts' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Settings' })).toBeNull();
+    expect(screen.getByText('Scout · Platform admin')).toBeInTheDocument();
+  });
+
+  it('lets a platform admin with no workspace switch into one', async () => {
+    serveNoTenantMe(ADMIN_USER, WORKSPACES, { brightline: { scopes: ['accounts:read'] } });
+    const app = renderApp('/admin/tenants');
+    await userEvent.click(await screen.findByRole('button', { name: /Switch workspace/ }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Brightline Logistics/ }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'All accounts' })).toBeInTheDocument();
+    expect(app.path()).toBe('/t/brightline/accounts');
+  });
+
+  it('leaves out Profile in the profile menu with no workspace', async () => {
+    serveNoTenantMe();
+    renderApp('/admin/tenants');
+    await userEvent.click(await screen.findByRole('button', { name: /Sam Okafor/ }));
+    expect(await screen.findByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Profile' })).toBeNull();
+  });
+
+  it('sends a platform admin with no workspace from / to Tenants', async () => {
+    serveNoTenantMe();
+    const app = renderApp('/');
+    await screen.findByRole('navigation', { name: 'Main' });
+    expect(app.router.state.location.pathname).toBe('/admin/tenants');
+  });
+
+  it('shows the Admin group to a platform admin in a workspace, next to the workspace items', async () => {
+    rememberWorkspace('taazaa');
+    serveMe({ taazaa: { scopes: ['accounts:read'], user: ADMIN_USER } });
+    renderApp('/admin/tenants');
+    const nav = await screen.findByRole('navigation', { name: 'Main' });
+    expect(within(nav).getByRole('link', { name: 'All accounts' })).toHaveAttribute('href', '/t/taazaa/accounts');
+    expect(within(nav).getByRole('link', { name: 'Tenants' })).toBeInTheDocument();
+  });
+
+  it('refuses someone who is not a platform admin', async () => {
+    rememberWorkspace('taazaa');
+    serveMe({ taazaa: { scopes: LEADER, user: { id: 'm1', name: 'Dana Whitfield', email: 'dana@taazaa.com', platform_admin: false } } });
+    renderApp('/admin/tenants');
+    expect(await screen.findByRole('heading', { name: 'Only platform admins can open this page' })).toBeInTheDocument();
+    expect(screen.getByText('Ask a Taazaa platform admin if you need something here.')).toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: 'Main' })).queryByRole('link', { name: 'Tenants' })).toBeNull();
+  });
+
+  it('sends a signed-out person from /admin to sign-in with the return path', async () => {
+    serveMe({});
+    const app = renderApp('/admin/health');
+    expect(await screen.findByRole('heading', { name: 'Sign in to Scout' })).toBeInTheDocument();
+    expect(app.router.state.location.search).toEqual({ return: '/admin/health' });
   });
 });

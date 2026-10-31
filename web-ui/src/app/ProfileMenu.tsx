@@ -14,7 +14,8 @@ export function ProfileMenu({ me }: { me: Me }) {
   const toast = useToast();
   const { name, email } = personOf(me);
   const display = name ?? email ?? 'Your account';
-  const detail = name && email ? email : me.tenant.name;
+  const detail = name && email ? email : (me.tenant?.name ?? 'Platform admin');
+  const tenant = me.tenant?.slug;
 
   async function leave() {
     try {
@@ -40,8 +41,12 @@ export function ProfileMenu({ me }: { me: Me }) {
         </button>
       }
     >
-      <MenuItem onSelect={() => void navigate({ to: '/t/$tenant/profile', params: { tenant: me.tenant.slug } })}>Profile</MenuItem>
-      <MenuSeparator />
+      {tenant && (
+        <>
+          <MenuItem onSelect={() => void navigate({ to: '/t/$tenant/profile', params: { tenant } })}>Profile</MenuItem>
+          <MenuSeparator />
+        </>
+      )}
       <MenuItem onSelect={() => void leave()}>Sign out</MenuItem>
     </Menu>
   );

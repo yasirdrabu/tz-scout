@@ -37,3 +37,30 @@ export function renderApp(path: string) {
   const view = render(<AppRoot app={app} />);
   return { ...view, ...app, path: () => app.router.state.location.href };
 }
+
+export const ADMIN_USER = { id: 'usr_sam', name: 'Sam Okafor', email: 'sam@taazaa.com', platform_admin: true };
+
+/**
+ * `/v1/me` for a person with no workspace to land in (a platform admin with no membership): no
+ * tenant, no scopes, every active tenant in `workspaces`. A tenant header is answered by `byTenant`.
+ */
+export function serveNoTenantMe(
+  user: Record<string, unknown> = ADMIN_USER,
+  workspaces: unknown[] = [],
+  byTenant: Record<string, Partial<Me> & Record<string, unknown>> = {},
+) {
+  server.use(
+    http.get('/v1/me', ({ request }) => {
+      const slug = request.headers.get('x-scout-tenant');
+      if (!slug) return HttpResponse.json({ ...ME, user, tenant: null, workspaces, scopes: [], data_limit: null });
+      const me = byTenant[slug];
+      if (!me) {
+        return HttpResponse.json(
+          { type: 'https://scout.taazaa.ai/problems/unauthenticated', title: 'Sign in or send a valid API key.', status: 401 },
+          { status: 401, headers: { 'content-type': 'application/problem+json' } },
+        );
+      }
+      return HttpResponse.json({ ...ME, user, workspaces, tenant: { id: slug, slug, name: slug }, ...me });
+    }),
+  );
+}

@@ -14,8 +14,11 @@ export type DataLimit =
 
 /** The `GET /v1/me` fields the app types (src/app/v1/me/route.ts); the person fields are read below. */
 export type Me = {
-  /** `currency` (ISO 4217) and `timezone` (IANA) feed lib/format; read as optional. */
-  tenant: { id: string; slug: string; name: string; currency?: string; timezone?: string };
+  /**
+   * `currency` (ISO 4217) and `timezone` (IANA) feed lib/format; read as optional. Null for a person
+   * with no workspace to land in (a platform admin with no membership), who can open only `/admin`.
+   */
+  tenant: { id: string; slug: string; name: string; currency?: string; timezone?: string } | null;
   kind: 'user' | 'api_key' | 'oauth';
   id: string;
   scopes: Scope[];
