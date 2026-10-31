@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-31: Web app admin parity; the old Next pages are retired
+
+The `web-ui/` app now has every screen the old Next pages served, on `/v1` endpoints, and the old pages are gone (spec C12).
+
+**What was built**
+- **Session for the shell**: `/v1/me` with the person and workspaces, `/v1/me/counts`, `PUT /v1/me/workspace`, `/v1/me/sessions`, `POST /v1/me:sign-out-everywhere`, `/v1/auth/config` and `/v1/dev/users`. A platform admin with no membership gets a session with no tenant and can open `/admin`.
+- **Endpoints for the old server actions**, each with the permission the action checked: Members (`/v1/members`, `/v1/roles`), API keys (`/v1/api-keys`), the audit log (`/v1/audit`), Integrations (`/v1/integrations` with credential, `:test`, mode, disabled, `:disconnect` and calls), AI runs (`/v1/ai-runs`), and Admin (`/v1/admin/tenants` with `:suspend` and `:resume`, `/v1/admin/platform-admins`, `/v1/admin/health`, dead job `:retry` and `:discard`, schedule `:pause`, `:resume` and `:run-now`, `/v1/admin/test-event`, `/v1/admin/ai-runs`).
+- **Screens in `web-ui/`**: sign-in, Settings (Members, Integrations, API keys, Audit log), Profile, and Admin (Tenants, System health, AI runs). The Audit log and AI runs keep their search and filters in the URL. System health refreshes every 15 seconds and shows a "{n} updates" bar instead of moving dead-job rows.
+- **Retired**: `src/app/admin`, `src/app/t`, `src/app/signin`, the root page, `src/components`, `src/server` (page context and server actions), `globals.css` and the Tailwind, PostCSS, Geist and clsx dependencies. Next keeps a minimal root layout and serves only `/v1`, `/api`, `/healthz` and `/readyz`; `/` is a 404.
+- **e2e**: Playwright starts the backend and the `web-ui` dev server and drives the app: sign-in and landing, nav by permission, Members invite and role change, Integrations save and test on the mock, API key create and revoke, the Audit log, Tenants create and suspend, and System health.
+
+**Decisions to know about**
+- Run the app from `web-ui/` (`npm run dev`, port 5173); the backend on 4240 has no pages.
+- Locally, Microsoft sign-in returns to `APP_PUBLIC_URL` (the backend origin), which now has no sign-in page. Use developer sign-in locally until the backend learns the app's return paths; in production the app and the API share one origin.
+
 ## 2026-10-30: Taazaa Scout R1c CRM sync
 
 An assigned account now lands in HubSpot with its note and tasks, the rep's replies and deals come back and move the account through the funnel, and HubSpot contacts that marketing qualified arrive in the review queue. It runs on a mock HubSpot that lives in Postgres; the live connector is built but has not yet run against a real portal. This release has the `/v1` API only; screens come from the front end.
