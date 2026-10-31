@@ -38,3 +38,4 @@ export { memberAccess, type MemberAccess } from './services/members';
 export { devSignInUsers, type DevSignInUser } from './services/dev-sign-in';
 export { sessionUser, type SessionUser } from './services/principal';
 export { completeSignIn } from './services/sign-in';
+export { personSummary, setLastWorkspace, workspacesFor, type Workspace } from './services/workspaces';

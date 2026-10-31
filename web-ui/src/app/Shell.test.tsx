@@ -7,7 +7,7 @@ import { server } from '../test/server';
 
 beforeEach(() => {
   localStorage.clear();
-  server.use(http.get('/api/dev/users', () => new HttpResponse('Not found', { status: 404 })));
+  server.use(http.get('/v1/dev/users', () => new HttpResponse('Not found', { status: 404 })));
 });
 
 const LEADER = ['review:act', 'assign:act', 'accounts:read', 'assignments:respond', 'analytics:read', 'offers:read', 'playbooks:read'];
@@ -147,7 +147,7 @@ describe('header', () => {
 
 describe('profile menu', () => {
   it('signs out and goes to sign-in', async () => {
-    serveMe({ taazaa: { scopes: LEADER, name: 'Dana Whitfield' } });
+    serveMe({ taazaa: { scopes: LEADER, user: { id: 'm1', name: 'Dana Whitfield', email: 'dana@taazaa.com', platform_admin: false } } });
     const signedOut = vi.fn();
     server.use(
       http.post('/api/auth/sign-out', () => {

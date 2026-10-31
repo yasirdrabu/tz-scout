@@ -64,8 +64,8 @@ const LEADER_LACKS: Permission[] = [
 
 /**
  * Default permission sets, from the roles table. A Seller's "own" rows grant the permission and the
- * data limit narrows the rows. "Grantable" (review:act for Seller and Operator) is not here: it is
- * added as an extra permission on a membership.
+ * data limit narrows the rows. Operators hold review:act by default (web-ui W6). "Grantable"
+ * (review:act for Seller) is not here: it is added as an extra permission on a membership.
  */
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   owner: ALL,
@@ -77,6 +77,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'arrivals:read',
     'imports:run',
     'sources:manage',
+    'review:act',
     'scoring:manage',
     'playbooks:read',
     'playbooks:manage',

@@ -267,3 +267,13 @@ export async function listAssignments(ctx: ModuleContext, f: AssignmentFilters =
     nextCursor: kept.length > limit ? encode(page[limit - 1]!.key) : !exhausted && scannedTo ? encode(scannedTo) : null,
   };
 }
+
+/** The actor's assignments still waiting for them to accept or decline, for the nav badge. */
+export async function countNewAssignments(ctx: ModuleContext): Promise<number> {
+  const me = requirePerson(ctx);
+  const [row] = await ctx.tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(assignment)
+    .where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.sellerUserId, me), eq(assignment.status, 'pending')));
+  return row?.n ?? 0;
+}

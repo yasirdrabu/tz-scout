@@ -12,7 +12,7 @@ export type DataLimit =
   | { kind: 'own_source' }
   | { kind: 'any_of'; limits: DataLimit[] };
 
-/** Exactly what today's `GET /v1/me` returns (src/app/v1/me/route.ts). */
+/** The `GET /v1/me` fields the app types (src/app/v1/me/route.ts); the person fields are read below. */
 export type Me = {
   tenant: { id: string; slug: string; name: string };
   kind: 'user' | 'api_key' | 'oauth';
@@ -39,20 +39,25 @@ export const meQuery = (tenant?: string) =>
 
 export const hasScope = (me: Me, scope: Scope) => me.scopes.includes(scope);
 
-// Fields the spec needs that `/me` does not send yet (api-gaps.md tenancy, Proposed change 2).
-// They are read defensively so the shell picks them up the day the API adds them.
+// Fields `/me` sends for a person: `user { id, name, email, platform_admin }` (null for API keys)
+// and `workspaces`; `tenant` is null for a person with no workspace to land in (a platform admin
+// with no membership). They are read defensively.
 type Loose = Record<string, unknown>;
 const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
 const count = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const userOf = (me: Me): Loose => {
+  const u = (me as unknown as Loose).user;
+  return typeof u === 'object' && u !== null ? (u as Loose) : {};
+};
 
 export function personOf(me: Me): { name: string | null; email: string | null } {
-  const m = me as unknown as Loose;
-  return { name: text(m.name), email: text(m.email) };
+  const u = userOf(me);
+  return { name: text(u.name), email: text(u.email) };
 }
 
-/** Today's `/me` has no platform admin flag, so this is false until it does. */
+/** True when `/me` says the person is a platform admin. */
 export function isPlatformAdmin(me: Me): boolean {
-  return (me as unknown as Loose).platform_admin === true;
+  return userOf(me).platform_admin === true;
 }
 
 /** The person's workspaces when `/me` lists them, else just the current one. */
@@ -69,5 +74,5 @@ export function workspacesOf(me: Me): Workspace[] {
     });
     if (valid.length > 0) return valid;
   }
-  return [{ ...me.tenant, role: null, member_count: null }];
+  return me.tenant ? [{ ...me.tenant, role: null, member_count: null }] : [];
 }

@@ -30,18 +30,17 @@ describe('/me', () => {
     expect(hasScope(me, 'sources:manage')).toBe(false);
   });
 
-  it('reads the fields the backend does not send yet as absent', () => {
+  it('reads missing person fields and workspaces as absent', () => {
     expect(personOf(me)).toEqual({ name: null, email: null });
     expect(isPlatformAdmin(me)).toBe(false);
     expect(workspacesOf(me)).toEqual([{ id: 't1', slug: 'taazaa', name: 'Taazaa', role: null, member_count: null }]);
+    expect(workspacesOf({ ...me, tenant: null } as unknown as Me)).toEqual([]);
   });
 
-  it('uses the person, platform admin flag and workspaces once /me carries them', () => {
+  it('uses the person, platform admin flag and workspaces /me carries', () => {
     const later = {
       ...me,
-      name: 'Dana Whitfield',
-      email: 'dana@taazaa.com',
-      platform_admin: true,
+      user: { id: 'm1', name: 'Dana Whitfield', email: 'dana@taazaa.com', platform_admin: true },
       workspaces: [
         { id: 't1', slug: 'taazaa', name: 'Taazaa', role: 'leader', member_count: 14 },
         { id: 't2', slug: 'brightline', name: 'Brightline Logistics', role: 'owner', member_count: 6 },

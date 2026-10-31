@@ -102,10 +102,12 @@ export async function createTenant(
   }
 }
 
-/** The id, slug and name of the context's tenant. */
-export async function tenantSummary(ctx: ModuleContext): Promise<{ id: string; slug: string; name: string }> {
+/** The id, slug, name, currency and timezone of the context's tenant. */
+export async function tenantSummary(
+  ctx: ModuleContext,
+): Promise<{ id: string; slug: string; name: string; currency: string; timezone: string }> {
   const [t] = await ctx.tx
-    .select({ id: tenant.id, slug: tenant.slug, name: tenant.name })
+    .select({ id: tenant.id, slug: tenant.slug, name: tenant.name, currency: tenant.currency, timezone: tenant.timezone })
     .from(tenant)
     .where(eq(tenant.id, ctx.tenantId));
   if (!t) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That workspace was not found.' });

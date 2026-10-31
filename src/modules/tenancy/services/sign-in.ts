@@ -213,9 +213,22 @@ export async function completeSignIn(userId: string): Promise<void> {
   });
 }
 
-/** Where to send someone after sign-in: their last used tenant, else their first active tenant (TEN-E2-S1-AC1). */
+/**
+ * Where to send someone after sign-in: their last used tenant, else their first active tenant
+ * (TEN-E2-S1-AC1). A platform admin's last used tenant counts even without a membership.
+ */
 export async function landingPathFor(userId: string): Promise<string> {
-  const [u] = await adminDb.select({ last: user.lastTenantId }).from(user).where(eq(user.id, userId));
+  const [u] = await adminDb
+    .select({ last: user.lastTenantId, platformAdmin: user.platformAdmin })
+    .from(user)
+    .where(eq(user.id, userId));
+  if (u?.platformAdmin && u.last) {
+    const [t] = await adminDb
+      .select({ slug: tenant.slug })
+      .from(tenant)
+      .where(and(eq(tenant.id, u.last), eq(tenant.status, 'active')));
+    if (t) return `/t/${t.slug}`;
+  }
   const list = await tenantsFor(userId);
   const target = list.find((t) => t.id === u?.last) ?? list[0];
   return target ? `/t/${target.slug}` : '/';

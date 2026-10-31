@@ -55,7 +55,9 @@ describe('GET /v1/me', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('x-correlation-id')).toBe('cor_mine');
     expect(await res.json()).toEqual({
-      tenant: { id: tenantId, slug, name: 'Me Co' },
+      user: null,
+      tenant: { id: tenantId, slug, name: 'Me Co', currency: 'USD', timezone: 'UTC' },
+      workspaces: [],
       kind: 'api_key',
       id,
       scopes: ['members:read', 'status:read'],

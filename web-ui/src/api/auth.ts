@@ -1,4 +1,4 @@
-import { request } from './client';
+import { API_BASE, request } from './client';
 import { ApiError, UnauthorizedError } from './errors';
 
 /** Sign-in lives outside the API base: better-auth at /api/auth, developer sign-in at /api/dev. */
@@ -30,12 +30,12 @@ export async function startMicrosoftSignIn(returnPath: string, go: (url: string)
 export type DevUser = { id: string; email: string; name: string; platform_admin: boolean };
 
 /**
- * People developer sign-in offers, or null when the API has no list (api-gaps.md tenancy:
- * `GET /dev/users` is a new endpoint; today only the old sign-in page reads them server side).
+ * People developer sign-in offers, or null when the API has no list (`GET /v1/dev/users` is 404
+ * unless developer sign-in is on).
  */
 export async function devUsers(): Promise<DevUser[] | null> {
   try {
-    const list = await request<unknown>(`${DEV}/users`);
+    const list = await request<unknown>(`${API_BASE}/dev/users`);
     return Array.isArray(list) ? (list as DevUser[]) : null;
   } catch (e) {
     if (e instanceof ApiError && !(e instanceof UnauthorizedError)) return null;

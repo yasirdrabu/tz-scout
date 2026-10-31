@@ -51,6 +51,8 @@ export const ADMIN_DB_ALLOWED = [
   "src/modules/integrations/jobs.ts",
   // An unauthenticated webhook has no tenant until its connection is found (connectionTenant).
   "src/modules/integrations/services/inbound.ts",
+  // adminRoute: platform-admin requests have no tenant and run on adminDb, after the admin check.
+  "src/app/v1/_lib/v1-route.ts",
   "src/entry/**",
 ];
 const LIVE_ADAPTERS = ["src/modules/*/adapters/*/live*", "src/modules/*/adapters/*/live*/**"];

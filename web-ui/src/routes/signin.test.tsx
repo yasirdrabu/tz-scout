@@ -6,7 +6,7 @@ import { server } from '../test/server';
 
 beforeEach(() => {
   localStorage.clear();
-  server.use(http.get('/api/dev/users', () => new HttpResponse('Not found', { status: 404 })));
+  server.use(http.get('/v1/dev/users', () => new HttpResponse('Not found', { status: 404 })));
 });
 
 describe('sign-in', () => {
@@ -43,7 +43,7 @@ describe('sign-in', () => {
 
   it('signs in as a dev user and goes back to the return path', async () => {
     server.use(
-      http.get('/api/dev/users', () =>
+      http.get('/v1/dev/users', () =>
         HttpResponse.json([{ id: 'u1', email: 'dana@taazaa.com', name: 'Dana Whitfield', platform_admin: false }]),
       ),
     );
@@ -64,7 +64,7 @@ describe('sign-in', () => {
 
   it('shows the API detail when dev sign-in is refused', async () => {
     server.use(
-      http.get('/api/dev/users', () => HttpResponse.json([{ id: 'u9', email: 'gone@taazaa.com', name: 'Gone', platform_admin: false }])),
+      http.get('/v1/dev/users', () => HttpResponse.json([{ id: 'u9', email: 'gone@taazaa.com', name: 'Gone', platform_admin: false }])),
       http.post('/api/dev/sign-in', () =>
         HttpResponse.json(
           { type: 'https://scout.taazaa.ai/problems/forbidden', title: "Your account isn't set up in Scout yet.", status: 403 },
