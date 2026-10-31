@@ -61,6 +61,8 @@ jobs:
           chmod +x .tools/nats-server/nats-server
           .tools/nats-server/nats-server --version
       - run: npm ci
+      # e2e drives the web-ui Vite dev server, so it needs the app's packages too.
+      - run: npm --prefix web-ui ci
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:unit
@@ -78,8 +80,27 @@ jobs:
           if-no-files-found: ignore
       - run: npm run build
 
+  web-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web-ui/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
   images:
-    needs: checks
+    needs: [checks, web-ui]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -163,17 +184,36 @@ jobs:
           docker run --rm --network host $SMOKE_ENV scout:ci migrate
           docker run --rm --network host $SMOKE_ENV scout:ci seed
           docker run -d --name web --network host $SMOKE_ENV scout:ci web
+          ready=false
           for i in $(seq 1 60); do
             if curl -fsS http://localhost:4240/readyz; then
               echo
               echo "readyz ok"
-              exit 0
+              ready=true
+              break
             fi
             sleep 2
           done
-          docker logs web
-          echo "readyz did not become ok within 120 seconds" >&2
-          exit 1
+          if [ "$ready" != true ]; then
+            docker logs web
+            echo "readyz did not become ok within 120 seconds" >&2
+            exit 1
+          fi
+          curl -fsS http://localhost:4240/healthz
+          echo
+          # The web role serves the web-ui app (interim, until the Hono move): / and deep links get its index.html.
+          for path in / /t/anything; do
+            body="$(curl -fsS "http://localhost:4240${path}")"
+            if ! grep -q '<div id="root"></div>' <<<"$body" || ! grep -q '<title>Scout</title>' <<<"$body"; then
+              docker logs web
+              echo "GET ${path} did not return the web-ui index.html" >&2
+              exit 1
+            fi
+            echo "GET ${path} serves the app"
+          done
+          asset="$(curl -fsS http://localhost:4240/ | grep -oE '/assets/[^"]+\.js' | head -n1)"
+          curl -fsS -o /dev/null "http://localhost:4240${asset}"
+          echo "GET ${asset} ok"
       - name: Log in to ghcr.io
         if: env.PUSH == 'true'
         uses: docker/login-action@v3
