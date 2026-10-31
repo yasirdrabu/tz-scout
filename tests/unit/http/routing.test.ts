@@ -106,3 +106,17 @@ describe('routing', () => {
     expect(res.headers.get('content-type')).toBe('application/problem+json');
   });
 });
+
+describe('trailing slash', () => {
+  it('redirects a GET that only matches without the slash', async () => {
+    const res = await app.request('/api/v1/accounts/', { method: 'GET' });
+    expect(res.status).toBe(301);
+    expect(new URL(res.headers.get('location')!).pathname).toBe('/api/v1/accounts');
+  });
+
+  it('keeps the query string', async () => {
+    const res = await app.request('/api/v1/accounts/?q=acme', { method: 'GET' });
+    expect(res.status).toBe(301);
+    expect(new URL(res.headers.get('location')!).search).toBe('?q=acme');
+  });
+});

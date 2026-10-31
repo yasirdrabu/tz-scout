@@ -7,6 +7,7 @@
 
 - **API at `/api/v1`** (spec C1): every endpoint moved from `/v1/...` to `/api/v1/...`, with no alias for the old path (nothing outside Scout calls it yet). Sign-in stays at `/api/auth`, developer sign-in at `/api/dev/sign-in`, and the health checks at `/healthz` and `/readyz`. `/v1/...` is now an app path: a GET gets the web app's `index.html`. The `status_url` of an arrival or batch points at `/api/v1`.
 - **HubSpot webhook**: subscriptions set up by hand in HubSpot must use `/api/v1/inbound/hubspot/{connectionId}`.
+- **Trailing slash**: a GET or HEAD to a path with a trailing slash that matches nothing is redirected (301) to the path without it, as Next did. Other methods on such a path get the 404 (Next redirected those too, with 308).
 - The web-ui app calls `/api/v1`; its dev server proxies `/api` and the health checks. The spec, README and sample requests use the new paths.
 
 ## 2026-10-31: The image serves the web app

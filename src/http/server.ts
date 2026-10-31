@@ -4,6 +4,7 @@ import path from 'node:path';
 import { getRequestListener } from '@hono/node-server';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { trimTrailingSlash } from 'hono/trailing-slash';
 import { ScoutError, toProblem } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { log } from '@/platform/log';
@@ -68,6 +69,8 @@ export type AppOptions = {
 export function createApp(opts: AppOptions = {}): Hono {
   const app = new Hono();
   app.use('*', bodyLimit({ maxSize: MAX_BODY_BYTES, onError: () => problem(tooLarge()) }));
+  // As Next did for a path with a trailing slash that matches nothing: redirect to the path without it (GET and HEAD).
+  app.use('*', trimTrailingSlash());
   for (const entry of [...(opts.routes ?? allRoutes)].sort(bySpecificity)) mount(app, entry);
   for (const prefix of API_PREFIXES) {
     app.all(prefix, () => problem(notFound()));
