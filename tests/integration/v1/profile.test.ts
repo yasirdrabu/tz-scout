@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { POST as resourceAction } from '@/app/v1/[resource]/route';
+import { DELETE as resourceDelete, GET as resourceGet, POST as resourceAction } from '@/app/v1/[resource]/route';
 import { GET as me } from '@/app/v1/me/route';
 import { GET as sessions } from '@/app/v1/me/sessions/route';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
@@ -78,5 +78,16 @@ describe('POST /v1/me:sign-out-everywhere', () => {
     expect((await resourceAction(v1Req('/me:explode', { cookies, method: 'POST' }))).status).toBe(404);
     expect((await resourceAction(v1Req('/accounts:sign-out-everywhere', { cookies, method: 'POST' }))).status).toBe(404);
     expect((await sessions(v1Req('/me/sessions', { cookies }))).status).toBe(200);
+  });
+});
+
+describe('/v1/{unknown}', () => {
+  it('answers other methods with the problem+json 404', async () => {
+    for (const handler of [resourceGet, resourceDelete]) {
+      const res = await handler(v1Req('/nope', { method: handler === resourceGet ? 'GET' : 'DELETE' }));
+      expect(res.status).toBe(404);
+      expect(res.headers.get('content-type')).toBe('application/problem+json');
+      expect(await res.json()).toMatchObject({ type: 'https://scout.taazaa.ai/problems/not-found', status: 404 });
+    }
   });
 });

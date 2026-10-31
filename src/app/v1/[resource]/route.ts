@@ -1,6 +1,6 @@
 import { endSessions } from '@/modules/tenancy';
 import { idAndAction, notFound } from '../_lib/path';
-import { noContent, sessionRoute } from '../_lib/v1-route';
+import { noContent, publicRoute, sessionRoute } from '../_lib/v1-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,3 +15,12 @@ export const POST = sessionRoute({}, async (req, person, { tx }) => {
   await endSessions(tx, person.userId);
   return noContent();
 });
+
+/** Any other method on an unknown top-level path is the API's problem+json 404, not Next's empty 405. */
+const unknown = publicRoute(async () => {
+  throw notFound();
+});
+export const GET = unknown;
+export const PUT = unknown;
+export const PATCH = unknown;
+export const DELETE = unknown;
