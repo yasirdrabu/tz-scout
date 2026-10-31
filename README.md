@@ -84,7 +84,7 @@ cd web-ui && npm run typecheck && npm run lint && npm test && npm run build   # 
 ## Build
 
 ```bash
-npm run build     # Next.js standalone build plus dist/cli.js
+npm run build     # the web-ui app (npm ci and build in web-ui/), the Next.js standalone build, plus dist/cli.js
 node dist/cli.js <migrate | seed | backfill-r1b | backfill-r1c | worker | relay | scheduler | all-background | web>
 ```
 
@@ -96,9 +96,15 @@ Design and runbook: `docs/spec/architecture/deployment-and-iac.md`. The single V
 `infra/compose/docker-compose.vm.yml` with Caddy or a Cloudflare Tunnel in front. Hosting is not decided
 yet, so nothing is deployed.
 
-The web-ui app has no production host yet. The Next image serves only the API (`/v1`, `/api`, health);
-it does not serve the app's screens. Until the HTTP layer and hosting plan lands, the app runs only from
-its Vite dev server (`cd web-ui && npm run dev`), and a deploy of today's image gives people no screens.
+The image serves the web-ui app and the API from one origin (spec W2): the app at `/`, the API at `/v1`,
+sign-in at `/api/auth`, health at `/healthz` and `/readyz`. The app's hashed files under `/assets` cache
+for a year; every other GET (deep links under `/t/...`, `/admin/...`, `/signin`) gets the app's
+`index.html` with `no-cache`. This is interim: the Next server does it through a catch-all route
+(`src/app/[[...app]]/route.ts`) until the HTTP layer moves to Hono.
+
+Local development does not use this: run the app from its Vite dev server (`cd web-ui && npm run dev`,
+port 5173, proxying to the backend on 4240) and sign in with developer sign-in. `npm run build` runs
+`npm ci` in `web-ui/`, so stop that dev server first (on Windows it holds esbuild open).
 
 Notes for the VM:
 

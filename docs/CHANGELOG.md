@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-31: The image serves the web app
+
+- The image now builds `web-ui/` and the `web` role serves it from the API's origin: the app at `/` with an `index.html` fallback for deep links (`/t/...`, `/admin/...`, `/signin`), hashed `/assets/*` cached for a year, and unknown `/v1` and `/api` paths still answered with the API's problem+json 404 (`GET /v1/{unknown}` was an empty 405). Interim, through a Next catch-all route, until the HTTP layer moves to Hono. CI checks `web-ui/` in its own job and the image smoke test asserts `/` and `/t/anything` return the app. Local dev still uses the Vite dev server with developer sign-in.
+
 ## 2026-10-31: Web app admin parity; the old Next pages are retired
 
 The `web-ui/` app now has every screen the old Next pages served, on `/v1` endpoints, and the old pages are gone (spec C12).
