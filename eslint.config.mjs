@@ -95,6 +95,7 @@ const config = [
       "next-env.d.ts",
       "playwright-report/**",
       "test-results/**",
+      "web-ui/**",
     ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),

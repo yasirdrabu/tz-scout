@@ -18,5 +18,5 @@
     "paths": { "@/*": ["./src/*"] }
   },
   "include": ["**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "next-env.d.ts"],
-  "exclude": ["node_modules", "reference/**", "dist"]
+  "exclude": ["node_modules", "reference/**", "dist", "web-ui"]
 }
