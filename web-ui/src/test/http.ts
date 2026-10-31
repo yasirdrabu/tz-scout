@@ -13,3 +13,9 @@ export function problem(status: number, title: string, opts: { detail?: string; 
     { status, headers: { 'content-type': 'application/problem+json' } },
   );
 }
+
+/**
+ * A handler path with a literal colon, as in `/v1/admin/tenants/t1:suspend`. MSW reads `:name` as a
+ * path parameter, so `/t1:suspend` would also match `/t1:resume`; this matches the path exactly.
+ */
+export const exactly = (path: string) => new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);

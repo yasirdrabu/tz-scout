@@ -61,7 +61,7 @@ export const adminTenantsRoute = createRoute({
 export const adminHealthRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: 'health',
-  component: () => <Placeholder screen={SCREENS.adminHealth} />,
+  component: lazyRouteComponent(() => import('../features/admin/health/HealthScreen'), 'HealthScreen'),
 });
 
 export const adminAiRunsRoute = createRoute({

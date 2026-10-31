@@ -1,4 +1,4 @@
-import { formatDate, formatDateTime, formatMoney, formatNumber, formatPercent, formatRelative, formatTime } from './format';
+import { formatCompact, formatDate, formatDateTime, formatDuration, formatMoney, formatNumber, formatPercent, formatRelative, formatTime } from './format';
 
 describe('formatMoney', () => {
   it('formats integer cents in the tenant currency', () => {
@@ -67,5 +67,27 @@ describe('formatRelative', () => {
     ['2026-11-03T12:00:00Z', 'in 3 days'],
   ])('%s is %s', (when, text) => {
     expect(formatRelative(when, now)).toBe(text);
+  });
+});
+
+describe('formatDuration', () => {
+  it.each([
+    [412, '412 ms'],
+    [1800, '1.8 s'],
+    [45_000, '45 s'],
+    [360_000, '6 min'],
+    [5_400_000, '1.5 h'],
+  ])('%d ms is %s', (ms, text) => {
+    expect(formatDuration(ms)).toBe(text);
+  });
+});
+
+describe('formatCompact', () => {
+  it.each([
+    [950, '950'],
+    [18_400, '18.4K'],
+    [2_100_000, '2.1M'],
+  ])('%d is %s', (n, text) => {
+    expect(formatCompact(n)).toBe(text);
   });
 });

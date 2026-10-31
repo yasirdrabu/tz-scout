@@ -64,3 +64,18 @@ export function formatRelative(when: When, now: When = new Date()): string {
   }
   return rtf.format(Math.round(seconds / 60), 'minute');
 }
+
+const oneDecimal = (n: number) => new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 }).format(n);
+
+/** A length of time from milliseconds: "412 ms", "6.2 s", "6 min", "1.5 h". */
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${oneDecimal(ms / 1000)} s`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)} min`;
+  return `${oneDecimal(ms / 3_600_000)} h`;
+}
+
+/** A count in short form: 950 is "950", 18400 is "18.4K", 2100000 is "2.1M". */
+export function formatCompact(n: number): string {
+  return new Intl.NumberFormat(LOCALE, { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+}

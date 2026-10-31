@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { formatDateTime } from '../../../lib/format';
-import { problem } from '../../../test/http';
+import { exactly, problem } from '../../../test/http';
 import { renderApp, serveNoTenantMe } from '../../../test/renderApp';
 import { server } from '../../../test/server';
 import type { AdminTenant, PlatformAdmin } from './api';
@@ -109,7 +109,7 @@ describe('tenant drawer', () => {
 
   it('suspends after the confirm, and shows the failure', async () => {
     serve();
-    server.use(http.post('/v1/admin/tenants/t_taazaa:suspend', () => problem(409, 'That tenant is already suspended.', { slug: 'not-active' })));
+    server.use(http.post(exactly('/v1/admin/tenants/t_taazaa:suspend'), () => problem(409, 'That tenant is already suspended.', { slug: 'not-active' })));
     renderApp('/admin/tenants?open=t_taazaa');
     const drawer = await screen.findByRole('dialog', { name: 'Taazaa' });
     expect(drawer).toHaveTextContent('Priya Raman · priya.raman@taazaa.com');
@@ -121,7 +121,7 @@ describe('tenant drawer', () => {
 
     let called = 0;
     server.use(
-      http.post('/v1/admin/tenants/t_taazaa:suspend', () => {
+      http.post(exactly('/v1/admin/tenants/t_taazaa:suspend'), () => {
         called++;
         return HttpResponse.json({ ...TENANTS[0], status: 'suspended' });
       }),
@@ -134,13 +134,13 @@ describe('tenant drawer', () => {
 
   it('resumes a suspended tenant, and shows the failure', async () => {
     serve();
-    server.use(http.post('/v1/admin/tenants/t_meridian:resume', () => problem(409, 'That tenant is not suspended.', { slug: 'not-suspended' })));
+    server.use(http.post(exactly('/v1/admin/tenants/t_meridian:resume'), () => problem(409, 'That tenant is not suspended.', { slug: 'not-suspended' })));
     renderApp('/admin/tenants?open=t_meridian');
     const drawer = await screen.findByRole('dialog', { name: 'Meridian Public Sector' });
     await userEvent.click(within(drawer).getByRole('button', { name: 'Resume tenant' }));
     expect(await screen.findByText('That tenant is not suspended.')).toBeInTheDocument();
 
-    server.use(http.post('/v1/admin/tenants/t_meridian:resume', () => HttpResponse.json({ ...TENANTS[2], status: 'active' })));
+    server.use(http.post(exactly('/v1/admin/tenants/t_meridian:resume'), () => HttpResponse.json({ ...TENANTS[2], status: 'active' })));
     await userEvent.click(within(drawer).getByRole('button', { name: 'Resume tenant' }));
     expect(await screen.findByText('Meridian Public Sector resumed.')).toBeInTheDocument();
   });
