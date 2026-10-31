@@ -263,9 +263,10 @@ export type SessionOptions = Pick<V1Options, 'idempotent' | 'maxBytes'>;
 function personRoute(opts: SessionOptions & { admin: boolean }, handler: SessionHandler) {
   return guarded(async (req, correlationId) => {
     if (req.headers.get('authorization') !== null) throw forbidden(true, 'Only a person can do this.');
+    // Before sessionUser, so a cross-site write does not restart the session's idle clock.
+    assertSameOrigin(req);
     const person = await sessionUser(req.headers);
     if (!person) throw unauthenticated();
-    assertSameOrigin(req);
     if (opts.admin && !person.platformAdmin) throw forbidden(true, 'Only a platform admin can do this.');
     const actor: Actor = { kind: 'user', id: person.userId };
     return execute(

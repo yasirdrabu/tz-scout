@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as me } from '@/app/v1/me/route';
 import { GET as counts } from '@/app/v1/me/counts/route';
@@ -174,6 +174,53 @@ describe('sessionRoute and adminRoute', () => {
     const h = await signedIn(p.id);
     await adminDb.update(session).set({ updatedAt: new Date(Date.now() - 13 * 3600_000) }).where(eq(session.userId, p.id));
     expect((await echo(new Request(`${ORIGIN}/v1/x`, { headers: h }))).status).toBe(401);
+  });
+
+  it('applies the 7 day age rule, even to a session active a moment ago', async () => {
+    const p = await seedUser({ signedIn: true });
+    await inTenant(alpha.tenantId, owner.actor, (ctx) => addMember(ctx, { email: p.email, role: 'seller' }));
+    const h = await signedIn(p.id);
+    expect((await echo(new Request(`${ORIGIN}/v1/x`, { headers: h }))).status).toBe(200);
+    await adminDb
+      .update(session)
+      .set({ createdAt: new Date(Date.now() - 8 * 86_400_000), updatedAt: new Date() })
+      .where(eq(session.userId, p.id));
+    expect((await echo(new Request(`${ORIGIN}/v1/x`, { headers: h }))).status).toBe(401);
+  });
+
+  it('refuses a disabled person and a disabled platform admin with a valid session', async () => {
+    const p = await seedUser({ signedIn: true });
+    const a = await seedUser({ admin: true, signedIn: true });
+    await inTenant(alpha.tenantId, owner.actor, (ctx) => addMember(ctx, { email: p.email, role: 'seller' }));
+    const hp = await signedIn(p.id);
+    const ha = await signedIn(a.id);
+    expect((await echo(new Request(`${ORIGIN}/v1/x`, { headers: hp }))).status).toBe(200);
+    expect((await adminOnly(new Request(`${ORIGIN}/v1/admin/x`, { headers: ha }))).status).toBe(200);
+    await adminDb.update(user).set({ disabledAt: new Date() }).where(inArray(user.id, [p.id, a.id]));
+    for (const h of [hp, ha]) {
+      expect((await echo(new Request(`${ORIGIN}/v1/x`, { headers: h }))).status).toBe(401);
+      expect((await me(new Request(`${ORIGIN}/v1/me`, { headers: h }))).status).toBe(401);
+    }
+    expect((await adminOnly(new Request(`${ORIGIN}/v1/admin/x`, { headers: ha }))).status).toBe(401);
+  });
+
+  it('refuses a cross-site write before recording activity on the session', async () => {
+    const p = await seedUser({ admin: true, signedIn: true });
+    const h = await signedIn(p.id);
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600_000);
+    await adminDb.update(session).set({ updatedAt: twoHoursAgo }).where(eq(session.userId, p.id));
+    const write = sessionRoute({}, async () => ({ ok: true }));
+    const evil = new Headers(h);
+    evil.set('origin', 'https://evil.example');
+    evil.set('content-type', 'application/json');
+    const res = await write(new Request(`${ORIGIN}/v1/x`, { method: 'POST', headers: evil, body: '{}' }));
+    expect(res.status).toBe(403);
+    const [s] = await adminDb.select({ updatedAt: session.updatedAt }).from(session).where(eq(session.userId, p.id));
+    expect(s!.updatedAt.getTime()).toBe(twoHoursAgo.getTime());
+    const adminWrite = adminRoute({}, async () => ({ ok: true }));
+    expect((await adminWrite(new Request(`${ORIGIN}/v1/admin/x`, { method: 'POST', headers: evil, body: '{}' }))).status).toBe(403);
+    const [s2] = await adminDb.select({ updatedAt: session.updatedAt }).from(session).where(eq(session.userId, p.id));
+    expect(s2!.updatedAt.getTime()).toBe(twoHoursAgo.getTime());
   });
 
   it('adminRoute admits a platform admin with no tenant and refuses everyone else', async () => {
