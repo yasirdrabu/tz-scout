@@ -4,9 +4,7 @@ import { isPlatformAdmin } from '../api/me';
 import { landingMe, signInRedirect } from '../app/RequireSession';
 import { Shell } from '../app/Shell';
 import { EmptyState } from '../ui/EmptyState';
-import { Placeholder } from './Placeholder';
 import { rootRoute } from './root';
-import { SCREENS } from './screens';
 
 /**
  * `/admin`: platform admin screens, with no workspace segment. The shell loads with the workspace
@@ -67,5 +65,5 @@ export const adminHealthRoute = createRoute({
 export const adminAiRunsRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: 'ai-runs',
-  component: () => <Placeholder screen={SCREENS.adminAiRuns} />,
+  component: lazyRouteComponent(() => import('../features/admin/ai-runs/AiRunsScreen'), 'AiRunsScreen'),
 });

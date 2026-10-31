@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import { hasScope } from '../../../api/me';
+import { useSettled } from '../../../lib/useSettled';
 import { Button } from '../../../ui/Button';
 import { EmptyState } from '../../../ui/EmptyState';
 import { Field } from '../../../ui/Field';
@@ -10,18 +11,6 @@ import styles from '../Settings.module.css';
 import { membersQuery } from '../members/api';
 import { AREAS, auditQuery } from './api';
 import { AuditTable } from './AuditTable';
-
-const SEARCH_DELAY_MS = 300;
-
-/** The search box's text, settled after the person stops typing. */
-function useSettled(value: string) {
-  const [settled, setSettled] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setSettled(value.trim()), SEARCH_DELAY_MS);
-    return () => clearTimeout(t);
-  }, [value]);
-  return settled;
-}
 
 /** §21g Audit log: search, Area and Who filters, newest first with Show more. */
 export function AuditTab({ me, tenant }: TabProps) {

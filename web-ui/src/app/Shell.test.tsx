@@ -192,6 +192,17 @@ describe('profile menu', () => {
 });
 
 describe('admin area', () => {
+  // The admin screens' own calls, answered with nothing to show.
+  beforeEach(() => {
+    server.use(
+      http.get('/v1/admin/tenants', () => HttpResponse.json({ data: [], summary: { active: 0, suspended: 0 } })),
+      http.get('/v1/admin/platform-admins', () => HttpResponse.json({ data: [] })),
+      http.get('/v1/admin/health', () =>
+        HttpResponse.json({ relay_lag_ms: 0, queues_available: true, pending_total: 0, queues: [], dead_job_count: 0, dead_jobs: [], schedules: [], ai_spend_today_cents: 0 }),
+      ),
+    );
+  });
+
   const WORKSPACES = [
     { id: 't1', slug: 'taazaa', name: 'Taazaa', role: null, member_count: 14 },
     { id: 't2', slug: 'brightline', name: 'Brightline Logistics', role: null, member_count: 6 },
