@@ -8,7 +8,11 @@ vi.mock('@/platform/config', async (orig) => {
 import { GET as listAuditRoute } from '@/app/v1/audit/route';
 import { POST as invite } from '@/app/v1/members/route';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
+import { sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
+import { adminDb } from '@/platform/db/client';
+import { auditLog } from '@/platform/db/schema';
+import { newId } from '@/platform/ids';
 import { inTenant, seedUser } from '../tenancy/helpers';
 import { signedIn, tenantOwnedBy, v1Req, type Person } from './session-helpers';
 
@@ -88,6 +92,37 @@ describe('GET /v1/audit', () => {
     const found = (await get(`?q=${tag.toUpperCase()}`)).body.data;
     expect(found.map((e: { actor_id: string; action: string }) => [e.actor_id, e.action])).toEqual([[q.id, 'routing.settings.updated']]);
     expect(found[0].actor_name).toBe(tag);
+  });
+
+  it('does not find a person who is not a member here, even when their name matches', async () => {
+    const tag = `rupert${Date.now()}`;
+    const stranger = await seedUser({ email: `${tag}@example.com`, signedIn: true });
+    const elsewhere = await tenantOwnedBy(await seedUser({ admin: true }), stranger.email, 'Elsewhere Co');
+    await inTenant(elsewhere.tenantId, stranger.actor, (ctx) => audit(ctx, { action: 'routing.settings.updated' }));
+    // An entry here under their id, so only the membership rule can keep it out.
+    await inTenant(t.tenantId, stranger.actor, (ctx) => audit(ctx, { action: 'routing.settings.updated' }));
+    expect((await get(`?q=${tag}`)).body.data).toEqual([]);
+    // The entry is there; it is only the name search that does not reach it.
+    expect((await get(`?actor_id=${stranger.id}`)).body.data).toHaveLength(1);
+  });
+
+  it('pages through entries with equal and sub-millisecond times without losing or repeating any', async () => {
+    const who = newId('usr');
+    const times = ['2026-01-01 00:00:00.000300+00', '2026-01-01 00:00:00.000300+00', '2026-01-01 00:00:00.000200+00', '2026-01-01 00:00:00.000100+00', '2026-01-01 00:00:00+00'];
+    await adminDb.insert(auditLog).values(
+      times.map((at) => ({ id: newId('aud'), tenantId: t.tenantId, actorKind: 'user', actorId: who, action: 'routing.settings.updated', at: sql`${at}::timestamptz` })),
+    );
+    const all = (await get(`?actor_id=${who}`)).body.data.map((e: { id: string }) => e.id);
+    expect(all).toHaveLength(5);
+    const paged: string[] = [];
+    let cursor = '';
+    for (let i = 0; i < 6; i++) {
+      const page = (await get(`?actor_id=${who}&limit=2${cursor ? `&cursor=${cursor}` : ''}`)).body;
+      paged.push(...page.data.map((e: { id: string }) => e.id));
+      if (!page.next_cursor) break;
+      cursor = page.next_cursor;
+    }
+    expect(paged).toEqual(all);
   });
 
   it('filters by who and pages with a cursor', async () => {
