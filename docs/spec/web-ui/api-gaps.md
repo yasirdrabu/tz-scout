@@ -1189,7 +1189,7 @@ user can overturn them.
 3. **Lowest tier after the scoring redesign.** Deferred to the scoring redesign plan; it does not block
    any R1 screen.
 4. **Revenue potential before R2.** Deferred to the scoring redesign plan, with item 3.
-5. **Scoring settings before the redesign.** Open, for the user (see below).
+5. **Scoring settings before the redesign.** Decided by the user (2026-10-31): the Scoring weights tab stays hidden until the scoring redesign lands.
 6. **Remove source.** (Call) Remove is a soft delete: the source is archived and hidden from lists and
    pickers, its history kept. A source that has sent shows `Archive source` instead, which keeps it
    visible as archived.
@@ -1204,5 +1204,5 @@ user can overturn them.
 13. **Tenant owners' AI runs.** (Call) Settings > AI runs (`settings:manage`, screens.md §21h) shows
     the workspace's runs from `GET /v1/ai-runs` and `/v1/ai-runs/{id}`; the admin list stays cross-tenant.
 
-Still open for the user: item 5, whether the Scoring weights tab shows today's model (fit and intent
-balance, fit parts, trust cap, thresholds) until the scoring redesign lands, or stays hidden.
+
+The user approved the spec on 2026-10-31. Nothing in this section is open.
