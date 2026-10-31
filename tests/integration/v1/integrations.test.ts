@@ -21,6 +21,7 @@ import { PUT as putDisabled } from '@/app/v1/integrations/[key]/disabled/route';
 import { GET as calls } from '@/app/v1/integrations/[key]/calls/route';
 import { webhookSecret } from '@/modules/integrations';
 import { registerDemoAdapter } from '@/modules/integrations/adapters/demo/mock';
+import { DEMO_PROVIDER, registerAdapter } from '@/modules/integrations/providers';
 import { callLog, connection, credential } from '@/modules/integrations/db/schema';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { adminDb } from '@/platform/db/client';
@@ -67,6 +68,19 @@ const logCall = (provider: string, outcome: string, durationMs: number, at = new
     errorMessage: outcome === 'ok' ? null : 'It broke.',
     at,
   });
+
+/** `connection.changed` events back to sample data for this tenant's connection to `provider`. */
+async function disconnectEvents(provider: string, tenantId = t.tenantId): Promise<number> {
+  const [conn] = await adminDb
+    .select({ id: connection.id })
+    .from(connection)
+    .where(and(eq(connection.tenantId, tenantId), eq(connection.provider, provider)));
+  const rows = await adminDb.select({ payload: outbox.payload }).from(outbox).where(eq(outbox.tenantId, tenantId));
+  return rows.filter((r) => {
+    const p = r.payload as { type: string; data?: { connectionId?: string; mode?: string } };
+    return p.type === 'integrations.connection.changed' && p.data?.connectionId === conn?.id && p.data?.mode === 'mock';
+  }).length;
+}
 
 describe('GET /v1/integrations (integrations:manage)', () => {
   it('lists every workspace service with mode, status, usage and the credential label and last 4', async () => {
@@ -212,6 +226,7 @@ describe('POST /v1/integrations/{key}:disconnect', () => {
     await save('demo', 'good-token-0000-3333');
     await action(as(owner, '/integrations/demo:test', { method: 'POST' }));
     expect((await putMode(as(owner, '/integrations/demo/mode', { method: 'PUT', body: { mode: 'live' } }))).status).toBe(200);
+    const changedBefore = await disconnectEvents('demo');
 
     const res = await action(as(owner, '/integrations/demo:disconnect', { method: 'POST' }));
     expect(res.status).toBe(200);
@@ -233,10 +248,7 @@ describe('POST /v1/integrations/{key}:disconnect', () => {
       .from(auditLog)
       .where(and(eq(auditLog.tenantId, t.tenantId), eq(auditLog.action, 'integrations.connection.disconnected')));
     expect(audits).toHaveLength(1);
-    const changed = (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId))).filter(
-      (r) => (r.payload as { type: string; data?: { mode?: string } }).type === 'integrations.connection.changed',
-    );
-    expect(changed.length).toBeGreaterThan(0);
+    expect((await disconnectEvents('demo')) - changedBefore).toBe(1);
 
     // Live now needs a new credential and test.
     expect((await putMode(as(owner, '/integrations/demo/mode', { method: 'PUT', body: { mode: 'live' } }))).status).toBe(409);
@@ -269,15 +281,124 @@ describe('GET /v1/integrations/{key}/calls', () => {
     expect(rows).toHaveLength(50);
     expect(rows[0]).toMatchObject({ operation: 'vibe.test', outcome: 'rate_limited', duration_ms: 0, status_code: 500, error_message: 'It broke.' });
     expect(rows[0].at).toEqual(expect.any(String));
+    // The 50th newest (i = 49), so the oldest two are the ones left out.
+    expect(rows[49]).toMatchObject({ outcome: 'ok', duration_ms: 49 });
 
     const errors = (await (await calls(as(owner, '/integrations/vibe/calls?errors_only=true'))).json()).data;
     expect(errors).toHaveLength(13);
     expect(errors.every((r: { outcome: string }) => r.outcome !== 'ok')).toBe(true);
   });
 
+  it('scrubs secrets out of stored error messages', async () => {
+    await adminDb.insert(callLog).values({
+      id: newId('call'),
+      tenantId: t.tenantId,
+      provider: 'email',
+      operation: 'email.send',
+      outcome: 'error',
+      durationMs: 5,
+      statusCode: 401,
+      errorMessage: 'GET https://bob:hunter2@api.example.com/v1?token=s3cret failed with Bearer abc.def.ghi',
+    });
+    const [row] = (await (await calls(as(owner, '/integrations/email/calls'))).json()).data;
+    expect(row.error_message).not.toMatch(/hunter2|s3cret|abc\.def\.ghi/);
+    expect(row.error_message).toContain('[redacted]');
+  });
+
   it('400s a bad errors_only, 404s an unknown service and refuses a leader', async () => {
     expect((await calls(as(owner, '/integrations/vibe/calls?errors_only=maybe'))).status).toBe(400);
     expect((await calls(as(owner, '/integrations/nope/calls'))).status).toBe(404);
     expect((await calls(as(leader, '/integrations/vibe/calls'))).status).toBe(403);
+  });
+});
+
+describe('POST /v1/integrations/{key}:test scrubs the message', () => {
+  it('a failure with a secret in the error does not echo it', async () => {
+    registerAdapter(DEMO_PROVIDER, {
+      mock: () => ({ test: async () => ({ ok: true, message: 'ok' }) }),
+      live: () => ({
+        async test() {
+          throw new Error('connect to https://bob:hunter2@api.example.com/v1?token=s3cret failed');
+        },
+      }),
+    });
+    try {
+      await save('demo', 'good-token-0000-4444');
+      const res = await action(as(owner, '/integrations/demo:test', { method: 'POST' }));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.ok).toBe(false);
+      expect(body.message).not.toMatch(/hunter2|s3cret/);
+    } finally {
+      registerDemoAdapter();
+    }
+  });
+});
+
+describe("another tenant's integrations stay apart", () => {
+  let other: { tenantId: string; slug: string };
+  let otherOwner: Person;
+  beforeAll(async () => {
+    const admin = await seedUser({ admin: true, signedIn: true });
+    otherOwner = await seedUser({ signedIn: true });
+    other = await tenantOwnedBy(admin, otherOwner.email, 'Other Co');
+    cookies[otherOwner.id] = await signedIn(otherOwner.id);
+  });
+  const asOther = (path: string, opts: Omit<ReqOpts, 'cookies' | 'tenant'> = {}) =>
+    v1Req(path, { ...opts, cookies: cookies[otherOwner.id], tenant: other.slug });
+
+  it("never shows the other tenant's calls or credentials, and disconnecting leaves theirs alone", async () => {
+    const apolloOf = async () =>
+      (await (await list(as(owner, '/integrations'))).json()).data.find((r: { key: string }) => r.key === 'apollo');
+    const before = await apolloOf();
+    const theirCall = newId('call');
+    await adminDb.insert(callLog).values({
+      id: theirCall,
+      tenantId: other.tenantId,
+      provider: 'apollo',
+      operation: 'apollo.test',
+      outcome: 'error',
+      durationMs: 7777,
+      statusCode: 500,
+      errorMessage: 'Theirs.',
+    });
+    const theirSecret = 'their-demo-secret-5c5c';
+    expect(
+      (await putCredential(asOther('/integrations/demo/credential', { method: 'PUT', body: { kind: 'api_key', value: theirSecret } }))).status,
+    ).toBe(200);
+
+    const after = await apolloOf();
+    expect(after).toMatchObject({ calls_today: before.calls_today, errors_today: before.errors_today, avg_ms: before.avg_ms });
+    const mine = (await (await calls(as(owner, '/integrations/apollo/calls'))).json()).data;
+    expect(mine.map((r: { id: string }) => r.id)).not.toContain(theirCall);
+    const listed = JSON.stringify(await (await list(as(owner, '/integrations'))).json());
+    expect(listed).not.toContain('5c5c');
+    expect(listed).not.toContain(theirSecret);
+
+    await save('demo', 'good-token-0000-6666');
+    expect((await action(as(owner, '/integrations/demo:disconnect', { method: 'POST' }))).status).toBe(200);
+    const theirLive = await adminDb
+      .select()
+      .from(credential)
+      .where(and(eq(credential.tenantId, other.tenantId), sql`${credential.replacedAt} is null`));
+    expect(theirLive).toHaveLength(1);
+    const [conn] = await adminDb
+      .select()
+      .from(connection)
+      .where(and(eq(connection.tenantId, other.tenantId), eq(connection.provider, 'demo')));
+    expect(conn!.credentialId).not.toBeNull();
+    expect(await disconnectEvents('demo', other.tenantId)).toBe(0);
+  });
+
+  it('disconnecting a turned-off service keeps it off and on sample data', async () => {
+    expect((await putDisabled(as(owner, '/integrations/vibe/disabled', { method: 'PUT', body: { disabled: true } }))).status).toBe(200);
+    const res = await action(as(owner, '/integrations/vibe:disconnect', { method: 'POST' }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ key: 'vibe', mode: 'mock', status: 'disabled' });
+    const [conn] = await adminDb
+      .select()
+      .from(connection)
+      .where(and(eq(connection.tenantId, t.tenantId), eq(connection.provider, 'vibe')));
+    expect(conn).toMatchObject({ mode: 'mock', status: 'disabled' });
   });
 });
