@@ -103,8 +103,8 @@ for a year; every other GET (deep links under `/t/...`, `/admin/...`, `/signin`)
 (`src/app/[[...app]]/route.ts`) until the HTTP layer moves to Hono.
 
 Local development does not use this: run the app from its Vite dev server (`cd web-ui && npm run dev`,
-port 5173, proxying to the backend on 4240) and sign in with developer sign-in. `npm run build` runs
-`npm ci` in `web-ui/`, so stop that dev server first (on Windows it holds esbuild open).
+port 5173, proxying to the backend on 4240) and sign in with developer sign-in. `npm run build` uses
+the packages already installed in `web-ui/`, so it is safe while the dev server runs.
 
 Notes for the VM:
 
