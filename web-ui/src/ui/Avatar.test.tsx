@@ -7,6 +7,12 @@ describe('Avatar', () => {
     expect(screen.getByRole('img', { name: 'Dana Whitfield' })).toHaveTextContent('DW');
   });
 
+  it('can be decorative', () => {
+    const { container } = render(<Avatar name="Dana Whitfield" decorative />);
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(container.firstElementChild).toHaveAttribute('aria-hidden', 'true');
+  });
+
   it('makes initials from one or many names', () => {
     expect(initialsOf('dana')).toBe('D');
     expect(initialsOf('Ash  van Patel')).toBe('AP');

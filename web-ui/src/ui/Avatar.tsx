@@ -10,9 +10,11 @@ export function initialsOf(name: string): string {
   return (first + (last ?? '')).toUpperCase();
 }
 
-export function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {
+/** Initials in a circle. Set `decorative` when the name is already written next to it. */
+export function Avatar({ name, size = 'md', decorative = false }: { name: string; size?: 'sm' | 'md'; decorative?: boolean }) {
+  const a11y = decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': name };
   return (
-    <span role="img" aria-label={name} className={cx(styles.avatar, styles[size])}>
+    <span {...a11y} className={cx(styles.avatar, styles[size])}>
       {initialsOf(name)}
     </span>
   );

@@ -19,6 +19,8 @@ const toBackend = {
 
 export default defineConfig({
   plugins: [react()],
+  // Inline, so Vite does not pick up the backend's PostCSS and Tailwind config from the repo root.
+  css: { postcss: { plugins: [] } },
   server: {
     port: 5173,
     strictPort: true,
