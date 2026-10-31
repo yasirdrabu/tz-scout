@@ -1,6 +1,7 @@
 import '@/entry/compose';
 import {
   actorFor,
+  clientIp,
   resolvePrincipal,
   requirePermission,
   sessionUser,
@@ -230,6 +231,7 @@ export function v1Route(opts: V1Options, handler: V1Handler): (req: Request) => 
     }
     if (opts.peopleOnly && principal.kind !== 'user') throw forbidden(opts.peopleOnly, 'Only a person can do this.');
     const actor = actorFor(principal);
+    const ip = clientIp(req);
     return execute(
       req,
       opts,
@@ -243,6 +245,7 @@ export function v1Route(opts: V1Options, handler: V1Handler): (req: Request) => 
           correlationId,
           tx,
           ...(principal.environment ? { environment: principal.environment } : {}),
+          ...(ip ? { ip } : {}),
         };
         return handler(r, principal, { ...ctx, access: await accessWithSources(ctx, principal, sourceAccessProvider()) });
       },

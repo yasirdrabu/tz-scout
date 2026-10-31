@@ -144,7 +144,8 @@ export async function sessionPrincipal(headers: Headers, tenantSlug: string): Pr
   return principal;
 }
 
-function clientIp(req: Request): string | null {
+/** The caller's IP address: the first `x-forwarded-for` hop, else `x-real-ip`, else null. */
+export function clientIp(req: Request): string | null {
   const forwarded = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
   return forwarded || req.headers.get('x-real-ip') || null;
 }
@@ -173,7 +174,7 @@ export async function resolvePrincipal(req: Request, tenantSlug?: string): Promi
   return sessionPrincipal(req.headers, slug);
 }
 
-export type SessionUser = { userId: string; name: string; email: string; platformAdmin: boolean };
+export type SessionUser = { userId: string; name: string; email: string; platformAdmin: boolean; sessionId: string };
 
 /** The signed-in person regardless of tenant (same idle and age rules), or null. */
 export async function sessionUser(headers: Headers): Promise<SessionUser | null> {
@@ -195,5 +196,5 @@ export async function sessionUser(headers: Headers): Promise<SessionUser | null>
       .set({ updatedAt: sql`now()` })
       .where(eq(session.id, found.session.id));
   }
-  return { userId: u.id, name: u.name, email: u.email, platformAdmin: u.platformAdmin };
+  return { userId: u.id, name: u.name, email: u.email, platformAdmin: u.platformAdmin, sessionId: found.session.id };
 }

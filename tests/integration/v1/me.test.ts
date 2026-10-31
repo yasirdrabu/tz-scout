@@ -60,8 +60,10 @@ describe('GET /v1/me', () => {
       workspaces: [],
       kind: 'api_key',
       id,
+      role: null,
       scopes: ['members:read', 'status:read'],
       data_limit: { kind: 'own_source' },
+      access_summary: ['You can see only the arrivals and accounts that your own source sent.'],
       source_id: null,
       environment: 'live',
     });

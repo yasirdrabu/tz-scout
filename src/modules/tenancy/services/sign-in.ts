@@ -45,26 +45,28 @@ async function findUser(id: SignInIdentity) {
 
 /**
  * The sign-in gate. A person gets in when they are not disabled and are a platform admin or hold an
- * active or invited membership in an active tenant. Read only: `completeSignIn` does the writes.
+ * active or invited membership in an active tenant. Someone suspended in every workspace they belong
+ * to is told their account is turned off. Read only: `completeSignIn` does the writes.
  */
 export async function checkSignIn(identity: SignInIdentity): Promise<SignInResult> {
   const u = await findUser(identity);
   if (!u) return { ok: false, message: NOT_SET_UP };
   if (u.disabledAt) return { ok: false, message: ACCOUNT_TURNED_OFF };
   if (u.platformAdmin) return { ok: true, userId: u.id };
-  const live = await adminDb
-    .select({ id: membership.id })
+  const memberships = await adminDb
+    .select({ status: membership.status })
     .from(membership)
     .innerJoin(tenant, eq(tenant.id, membership.tenantId))
     .where(
       and(
         eq(membership.userId, u.id),
-        inArray(membership.status, ['invited', 'active']),
+        inArray(membership.status, ['invited', 'active', 'suspended']),
         eq(tenant.status, 'active'),
       ),
-    )
-    .limit(1);
-  return live.length > 0 ? { ok: true, userId: u.id } : { ok: false, message: NOT_SET_UP };
+    );
+  if (memberships.some((m) => m.status !== 'suspended')) return { ok: true, userId: u.id };
+  // Suspended in every workspace they belong to.
+  return { ok: false, message: memberships.length > 0 ? ACCOUNT_TURNED_OFF : NOT_SET_UP };
 }
 
 /** Claims of a Microsoft id token that matter for matching. */

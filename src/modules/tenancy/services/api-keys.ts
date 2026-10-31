@@ -1,6 +1,6 @@
 import { createHash, randomInt } from 'node:crypto';
 import { hash, verify } from '@node-rs/argon2';
-import { and, eq, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb } from '@/platform/db/client';
@@ -14,7 +14,8 @@ import type { Principal } from '../contracts/principal';
 import { sourceValidator } from '../contracts/source-validator';
 import { DataLimitSchema, defaultDataLimit, isWithin, type DataLimit } from '../domain/data-limit';
 import { PERMISSIONS, isPermission, type Permission } from '../domain/permissions';
-import { apiKey, tenant } from '../db/schema';
+import { KEY_ACCESS, keyMask, type KeyAccess } from '../domain/key-access';
+import { apiKey, tenant, user } from '../db/schema';
 
 export const NEEDS_SOURCE_LATER = 'Pick the source this key sends for.';
 
@@ -106,6 +107,9 @@ export async function createApiKey(
     if (!v) throw validation('source-required', NEEDS_SOURCE_LATER);
     if (!input.sourceId) throw validation('source-required', 'Keys that send accounts need a source.');
     if (!(await v.exists(ctx, input.sourceId))) throw validation('source-not-found', 'That source was not found.');
+  } else if (input.sourceId) {
+    const v = sourceValidator();
+    if (v && !(await v.exists(ctx, input.sourceId))) throw validation('source-not-found', 'That source was not found.');
   }
 
   const head = `scout_${input.environment}_`;
@@ -193,6 +197,82 @@ export async function revokeApiKey(ctx: ModuleContext, id: string, reason: strin
     subject: { type: 'api_key', id },
     after: { reason },
   });
+}
+
+/** One key as the API keys screen lists it (§21c). The secret is never returned after creation. */
+export type ApiKeyView = {
+  id: string;
+  name: string;
+  prefix: string;
+  mask: string;
+  environment: 'live' | 'test';
+  scopes: Permission[];
+  sourceId: string | null;
+  createdBy: string | null;
+  createdByName: string | null;
+  createdAt: Date;
+  lastUsedAt: Date | null;
+  lastUsedIp: string | null;
+  expiresAt: Date | null;
+  revokedAt: Date | null;
+};
+
+/** The tenant's keys, newest first; only one source's with `sourceId`, only one key with `id`. */
+export async function listApiKeys(ctx: ModuleContext, f: { sourceId?: string; id?: string } = {}): Promise<ApiKeyView[]> {
+  const rows = await ctx.tx
+    .select({ k: apiKey, createdByName: user.name })
+    .from(apiKey)
+    .leftJoin(user, eq(user.id, apiKey.createdBy))
+    .where(
+      and(
+        eq(apiKey.tenantId, ctx.tenantId),
+        f.sourceId ? eq(apiKey.sourceId, f.sourceId) : undefined,
+        f.id ? eq(apiKey.id, f.id) : undefined,
+      ),
+    )
+    .orderBy(desc(apiKey.createdAt), desc(apiKey.id));
+  return rows.map(({ k, createdByName }) => ({
+    id: k.id,
+    name: k.name,
+    prefix: k.prefix,
+    mask: keyMask(k.prefix),
+    environment: k.environment === 'test' ? 'test' : 'live',
+    scopes: k.scopes.filter(isPermission),
+    sourceId: k.sourceId,
+    createdBy: k.createdBy,
+    createdByName,
+    createdAt: k.createdAt,
+    lastUsedAt: k.lastUsedAt,
+    lastUsedIp: k.lastUsedIp,
+    expiresAt: k.expiresAt,
+    revokedAt: k.revokedAt,
+  }));
+}
+
+/** 404 unless the source exists in the tenant (asked through the registered source validator). */
+export async function assertSourceExists(ctx: ModuleContext, sourceId: string): Promise<void> {
+  const v = sourceValidator();
+  if (!v || !(await v.exists(ctx, sourceId))) {
+    throw new ScoutError({ slug: 'not-found', status: 404, title: 'That source was not found.' });
+  }
+}
+
+/**
+ * Creates a key from an access choice on the API keys screen (`KEY_ACCESS`), for `sourceId`, within
+ * what the grantor holds. Returns the key's view and its secret, which is shown once.
+ */
+export async function createKeyWithAccess(
+  ctx: ModuleContext,
+  input: { name: string; access: KeyAccess; sourceId: string; environment?: 'live' | 'test' },
+  grantor: Grantor,
+): Promise<ApiKeyView & { secret: string }> {
+  const { id, secret } = await createApiKey(
+    ctx,
+    { name: input.name, environment: input.environment ?? 'live', scopes: [...KEY_ACCESS[input.access]], sourceId: input.sourceId },
+    grantor,
+  );
+  const [view] = await listApiKeys(ctx, { id });
+  return { ...view!, secret };
 }
 
 /** Revokes every active key with this name in the context's tenant. Returns how many were revoked. */

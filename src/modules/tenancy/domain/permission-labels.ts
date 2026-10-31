@@ -40,3 +40,29 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
 };
 
 export const permissionLabel = (p: Permission): string => PERMISSION_LABELS[p];
+
+/** The groups of the roles and permissions matrix (screens.md §21a), in display order. */
+export const PERMISSION_GROUP_NAMES = ['Accounts', 'Review and sources', 'Offers and playbooks', 'Pipeline and money', 'Workspace'] as const;
+export type PermissionGroup = (typeof PERMISSION_GROUP_NAMES)[number];
+
+const GROUPS: Record<PermissionGroup, Permission[]> = {
+  Accounts: [
+    'accounts:read',
+    'accounts:write',
+    'people:read',
+    'people:write',
+    'signals:write',
+    'enrichment:request',
+    'enrichment:approve',
+    'warm_intro:declare',
+    'searches:manage',
+  ],
+  'Review and sources': ['arrivals:write', 'arrivals:read', 'imports:run', 'sources:manage', 'review:act', 'assign:act', 'assignments:respond'],
+  'Offers and playbooks': ['offers:read', 'offers:manage', 'playbooks:read', 'playbooks:write', 'playbooks:manage', 'scoring:manage', 'campaigns:read', 'campaigns:manage'],
+  'Pipeline and money': ['crm:push', 'analytics:read', 'costs:write'],
+  Workspace: ['members:read', 'members:manage', 'keys:manage', 'integrations:manage', 'webhooks:manage', 'settings:manage', 'status:read', 'audit:read'],
+};
+
+export function permissionGroup(p: Permission): PermissionGroup {
+  return PERMISSION_GROUP_NAMES.find((g) => GROUPS[g].includes(p))!;
+}

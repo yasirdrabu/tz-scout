@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, ilike, inArray, like, lte, not, or, sql, type SQL } from 'drizzle-orm';
 import { adminDb } from './db/client';
 import { auditLog } from './db/schema';
 import type { Tx } from './db/tenant';
@@ -43,7 +43,7 @@ export function redact(value: unknown, seen: WeakSet<object> = new WeakSet()): u
   return value;
 }
 
-function row(tenantId: string, actor: Actor, correlationId: string | undefined, entry: AuditEntry) {
+function row(tenantId: string, actor: Actor, correlationId: string | undefined, entry: AuditEntry, ip?: string) {
   return {
     id: newId('aud'),
     tenantId,
@@ -56,15 +56,15 @@ function row(tenantId: string, actor: Actor, correlationId: string | undefined, 
     subjectType: entry.subject?.type ?? null,
     subjectId: entry.subject?.id ?? null,
     correlationId: correlationId ?? null,
-    ip: entry.ip ?? null,
+    ip: entry.ip ?? ip ?? null,
     before: entry.before === undefined ? null : redact(entry.before),
     after: entry.after === undefined ? null : redact(entry.after),
   };
 }
 
-/** Records a change in the caller's transaction: it commits or rolls back with the change. */
+/** Records a change in the caller's transaction: it commits or rolls back with the change. The IP is `entry.ip`, else `ctx.ip`. */
 export async function audit(ctx: ModuleContext, entry: AuditEntry): Promise<void> {
-  await ctx.tx.insert(auditLog).values(row(ctx.tenantId, ctx.actor, ctx.correlationId, entry));
+  await ctx.tx.insert(auditLog).values(row(ctx.tenantId, ctx.actor, ctx.correlationId, entry, ctx.ip));
 }
 
 /**
@@ -85,6 +85,12 @@ export type AuditFilter = {
   apiKeyId?: string;
   sourceId?: string;
   subjectId?: string;
+  /** Only actions starting with one of these. */
+  actionPrefixes?: string[];
+  /** No action starting with one of these. */
+  excludeActionPrefixes?: string[];
+  /** Text in the action, subject type or id, or IP address; or an actor among `actorIds` (people or keys whose name matched). */
+  search?: { text: string; actorIds: string[] };
   from?: Date;
   to?: Date;
   cursor?: string;
@@ -105,6 +111,9 @@ function decodeCursor(cursor: string): [string, string] {
   throw new ScoutError({ slug: 'invalid-cursor', status: 400, title: 'Invalid cursor' });
 }
 
+/** `value` with LIKE wildcards escaped, to match literally. */
+export const escapeLike = (value: string): string => value.replace(/[\\%_]/g, (c) => `\\${c}`);
+
 /** Audit rows of the caller's tenant, newest first. */
 export async function listAudit(
   ctx: Pick<ModuleContext, 'tenantId' | 'tx'>,
@@ -118,6 +127,22 @@ export async function listAudit(
   if (f.subjectId) conds.push(eq(auditLog.subjectId, f.subjectId));
   if (f.from) conds.push(gte(auditLog.at, f.from));
   if (f.to) conds.push(lte(auditLog.at, f.to));
+  if (f.actionPrefixes) conds.push(or(...f.actionPrefixes.map((p) => like(auditLog.action, `${escapeLike(p)}%`))));
+  if (f.excludeActionPrefixes?.length) {
+    conds.push(not(or(...f.excludeActionPrefixes.map((p) => like(auditLog.action, `${escapeLike(p)}%`)))!));
+  }
+  if (f.search) {
+    const t = `%${escapeLike(f.search.text)}%`;
+    conds.push(
+      or(
+        ilike(auditLog.action, t),
+        ilike(auditLog.subjectType, t),
+        ilike(auditLog.subjectId, t),
+        ilike(auditLog.ip, t),
+        f.search.actorIds.length ? inArray(auditLog.actorId, f.search.actorIds) : undefined,
+      ),
+    );
+  }
   if (f.cursor) {
     const [at, id] = decodeCursor(f.cursor);
     conds.push(

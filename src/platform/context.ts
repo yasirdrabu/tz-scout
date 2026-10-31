@@ -11,6 +11,8 @@ export type ModuleContext = {
   tx: Tx;
   /** Set when the caller authenticated with an API key. Test keys only ever get mock adapters. */
   environment?: 'live' | 'test';
+  /** The caller's IP address, for HTTP requests. Audit entries record it. */
+  ip?: string;
   /** Who is asking and what they may see. Set for requests from people and API keys, not for worker runs. */
   access?: Access;
 };

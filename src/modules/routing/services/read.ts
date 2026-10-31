@@ -277,3 +277,13 @@ export async function countNewAssignments(ctx: ModuleContext): Promise<number> {
     .where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.sellerUserId, me), eq(assignment.status, 'pending')));
   return row?.n ?? 0;
 }
+
+/** Open (pending or accepted) assignments per seller user id, for the Members screen's remove confirm. */
+export async function openAssignmentCounts(ctx: ModuleContext): Promise<Record<string, number>> {
+  const rows = await ctx.tx
+    .select({ userId: assignment.sellerUserId, n: sql<number>`count(*)::int` })
+    .from(assignment)
+    .where(and(eq(assignment.tenantId, ctx.tenantId), inArray(assignment.status, OPEN_STATUSES)))
+    .groupBy(assignment.sellerUserId);
+  return Object.fromEntries(rows.map((r) => [r.userId, r.n]));
+}
