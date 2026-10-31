@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
-import { problem } from '../../../test/http';
+import { exactly, problem } from '../../../test/http';
 import { renderApp, serveMe } from '../../../test/renderApp';
 import { server } from '../../../test/server';
 import type { Call, Integration } from './api';
@@ -140,7 +140,7 @@ describe('manage panel', () => {
         saved = await request.json();
         return HttpResponse.json({ ...GOVSPEND, credentials: [{ kind: 'api_key', label: 'Key', last4: '9z9z', saved_at: '2026-10-31T10:00:00Z' }] });
       }),
-      http.post('/v1/integrations/govspend:test', () => HttpResponse.json({ ok: true, message: 'Read and write scopes granted.', duration_ms: 182 })),
+      http.post(exactly('/v1/integrations/govspend:test'), () => HttpResponse.json({ ok: true, message: 'Read and write scopes granted.', duration_ms: 182 })),
     );
     const drawer = await openService('Connect GovSpend');
     await userEvent.type(within(drawer).getByLabelText('Paste the Key'), 'gs-key-1234567890');
@@ -163,7 +163,7 @@ describe('manage panel', () => {
   it('tests the connection and shows a failed result', async () => {
     serve();
     server.use(
-      http.post('/v1/integrations/hubspot:test', () =>
+      http.post(exactly('/v1/integrations/hubspot:test'), () =>
         HttpResponse.json({ ok: false, message: 'HubSpot refused the token.', missing_permissions: ['crm.objects.deals.write'], duration_ms: 90 }),
       ),
     );
@@ -175,7 +175,7 @@ describe('manage panel', () => {
 
   it('shows the API words when the test call fails', async () => {
     serve();
-    server.use(http.post('/v1/integrations/hubspot:test', () => problem(500, 'Something went wrong', { detail: 'Scout could not run the test.' })));
+    server.use(http.post(exactly('/v1/integrations/hubspot:test'), () => problem(500, 'Something went wrong', { detail: 'Scout could not run the test.' })));
     const drawer = await openService('Manage HubSpot');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Test connection' }));
     expect(await screen.findByText('Scout could not run the test.')).toBeInTheDocument();
@@ -224,14 +224,14 @@ describe('manage panel', () => {
 
   it('disconnects after the confirm, and shows the failure', async () => {
     serve();
-    server.use(http.post('/v1/integrations/hubspot:disconnect', () => problem(404, 'Not found', { detail: 'Scout has no such service.' })));
+    server.use(http.post(exactly('/v1/integrations/hubspot:disconnect'), () => problem(404, 'Not found', { detail: 'Scout has no such service.' })));
     const drawer = await openService('Manage HubSpot');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Disconnect' }));
     const confirm = await screen.findByRole('dialog', { name: 'Disconnect HubSpot?' });
     await userEvent.click(within(confirm).getByRole('button', { name: 'Disconnect' }));
     expect(await screen.findByText('Scout has no such service.')).toBeInTheDocument();
 
-    server.use(http.post('/v1/integrations/hubspot:disconnect', () => HttpResponse.json({ ...HUBSPOT, credentials: [], mode: 'mock', status: 'not_set_up' })));
+    server.use(http.post(exactly('/v1/integrations/hubspot:disconnect'), () => HttpResponse.json({ ...HUBSPOT, credentials: [], mode: 'mock', status: 'not_set_up' })));
     await userEvent.click(within(confirm).getByRole('button', { name: 'Disconnect' }));
     expect(await screen.findByText('Disconnected HubSpot. Scout stopped calling it and switched to sample data.')).toBeInTheDocument();
   });

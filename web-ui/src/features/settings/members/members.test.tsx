@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
-import { problem } from '../../../test/http';
+import { exactly, problem } from '../../../test/http';
 import { renderApp } from '../../../test/renderApp';
 import { server } from '../../../test/server';
 import { fail, MEMBERS, serve } from './testing';
@@ -190,24 +190,24 @@ describe('member drawer', () => {
 
   it('suspends, and shows the failure', async () => {
     serve();
-    server.use(http.post('/v1/members/mbr_dana:suspend', () => HttpResponse.json({ ...MEMBERS[1], status: 'suspended' })));
+    server.use(http.post(exactly('/v1/members/mbr_dana:suspend'), () => HttpResponse.json({ ...MEMBERS[1], status: 'suspended' })));
     const drawer = await openMember('Dana Whitfield');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Suspend' }));
     expect(await screen.findByText("Dana Whitfield suspended. They can't use this workspace until you reactivate them.")).toBeInTheDocument();
 
-    server.use(http.post('/v1/members/mbr_dana:suspend', fail));
+    server.use(http.post(exactly('/v1/members/mbr_dana:suspend'), fail));
     await userEvent.click(within(drawer).getByRole('button', { name: 'Suspend' }));
     expect(await screen.findByText('The API refused this change.')).toBeInTheDocument();
   });
 
   it('reactivates, and shows the failure', async () => {
     serve();
-    server.use(http.post('/v1/members/mbr_lena:reactivate', () => HttpResponse.json(MEMBERS[2])));
+    server.use(http.post(exactly('/v1/members/mbr_lena:reactivate'), () => HttpResponse.json(MEMBERS[2])));
     const drawer = await openMember('Lena Brooks');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Reactivate' }));
     expect(await screen.findByText('Lena Brooks reactivated.')).toBeInTheDocument();
 
-    server.use(http.post('/v1/members/mbr_lena:reactivate', fail));
+    server.use(http.post(exactly('/v1/members/mbr_lena:reactivate'), fail));
     await userEvent.click(within(drawer).getByRole('button', { name: 'Reactivate' }));
     expect(await screen.findByText('The API refused this change.')).toBeInTheDocument();
   });
@@ -232,7 +232,7 @@ describe('member drawer', () => {
 
   it('signs a member out everywhere after the confirm, and shows the failure', async () => {
     serve();
-    server.use(http.post('/v1/members/mbr_dana:sign-out-everywhere', fail));
+    server.use(http.post(exactly('/v1/members/mbr_dana:sign-out-everywhere'), fail));
     const drawer = await openMember('Dana Whitfield');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Sign out of every device' }));
     const confirm = await screen.findByRole('dialog', { name: 'Sign Dana Whitfield out everywhere?' });
@@ -240,7 +240,7 @@ describe('member drawer', () => {
     await userEvent.click(within(confirm).getByRole('button', { name: 'Sign out everywhere' }));
     expect(await screen.findByText('The API refused this change.')).toBeInTheDocument();
 
-    server.use(http.post('/v1/members/mbr_dana:sign-out-everywhere', () => new HttpResponse(null, { status: 204 })));
+    server.use(http.post(exactly('/v1/members/mbr_dana:sign-out-everywhere'), () => new HttpResponse(null, { status: 204 })));
     await userEvent.click(within(confirm).getByRole('button', { name: 'Sign out everywhere' }));
     expect(await screen.findByText('Dana Whitfield is signed out of every device.')).toBeInTheDocument();
   });

@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
-import { problem } from '../../test/http';
+import { exactly, problem } from '../../test/http';
 import { renderApp, serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
 
@@ -69,7 +69,7 @@ describe('Profile', () => {
   it('signs out of every device after the confirm and goes to sign-in', async () => {
     serve();
     let called = false;
-    server.use(http.post('/v1/me:sign-out-everywhere', () => {
+    server.use(http.post(exactly('/v1/me:sign-out-everywhere'), () => {
       called = true;
       return new HttpResponse(null, { status: 204 });
     }));
@@ -85,7 +85,7 @@ describe('Profile', () => {
 
   it('shows the API words when signing out everywhere fails', async () => {
     serve();
-    server.use(http.post('/v1/me:sign-out-everywhere', () => problem(403, 'Forbidden', { detail: 'Only a person can do this.' })));
+    server.use(http.post(exactly('/v1/me:sign-out-everywhere'), () => problem(403, 'Forbidden', { detail: 'Only a person can do this.' })));
     renderApp('/t/taazaa/profile');
     await userEvent.click(await screen.findByRole('button', { name: 'Sign out of every device' }));
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Sign out everywhere' }));
