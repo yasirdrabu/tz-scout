@@ -54,7 +54,7 @@ export function TenantsScreen() {
           <div className={styles.tiles}>
             <div className={styles.tile}>
               <div className={styles.tileLabel}>Tenants</div>
-              <div className={styles.tileValue}>{f.number(tenants.data.data.length)}</div>
+              <div className={styles.tileValue}>{f.number(tenants.data.summary.total)}</div>
               <div className={styles.tileNote}>
                 {f.number(tenants.data.summary.active)} active · {f.number(tenants.data.summary.suspended)} suspended
               </div>
@@ -108,7 +108,7 @@ export function TenantsScreen() {
                 </table>
                 <div className={table.foot}>
                   <span>
-                    Showing {tenants.data.data.length} of {tenants.data.data.length}
+                    Showing {tenants.data.data.length} of {tenants.data.summary.total}
                   </span>
                   <span>Newest first</span>
                 </div>

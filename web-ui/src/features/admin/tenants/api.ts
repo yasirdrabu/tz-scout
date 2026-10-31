@@ -16,7 +16,7 @@ export type AdminTenant = {
   owner: { name: string; email: string } | null;
 };
 
-export type TenantsList = { data: AdminTenant[]; summary: { active: number; suspended: number } };
+export type TenantsList = { data: AdminTenant[]; summary: { total: number; active: number; suspended: number } };
 
 export const tenantsQuery = () =>
   queryOptions({

@@ -30,13 +30,17 @@ const ADMINS: PlatformAdmin[] = [
 
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-function serve(tenants: AdminTenant[] = TENANTS, admins: PlatformAdmin[] = ADMINS) {
+function serve(tenants: AdminTenant[] = TENANTS, admins: PlatformAdmin[] = ADMINS, total = tenants.length) {
   serveNoTenantMe();
   server.use(
     http.get('/v1/admin/tenants', () =>
       HttpResponse.json({
         data: tenants,
-        summary: { active: tenants.filter((t) => t.status === 'active').length, suspended: tenants.filter((t) => t.status === 'suspended').length },
+        summary: {
+          total,
+          active: tenants.filter((t) => t.status === 'active').length,
+          suspended: tenants.filter((t) => t.status === 'suspended').length,
+        },
       }),
     ),
     http.get('/v1/admin/platform-admins', () => HttpResponse.json({ data: admins })),
@@ -59,6 +63,14 @@ describe('Tenants list', () => {
     expect(taazaa).toHaveTextContent('Aug 2, 2026');
     expect(screen.getByRole('button', { name: 'Meridian Public Sector' }).closest('tr')).toHaveTextContent('Suspended');
     expect(screen.getByText('Showing 3 of 3')).toBeInTheDocument();
+  });
+
+  it("shows the API's total in the Tenants tile, not its own count", async () => {
+    serve(TENANTS, ADMINS, 12);
+    renderApp('/admin/tenants');
+    const tile = (await screen.findByText('Tenants', { selector: 'div' })).parentElement!;
+    expect(tile).toHaveTextContent('12');
+    expect(screen.getByText('Showing 3 of 12')).toBeInTheDocument();
   });
 
   it('shows loading, error and empty states', async () => {
