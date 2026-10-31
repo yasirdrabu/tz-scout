@@ -6,10 +6,21 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+# The web-ui app (interim, until the HTTP layer moves to Hono: the web role serves it at /).
+# Its own install; only dist/ leaves this stage.
+FROM node:22-bookworm-slim AS web-ui
+WORKDIR /app/web-ui
+COPY web-ui/package.json web-ui/package-lock.json web-ui/.npmrc ./
+RUN npm ci
+COPY web-ui/ ./
+RUN npm run build
+
 FROM deps AS build
 COPY . .
+COPY --from=web-ui /app/web-ui/dist ./web-ui/dist
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+# build:api, not build: the web-ui is already built above. It copies web-ui/dist into the standalone output.
+RUN npm run build:api
 
 FROM deps AS prod-deps
 RUN npm prune --omit=dev
@@ -26,8 +37,6 @@ COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/package.json ./package.json
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/.next/standalone ./.next/standalone
-COPY --from=build --chown=node:node /app/.next/static ./.next/standalone/.next/static
-COPY --from=build --chown=node:node /app/public ./.next/standalone/public
 # Everything "migrate" reads, at the same relative paths it uses from the working directory.
 COPY --from=build --chown=node:node /app/src/platform/db/bootstrap.sql ./src/platform/db/bootstrap.sql
 COPY --from=build --chown=node:node /app/src/platform/db/migrations ./src/platform/db/migrations
