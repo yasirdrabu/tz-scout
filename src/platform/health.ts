@@ -3,6 +3,7 @@ import { connect, type NatsConnection } from '@nats-io/transport-node';
 import { config } from '@/platform/config';
 import { jetstreamManager } from '@nats-io/jetstream';
 import { adminDb, appDb } from '@/platform/db/client';
+import type { Tx } from '@/platform/db/tenant';
 import { deadJob, schedule } from '@/platform/db/schema';
 import { STREAMS } from '@/platform/nats/streams';
 import { relayLagMs } from '@/platform/relay';
@@ -117,12 +118,13 @@ async function consumerNumbers(url: string): Promise<ConsumerHealth[]> {
  * What the System page shows: relay lag, queue numbers per consumer, dead jobs and schedules. When NATS
  * does not answer, the database parts still come back and `consumersAvailable` is false.
  */
-export async function systemHealth(opts: { natsUrl?: string } = {}): Promise<SystemHealth> {
+export async function systemHealth(opts: { natsUrl?: string; tx?: Tx } = {}): Promise<SystemHealth> {
   const url = opts.natsUrl ?? config.natsUrl;
+  const db = opts.tx ?? adminDb;
   const [lag, dead, schedules, consumers] = await Promise.all([
-    relayLagMs(),
-    adminDb.select({ n: sql<number>`count(*)::int` }).from(deadJob),
-    adminDb.select().from(schedule).orderBy(schedule.jobName, schedule.tenantId),
+    relayLagMs(db),
+    db.select({ n: sql<number>`count(*)::int` }).from(deadJob),
+    db.select().from(schedule).orderBy(schedule.jobName, schedule.tenantId),
     consumerNumbers(url).then(
       (c) => ({ ok: true as const, c }),
       () => ({ ok: false as const, c: [] as ConsumerHealth[] }),

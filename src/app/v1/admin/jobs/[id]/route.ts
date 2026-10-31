@@ -7,12 +7,12 @@ export const dynamic = 'force-dynamic';
 // POST /v1/admin/jobs/{id}:retry and :discard, for dead jobs. Both are audited by the platform services.
 export const POST = adminByAction('jobs', {
   /** Sends the work again; `sent_id` is the new job id, or the event id for an event. */
-  retry: adminRoute({}, async (req, _person, { actor, correlationId }) => ({
-    sentId: await retryDeadJob({ actor, correlationId }, idAndAction(req, 'jobs').id),
+  retry: adminRoute({}, async (req, _person, ctx) => ({
+    sentId: await retryDeadJob(ctx, idAndAction(req, 'jobs').id),
   })),
   /** Removes the dead job without running it. */
-  discard: adminRoute({}, async (req, _person, { actor, correlationId }) => {
-    await discardDeadJob({ actor, correlationId }, idAndAction(req, 'jobs').id);
+  discard: adminRoute({}, async (req, _person, ctx) => {
+    await discardDeadJob(ctx, idAndAction(req, 'jobs').id);
     return noContent();
   }),
 });

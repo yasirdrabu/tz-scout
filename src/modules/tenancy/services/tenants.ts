@@ -1,7 +1,8 @@
 import { asc, desc, eq, sql } from 'drizzle-orm';
 import { platformAudit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
-import { adminDb } from '@/platform/db/client';
+import { adminDb, adminTransaction } from '@/platform/db/client';
+import type { Tx } from '@/platform/db/tenant';
 import { ScoutError } from '@/platform/errors';
 import type { Actor } from '@/platform/events/envelope';
 import { publish } from '@/platform/events/outbox';
@@ -28,11 +29,13 @@ const isUniqueViolation = (e: unknown): boolean => {
 
 /**
  * Creates a tenant with its first owner (status invited). Platform admins only. Runs in one
- * `adminDb` transaction; the creation is written to the platform audit log, not the tenant's.
+ * `adminDb` transaction (a savepoint of `outer` when given); the creation is written to the platform
+ * audit log, not the tenant's.
  */
 export async function createTenant(
   actor: Actor,
   input: CreateTenantInput,
+  outer?: Tx,
 ): Promise<{ tenantId: string; ownerMembershipId: string }> {
   const slug = input.slug.trim().toLowerCase();
   const email = input.ownerEmail.trim().toLowerCase();
@@ -46,7 +49,7 @@ export async function createTenant(
   }
   const correlationId = newId('cor');
   try {
-    return await adminDb.transaction(async (tx) => {
+    return await adminTransaction(outer, async (tx) => {
       const [admin] = await tx
         .select({ isAdmin: user.platformAdmin, disabledAt: user.disabledAt })
         .from(user)
@@ -125,8 +128,8 @@ export async function tenantTimezone(ctx: ModuleContext): Promise<string> {
 export type TenantRow = { id: string; slug: string; name: string; currency: string; timezone: string; status: string };
 
 /** Every tenant, newest last. Platform-wide, so it uses `adminDb`; callers must be platform admins. */
-export async function listTenants(): Promise<TenantRow[]> {
-  return adminDb
+export async function listTenants(tx?: Tx): Promise<TenantRow[]> {
+  return (tx ?? adminDb)
     .select({
       id: tenant.id,
       slug: tenant.slug,
@@ -168,13 +171,13 @@ export type AdminTenantRow = TenantRow & {
 };
 
 /** Every tenant for the admin Tenants screen, newest first, with member count and owner. Platform admins only. */
-export async function adminTenants(): Promise<AdminTenantRow[]> {
+export async function adminTenants(tx?: Tx): Promise<AdminTenantRow[]> {
   const counted = sql<number>`(select count(*)::int from ${membership} m where m.tenant_id = tenancy.tenant.id and m.status in ('invited', 'active'))`;
   const owner = sql<{ name: string; email: string } | null>`(
     select json_build_object('name', u.name, 'email', u.email) from ${membership} m join ${user} u on u.id = m.user_id
     where m.tenant_id = tenancy.tenant.id and m.role = 'owner' and m.status in ('invited', 'active')
     order by m.created_at, m.id limit 1)`;
-  return adminDb
+  return (tx ?? adminDb)
     .select({
       id: tenant.id,
       slug: tenant.slug,
@@ -190,8 +193,8 @@ export async function adminTenants(): Promise<AdminTenantRow[]> {
     .orderBy(desc(tenant.createdAt), desc(tenant.id));
 }
 
-/** A platform admin acting outside any tenant: who, and the request's correlation id. */
-export type AdminActor = { actor: Actor; correlationId: string };
+/** A platform admin acting outside any tenant: who, the request's correlation id and its `adminDb` transaction, to work in. */
+export type AdminActor = { actor: Actor; correlationId: string; tx?: Tx };
 
 /**
  * Suspends or resumes a tenant. While suspended nobody in it can sign in to it and its API keys are
@@ -200,7 +203,7 @@ export type AdminActor = { actor: Actor; correlationId: string };
  * 404 for an unknown tenant, 409 when it is already in that state.
  */
 export async function setTenantStatus(by: AdminActor, tenantId: string, status: 'active' | 'suspended'): Promise<void> {
-  await adminDb.transaction(async (tx) => {
+  await adminTransaction(by.tx, async (tx) => {
     const [t] = await tx.select({ status: tenant.status, slug: tenant.slug }).from(tenant).where(eq(tenant.id, tenantId)).for('update');
     if (!t) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That tenant was not found.' });
     if (t.status === status) {

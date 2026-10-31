@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { platformAudit } from '@/platform/audit';
-import { adminDb } from '@/platform/db/client';
+import { adminDb, adminTransaction } from '@/platform/db/client';
+import type { Tx } from '@/platform/db/tenant';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { adminRemovalRefusal, isStaffEmail } from '../domain/platform-admin-rules';
@@ -14,8 +15,8 @@ const cols = { userId: user.id, name: user.name, email: user.email, lastSignInAt
 const active = and(eq(user.platformAdmin, true), isNull(user.disabledAt));
 
 /** Platform admins who are not turned off, by email. */
-export async function platformAdmins(): Promise<PlatformAdmin[]> {
-  return adminDb.select(cols).from(user).where(active).orderBy(asc(user.email));
+export async function platformAdmins(tx?: Tx): Promise<PlatformAdmin[]> {
+  return (tx ?? adminDb).select(cols).from(user).where(active).orderBy(asc(user.email));
 }
 
 /**
@@ -28,7 +29,7 @@ export async function addPlatformAdmin(by: AdminActor, rawEmail: string): Promis
   if (!isStaffEmail(email)) {
     throw new ScoutError({ slug: 'not-staff-email', status: 400, title: 'Use an @taazaa.com email.' });
   }
-  const added = await adminDb.transaction(async (tx) => {
+  const added = await adminTransaction(by.tx, async (tx) => {
     await tx
       .insert(user)
       .values({ id: newId('usr'), name: email.split('@')[0] ?? email, email })
@@ -65,7 +66,7 @@ export async function addPlatformAdmin(by: AdminActor, rawEmail: string): Promis
  * are locked, so two removals at once cannot leave none. Audited as `tenancy.platform_admin.removed`.
  */
 export async function removePlatformAdmin(by: AdminActor, userId: string): Promise<void> {
-  await adminDb.transaction(async (tx) => {
+  await adminTransaction(by.tx, async (tx) => {
     const admins = await tx.select({ id: user.id, email: user.email }).from(user).where(active).for('update');
     const target = admins.find((a) => a.id === userId);
     if (!target) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That platform admin was not found.' });

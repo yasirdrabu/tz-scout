@@ -215,3 +215,19 @@ describe('/v1/admin/platform-admins', () => {
     await refusesNonAdmins((o) => removeAdmin(v1Req(`/admin/platform-admins/${admin.id}`, { ...o, method: 'DELETE' })));
   });
 });
+
+describe('a turned-off platform admin', () => {
+  it('gets 401 on admin reads and writes even with a valid session', async () => {
+    const off = await seedUser({ admin: true, signedIn: true });
+    const h = await signedIn(off.id);
+    expect((await listTenantsRoute(v1Req('/admin/tenants', { cookies: h }))).status).toBe(200);
+    await adminDb.update(user).set({ disabledAt: new Date() }).where(eq(user.id, off.id));
+    expect((await listTenantsRoute(v1Req('/admin/tenants', { cookies: h }))).status).toBe(401);
+    const slug = uniqueSlug();
+    const res = await createTenantRoute(
+      v1Req('/admin/tenants', { cookies: h, method: 'POST', body: { name: 'Should not exist', slug, owner_email: 'nobody@example.com' } }),
+    );
+    expect(res.status).toBe(401);
+    expect((await adminDb.select().from(auditLog).where(and(eq(auditLog.action, 'tenancy.tenant.created'), eq(auditLog.actorId, off.id))))).toHaveLength(0);
+  });
+});

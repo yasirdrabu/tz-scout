@@ -10,17 +10,17 @@ const scheduleId = (req: Request) => idAndAction(req, 'schedules').id;
 
 // POST /v1/admin/schedules/{id}:pause, :resume and :run-now. Audited by the scheduler services.
 export const POST = adminByAction('schedules', {
-  pause: adminRoute({}, async (req, _person, { actor, correlationId }) => {
-    await pauseSchedule({ actor, correlationId }, scheduleId(req));
+  pause: adminRoute({}, async (req, _person, ctx) => {
+    await pauseSchedule(ctx, scheduleId(req));
     return noContent();
   }),
   /** Resuming recomputes the next run from now. */
-  resume: adminRoute({}, async (req, _person, { actor, correlationId }) => {
-    await resumeSchedule({ actor, correlationId }, scheduleId(req));
+  resume: adminRoute({}, async (req, _person, ctx) => {
+    await resumeSchedule(ctx, scheduleId(req));
     return noContent();
   }),
   /** Starts the job now; the next run stays as it was. */
-  'run-now': adminRoute({}, async (req, _person, { actor, correlationId }) => ({
-    jobId: await runNow({ actor, correlationId }, scheduleId(req)),
+  'run-now': adminRoute({}, async (req, _person, ctx) => ({
+    jobId: await runNow(ctx, scheduleId(req)),
   })),
 });

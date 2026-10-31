@@ -2,7 +2,8 @@ import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { scrubError } from '@/platform/scrub-error';
 import { platformAudit } from './audit';
-import { adminDb } from './db/client';
+import { adminDb, adminTransaction } from './db/client';
+import type { Tx } from './db/tenant';
 import { deadJob, outbox } from './db/schema';
 import { ScoutError } from './errors';
 import { EnvelopeSchema, type Actor, type Envelope } from './events/envelope';
@@ -18,8 +19,8 @@ export const jobDead = defineEvent(
   z.object({ jobType: z.string(), error: z.string(), attempts: z.number().int() }),
 );
 
-/** A platform admin acting on dead jobs. Not tenant-scoped. */
-export type AdminCtx = { actor: Actor; correlationId?: string };
+/** A platform admin acting on dead jobs. Not tenant-scoped. `tx`: the request's `adminDb` transaction, to work in. */
+export type AdminCtx = { actor: Actor; correlationId?: string; tx?: Tx };
 
 export type DeadJobView = {
   id: string;
@@ -77,8 +78,8 @@ export async function recordDeadJob(input: {
 }
 
 /** Dead jobs, newest first. */
-export async function listDeadJobs(opts: { limit?: number } = {}): Promise<DeadJobView[]> {
-  const rows = await adminDb
+export async function listDeadJobs(opts: { limit?: number; tx?: Tx } = {}): Promise<DeadJobView[]> {
+  const rows = await (opts.tx ?? adminDb)
     .select()
     .from(deadJob)
     .orderBy(desc(deadJob.deadAt), desc(deadJob.id))
@@ -103,7 +104,7 @@ const notFound = (id: string) =>
  *   consumers that already handled it skip it through `processed_event`. Returns the event id.
  */
 export async function retryDeadJob(adminCtx: AdminCtx, deadJobId: string): Promise<string> {
-  return adminDb.transaction(async (tx) => {
+  return adminTransaction(adminCtx.tx, async (tx) => {
     const [row] = await tx.select().from(deadJob).where(eq(deadJob.id, deadJobId)).for('update');
     if (!row) throw notFound(deadJobId);
     const original = EnvelopeSchema.parse(row.envelope) as Envelope;
@@ -145,7 +146,7 @@ export async function retryDeadJob(adminCtx: AdminCtx, deadJobId: string): Promi
 
 /** Deletes a dead job without running it again. */
 export async function discardDeadJob(adminCtx: AdminCtx, deadJobId: string): Promise<void> {
-  await adminDb.transaction(async (tx) => {
+  await adminTransaction(adminCtx.tx, async (tx) => {
     const [row] = await tx.delete(deadJob).where(eq(deadJob.id, deadJobId)).returning();
     if (!row) throw notFound(deadJobId);
     await platformAudit(

@@ -34,7 +34,7 @@ export const GET = adminRoute({}, async (req, _person, { tx }) => {
     limit: limit + 1,
   });
   const { items, nextCursor } = page(rows, limit, (r) => ({ at: r.atText, id: r.id }));
-  const names = new Map((await listTenants()).map((t) => [t.id, t.name]));
+  const names = new Map((await listTenants(tx)).map((t) => [t.id, t.name]));
   return {
     data: items.map((r) => ({ ...runRow(r), tenantName: names.get(r.tenantId) ?? null })),
     nextCursor,

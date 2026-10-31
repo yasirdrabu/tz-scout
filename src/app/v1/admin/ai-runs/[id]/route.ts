@@ -12,6 +12,6 @@ export const GET = adminRoute({}, async (req, _person, { tx }) => {
   if (action) throw notFound();
   const run = await anyRun(tx, id);
   if (!run) throw notFound();
-  const tenantName = (await listTenants()).find((t) => t.id === run.tenantId)?.name ?? null;
+  const tenantName = (await listTenants(tx)).find((t) => t.id === run.tenantId)?.name ?? null;
   return { ...runDetail(run), tenantName };
 });

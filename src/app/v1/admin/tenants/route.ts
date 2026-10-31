@@ -24,8 +24,8 @@ const createBody = z.strictObject({
 });
 
 /** Every tenant, newest first, with member count, owner and the active and suspended totals. */
-export const GET = adminRoute({}, async () => {
-  const data = await adminTenants();
+export const GET = adminRoute({}, async (_req, _person, { tx }) => {
+  const data = await adminTenants(tx);
   return {
     data,
     summary: {
@@ -39,9 +39,9 @@ export const GET = adminRoute({}, async () => {
  * Creates a tenant with Scout defaults; the owner is invited and gets the Owner role when they sign
  * in. Starting from another tenant's settings is not supported yet.
  */
-export const POST = adminRoute({}, async (req, _person, { actor }) => {
+export const POST = adminRoute({}, async (req, _person, { actor, tx }) => {
   const b = await parseBody<{ name: string; slug: string; ownerEmail: string; currency: string; timezone: string }>(req, createBody);
-  const { tenantId } = await createTenant(actor, b);
-  const row = (await adminTenants()).find((t) => t.id === tenantId);
+  const { tenantId } = await createTenant(actor, b, tx);
+  const row = (await adminTenants(tx)).find((t) => t.id === tenantId);
   return created(row!);
 });
