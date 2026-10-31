@@ -727,3 +727,26 @@ export async function signOutMemberEverywhere(ctx: ModuleContext, membershipId: 
     after: { userId: m.userId, sessionsEnded: ended },
   });
 }
+
+/** An active member who can take assignments, with what the Assign dialog needs: their data limit and whether a CRM user is linked. */
+export type AssignableMember = { userId: string; name: string; email: string; role: Role; dataLimit: DataLimit | null; crmOwnerIds: Record<string, string> };
+
+/** Active members holding `assignments:respond`, by name. `dataLimit` is the one they work under (null when the stored one is invalid). */
+export async function assignableMembers(ctx: ModuleContext): Promise<AssignableMember[]> {
+  const rows = await ctx.tx
+    .select({ userId: membership.userId, name: user.name, email: user.email, role: membership.role, extra: membership.extraPermissions, dataLimit: membership.dataLimit, crmOwnerIds: membership.crmOwnerIds })
+    .from(membership)
+    .innerJoin(user, eq(user.id, membership.userId))
+    .where(and(eq(membership.tenantId, ctx.tenantId), eq(membership.status, 'active')))
+    .orderBy(asc(user.name), asc(user.email));
+  return rows
+    .filter((r) => permissionsFor(r.role as Role, (r.extra ?? []).filter(isPermission), false).includes('assignments:respond'))
+    .map((r) => ({
+      userId: r.userId,
+      name: r.name,
+      email: r.email,
+      role: r.role as Role,
+      dataLimit: effectiveLimit(r.role as Role, r.dataLimit),
+      crmOwnerIds: (r.crmOwnerIds ?? {}) as Record<string, string>,
+    }));
+}

@@ -411,3 +411,93 @@ export async function accountIdsForSource(
 
 /** Accounts' `SourceAccessProvider`. */
 export const intakeSourceAccess: SourceAccessProvider = { childSources, personSourceFor: ensurePersonSource };
+
+/** One source chain an account arrived through, named the way the queue shows it: "{name}" and "via {via}". */
+export type AccountSource = {
+  /** The closest sender: the agent, else the person, else the vendor. */
+  sourceId: string;
+  name: string;
+  kind: string;
+  /** The rest of the chain, person then vendor, joined with " · "; null when there is none. */
+  via: string | null;
+  /** Who answers for the source: a person source's user, or an agent's person (Decision 11, until sources get an owner of their own). */
+  ownerUserId: string | null;
+  arrivalId: string;
+  batchId: string | null;
+  receivedAt: Date;
+};
+
+type ChainRow = { accountId: string | null; arrivalId: string; batchId: string | null; receivedAt: Date; person: string | null; agent: string | null; vendor: string | null };
+
+async function namedChains(ctx: ModuleContext, rows: ChainRow[]): Promise<{ accountId: string; source: AccountSource }[]> {
+  const ids = [...new Set(rows.flatMap((r) => [r.person, r.agent, r.vendor]).filter((id): id is string => !!id))];
+  const sources = ids.length
+    ? await ctx.tx
+        .select({ id: source.id, name: source.name, kind: source.kind, parentId: source.parentId, userId: source.userId })
+        .from(source)
+        .where(and(eq(source.tenantId, ctx.tenantId), inArray(source.id, ids)))
+    : [];
+  const parents = [...new Set(sources.map((s) => s.parentId).filter((id): id is string => !!id && !ids.includes(id)))];
+  const all = parents.length
+    ? [...sources, ...(await ctx.tx.select({ id: source.id, name: source.name, kind: source.kind, parentId: source.parentId, userId: source.userId }).from(source).where(and(eq(source.tenantId, ctx.tenantId), inArray(source.id, parents))))]
+    : sources;
+  const byId = new Map(all.map((s) => [s.id, s]));
+  const ownerOf = (id: string): string | null => {
+    const s = byId.get(id);
+    if (!s) return null;
+    if (s.kind === 'person') return s.userId;
+    const parent = s.parentId ? byId.get(s.parentId) : undefined;
+    return parent?.kind === 'person' ? parent.userId : null;
+  };
+  return rows.flatMap((r) => {
+    const closest = r.agent ?? r.person ?? r.vendor;
+    const s = closest ? byId.get(closest) : undefined;
+    if (!r.accountId || !closest || !s) return [];
+    const via = [r.person, r.vendor].filter((id): id is string => !!id && id !== closest).map((id) => byId.get(id)?.name).filter(Boolean);
+    return [
+      {
+        accountId: r.accountId,
+        source: { sourceId: closest, name: s.name, kind: s.kind, via: via.length ? via.join(' · ') : null, ownerUserId: ownerOf(closest), arrivalId: r.arrivalId, batchId: r.batchId, receivedAt: r.receivedAt },
+      },
+    ];
+  });
+}
+
+const chainColumns = {
+  accountId: arrival.accountId,
+  arrivalId: arrival.id,
+  batchId: arrival.batchId,
+  receivedAt: arrival.receivedAt,
+  person: arrival.personSourceId,
+  agent: arrival.agentSourceId,
+  vendor: arrival.vendorSourceId,
+};
+
+/** The chain each account first arrived through (its earliest resolved arrival). The caller has checked the accounts are visible. */
+export async function firstSources(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, AccountSource>> {
+  if (accountIds.length === 0) return new Map();
+  const rows = await ctx.tx
+    .selectDistinctOn([arrival.accountId], chainColumns)
+    .from(arrival)
+    .where(and(eq(arrival.tenantId, ctx.tenantId), inArray(arrival.accountId, accountIds), eq(arrival.status, 'resolved')))
+    .orderBy(asc(arrival.accountId), asc(arrival.receivedAt), asc(arrival.id));
+  return new Map((await namedChains(ctx, rows)).map((c) => [c.accountId, c.source]));
+}
+
+/** Every distinct chain an account arrived through, first arrival first. The caller has checked the account is visible. */
+export async function sourcesOfAccount(ctx: ModuleContext, accountId: string): Promise<AccountSource[]> {
+  const rows = await ctx.tx
+    .select(chainColumns)
+    .from(arrival)
+    .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.accountId, accountId), eq(arrival.status, 'resolved')))
+    .orderBy(asc(arrival.receivedAt), asc(arrival.id));
+  const seen = new Set<string>();
+  return (await namedChains(ctx, rows))
+    .map((c) => c.source)
+    .filter((s) => {
+      const key = `${s.sourceId}|${s.via}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}

@@ -6,7 +6,10 @@ import { adminDb } from '@/platform/db/client';
 import { runOutbox } from '../helpers/run-outbox';
 import { arrivedAccount } from '../routing/helpers';
 import { inTenant, seedUser, uniqueSlug } from '../tenancy/helpers';
-import { personAndAgent } from './intake-helpers';
+import { POST as postArrival } from '@/http/routes/v1/arrivals/route';
+import { arrival } from '@/modules/intake/db/schema';
+import { newId } from '@/platform/ids';
+import { call, keyFor, personAndAgent, SEND } from './intake-helpers';
 
 export type Role = 'leader' | 'seller' | 'operator';
 type Handler = (r: Request) => Promise<Response>;
@@ -69,5 +72,16 @@ export async function workspace(name = 'Review Co') {
   /** Delivers what is in the outbox, so read models (the account summary) catch up. */
   const deliver = () => runOutbox(tenantId);
 
-  return { tenantId, slug, owner: owner.id, ownerName: `${name} Owner`, run, tenant, source, person, as, account, deliver };
+  /** An account sent through the API by the agent (a real arrival, so it has a source chain), delivered. */
+  const sent = async (fields: Record<string, unknown> & { name: string }, agentSourceId = source.agentId) => {
+    const key = await keyFor(tenant, SEND, { sourceId: agentSourceId, dataLimit: { kind: 'own_source' } });
+    const res = await call(postArrival, key, 'arrivals', { body: { account: { domain: `${newId('acc').slice(-10).toLowerCase()}-example.com`, ...fields } } });
+    if (res.status !== 202) throw new Error(JSON.stringify(await res.json()));
+    const arrivalId = (await res.json()).arrival_id as string;
+    await deliver();
+    const [row] = await run((ctx) => ctx.tx.select({ accountId: arrival.accountId }).from(arrival).where(eq(arrival.id, arrivalId)));
+    return row!.accountId!;
+  };
+
+  return { tenantId, slug, owner: owner.id, ownerName: `${name} Owner`, run, tenant, source, person, as, account, deliver, sent };
 }

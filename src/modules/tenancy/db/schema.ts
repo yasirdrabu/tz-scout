@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, index, integer, jsonb, pgSchema, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, jsonb, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Tenancy schema.
@@ -8,7 +8,7 @@ import { boolean, index, integer, jsonb, pgSchema, text, timestamp, uniqueIndex 
  * tenants): `tenant` (written through `adminDb`), `user`, and the better-auth tables `session`,
  * `account` and `verification` (read and written by better-auth through `adminDb`).
  *
- * Tenant tables (`membership`, `invite`, `api_key`) carry `tenant_id` and have row level security
+ * Tenant tables (`membership`, `invite`, `api_key`, `member_preference`) carry `tenant_id` and have row level security
  * enabled and forced with the standard `tenant_isolation` policy (added by hand in the migration).
  */
 export const tenancy = pgSchema('tenancy');
@@ -157,4 +157,17 @@ export const verification = tenancy.table(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('verification_identifier_idx').on(t.identifier)],
+);
+
+/** A person's own setting in a workspace, such as the review queue's columns. `value` is JSON the owning feature checks. */
+export const memberPreference = tenancy.table(
+  'member_preference',
+  {
+    tenantId: text('tenant_id').notNull(),
+    userId: text('user_id').notNull(),
+    key: text('key').notNull(),
+    value: jsonb('value').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.userId, t.key] })],
 );

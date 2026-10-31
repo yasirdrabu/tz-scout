@@ -49,7 +49,7 @@ export {
 export { activityPollHandler, companyCheckHandler, dealsPollHandler, crmJobHandlers, syncHandler, handoffPushHandler, handoffUndoHandler, ownersSyncHandler, personPushHandler } from './jobs';
 export { ASSIGN_FIRST, push, queuePersonPush, runPersonPush } from './services/push';
 export { POLL_LIMIT, POLL_WINDOW_MS, checkFollowThrough, followThrough, pollActivity, syncAccount } from './services/follow-through';
-export { getHandoffs, lastActivityAt, latestHandoff, type HandoffRow, type HandoffsView } from './services/read';
+export { crmFacts, getHandoffs, lastActivityAt, latestHandoff, type AccountCrmFacts, type HandoffRow, type HandoffsView } from './services/read';
 export {
   DEFAULT_QUALIFIED_LEAD_RULE,
   getCrmSettings,

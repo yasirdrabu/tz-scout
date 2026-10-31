@@ -14,5 +14,6 @@ export function queueFilters(url: URL): QueueFilters {
     tier: q.get('tier') || undefined,
     flag: q.get('flag') || undefined,
     arrivedSince: parseIsoParam(q.get('arrived_since'), 'arrived_since'),
+    updatedSince: parseIsoParam(q.get('updated_since'), 'updated_since'),
   };
 }

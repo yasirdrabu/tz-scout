@@ -8,6 +8,9 @@ export const TIERS = ['not_fit', 'watch', 'good_fit', 'act_now'] as const;
 export const tierSchema = z.enum(TIERS);
 export type Tier = z.infer<typeof tierSchema>;
 
+/** The tier names people see, best first ("Tier names come from the API"). */
+export const TIER_NAMES: Record<Tier, string> = { act_now: 'Act now', good_fit: 'Good fit', watch: 'Watch', not_fit: 'Not a fit' };
+
 /** One offer's score for an account, as the best-offer pick and priority read it. */
 export type Match = { offerId: string; fit: number; intent: number; total: number; tier: Tier };
 

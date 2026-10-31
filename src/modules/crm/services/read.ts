@@ -1,4 +1,4 @@
-import { and, desc, eq, max } from 'drizzle-orm';
+import { and, desc, eq, inArray, max } from 'drizzle-orm';
 import { filterVisibleAccountIds } from '@/modules/accounts';
 import { connectionSettings } from '@/modules/integrations';
 import type { ModuleContext } from '@/platform/context';
@@ -106,4 +106,33 @@ export async function lastActivityAt(ctx: ModuleContext, accountId: string): Pro
     .from(activity)
     .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, accountId)));
   return row?.at ?? null;
+}
+
+/** What a list row shows from the CRM: the latest activity, and the value of a won deal, else an open one. */
+export type AccountCrmFacts = {
+  lastActivity: { kind: string; at: Date } | null;
+  value: { amountCents: number | null; currency: string | null; kind: 'won' | 'open_deal'; dealName: string } | null;
+};
+
+/** CRM facts for list rows. The caller has already limited `accountIds` to accounts the principal can see. */
+export async function crmFacts(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, AccountCrmFacts>> {
+  if (accountIds.length === 0) return new Map();
+  const activities = await ctx.tx
+    .selectDistinctOn([activity.accountId], { accountId: activity.accountId, kind: activity.kind, at: activity.occurredAt })
+    .from(activity)
+    .where(and(eq(activity.tenantId, ctx.tenantId), inArray(activity.accountId, accountIds)))
+    .orderBy(activity.accountId, desc(activity.occurredAt), desc(activity.id));
+  const deals = await ctx.tx
+    .select({ accountId: deal.accountId, name: deal.name, status: deal.status, amountCents: deal.amountCents, currency: deal.currency, openedAt: deal.openedAt, closedAt: deal.closedAt })
+    .from(deal)
+    .where(and(eq(deal.tenantId, ctx.tenantId), inArray(deal.accountId, accountIds), inArray(deal.status, ['open', 'won'])))
+    .orderBy(desc(deal.closedAt), desc(deal.openedAt), deal.id);
+  const out = new Map<string, AccountCrmFacts>(accountIds.map((id) => [id, { lastActivity: null, value: null }]));
+  for (const a of activities) out.get(a.accountId)!.lastActivity = { kind: a.kind, at: a.at };
+  for (const id of accountIds) {
+    const mine = deals.filter((d) => d.accountId === id);
+    const pick = mine.find((d) => d.status === 'won') ?? mine.find((d) => d.status === 'open');
+    if (pick) out.get(id)!.value = { amountCents: pick.amountCents, currency: pick.currency, kind: pick.status === 'won' ? 'won' : 'open_deal', dealName: pick.name };
+  }
+  return out;
 }
