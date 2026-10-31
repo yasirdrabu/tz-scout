@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { v1Route } from '@/app/v1/_lib/v1-route';
 import { sourceAccessProvider, sourceInfoProvider } from '@/modules/accounts';
 import {
@@ -26,9 +26,6 @@ import { runOutbox } from '../helpers/run-outbox';
 import { inTenant, seedUser, uniqueSlug } from '../tenancy/helpers';
 import { asSource, freshTenant, personAndAgent, type Tenant } from './helpers';
 
-let currentHeaders = new Headers();
-vi.mock('next/headers', () => ({ headers: async () => currentHeaders }));
-const { tenantAction } = await import('@/server/page-context');
 
 let t: Tenant;
 
@@ -320,7 +317,7 @@ describe('ports', () => {
 });
 
 describe('access for signed-in people', () => {
-  it('a cookie-session /v1 request and a server action from a seller carry their person source and its children', async () => {
+  it('a cookie-session /v1 request from a seller carries their person source and its children', async () => {
     const admin = await seedUser({ admin: true });
     const owner = await seedUser({ signedIn: true });
     const slug = uniqueSlug();
@@ -354,9 +351,5 @@ describe('access for signed-in people', () => {
     h.set('x-scout-tenant', slug);
     expect((await route(new Request('http://localhost:4240/v1/y', { headers: h }))).status).toBe(200);
     expect(seen).toMatchObject({ userId: seller.id, sourceId: personId, childSourceIds: [agentId] });
-
-    currentHeaders = cookies;
-    const fromAction = await tenantAction(slug, 'accounts:read', async (ctx) => ctx.access);
-    expect(fromAction).toMatchObject({ userId: seller.id, sourceId: personId, childSourceIds: [agentId] });
   });
 });

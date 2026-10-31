@@ -1,5 +1,5 @@
 // Composition root for ports. Lower modules define interfaces; this file registers the higher
-// modules' implementations. The web app (v1-route, page-context) and every background role
+// modules' implementations. The web app (v1-route) and every background role
 // (through registry.ts) import it, so all processes see the same implementations.
 import { registerMergeGuard, registerSourceAccessProvider, registerSourceInfoProvider } from '@/modules/accounts';
 import { intakeSourceAccess, intakeSourceInfo, intakeSourceValidator, registerReviewStatusValidator } from '@/modules/intake';

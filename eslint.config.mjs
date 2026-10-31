@@ -16,7 +16,7 @@ export const boundariesConfig = {
       { type: "module", pattern: "src/modules/*/**", mode: "file", capture: ["moduleName"] },
       { type: "platform", pattern: "src/platform/**", mode: "file" },
       { type: "lib", pattern: "src/lib/**", mode: "file" },
-      { type: "app", pattern: ["src/app/**", "src/entry/**", "src/components/**"], mode: "file" },
+      { type: "app", pattern: ["src/app/**", "src/entry/**"], mode: "file" },
     ],
   },
   rules: {

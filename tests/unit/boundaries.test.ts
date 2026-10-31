@@ -83,8 +83,7 @@ const importAdminDb = 'import { adminDb } from "@/platform/db/client";\nexport c
 
 test("adminDb may not be imported outside the allowed files", async () => {
   for (const file of [
-    "src/app/t/[tenant]/page.tsx",
-    "src/server/page-context.ts",
+    "src/app/v1/members/route.ts",
     "src/modules/ai-tasks/runner.ts",
     "src/modules/integrations/gateway.ts",
     "src/modules/tenancy/domain/permissions.ts",
