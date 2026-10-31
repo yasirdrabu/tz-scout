@@ -1,4 +1,4 @@
-import { createRoute, Outlet, redirect } from '@tanstack/react-router';
+import { createRoute, lazyRouteComponent, Outlet, redirect } from '@tanstack/react-router';
 import { ShieldOff } from 'lucide-react';
 import { isPlatformAdmin } from '../api/me';
 import { landingMe, signInRedirect } from '../app/RequireSession';
@@ -55,7 +55,7 @@ export const adminTenantsRoute = createRoute({
   path: 'tenants',
   validateSearch: (search: Record<string, unknown>): TenantsSearch =>
     typeof search.open === 'string' && search.open ? { open: search.open } : {},
-  component: () => <Placeholder screen={SCREENS.adminTenants} />,
+  component: lazyRouteComponent(() => import('../features/admin/tenants/TenantsScreen'), 'TenantsScreen'),
 });
 
 export const adminHealthRoute = createRoute({
