@@ -53,10 +53,10 @@ describe('shell navigation', () => {
 
   it('shows a placeholder naming the screen, its spec section and release', async () => {
     serveMe({ taazaa: { scopes: LEADER } });
-    renderApp('/t/taazaa/queue');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Review queue' })).toBeInTheDocument();
-    expect(screen.getByText('screens.md §2')).toBeInTheDocument();
-    expect(screen.getByText('R1')).toBeInTheDocument();
+    renderApp('/t/taazaa/overview');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Overview' })).toBeInTheDocument();
+    expect(screen.getByText('screens.md §9')).toBeInTheDocument();
+    expect(screen.getByText('R3')).toBeInTheDocument();
   });
 });
 

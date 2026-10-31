@@ -25,3 +25,6 @@ export function Button({ variant = 'primary', size = 'md', icon, className, type
     </button>
   );
 }
+
+/** The button look for a link that navigates, for example `Import a list`. */
+export const buttonClass = (variant: ButtonVariant = 'primary', size: ButtonSize = 'md') => cx(styles.button, styles[variant], styles[size]);

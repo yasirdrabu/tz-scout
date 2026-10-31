@@ -1,14 +1,22 @@
-import { createRoute } from '@tanstack/react-router';
+import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
+import { pickStrings } from '../lib/search';
 import { Placeholder } from './Placeholder';
 import { SCREENS } from './screens';
 import { tenantRoute } from './tenant';
 
 // Placeholders for every workspace screen. Each feature plan replaces one with the real screen.
 
+/**
+ * The queue's tier, filters (`status` keys comma separated) and the account open in the peek drawer, so
+ * a link or a reload keeps the place (C10).
+ */
+export type QueueSearch = { tier?: string; practice?: string; offer?: string; source?: string; status?: string; peek?: string };
+
 export const queueRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'queue',
-  component: () => <Placeholder screen={SCREENS.queue} />,
+  validateSearch: (search: Record<string, unknown>): QueueSearch => pickStrings(search, ['tier', 'practice', 'offer', 'source', 'status', 'peek']),
+  component: lazyRouteComponent(() => import('../features/review/QueueScreen'), 'QueueScreen'),
 });
 
 export const myRoute = createRoute({
