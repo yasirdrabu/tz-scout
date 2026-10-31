@@ -62,6 +62,7 @@ function serve(summary: RunsSummary = SUMMARY) {
 }
 
 const last = () => seen[seen.length - 1]!;
+const params = (href: string) => new URL(href, 'http://app').searchParams;
 
 beforeEach(() => localStorage.clear());
 
@@ -117,6 +118,40 @@ describe('AI runs', () => {
     expect(await screen.findByRole('heading', { name: 'No runs match' })).toBeInTheDocument();
     expect(last().get('q')).toBe('nothing');
     expect(screen.getByText('Try other words, or another status, task or tenant.')).toBeInTheDocument();
+  });
+
+  it('keeps the search, filters and expanded run in the URL', async () => {
+    serve();
+    server.use(http.get('/v1/admin/ai-runs/run_8f1c', () => HttpResponse.json({ ...PAGE_1[1], input_hash: null, output: null, error: null })));
+    const app = renderApp('/admin/ai-runs');
+    await screen.findByRole('button', { name: 'run_8f21' });
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'Failed');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), 'Harbor Health Partners');
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Find by run, account or task' }), 'harbor');
+    await waitFor(() => expect(params(app.path()).get('q')).toBe('harbor'));
+    await userEvent.click(await screen.findByRole('button', { name: 'run_8f1c' }));
+    const url = params(app.path());
+    expect(url.get('status')).toBe('failed');
+    expect(url.get('tenant')).toBe('t_harbor');
+    expect(url.get('open')).toBe('run_8f1c');
+
+    await userEvent.click(screen.getByRole('button', { name: 'run_8f1c' }));
+    expect(params(app.path()).has('open')).toBe(false);
+  });
+
+  it('opens with the search, filters and expanded run from the URL', async () => {
+    serve();
+    server.use(http.get('/v1/admin/ai-runs/run_8f1c', () => HttpResponse.json({ ...PAGE_1[1], input_hash: null, output: null, error: null })));
+    renderApp('/admin/ai-runs?q=harbor&status=failed&task=csv_column_mapping&tenant=t_harbor&open=run_8f1c');
+    expect(await screen.findByRole('button', { name: 'run_8f1c' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('searchbox', { name: 'Find by run, account or task' })).toHaveValue('harbor');
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveValue('failed');
+    expect(screen.getByRole('combobox', { name: 'Task' })).toHaveValue('csv_column_mapping');
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Tenant' })).toHaveValue('t_harbor'));
+    expect(seen[0]!.get('q')).toBe('harbor');
+    expect(seen[0]!.get('status')).toBe('failed');
+    expect(seen[0]!.get('task')).toBe('csv_column_mapping');
+    expect(seen[0]!.get('tenant')).toBe('t_harbor');
   });
 
   it('shows the failed in the last hour banner, and Show them filters to failed runs', async () => {

@@ -1,7 +1,8 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { useId, useState } from 'react';
+import { getRouteApi } from '@tanstack/react-router';
+import { useId } from 'react';
 import { hasScope } from '../../../api/me';
-import { useSettled } from '../../../lib/useSettled';
+import { useSearchText } from '../../../lib/useSearchText';
 import { Button } from '../../../ui/Button';
 import { EmptyState } from '../../../ui/EmptyState';
 import { Field } from '../../../ui/Field';
@@ -12,13 +13,22 @@ import { membersQuery } from '../members/api';
 import { AREAS, auditQuery } from './api';
 import { AuditTable } from './AuditTable';
 
-/** §21g Audit log: search, Area and Who filters, newest first with Show more. */
+const route = getRouteApi('/t/$tenant/settings/$tab');
+
+type Filters = { q?: string; area?: string; who?: string };
+
+/** §21g Audit log: search, Area and Who filters (in the URL, C10), newest first with Show more. */
 export function AuditTab({ me, tenant }: TabProps) {
   const searchId = useId();
-  const [text, setText] = useState('');
-  const [area, setArea] = useState('');
-  const [who, setWho] = useState('');
-  const q = useSettled(text);
+  const search = route.useSearch();
+  const navigate = route.useNavigate();
+  const q = search.q ?? '';
+  const area = search.area ?? '';
+  const who = search.who ?? '';
+  // Typing replaces the history entry; picking a filter adds one, so Back undoes it.
+  const setFilter = (patch: Filters, replace = false) =>
+    void navigate({ search: (prev) => ({ ...prev, ...patch }), replace });
+  const [text, setText] = useSearchText(q, (next) => setFilter({ q: next || undefined }, true));
   const log = useInfiniteQuery(auditQuery(tenant, { q, area, who }));
   // Who lists the workspace's members, for people who may read the members list.
   const canListPeople = hasScope(me, 'members:read') || hasScope(me, 'members:manage');
@@ -45,7 +55,7 @@ export function AuditTab({ me, tenant }: TabProps) {
         />
         <Field label="Area">
           {(c) => (
-            <select {...c} className="input" value={area} onChange={(e) => setArea(e.target.value)}>
+            <select {...c} className="input" value={area} onChange={(e) => setFilter({ area: e.target.value || undefined })}>
               <option value="">Every area</option>
               {AREAS.map((a) => (
                 <option key={a.area} value={a.area}>
@@ -58,7 +68,7 @@ export function AuditTab({ me, tenant }: TabProps) {
         {canListPeople && (
           <Field label="Who">
             {(c) => (
-              <select {...c} className="input" value={who} onChange={(e) => setWho(e.target.value)}>
+              <select {...c} className="input" value={who} onChange={(e) => setFilter({ who: e.target.value || undefined })}>
                 <option value="">Everyone</option>
                 {(people.data ?? []).map((m) => (
                   <option key={m.user_id} value={m.user_id}>

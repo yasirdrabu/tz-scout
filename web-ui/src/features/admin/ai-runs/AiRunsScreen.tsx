@@ -1,9 +1,11 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { Fragment, useId, useState } from 'react';
+import { getRouteApi } from '@tanstack/react-router';
+import { Fragment, useId } from 'react';
 import { cx } from '../../../lib/cx';
 import { useFormat } from '../../../lib/useFormat';
-import { useSettled } from '../../../lib/useSettled';
+import { useSearchText } from '../../../lib/useSearchText';
+import type { AiRunsSearch } from '../../../routes/admin';
 import page from '../../../routes/Page.module.css';
 import { Button } from '../../../ui/Button';
 import { EmptyState } from '../../../ui/EmptyState';
@@ -23,16 +25,23 @@ const FAILED_TARGET_PCT = 3;
 
 const TONE: Record<RunStatus, PillTone> = { succeeded: 'good', failed: 'bad', stopped_by_limit: 'near' };
 
-/** §23 AI runs: every tenant's runs, with today's tiles, search, filters and an expandable row. */
+const route = getRouteApi('/admin/ai-runs');
+
+/**
+ * §23 AI runs: every tenant's runs, with today's tiles, search, filters and an expandable row. The
+ * search, filters and the expanded run live in the URL (C10).
+ */
 export function AiRunsScreen() {
   const searchId = useId();
-  const [text, setText] = useState('');
-  const [status, setStatus] = useState<RunStatus | ''>('');
-  const [task, setTask] = useState('');
-  const [tenant, setTenant] = useState('');
-  const [open, setOpen] = useState<string | null>(null);
-  const q = useSettled(text);
-  const filters: RunFilters = { q, status, task, tenant };
+  const search = route.useSearch();
+  const navigate = route.useNavigate();
+  // Typing replaces the history entry; a filter or an expanded row adds one, so Back undoes it.
+  const update = (patch: AiRunsSearch, replace = false) => void navigate({ search: (prev) => ({ ...prev, ...patch }), replace });
+  const setStatus = (status: RunStatus | '') => update({ status: status || undefined });
+  const open = search.open ?? null;
+  const filters: RunFilters = { q: search.q ?? '', status: search.status ?? '', task: search.task ?? '', tenant: search.tenant ?? '' };
+  const { status, task, tenant } = filters;
+  const [text, setText] = useSearchText(filters.q, (q) => update({ q: q || undefined }, true));
   const runs = useInfiniteQuery(runsQuery(filters));
   const tenants = useQuery(tenantsQuery());
   const rows = runs.data?.pages.flatMap((p) => p.data) ?? [];
@@ -81,7 +90,7 @@ export function AiRunsScreen() {
         </Field>
         <Field label="Task">
           {(c) => (
-            <select {...c} className="input" value={task} onChange={(e) => setTask(e.target.value)}>
+            <select {...c} className="input" value={task} onChange={(e) => update({ task: e.target.value || undefined })}>
               <option value="">Every task</option>
               {tasks.map((t) => (
                 <option key={t} value={t}>
@@ -93,7 +102,7 @@ export function AiRunsScreen() {
         </Field>
         <Field label="Tenant">
           {(c) => (
-            <select {...c} className="input" value={tenant} onChange={(e) => setTenant(e.target.value)}>
+            <select {...c} className="input" value={tenant} onChange={(e) => update({ tenant: e.target.value || undefined })}>
               <option value="">Every tenant</option>
               {(tenants.data?.data ?? []).map((t) => (
                 <option key={t.id} value={t.id}>
@@ -133,7 +142,7 @@ export function AiRunsScreen() {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <Row key={r.id} run={r} expanded={open === r.id} onToggle={() => setOpen(open === r.id ? null : r.id)} />
+                <Row key={r.id} run={r} expanded={open === r.id} onToggle={() => update({ open: open === r.id ? undefined : r.id })} />
               ))}
             </tbody>
           </table>

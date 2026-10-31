@@ -3,6 +3,8 @@ import { ShieldOff } from 'lucide-react';
 import { isPlatformAdmin } from '../api/me';
 import { landingMe, signInRedirect } from '../app/RequireSession';
 import { Shell } from '../app/Shell';
+import { STATUSES, type RunStatus } from '../features/admin/ai-runs/api';
+import { pickStrings } from '../lib/search';
 import { EmptyState } from '../ui/EmptyState';
 import { rootRoute } from './root';
 
@@ -62,8 +64,16 @@ export const adminHealthRoute = createRoute({
   component: lazyRouteComponent(() => import('../features/admin/health/HealthScreen'), 'HealthScreen'),
 });
 
+/** The search, filters and the expanded run (`open`), so the URL carries them (C10). */
+export type AiRunsSearch = { q?: string; status?: RunStatus; task?: string; tenant?: string; open?: string };
+
 export const adminAiRunsRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: 'ai-runs',
+  validateSearch: (search: Record<string, unknown>): AiRunsSearch => {
+    const { status, ...rest } = pickStrings(search, ['q', 'status', 'task', 'tenant', 'open']);
+    const known = STATUSES.find((s) => s.status === status);
+    return known ? { ...rest, status: known.status } : rest;
+  },
   component: lazyRouteComponent(() => import('../features/admin/ai-runs/AiRunsScreen'), 'AiRunsScreen'),
 });

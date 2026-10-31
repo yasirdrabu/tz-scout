@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { problem } from '../../../test/http';
@@ -46,6 +46,8 @@ function serve(scopes = ['audit:read', 'members:read']) {
   );
 }
 
+const params = (href: string) => new URL(href, 'http://app').searchParams;
+
 beforeEach(() => localStorage.clear());
 
 describe('Audit log', () => {
@@ -79,6 +81,28 @@ describe('Audit log', () => {
     expect(last.get('q')).toBe('nothing');
     expect(last.get('area')).toBe('api_keys');
     expect(last.get('actor_id')).toBe('usr_priya');
+  });
+
+  it('keeps the search and filters in the URL, and opens with them', async () => {
+    serve();
+    const app = renderApp('/t/taazaa/settings/audit-log');
+    await screen.findByText('tenancy.member.invited');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Area' }), 'API keys');
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Who' }), 'Priya Raman');
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Find an action, person or target' }), 'key');
+    await waitFor(() => expect(params(app.path()).get('q')).toBe('key'));
+    expect(params(app.path()).get('area')).toBe('api_keys');
+    expect(params(app.path()).get('who')).toBe('usr_priya');
+    app.unmount();
+
+    serve();
+    renderApp('/t/taazaa/settings/audit-log?q=nothing&area=api_keys&who=usr_priya');
+    expect(await screen.findByRole('heading', { name: 'No events match' })).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Find an action, person or target' })).toHaveValue('nothing');
+    expect(screen.getByRole('combobox', { name: 'Area' })).toHaveValue('api_keys');
+    expect(seen[0]!.get('q')).toBe('nothing');
+    expect(seen[0]!.get('area')).toBe('api_keys');
+    expect(seen[0]!.get('actor_id')).toBe('usr_priya');
   });
 
   it('hides Who for someone who cannot list members', async () => {
