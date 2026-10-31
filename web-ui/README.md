@@ -37,9 +37,9 @@ Do not copy this to production: there the app and the API share one origin (spec
 is needed.
 
 Sign in locally with developer sign-in (`AUTH_DEV_SIGNIN=true` on the backend). Microsoft sign-in
-returns to `APP_PUBLIC_URL`, which is the backend's origin, not the Vite one. The backend has no pages
-any more, so locally that return lands on a 404 until the backend learns the app's return paths. In
-production the app and the API share one origin, so it lands in the app.
+returns to `APP_PUBLIC_URL`, which is the backend's origin, not the Vite one, so locally it lands on the
+backend's copy of the app: the last `npm run build` at the repo root, or a "not built" page without one.
+In production the app and the API share one origin, so it lands in the app.
 
 ## Dependencies
 

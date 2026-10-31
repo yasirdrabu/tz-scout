@@ -14,7 +14,7 @@ export const POST = sessionRoute({}, async (req, person, { tx }) => {
   return noContent();
 });
 
-/** Any other method on an unknown top-level path is the API's problem+json 404, not Next's empty 405. */
+/** Any other method on an unknown top-level path is the API's problem+json 404, not a 405. */
 const unknown = publicRoute(async () => {
   throw notFound();
 });

@@ -1,7 +1,5 @@
-import { FlatCompat } from "@eslint/eslintrc";
 import boundaries from "eslint-plugin-boundaries";
-
-const compat = new FlatCompat({ baseDirectory: import.meta.dirname });
+import tseslint from "typescript-eslint";
 
 const sameModule = { moduleName: "${from.moduleName}" };
 
@@ -16,7 +14,7 @@ export const boundariesConfig = {
       { type: "module", pattern: "src/modules/*/**", mode: "file", capture: ["moduleName"] },
       { type: "platform", pattern: "src/platform/**", mode: "file" },
       { type: "lib", pattern: "src/lib/**", mode: "file" },
-      { type: "app", pattern: ["src/app/**", "src/http/**", "src/entry/**"], mode: "file" },
+      { type: "app", pattern: ["src/http/**", "src/entry/**"], mode: "file" },
     ],
   },
   rules: {
@@ -91,16 +89,14 @@ const config = [
   {
     ignores: [
       "reference/**",
-      ".next/**",
       "dist/**",
       "node_modules/**",
-      "next-env.d.ts",
       "playwright-report/**",
       "test-results/**",
       "web-ui/**",
     ],
   },
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  ...tseslint.configs.recommended,
   {
     rules: {
       "@typescript-eslint/no-unused-vars": [

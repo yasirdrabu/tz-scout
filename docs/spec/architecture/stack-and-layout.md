@@ -5,7 +5,8 @@
 | Concern | Choice | Notes |
 |---|---|---|
 | Language | TypeScript (strict), Node 22 LTS or newer | Specs stay language-neutral so a module can be rebuilt in .NET |
-| Web, API, MCP | Next.js (App Router) | UI pages, `/api/v1/*` route handlers, `/mcp` endpoint in one app |
+| HTTP (web role) | Hono on Node (`@hono/node-server`) | `/api/v1` route handlers, `/api/auth`, health checks and the built web app on one origin; `/mcp` later (web-ui W4 replaced Next.js) |
+| Web app | React, Vite, TypeScript in `web-ui/` (its own npm package) | Built to static files the web role serves at `/` (web-ui W1, W2) |
 | Worker, scheduler | Plain Node entry points in the same repo | `node dist/worker.js`, `node dist/scheduler.js` |
 | Database | PostgreSQL 17, UTF-8 | One database, one schema per module |
 | Data access | Drizzle ORM + drizzle-kit migrations | `pgSchema()` per module; SQL migration files committed and reviewed |
@@ -15,7 +16,7 @@
 | API docs | OpenAPI 3.1 generated from Zod schemas | Served at `/api/v1/openapi.json`, rendered at `/developers` |
 | MCP | Official MCP TypeScript SDK | Streamable HTTP at `/mcp`; local stdio package `@taazaa/scout-mcp` |
 | AI | Anthropic SDK through the AI tasks module | Versioned prompts, Zod-checked output, every call logged |
-| UI | Tailwind, the existing token set (warm neutrals, plum accent) | Design rules in [design-and-copy.md](design-and-copy.md) |
+| UI | CSS modules and the existing token set (warm neutrals, plum accent) | Design rules in [design-and-copy.md](design-and-copy.md) and [web-ui/](../web-ui/index.md) |
 | Tests | Vitest (unit, integration against real Postgres and NATS), Playwright (e2e) | Testcontainers or compose services in CI |
 | Logs, traces | pino JSON logs, OpenTelemetry traces | Trace id carried through events |
 
@@ -25,15 +26,17 @@ decimals; pure math modules with unit tests.
 
 ## Repo layout
 
-> Layout decision (R0): one npm package. The Next.js app lives in `src/app` and the other process roles
-> in `src/entry` (`cli.ts`, `worker.ts`, `scheduler.ts`, `relay.ts`), instead of `apps/web`,
-> `apps/worker` and `apps/scheduler`. Next.js does not compile code outside its project folder without
-> experimental flags, and one package keeps one dependency tree. `packages/mcp-local` arrives in R1.
-> The tree below shows the original intent; read `apps/*` as `src/app` and `src/entry`.
+> Layout decision (R0, updated for web-ui W4): one npm package for the backend, so one dependency
+> tree. The HTTP layer lives in `src/http`: `server.ts` (the Hono app and server), `routes.ts` (the
+> route table) and the handlers in `src/http/routes`, one folder per path segment (`[id]` is a
+> parameter, `[...all]` a wildcard; the table test fails when a handler is not mounted). The other
+> process roles are in `src/entry` (`cli.ts`, `worker.ts`, `scheduler.ts`, `relay.ts`), and the web app
+> is its own package in `web-ui/`. `packages/mcp-local` arrives in R1. The tree below shows the original
+> intent; read `apps/web` as `src/http` (and `web-ui/` for pages), `apps/*` otherwise as `src/entry`.
 
 ```
 apps/
-  web/                     Next.js app: pages, /api/v1 route handlers, /mcp, auth routes
+  web/                     HTTP server: /api/v1 route handlers, /mcp, auth routes
   worker/                  worker entry: registers every module's consumers
   scheduler/               scheduler entry: publishes timed jobs
 packages/
@@ -64,7 +67,7 @@ One container image, started in one of four roles by its command:
 
 | Role | Command | Scales | Does |
 |---|---|---|---|
-| web | `scout web` | horizontally, stateless | UI, `/api/v1`, `/mcp`, inbound webhooks |
+| web | `scout web` | horizontally, stateless | the web app, `/api/v1`, `/api/auth`, `/mcp`, inbound webhooks, health checks |
 | worker | `scout worker` | horizontally, by queue depth | all NATS consumers |
 | scheduler | `scout scheduler` | exactly one | publishes timed jobs (pulls, scorecard, follow-through checks) |
 | relay | `scout relay` | exactly one active (leader lock in Postgres) | moves outbox rows to NATS |

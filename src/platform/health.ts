@@ -29,6 +29,13 @@ function natsFor(url: string): Promise<NatsConnection> {
   return p;
 }
 
+/** Closes the NATS connections the checks keep open. For shutdown; a later check opens a new one. */
+export async function closeHealthConnections(): Promise<void> {
+  const open = [...cache.values()];
+  cache.clear();
+  await Promise.allSettled(open.map(async (p) => (await p).close()));
+}
+
 async function checkDb(): Promise<void> {
   await Promise.race([appDb.execute(sql`select 1`), timeout(TIMEOUT_MS)]);
 }

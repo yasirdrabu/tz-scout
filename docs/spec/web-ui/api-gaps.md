@@ -379,8 +379,8 @@ then R2 and R3 screens.
 
 ## tenancy
 
-Includes auth and the HTTP layer. Files: `src/http/routes/v1/me/route.ts`, `src/app/api/auth/[...all]/route.ts`,
-`src/app/api/dev/sign-in/route.ts`, `src/modules/tenancy/{auth.ts,services/*,domain/*,db/schema.ts}`,
+Includes auth and the HTTP layer. Files: `src/http/routes/v1/me/route.ts`, `src/http/routes/api/auth/[...all]/route.ts`,
+`src/http/routes/api/dev/sign-in/route.ts`, `src/modules/tenancy/{auth.ts,services/*,domain/*,db/schema.ts}`,
 `src/server/{action,page-context}.ts` (Next-only, to retire), `src/app/t/[tenant]/settings/members/page.tsx`,
 `src/app/admin/tenants/page.tsx`.
 
