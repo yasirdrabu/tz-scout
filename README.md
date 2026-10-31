@@ -96,6 +96,10 @@ Design and runbook: `docs/spec/architecture/deployment-and-iac.md`. The single V
 `infra/compose/docker-compose.vm.yml` with Caddy or a Cloudflare Tunnel in front. Hosting is not decided
 yet, so nothing is deployed.
 
+The web-ui app has no production host yet. The Next image serves only the API (`/v1`, `/api`, health);
+it does not serve the app's screens. Until the HTTP layer and hosting plan lands, the app runs only from
+its Vite dev server (`cd web-ui && npm run dev`), and a deploy of today's image gives people no screens.
+
 Notes for the VM:
 
 - Run every compose command with `--env-file /opt/scout/.env`, not just `up`. The file holds the passwords
