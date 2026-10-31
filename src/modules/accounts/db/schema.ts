@@ -266,6 +266,8 @@ export const accountSummary = accounts.table(
     intent: integer('intent'),
     tier: text('tier'),
     bestOfferId: text('best_offer_id'),
+    /** The offer someone picked (Decision 5), copied from the review snapshot; rows and the offer filter use it over `best_offer_id`. */
+    leadOfferOverrideId: text('lead_offer_override_id'),
     practiceId: text('practice_id'),
     scoreVersion: integer('score_version'),
     practiceIds: textArray('practice_ids'),
@@ -278,6 +280,7 @@ export const accountSummary = accounts.table(
     stage: text('stage'),
     sourceIds: textArray('source_ids'),
     lastSignalAt: at('last_signal_at'),
+    noteCount: integer('note_count').notNull().default(0),
     createdAt: now('created_at'),
     updatedAt: now('updated_at'),
   },
@@ -287,4 +290,20 @@ export const accountSummary = accounts.table(
     index('account_summary_owner_history_idx').using('gin', t.ownerHistoryUserIds),
     index('account_summary_priority_idx').on(t.tenantId, t.priority.desc().nullsLast(), t.createdAt),
   ],
+);
+
+/** A note for the team on an account (Decision 3): everyone who can see the account sees it. */
+export const accountNote = accounts.table(
+  'account_note',
+  {
+    id: text('id').primaryKey(), // nte_
+    tenantId: text('tenant_id').notNull(),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => account.id),
+    body: text('body').notNull(),
+    byUserId: text('by_user_id').notNull(),
+    at: now('at'),
+  },
+  (t) => [index('account_note_account_at_idx').on(t.tenantId, t.accountId, t.at)],
 );

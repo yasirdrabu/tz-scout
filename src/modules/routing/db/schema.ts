@@ -158,3 +158,18 @@ export const routingSetting = routing.table(
   },
   (t) => [check('routing_setting_auto_accept_range', sql`${t.autoAcceptWorkingDays} is null or ${t.autoAcceptWorkingDays} between 1 and 10`)],
 );
+
+/** A person picking the lead offer, or giving it back to Scout (Decision 5), for the change log. */
+export const leadOfferChange = routing.table(
+  'lead_offer_change',
+  {
+    id: text('id').primaryKey(), // loc_
+    tenantId: text('tenant_id').notNull(),
+    accountId: text('account_id').notNull(),
+    fromOfferId: text('from_offer_id'),
+    toOfferId: text('to_offer_id'),
+    by: text('by').notNull(),
+    at: at('at').notNull().defaultNow(),
+  },
+  (t) => [index('lead_offer_change_account_at_idx').on(t.tenantId, t.accountId, sql`${t.at} desc`)],
+);

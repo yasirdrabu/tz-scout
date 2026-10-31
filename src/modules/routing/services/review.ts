@@ -6,7 +6,7 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { assignmentWithdrawn, statusChanged } from '../contracts/events';
 import type { ReviewSnapshot } from '../contracts/types';
-import { accountReview, assignment, declineReasonDef, reviewStatusDef, stageChange, statusChange } from '../db/schema';
+import { accountReview, assignment, declineReasonDef, leadOfferChange, reviewStatusDef, stageChange, statusChange } from '../db/schema';
 import { statusChangeProblems, type ReasonDef } from '../domain/status-rules';
 import { currentReviewSnapshot, publishReviewSnapshot } from './snapshot';
 import { moveStage } from './stage';
@@ -165,6 +165,7 @@ export async function reviewOnMerge(ctx: ModuleContext, survivorId: string, merg
   await ctx.tx.update(assignment).set(repoint).where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.accountId, mergedId)));
   await ctx.tx.update(statusChange).set(repoint).where(and(eq(statusChange.tenantId, ctx.tenantId), eq(statusChange.accountId, mergedId)));
   await ctx.tx.update(stageChange).set(repoint).where(and(eq(stageChange.tenantId, ctx.tenantId), eq(stageChange.accountId, mergedId)));
+  await ctx.tx.update(leadOfferChange).set(repoint).where(and(eq(leadOfferChange.tenantId, ctx.tenantId), eq(leadOfferChange.accountId, mergedId)));
   await ctx.tx.update(accountReview).set({ mergedInto: survivorId, currentAssignmentId: null }).where(reviewWhere(ctx, mergedId));
   if (moved) {
     await ctx.tx.update(accountReview).set({ currentAssignmentId: moved.id }).where(reviewWhere(ctx, survivorId));

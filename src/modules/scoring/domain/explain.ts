@@ -193,6 +193,7 @@ const CAUSE_WORDS: Record<ScoreCause, string> = {
   warm_intro: 'A warm intro was recorded.',
   manual_rescore: 'A rescore was requested.',
   ageing: 'Signals got older.',
+  tier_override: 'A person changed the tier.',
 };
 
 /** A score change's cause as a sentence for the history list (SCO-E4-S3-AC1). */

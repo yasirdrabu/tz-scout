@@ -60,5 +60,6 @@ async function buildSnapshot(ctx: ModuleContext, review: typeof accountReview.$i
     hasOpenAssignment: !!open,
     stage: stageSchema.parse(review.stage),
     reviewFlags,
+    leadOfferOverrideId: review.leadOfferOverrideId,
   };
 }

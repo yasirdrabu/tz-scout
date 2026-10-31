@@ -8,6 +8,13 @@
       "when": 1793137724782,
       "tag": "0000_scoring_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793484272009,
+      "tag": "0001_tier_override",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,7 @@ import { causeInWords, getScoreHistory, TIER_NAMES, type Tier } from '@/modules/
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import type { ReviewFlags, Stage } from '../contracts/types';
-import { assignment, stageChange, statusChange } from '../db/schema';
+import { assignment, leadOfferChange, stageChange, statusChange } from '../db/schema';
 import { EXIT_STAGES, PIPELINE_STAGES, STAGE_LABELS } from '../domain/stages';
 import { leadOffer, loadNames } from './lookups';
 import { loadStatuses, OPEN_STATUSES, visibleReview } from './review';
@@ -118,7 +118,7 @@ export async function getAccountReview(ctx: ModuleContext, accountId: string): P
   };
 }
 
-export type ChangeKind = 'arrived' | 'status' | 'stage' | 'assigned' | 'accepted' | 'declined_by_seller' | 'withdrawn' | 'scored';
+export type ChangeKind = 'arrived' | 'status' | 'stage' | 'assigned' | 'accepted' | 'declined_by_seller' | 'withdrawn' | 'scored' | 'tier' | 'lead_offer';
 
 /** One line of the Changes list: "{Field} changed from {x} to {y}" by person and when, and Scout's own lines. */
 export type ChangeView = {
@@ -166,6 +166,7 @@ export async function listChanges(ctx: ModuleContext, accountId: string, opts: {
   const assignments = await ctx.tx.select().from(assignment).where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.accountId, accountId)));
   const reasons = await reasonLabels(ctx, [...new Set([...statusRows.map((s) => s.reasonKey), ...assignments.map((a) => a.declineReasonKey)].filter((k): k is string => !!k))]);
   const scores = await getScoreHistory(ctx, accountId, { limit: 50 });
+  const offerChanges = await ctx.tx.select().from(leadOfferChange).where(and(eq(leadOfferChange.tenantId, ctx.tenantId), eq(leadOfferChange.accountId, accountId)));
   const [first] = await sourcesOfAccount(ctx, accountId);
 
   const out: ChangeView[] = [];
@@ -197,7 +198,12 @@ export async function listChanges(ctx: ModuleContext, accountId: string, opts: {
     }
   }
   for (const s of scores) {
-    add({ id: s.id, at: s.at, kind: 'scored', field: 'tier', from: tierName(s.fromTier), to: tierName(s.toTier), priority: s.toPriority, note: causeInWords(s.cause) });
+    if (s.cause === 'tier_override') add({ id: s.id, at: s.at, kind: 'tier', field: 'tier', from: tierName(s.fromTier), to: tierName(s.toTier), byName: names.person(s.by), note: s.note });
+    else add({ id: s.id, at: s.at, kind: 'scored', field: 'tier', from: tierName(s.fromTier), to: tierName(s.toTier), priority: s.toPriority, note: causeInWords(s.cause) });
+  }
+  const scoutsPick = "Scout's pick";
+  for (const c of offerChanges) {
+    add({ id: c.id, at: c.at, kind: 'lead_offer', field: 'best_offer', from: c.fromOfferId ? (names.offer(c.fromOfferId)?.name ?? c.fromOfferId) : scoutsPick, to: c.toOfferId ? (names.offer(c.toOfferId)?.name ?? c.toOfferId) : scoutsPick, byName: names.person(c.by) });
   }
 
   const sorted = out.sort((a, b) => b.at.getTime() - a.at.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));

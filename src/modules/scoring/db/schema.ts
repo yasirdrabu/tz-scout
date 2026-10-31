@@ -72,6 +72,13 @@ export const accountScore = scoring.table(
     priority: integer('priority').notNull(),
     tier: text('tier').notNull(),
     tierReason: text('tier_reason').notNull(), // computed | research_floor | warm_intro_floor
+    /** The tier Scout scored (after floors). `tier` is this unless a person set one by hand (Decision 4). */
+    scoredTier: text('scored_tier').notNull(),
+    /** A tier a person set by hand; kept across rescores until someone picks Scout's tier again. */
+    tierOverride: text('tier_override'),
+    tierOverrideBy: text('tier_override_by'),
+    tierOverrideAt: at('tier_override_at'),
+    tierOverrideNote: text('tier_override_note'),
     revenuePotentialCents: bigint('revenue_potential_cents', { mode: 'number' }), // null until R2
     revenueBand: text('revenue_band'), // low | medium | high, null until R2
     explanation: jsonb('explanation').notNull(),
@@ -98,6 +105,9 @@ export const scoreChange = scoring.table(
     toOfferId: text('to_offer_id'),
     cause: text('cause').notNull(), // new_signal | new_fact | rules_changed | offer_changed | trust_changed | warm_intro | manual_rescore | ageing
     causeEventId: text('cause_event_id'),
+    /** Who changed it by hand (cause `tier_override`); null when Scout did. */
+    by: text('by'),
+    note: text('note'),
     at: at('at').notNull().defaultNow(),
   },
   (t) => [index('score_change_account_at_idx').on(t.tenantId, t.accountId, sql`${t.at} desc`)],

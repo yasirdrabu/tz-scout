@@ -66,6 +66,12 @@ export async function getScoreHistory(ctx: ModuleContext, accountId: string, opt
 export type TierDetail = {
   /** "Was {old}": the tier before the latest change, when that change was a rescore that moved the tier. */
   previousTier: string | null;
+  /** The tier Scout scored; differs from the account's tier when a person set one by hand. */
+  scoredTier: string;
+  /** Who set the tier by hand, when, and why; null while the tier is Scout's (Decision 4). */
+  tierSetBy: string | null;
+  tierSetAt: Date | null;
+  tierNote: string | null;
   warmIntro: { introducerName: string | null; points: number } | null;
 };
 
@@ -76,7 +82,16 @@ const RESCORES = ['rules_changed', 'manual_rescore'];
 export async function tierDetails(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, TierDetail>> {
   if (accountIds.length === 0) return new Map();
   const scores = await ctx.tx
-    .select({ accountId: accountScore.accountId, warmPoints: accountScore.warmPoints, warmIntroducerId: accountScore.warmIntroducerId, warmIntroducerName: accountScore.warmIntroducerName })
+    .select({
+      accountId: accountScore.accountId,
+      warmPoints: accountScore.warmPoints,
+      warmIntroducerId: accountScore.warmIntroducerId,
+      warmIntroducerName: accountScore.warmIntroducerName,
+      scoredTier: accountScore.scoredTier,
+      tierSetBy: accountScore.tierOverrideBy,
+      tierSetAt: accountScore.tierOverrideAt,
+      tierNote: accountScore.tierOverrideNote,
+    })
     .from(accountScore)
     .where(and(eq(accountScore.tenantId, ctx.tenantId), inArray(accountScore.accountId, accountIds)));
   const latest = await ctx.tx
@@ -90,6 +105,10 @@ export async function tierDetails(ctx: ModuleContext, accountIds: string[]): Pro
       s.accountId,
       {
         previousTier: moved.get(s.accountId) ?? null,
+        scoredTier: s.scoredTier,
+        tierSetBy: s.tierSetBy,
+        tierSetAt: s.tierSetAt,
+        tierNote: s.tierNote,
         warmIntro: s.warmPoints > 0 || s.warmIntroducerId ? { introducerName: s.warmIntroducerName, points: s.warmPoints } : null,
       },
     ]),

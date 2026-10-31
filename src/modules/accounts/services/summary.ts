@@ -98,6 +98,7 @@ export async function applyReview(ctx: ModuleContext, accountId: string, s: Revi
       hasOpenAssignment: s.hasOpenAssignment,
       stage: s.stage,
       reviewFlags: s.reviewFlags,
+      leadOfferOverrideId: s.leadOfferOverrideId ?? null,
       reviewVersion: version,
       updatedAt: new Date(),
     })

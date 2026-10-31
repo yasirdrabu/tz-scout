@@ -77,7 +77,13 @@ export type SearchRow = {
   practiceId: string | null;
   /** Every source of every chain the account arrived through. */
   sourceIds: string[];
+  /** The offer someone picked over Scout's best (Decision 5), or null. */
+  leadOfferOverrideId: string | null;
+  noteCount: number;
 };
+
+/** The offer an account leads with (Decision 5): someone's pick, else Scout's best. The offer filter and facet use it. */
+const LEAD_OFFER = sql`coalesce(${accountSummary.leadOfferOverrideId}, ${accountSummary.bestOfferId})`;
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -174,7 +180,7 @@ function filters(ctx: ModuleContext, q: SearchQuery): (SQL | undefined)[] {
     q.practiceId
       ? or(sql`${accountSummary.practiceIds} @> ARRAY[${q.practiceId}]::text[]`, eq(accountSummary.practiceId, q.practiceId))
       : undefined,
-    q.bestOfferId ? eq(accountSummary.bestOfferId, q.bestOfferId) : undefined,
+    q.bestOfferId ? sql`${LEAD_OFFER} = ${q.bestOfferId}` : undefined,
     q.tier ? eq(accountSummary.tier, q.tier) : undefined,
     q.priorityMin !== undefined ? gte(accountSummary.priority, q.priorityMin) : undefined,
     q.reviewStatusKey ? eq(accountSummary.reviewStatusKey, q.reviewStatusKey) : undefined,
@@ -251,7 +257,7 @@ export type FacetKey = 'tier' | 'practice' | 'offer' | 'source' | 'review_status
 const FACET_VALUES: Record<FacetKey, SQL> = {
   tier: sql`array[${accountSummary.tier}]`,
   practice: sql`array_append(${accountSummary.practiceIds}, ${accountSummary.practiceId})`,
-  offer: sql`array[${accountSummary.bestOfferId}]`,
+  offer: sql`array[${LEAD_OFFER}]`,
   source: sql`${accountSummary.sourceIds}`,
   review_status: sql`array[${accountSummary.reviewStatusKey}]`,
   stage: sql`array[${accountSummary.stage}]`,
@@ -319,6 +325,8 @@ export async function search(ctx: ModuleContext, q: SearchQuery = {}): Promise<{
       intent: accountSummary.intent,
       practiceId: accountSummary.practiceId,
       sourceIds: accountSummary.sourceIds,
+      leadOfferOverrideId: accountSummary.leadOfferOverrideId,
+      noteCount: accountSummary.noteCount,
       cursorKey: sql<string | null>`(${spec.expr})::text`,
     })
     .from(accountSummary)

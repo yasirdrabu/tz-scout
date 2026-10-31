@@ -12,6 +12,7 @@ import { applyExclusion } from './exclusion';
 import { reproject } from './facts';
 import { lockAccounts } from './lock';
 import { filterVisibleAccountIds } from './visibility';
+import { moveNotes } from './notes';
 import { findMatch } from './people';
 import { repickPrimary } from './primary';
 import { setPractices } from './practices';
@@ -203,6 +204,7 @@ export async function mergeAccounts(ctx: ModuleContext, survivorId: string, merg
   await repickPrimary(ctx, survivorId);
   await applyExclusion(ctx, survivorId);
   await writeSummary(ctx, survivorId, { addSourceIds: mergedSummary?.sourceIds ?? [] });
+  await moveNotes(ctx, survivorId, mergedId);
 
   await audit(ctx, {
     action: 'accounts.account.merge',

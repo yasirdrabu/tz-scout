@@ -1,11 +1,14 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import { lastActivityAt, latestHandoff } from '@/modules/crm';
+import { crmFacts, lastActivityAt, latestHandoff } from '@/modules/crm';
 import { accountNames, filterVisibleAccountIds, getSummaries, resolveAccountId } from '@/modules/accounts';
 import { getArrival } from '@/modules/intake';
 import { members, tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { accountReview, assignment, declineReasonDef, statusChange } from '../db/schema';
+import type { Stage } from '../contracts/types';
+import { STAGE_LABELS } from '../domain/stages';
+import { loadNames } from './lookups';
 import { OPEN_STATUSES, loadStatuses, requirePerson } from './review';
 
 export type AccountStatus = {
@@ -161,6 +164,20 @@ export type AssignmentRow = {
   acceptedHow: string | null;
   notes: string | null;
   declineReasonKey: string | null;
+  assignedByName: string | null;
+  /** The offer the account leads with (the one picked, else Scout's best), for "{offer}" in My accounts. */
+  offerId: string | null;
+  offerName: string | null;
+  /** Playbooks are R2: null until then. */
+  playbookName: null;
+  stage: string | null;
+  stageLabel: string | null;
+  /** Playbook steps are R2. */
+  nextStep: null;
+  /** The latest CRM activity on the account, when the caller can see it. */
+  lastActivity: { kind: string; at: Date } | null;
+  /** The CRM handoff state, so a row can show it while the send has not finished. */
+  handoff: { state: string; at: string } | null;
 };
 
 type Key = [string, string];
@@ -178,9 +195,21 @@ function decode(cursor: string): Key {
 
 /** The rows with account and seller names. */
 async function assignmentRows(ctx: ModuleContext, rows: (typeof assignment.$inferSelect)[]): Promise<AssignmentRow[]> {
-  const accounts = await accountNames(ctx, [...new Set(rows.map((a) => a.accountId))]);
+  const accountIds = [...new Set(rows.map((a) => a.accountId))];
+  const accounts = await accountNames(ctx, accountIds);
+  const visible = [...accounts.keys()];
   const names = new Map((await members(ctx)).map((m) => [m.userId, m.name]));
-  return rows.map((a) => ({
+  const lookups = await loadNames(ctx);
+  const reviews = new Map(
+    (accountIds.length ? await ctx.tx.select().from(accountReview).where(and(eq(accountReview.tenantId, ctx.tenantId), inArray(accountReview.accountId, accountIds))) : []).map((r) => [r.accountId, r]),
+  );
+  const best = new Map((await getSummaries(ctx, visible)).map((s) => [s.accountId, s.bestOfferId]));
+  const crm = await crmFacts(ctx, visible);
+  return rows.map((a) => {
+    const review = reviews.get(a.accountId);
+    const offerId = review?.leadOfferOverrideId ?? best.get(a.accountId) ?? null;
+    const stage = review?.stage ?? null;
+    return {
     id: a.id,
     accountId: a.accountId,
     accountName: accounts.get(a.accountId) ?? null,
@@ -193,7 +222,17 @@ async function assignmentRows(ctx: ModuleContext, rows: (typeof assignment.$infe
     acceptedHow: a.acceptedHow,
     notes: a.notes,
     declineReasonKey: a.declineReasonKey,
-  }));
+    assignedByName: names.get(a.assignedBy) ?? null,
+    offerId,
+    offerName: lookups.offer(offerId)?.name ?? null,
+    playbookName: null,
+    stage,
+    stageLabel: stage ? (STAGE_LABELS[stage as Stage] ?? stage) : null,
+    nextStep: null,
+    lastActivity: crm.get(a.accountId)?.lastActivity ?? null,
+    handoff: review?.flags.handoff && review.currentAssignmentId === a.id ? { state: review.flags.handoff.state, at: review.flags.handoff.at } : null,
+    };
+  });
 }
 
 /**

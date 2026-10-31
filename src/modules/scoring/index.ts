@@ -20,4 +20,5 @@ export { requestRescore } from './services/rescore';
 export { scoreAccount, type AccountScore, type ScoreOptions } from './services/score';
 export { getMatches, getScore, getScoreHistory, tierDetails, type OfferMatchView, type ScoreChangeView, type TierDetail } from './services/read';
 export { explainScore, type ScoreExplanation } from './services/explain';
+export { setTierOverride, type TierView } from './services/tier';
 export { causeInWords } from './domain/explain';

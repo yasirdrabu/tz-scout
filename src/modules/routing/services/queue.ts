@@ -54,6 +54,11 @@ export type QueueRow = SearchRow & {
   leadOffer: { offerId: string; name: string | null; practiceId: string | null; practiceName: string | null; chosen: boolean } | null;
   /** "Was {old}" after a rescore moved the tier. */
   previousTier: string | null;
+  /** The tier Scout scored, and who set the row's tier by hand, when and why (Decision 4). */
+  scoredTier: string | null;
+  tierSetByName: string | null;
+  tierSetAt: Date | null;
+  tierNote: string | null;
   warmIntro: { introducerName: string | null; points: number } | null;
 };
 
@@ -123,6 +128,10 @@ export async function listQueue(ctx: ModuleContext, f: QueueFilters = {}): Promi
         practiceName: names.practice(r.practiceId),
         leadOffer: leadOffer(names, review?.leadOfferOverrideId ?? null, r.bestOfferId),
         previousTier: tier?.previousTier ?? null,
+        scoredTier: tier?.scoredTier ?? r.tier,
+        tierSetByName: names.person(tier?.tierSetBy),
+        tierSetAt: tier?.tierSetAt ?? null,
+        tierNote: tier?.tierNote ?? null,
         warmIntro: tier?.warmIntro ?? null,
       };
     }),

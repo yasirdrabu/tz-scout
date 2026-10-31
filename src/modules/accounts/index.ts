@@ -53,6 +53,7 @@ export { countAccounts, countAccountsBy, oldestCreatedAt, search, type FacetKey,
 export { listExclusionLists, listExclusionRules, setExclusionList, setExclusionRule, type ExclusionRuleView } from './services/settings';
 export { filterVisibleAccountIds, visibleAccounts } from './services/visibility';
 export { setPractices } from './services/practices';
+export { addNote, listNotes, MAX_NOTE, type NoteView } from './services/notes';
 export { upsertFromArrival, type UpsertResult } from './services/upsert';
 export type {
   AccountView,

@@ -14,7 +14,9 @@ import * as v1AccountsIdExclusionOverride from './routes/v1/accounts/[id]/exclus
 import * as v1AccountsIdFacts from './routes/v1/accounts/[id]/facts/route';
 import * as v1AccountsIdHandoffs from './routes/v1/accounts/[id]/handoffs/route';
 import * as v1AccountsIdInsights from './routes/v1/accounts/[id]/insights/route';
+import * as v1AccountsIdLeadOffer from './routes/v1/accounts/[id]/lead-offer/route';
 import * as v1AccountsIdMatches from './routes/v1/accounts/[id]/matches/route';
+import * as v1AccountsIdNotes from './routes/v1/accounts/[id]/notes/route';
 import * as v1AccountsIdPeople from './routes/v1/accounts/[id]/people/route';
 import * as v1AccountsIdPractices from './routes/v1/accounts/[id]/practices/route';
 import * as v1AccountsIdReviewStatus from './routes/v1/accounts/[id]/review-status/route';
@@ -24,6 +26,7 @@ import * as v1AccountsIdScoreHistory from './routes/v1/accounts/[id]/score/histo
 import * as v1AccountsIdScore from './routes/v1/accounts/[id]/score/route';
 import * as v1AccountsIdSignals from './routes/v1/accounts/[id]/signals/route';
 import * as v1AccountsIdStatus from './routes/v1/accounts/[id]/status/route';
+import * as v1AccountsIdTier from './routes/v1/accounts/[id]/tier/route';
 import * as v1AccountsExport from './routes/v1/accounts/export/route';
 import * as v1AccountsFacets from './routes/v1/accounts/facets/route';
 import * as v1Accounts from './routes/v1/accounts/route';
@@ -43,6 +46,7 @@ import * as v1ApiKeysId from './routes/v1/api-keys/[id]/route';
 import * as v1ApiKeys from './routes/v1/api-keys/route';
 import * as v1ArrivalsId from './routes/v1/arrivals/[id]/route';
 import * as v1Arrivals from './routes/v1/arrivals/route';
+import * as v1AssignableSellers from './routes/v1/assignable-sellers/route';
 import * as v1AssignmentsId from './routes/v1/assignments/[id]/route';
 import * as v1Assignments from './routes/v1/assignments/route';
 import * as v1Audit from './routes/v1/audit/route';
@@ -132,7 +136,9 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/accounts/:id/facts`, module: v1AccountsIdFacts },
   { path: `${V1}/accounts/:id/handoffs`, module: v1AccountsIdHandoffs },
   { path: `${V1}/accounts/:id/insights`, module: v1AccountsIdInsights },
+  { path: `${V1}/accounts/:id/lead-offer`, module: v1AccountsIdLeadOffer },
   { path: `${V1}/accounts/:id/matches`, module: v1AccountsIdMatches },
+  { path: `${V1}/accounts/:id/notes`, module: v1AccountsIdNotes },
   { path: `${V1}/accounts/:id/people`, module: v1AccountsIdPeople },
   { path: `${V1}/accounts/:id/practices`, module: v1AccountsIdPractices },
   { path: `${V1}/accounts/:id/review-status`, module: v1AccountsIdReviewStatus },
@@ -142,6 +148,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/accounts/:id/score`, module: v1AccountsIdScore },
   { path: `${V1}/accounts/:id/signals`, module: v1AccountsIdSignals },
   { path: `${V1}/accounts/:id/status`, module: v1AccountsIdStatus },
+  { path: `${V1}/accounts/:id/tier`, module: v1AccountsIdTier },
   { path: `${V1}/accounts/export`, module: v1AccountsExport },
   { path: `${V1}/accounts/facets`, module: v1AccountsFacets },
   { path: `${V1}/accounts`, module: v1Accounts },
@@ -161,6 +168,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/api-keys`, module: v1ApiKeys },
   { path: `${V1}/arrivals/:id`, module: v1ArrivalsId },
   { path: `${V1}/arrivals`, module: v1Arrivals },
+  { path: `${V1}/assignable-sellers`, module: v1AssignableSellers },
   { path: `${V1}/assignments/:id`, module: v1AssignmentsId },
   { path: `${V1}/assignments`, module: v1Assignments },
   { path: `${V1}/audit`, module: v1Audit },
