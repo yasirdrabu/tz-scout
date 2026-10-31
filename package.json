@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev -p 4240",
     "build": "npm run build:web-ui && npm run build:api",
-    "build:web-ui": "npm --prefix web-ui ci && npm --prefix web-ui run build",
+    "build:web-ui": "npm --prefix web-ui run build",
     "build:api": "next build && npm run build:server && node scripts/copy-standalone-assets.mjs",
     "build:server": "tsup",
     "start": "next start -p 4240",

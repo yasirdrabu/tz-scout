@@ -84,7 +84,7 @@ cd web-ui && npm run typecheck && npm run lint && npm test && npm run build   # 
 ## Build
 
 ```bash
-npm run build     # the web-ui app (npm ci and build in web-ui/), the Next.js standalone build, plus dist/cli.js
+npm run build     # the web-ui app (build in web-ui/; install its packages first with `npm --prefix web-ui ci`), the Next.js standalone build, plus dist/cli.js
 node dist/cli.js <migrate | seed | backfill-r1b | backfill-r1c | worker | relay | scheduler | all-background | web>
 ```
 
