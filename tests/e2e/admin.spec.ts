@@ -54,3 +54,11 @@ test('System health: loads, retries a dead job and sends a test event', async ({
   await page.getByRole('button', { name: 'Send test event' }).click();
   await expect(page.getByText(/^Round trip \d+ ms\. Relay, queue and worker all answered\.$/)).toBeVisible({ timeout: 20_000 });
 });
+
+test('System health: runs a schedule now', async ({ page }) => {
+  await page.goto('/admin/health');
+  const run = page.getByRole('button', { name: /^Run integrations\.credentials\.cleanup for .* now$/ }).first();
+  await expect(run).toBeVisible();
+  await run.click();
+  await shows(page, 'integrations.credentials.cleanup started');
+});
