@@ -8,7 +8,7 @@ import { copyText, errorText } from '../shared';
 import styles from '../Settings.module.css';
 import { inviteMembers, membersQuery, rolesQuery, type InviteResult, type Practice } from './api';
 import { PracticePicker } from './MemberAccess';
-import { hasPracticeAccess, parseEmails, roleAbout, roleLabel } from './words';
+import { hasPracticeAccess, parseEmails, roleAbout, roleLabel, signInAddress } from './words';
 
 type Props = { open: boolean; onOpenChange: (open: boolean) => void; tenant: string; practices: Practice[] };
 
@@ -52,7 +52,7 @@ export function InviteDialog({ open, onOpenChange, tenant, practices }: Props) {
       setFailed(bad);
       setEmails(bad.map((r) => r.email).join('\n'));
       if (good > 0) {
-        setLink(res.sign_in_url);
+        setLink(signInAddress());
         toast.show(good === 1 ? `Invited ${res.results.find((r) => r.ok)?.email}.` : `Invited ${good} people.`);
         await queryClient.invalidateQueries({ queryKey: membersQuery(tenant).queryKey });
       }

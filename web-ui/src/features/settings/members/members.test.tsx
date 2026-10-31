@@ -4,7 +4,7 @@ import { delay, http, HttpResponse } from 'msw';
 import { exactly, problem } from '../../../test/http';
 import { renderApp } from '../../../test/renderApp';
 import { server } from '../../../test/server';
-import { fail, MEMBERS, serve } from './testing';
+import { countsOf, fail, member, MEMBERS, serve } from './testing';
 
 /** Opens Settings > Members and the named member's drawer. */
 async function openMember(name: string, user: { click: (el: Element) => Promise<void> } = userEvent) {
@@ -52,22 +52,44 @@ describe('Members tab', () => {
     expect(screen.getByText('Showing 5 of 5')).toBeInTheDocument();
   });
 
-  it('filters by search and status', async () => {
+  it('filters by search and status, and keeps both in the URL', async () => {
     serve();
-    renderApp('/t/taazaa/settings/members');
+    const app = renderApp('/t/taazaa/settings/members');
     await userEvent.click(await screen.findByRole('tab', { name: 'Suspended 1' }));
     expect(screen.getAllByRole('row')).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Lena Brooks' })).toBeInTheDocument();
+    expect(app.router.state.location.search).toEqual({ status: 'suspended' });
     await userEvent.click(screen.getByRole('tab', { name: 'All 5' }));
     await userEvent.type(screen.getByRole('searchbox', { name: 'Search by name or email' }), 'nobody');
     expect(screen.getByRole('heading', { name: 'No members match' })).toBeInTheDocument();
+    await waitFor(() => expect(app.router.state.location.search).toEqual({ q: 'nobody' }));
+  });
+
+  it('opens with the search and status tab from the URL', async () => {
+    serve();
+    renderApp('/t/taazaa/settings/members?status=active&q=dana');
+    expect(await screen.findByRole('tab', { name: 'Active 3' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('searchbox', { name: 'Search by name or email' })).toHaveValue('dana');
+    expect(screen.getAllByRole('row')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Dana Whitfield' })).toBeInTheDocument();
+  });
+
+  it("shows the API's counts, not its own", async () => {
+    const counts = { all: 40, active: 31, invited: 6, suspended: 3, active_by_sign_in_method: { microsoft: 29, dev: 2 } };
+    serve(MEMBERS, undefined, counts);
+    renderApp('/t/taazaa/settings/members');
+    expect(await screen.findByRole('tab', { name: 'Members (40)' })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: 'Active 31' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Invited 6' })).toBeInTheDocument();
+    expect(screen.getByText('29 active members use this')).toBeInTheDocument();
+    expect(screen.getByText('Showing 5 of 40')).toBeInTheDocument();
   });
 
   it('shows the loading line while members load', async () => {
     serve();
     server.use(http.get('/v1/members', async () => {
       await delay('infinite');
-      return HttpResponse.json({ data: [] });
+      return HttpResponse.json({ data: [], counts: countsOf([]) });
     }));
     renderApp('/t/taazaa/settings/members');
     expect(await screen.findByText('Loading members')).toBeInTheDocument();
@@ -152,6 +174,39 @@ describe('member drawer', () => {
     expect(within(drawer).getByRole('button', { name: 'Suspend' })).toBeDisabled();
     expect(within(drawer).getByRole('button', { name: 'Remove from workspace' })).toBeDisabled();
     expect(within(drawer).getByText("You can't suspend or remove yourself.")).toBeInTheDocument();
+  });
+
+  it('locks the role with the reason the API gives', async () => {
+    const dana = member({
+      id: 'mbr_dana',
+      name: 'Dana Whitfield',
+      role: 'owner',
+      can_change_role: false,
+      can_suspend: false,
+      can_remove: false,
+      lock_reasons: { change_role: 'last_owner', suspend: 'owner', remove: 'owner', sign_out: null },
+    });
+    serve(MEMBERS.map((m) => (m.id === 'mbr_dana' ? dana : m)));
+    const drawer = await openMember('Dana Whitfield');
+    const role = within(drawer).getByRole('combobox', { name: 'Role' });
+    expect(role).toBeDisabled();
+    expect(role).toHaveAccessibleDescription('This is the only owner. Make someone else an owner first.');
+    expect(within(drawer).getByRole('button', { name: 'Suspend' })).toBeDisabled();
+    expect(within(drawer).getByText("Owners can't be suspended or removed. Change their role first.")).toBeInTheDocument();
+  });
+
+  it('hides Sign out of every device when the API says you may not', async () => {
+    const dana = member({
+      id: 'mbr_dana',
+      name: 'Dana Whitfield',
+      can_sign_out: false,
+      lock_reasons: { change_role: null, suspend: null, remove: null, sign_out: 'platform_admin' },
+    });
+    serve(MEMBERS.map((m) => (m.id === 'mbr_dana' ? dana : m)));
+    const drawer = await openMember('Dana Whitfield');
+    expect(within(drawer).queryByRole('button', { name: 'Sign out of every device' })).toBeNull();
+    expect(within(drawer).getByText('Only a platform admin can sign a platform admin out everywhere.')).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: 'Suspend' })).toBeEnabled();
   });
 
   it('saves practice access', async () => {

@@ -1,5 +1,5 @@
 import type { DataLimit } from '../../../api/me';
-import type { Member, MemberStatus, Practice } from './api';
+import type { Member, MemberLock, MemberStatus, Practice } from './api';
 
 // The API sends role keys only (GET /v1/roles has no role labels), so the screen names them here,
 // in the mockup's words. A role the app doesn't know shows its key, capitalised.
@@ -32,6 +32,37 @@ export function practiceText(limit: DataLimit | null, practices: Practice[]): st
   if (!ids) return 'All practices';
   if (ids.length === 1) return practices.find((p) => p.id === ids[0])?.name ?? '1 practice';
   return `${ids.length} practices`;
+}
+
+/**
+ * The plain Scout sign-in address, this app's own sign-in page: invited people get in the first time
+ * they sign in with Microsoft (Decision 18). The invite dialog and Copy sign-in link both use it.
+ */
+export const signInAddress = () => `${window.location.origin}/signin`;
+
+/** Why the role can't change, in the screen's words (from the API's lock reason). */
+export function roleLockText(lock: MemberLock | null): string | null {
+  if (lock === 'self') return "You can't change your own role.";
+  if (lock === 'last_owner') return 'This is the only owner. Make someone else an owner first.';
+  if (lock === 'owners_only') return "Only an owner can change an owner's role.";
+  if (lock === 'no_permission') return "You can't change roles.";
+  return null;
+}
+
+/** Why a member can't be suspended or removed. */
+export function removeLockText(lock: MemberLock | null): string | null {
+  if (lock === 'self') return "You can't suspend or remove yourself.";
+  if (lock === 'owner') return "Owners can't be suspended or removed. Change their role first.";
+  if (lock) return "You can't suspend or remove this member.";
+  return null;
+}
+
+/** Why a member can't be signed out everywhere. */
+export function signOutLockText(lock: MemberLock | null): string | null {
+  if (lock === 'owners_only') return 'Only an owner can sign an owner out everywhere.';
+  if (lock === 'platform_admin') return 'Only a platform admin can sign a platform admin out everywhere.';
+  if (lock) return "You can't sign this member out everywhere.";
+  return null;
 }
 
 /** Email addresses typed with commas, semicolons or new lines. */

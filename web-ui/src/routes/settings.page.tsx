@@ -13,6 +13,6 @@ export function SettingsPage() {
   const { data: me } = useQuery(meQuery(tenant));
   if (!me) return null;
   const setOpen = (id: string | undefined) =>
-    void navigate({ to: '/t/$tenant/settings/$tab', params: { tenant, tab }, search: id ? { open: id } : {} });
+    void navigate({ to: '/t/$tenant/settings/$tab', params: { tenant, tab }, search: (prev) => ({ ...prev, open: id }) });
   return <SettingsScreen me={me} tenant={tenant} tab={tab} open={open} setOpen={setOpen} />;
 }

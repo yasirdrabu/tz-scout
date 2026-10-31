@@ -5,27 +5,22 @@ import { useToast } from '../../../ui/Toast';
 import { copyText, useRun } from '../shared';
 import styles from '../Settings.module.css';
 import { memberAction, removeMember, type Member } from './api';
+import { removeLockText, signInAddress, signOutLockText } from './words';
 
-type Props = { member: Member; youId: string | null; tenant: string; onChanged: () => Promise<unknown>; onRemoved: () => void };
+type Props = { member: Member; tenant: string; onChanged: () => Promise<unknown>; onRemoved: () => void };
 
 type Confirm = 'sign-out' | 'remove' | null;
 
-/** The plain Scout sign-in address: invited people get in the first time they sign in with Microsoft (Decision 18). */
-export const signInAddress = () => `${window.location.origin}/signin`;
-
-/** Why a member can't be suspended or removed, or null. */
-function protectedBecause(member: Member, youId: string | null): string | null {
-  if (member.user_id === youId) return "You can't suspend or remove yourself.";
-  if (member.role === 'owner' && member.status === 'active') return "Owners can't be suspended or removed. Change their role first.";
-  return null;
-}
-
-/** Sign out everywhere; for invites Copy sign-in link and Revoke invite; Suspend or Reactivate; Remove. */
-export function MemberActions({ member, youId, tenant, onChanged, onRemoved }: Props) {
+/**
+ * Sign out everywhere; for invites Copy sign-in link and Revoke invite; Suspend or Reactivate; Remove.
+ * What is locked, and why, comes from the API (`can_*`, `lock_reasons`).
+ */
+export function MemberActions({ member, tenant, onChanged, onRemoved }: Props) {
   const toast = useToast();
   const { run, busy } = useRun();
   const [confirm, setConfirm] = useState<Confirm>(null);
-  const lock = protectedBecause(member, youId);
+  const lock = removeLockText(member.lock_reasons.remove ?? member.lock_reasons.suspend);
+  const signOutLock = member.can_sign_out ? null : signOutLockText(member.lock_reasons.sign_out);
   const name = member.name;
 
   const act = async (action: 'suspend' | 'reactivate', done: string) => {
@@ -59,21 +54,23 @@ export function MemberActions({ member, youId, tenant, onChanged, onRemoved }: P
           <Button size="sm" variant="secondary" onClick={() => void copyLink()}>
             Copy sign-in link
           </Button>
-          <Button size="sm" variant="secondary" disabled={busy || member.user_id === youId} onClick={() => void remove(`Invite to ${member.email} revoked.`)}>
+          <Button size="sm" variant="secondary" disabled={busy || !member.can_remove} onClick={() => void remove(`Invite to ${member.email} revoked.`)}>
             Revoke invite
           </Button>
         </div>
       ) : (
         <>
           <div className={styles.row}>
-            <Button size="sm" variant="secondary" disabled={busy} onClick={() => setConfirm('sign-out')}>
-              Sign out of every device
-            </Button>
+            {member.can_sign_out && (
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => setConfirm('sign-out')}>
+                Sign out of every device
+              </Button>
+            )}
             {member.status === 'active' ? (
               <Button
                 size="sm"
                 variant="secondary"
-                disabled={busy || !!lock}
+                disabled={busy || !member.can_suspend}
                 onClick={() => void act('suspend', `${name} suspended. They can't use this workspace until you reactivate them.`)}
               >
                 Suspend
@@ -83,11 +80,12 @@ export function MemberActions({ member, youId, tenant, onChanged, onRemoved }: P
                 Reactivate
               </Button>
             )}
-            <Button size="sm" variant="secondary" disabled={busy || !!lock} onClick={() => setConfirm('remove')}>
+            <Button size="sm" variant="secondary" disabled={busy || !member.can_remove} onClick={() => setConfirm('remove')}>
               <span className={styles.danger}>Remove from workspace</span>
             </Button>
           </div>
           {lock && <p className={styles.note}>{lock}</p>}
+          {signOutLock && <p className={styles.note}>{signOutLock}</p>}
         </>
       )}
       <ConfirmDialog

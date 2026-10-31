@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { hasScope, userIdOf, type Me } from '../../../api/me';
+import { hasScope, type Me } from '../../../api/me';
 import { useFormat } from '../../../lib/useFormat';
 import { Avatar } from '../../../ui/Avatar';
 import { Drawer } from '../../../ui/Drawer';
@@ -9,26 +9,18 @@ import styles from '../Settings.module.css';
 import { membersQuery, rolesQuery, updateMember, type Member, type Practice } from './api';
 import { HubSpotUser, PracticeAccess } from './MemberAccess';
 import { MemberActions } from './MemberActions';
-import { hasPracticeAccess, roleLabel, signInWith, STATUS_LABEL } from './words';
+import { hasPracticeAccess, roleLabel, roleLockText, signInWith, STATUS_LABEL } from './words';
 
-type Props = { member: Member; everyone: Member[]; me: Me; tenant: string; practices: Practice[]; onClose: () => void };
-
-/** Why the role can't change, or null when it can. */
-function roleLock(member: Member, everyone: Member[], youId: string | null): string | null {
-  if (member.user_id === youId) return "You can't change your own role.";
-  const owners = everyone.filter((m) => m.role === 'owner' && m.status === 'active').length;
-  if (member.role === 'owner' && member.status === 'active' && owners === 1) return 'This is the only owner. Make someone else an owner first.';
-  return null;
-}
+type Props = { member: Member; me: Me; tenant: string; practices: Practice[]; onClose: () => void };
 
 /** §21a member drawer: role, practice access, HubSpot user, sign-in facts and the member actions. */
-export function MemberDrawer({ member, everyone, me, tenant, practices, onClose }: Props) {
+export function MemberDrawer({ member, me, tenant, practices, onClose }: Props) {
   const f = useFormat();
   const queryClient = useQueryClient();
   const roles = useQuery(rolesQuery(tenant));
   const { run, busy } = useRun();
   const canManage = hasScope(me, 'members:manage');
-  const lock = roleLock(member, everyone, userIdOf(me));
+  const lock = member.can_change_role ? null : roleLockText(member.lock_reasons.change_role);
   const roleKeys = roles.data?.roles.map((r) => r.role) ?? [member.role];
   const refresh = () => queryClient.invalidateQueries({ queryKey: membersQuery(tenant).queryKey });
 
@@ -85,7 +77,7 @@ export function MemberDrawer({ member, everyone, me, tenant, practices, onClose 
           <dd>{f.number(member.open_account_count)}</dd>
         </dl>
       </section>
-      {canManage && <MemberActions member={member} youId={userIdOf(me)} tenant={tenant} onChanged={refresh} onRemoved={onClose} />}
+      {canManage && <MemberActions member={member} tenant={tenant} onChanged={refresh} onRemoved={onClose} />}
     </Drawer>
   );
 }

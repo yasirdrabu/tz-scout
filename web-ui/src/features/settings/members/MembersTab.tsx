@@ -13,7 +13,7 @@ export function MembersTab(props: TabProps) {
   const [view, setView] = useState('members');
   const { data } = useQuery(membersQuery(props.tenant));
   const tabs = [
-    { id: 'members', label: data ? `Members (${data.length})` : 'Members' },
+    { id: 'members', label: data ? `Members (${data.counts.all})` : 'Members' },
     { id: 'roles', label: 'Roles and permissions' },
     { id: 'logins', label: 'Login history' },
   ];

@@ -4,11 +4,12 @@ import { pickStrings } from '../lib/search';
 import { tenantRoute } from './tenant';
 
 /**
- * `open`: the member, service or key shown in a drawer, so the URL carries what is open. `q`, `area`
- * and `who`: the Audit log's search and filters (C10).
+ * `open`: the member, service, key or AI run shown open, so the URL carries what is open. `q`, `area`
+ * and `who`: the Audit log's search and filters; `q` and `status` the Members search and status tab;
+ * `status` and `task` the AI runs filters (C10).
  */
-type SettingsSearch = { open?: string; q?: string; area?: string; who?: string };
-const SEARCH_KEYS = ['open', 'q', 'area', 'who'] as const;
+type SettingsSearch = { open?: string; q?: string; area?: string; who?: string; status?: string; task?: string };
+const SEARCH_KEYS = ['open', 'q', 'area', 'who', 'status', 'task'] as const;
 
 export const settingsRoute = createRoute({
   getParentRoute: () => tenantRoute,

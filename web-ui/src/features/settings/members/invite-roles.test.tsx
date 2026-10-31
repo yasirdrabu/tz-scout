@@ -37,7 +37,7 @@ describe('invite dialog', () => {
             { email: 'jo@taazaa.com', ok: true, membership_id: 'mbr_10', status: 'invited' },
             { email: 'dana@taazaa.com', ok: false, error: { slug: 'already-member', title: 'Already a member' } },
           ],
-          sign_in_url: 'https://scout.taazaa.ai/signin',
+          sign_in_url: 'https://api.example.com/signin',
         });
       }),
     );
@@ -54,11 +54,11 @@ describe('invite dialog', () => {
       data_limit: { kind: 'practices', ids: ['p1'] },
     });
     const done = screen.getByRole('dialog', { name: 'Invite people' });
-    expect(done).toHaveTextContent("Scout doesn't send invite emails yet. Send them this link to sign in: https://scout.taazaa.ai/signin");
+    expect(done).toHaveTextContent(`Scout doesn't send invite emails yet. Send them this link to sign in: ${window.location.origin}/signin`);
     expect(within(done).getByText('dana@taazaa.com: Already a member')).toBeInTheDocument();
     await user.click(within(done).getByRole('button', { name: 'Copy link' }));
     expect(await screen.findByText('Sign-in link copied.')).toBeInTheDocument();
-    expect(await navigator.clipboard.readText()).toBe('https://scout.taazaa.ai/signin');
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/signin`);
     await user.click(within(done).getByRole('button', { name: 'Done' }));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
@@ -69,7 +69,7 @@ describe('invite dialog', () => {
       http.post('/v1/members', () =>
         HttpResponse.json({
           results: [{ email: 'dana@taazaa.com', ok: false, error: { slug: 'already-member', title: 'Already a member' } }],
-          sign_in_url: 'https://scout.taazaa.ai/signin',
+          sign_in_url: 'https://api.example.com/signin',
         }),
       ),
     );

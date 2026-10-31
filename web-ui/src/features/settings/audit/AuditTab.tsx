@@ -70,7 +70,7 @@ export function AuditTab({ me, tenant }: TabProps) {
             {(c) => (
               <select {...c} className="input" value={who} onChange={(e) => setFilter({ who: e.target.value || undefined })}>
                 <option value="">Everyone</option>
-                {(people.data ?? []).map((m) => (
+                {(people.data?.data ?? []).map((m) => (
                   <option key={m.user_id} value={m.user_id}>
                     {m.name}
                   </option>

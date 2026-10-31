@@ -20,7 +20,27 @@ export type Member = {
   crm_owner_ids: Record<string, string>;
   extra_permissions: string[];
   open_account_count: number;
+  /** What you may do to this member, from your own powers; `lock_reasons` says why not (null where allowed). */
+  can_change_role: boolean;
+  can_suspend: boolean;
+  can_remove: boolean;
+  can_sign_out: boolean;
+  lock_reasons: Record<'change_role' | 'suspend' | 'remove' | 'sign_out', MemberLock | null>;
 };
+
+/** Why an action on a member is locked. */
+export type MemberLock = 'self' | 'owner' | 'owners_only' | 'platform_admin' | 'last_owner' | 'no_permission';
+
+/** Members per status, and active members per sign-in method (counted by the API, C8). */
+export type MemberCounts = {
+  all: number;
+  active: number;
+  invited: number;
+  suspended: number;
+  active_by_sign_in_method: { microsoft: number; dev: number };
+};
+
+export type MembersList = { data: Member[]; counts: MemberCounts };
 
 export type Roles = {
   roles: { role: string; permissions: string[] }[];
@@ -32,7 +52,7 @@ export type Practice = { id: string; name: string };
 export const membersQuery = (tenant: string) =>
   queryOptions({
     queryKey: ['members', tenant],
-    queryFn: () => apiFetch<{ data: Member[] }>('/members', { tenant }).then((r) => r.data),
+    queryFn: () => apiFetch<MembersList>('/members', { tenant }),
   });
 
 export const rolesQuery = (tenant: string) =>
@@ -62,5 +82,6 @@ export type InviteResult =
   | { email: string; ok: true; membership_id: string; status: 'invited' | 'active' }
   | { email: string; ok: false; error: { slug: string; title: string } };
 
+// The response's sign_in_url is not used: the link is this app's own sign-in page (signInAddress).
 export const inviteMembers = (tenant: string, body: { emails: string[]; role: string; data_limit?: DataLimit | null }) =>
-  apiFetch<{ results: InviteResult[]; sign_in_url: string }>('/members', { tenant, method: 'POST', body });
+  apiFetch<{ results: InviteResult[] }>('/members', { tenant, method: 'POST', body });

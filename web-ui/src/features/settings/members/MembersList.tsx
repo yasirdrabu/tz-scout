@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
+import { getRouteApi } from '@tanstack/react-router';
 import { UserPlus, Users } from 'lucide-react';
 import { useId, useState } from 'react';
 import { hasScope, userIdOf } from '../../../api/me';
+import { useSearchText } from '../../../lib/useSearchText';
 import { Button } from '../../../ui/Button';
 import { Card } from '../../../ui/Card';
 import { EmptyState } from '../../../ui/EmptyState';
@@ -18,12 +20,21 @@ import { STATUS_LABEL } from './words';
 const STATUSES = ['all', 'active', 'invited', 'suspended'] as const;
 type StatusFilter = (typeof STATUSES)[number];
 
-const matches = (m: Member, q: string) => !q || m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q);
+const route = getRouteApi('/t/$tenant/settings/$tab');
 
+const matches = (m: Member, q: string) => !q || m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q);
+const asStatus = (s: string | undefined): StatusFilter => (STATUSES as readonly string[]).includes(s ?? '') ? (s as StatusFilter) : 'all';
+
+/** The members list: search and status tab live in the URL (C10); every count comes from the API (C8). */
 export function MembersList({ me, tenant, open, setOpen }: TabProps) {
   const searchId = useId();
-  const [q, setQ] = useState('');
-  const [status, setStatus] = useState<StatusFilter>('all');
+  const search = route.useSearch();
+  const navigate = route.useNavigate();
+  const status = asStatus(search.status);
+  // Typing replaces the history entry; picking a status tab adds one, so Back undoes it.
+  const setSearch = (patch: { q?: string; status?: string }, replace = false) =>
+    void navigate({ search: (prev) => ({ ...prev, ...patch }), replace });
+  const [text, setText] = useSearchText(search.q ?? '', (q) => setSearch({ q: q || undefined }, true));
   const [inviting, setInviting] = useState(false);
   const members = useQuery(membersQuery(tenant));
   // Practice names for "Role and practice access"; a person without offers:read sees counts instead.
@@ -33,11 +44,10 @@ export function MembersList({ me, tenant, open, setOpen }: TabProps) {
   if (members.isPending) return <LoadingRows>Loading members</LoadingRows>;
   if (members.isError) return <LoadFailed title="Members didn't load" error={members.error} onRetry={() => void members.refetch()} />;
 
-  const all = members.data;
-  const needle = q.trim().toLowerCase();
-  const count = (s: StatusFilter) => all.filter((m) => s === 'all' || m.status === s).length;
+  const { data: all, counts } = members.data;
+  const needle = text.trim().toLowerCase();
   const shown = all.filter((m) => (status === 'all' || m.status === status) && matches(m, needle));
-  const microsoft = all.filter((m) => m.status === 'active' && m.sign_in_method === 'microsoft').length;
+  const microsoft = counts.active_by_sign_in_method.microsoft;
   const selected = open ? all.find((m) => m.id === open) : undefined;
   const invite = canManage && (
     <Button icon={<UserPlus />} onClick={() => setInviting(true)}>
@@ -63,15 +73,15 @@ export function MembersList({ me, tenant, open, setOpen }: TabProps) {
           type="search"
           className={`input ${styles.search}`}
           placeholder="Search by name or email"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
         />
         <Tabs
           label="Member status"
           size="sm"
-          tabs={STATUSES.map((s) => ({ id: s, label: `${s === 'all' ? 'All' : STATUS_LABEL[s]} ${count(s)}` }))}
+          tabs={STATUSES.map((s) => ({ id: s, label: `${s === 'all' ? 'All' : STATUS_LABEL[s]} ${counts[s]}` }))}
           value={status}
-          onChange={(s) => setStatus(s as StatusFilter)}
+          onChange={(s) => setSearch({ status: s === 'all' ? undefined : s })}
         />
         <span className={styles.grow} />
         {invite}
@@ -83,17 +93,10 @@ export function MembersList({ me, tenant, open, setOpen }: TabProps) {
       ) : shown.length === 0 ? (
         <EmptyState title="No members match">Try another name or email, or another status.</EmptyState>
       ) : (
-        <MembersTable members={shown} total={all.length} youId={userIdOf(me)} practices={practices.data ?? []} onOpen={setOpen} />
+        <MembersTable members={shown} total={counts.all} youId={userIdOf(me)} practices={practices.data ?? []} onOpen={setOpen} />
       )}
       {selected && (
-        <MemberDrawer
-          member={selected}
-          everyone={all}
-          me={me}
-          tenant={tenant}
-          practices={practices.data ?? []}
-          onClose={() => setOpen(undefined)}
-        />
+        <MemberDrawer member={selected} me={me} tenant={tenant} practices={practices.data ?? []} onClose={() => setOpen(undefined)} />
       )}
       {canManage && <InviteDialog open={inviting} onOpenChange={setInviting} tenant={tenant} practices={practices.data ?? []} />}
     </>
