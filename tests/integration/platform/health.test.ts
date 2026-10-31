@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readyResponse } from '@/platform/health';
-import { GET as healthz } from '@/app/healthz/route';
+import { GET as healthz } from '@/http/routes/healthz/route';
 
 describe('health endpoints', () => {
   it('/healthz is always ok', async () => {

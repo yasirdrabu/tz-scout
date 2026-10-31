@@ -1,0 +1,211 @@
+// The route table: every handler module under ./routes and the path it serves. The paths follow
+// the folders (Next's file-system routing, which the handlers were written for): `[id]` is `:id`
+// and `[...all]` is `*`. Each module exports one handler per HTTP method; server.ts mounts them.
+// tests/unit/http/routes.test.ts fails when a route file is missing here.
+import * as apiAuthAll from './routes/api/auth/[...all]/route';
+import * as apiDevSignIn from './routes/api/dev/sign-in/route';
+import * as healthz from './routes/healthz/route';
+import * as readyz from './routes/readyz/route';
+import * as v1Resource from './routes/v1/[resource]/route';
+import * as v1AccountsIdArrivals from './routes/v1/accounts/[id]/arrivals/route';
+import * as v1AccountsIdAssignments from './routes/v1/accounts/[id]/assignments/route';
+import * as v1AccountsIdExclusionOverride from './routes/v1/accounts/[id]/exclusion-override/route';
+import * as v1AccountsIdFacts from './routes/v1/accounts/[id]/facts/route';
+import * as v1AccountsIdHandoffs from './routes/v1/accounts/[id]/handoffs/route';
+import * as v1AccountsIdInsights from './routes/v1/accounts/[id]/insights/route';
+import * as v1AccountsIdMatches from './routes/v1/accounts/[id]/matches/route';
+import * as v1AccountsIdPeople from './routes/v1/accounts/[id]/people/route';
+import * as v1AccountsIdPractices from './routes/v1/accounts/[id]/practices/route';
+import * as v1AccountsIdReviewStatus from './routes/v1/accounts/[id]/review-status/route';
+import * as v1AccountsId from './routes/v1/accounts/[id]/route';
+import * as v1AccountsIdScoreHistory from './routes/v1/accounts/[id]/score/history/route';
+import * as v1AccountsIdScore from './routes/v1/accounts/[id]/score/route';
+import * as v1AccountsIdSignals from './routes/v1/accounts/[id]/signals/route';
+import * as v1AccountsIdStatus from './routes/v1/accounts/[id]/status/route';
+import * as v1Accounts from './routes/v1/accounts/route';
+import * as v1AdminAiRunsId from './routes/v1/admin/ai-runs/[id]/route';
+import * as v1AdminAiRuns from './routes/v1/admin/ai-runs/route';
+import * as v1AdminHealth from './routes/v1/admin/health/route';
+import * as v1AdminJobsId from './routes/v1/admin/jobs/[id]/route';
+import * as v1AdminPlatformAdminsId from './routes/v1/admin/platform-admins/[id]/route';
+import * as v1AdminPlatformAdmins from './routes/v1/admin/platform-admins/route';
+import * as v1AdminSchedulesId from './routes/v1/admin/schedules/[id]/route';
+import * as v1AdminTenantsId from './routes/v1/admin/tenants/[id]/route';
+import * as v1AdminTenants from './routes/v1/admin/tenants/route';
+import * as v1AdminTestEvent from './routes/v1/admin/test-event/route';
+import * as v1AiRunsId from './routes/v1/ai-runs/[id]/route';
+import * as v1AiRuns from './routes/v1/ai-runs/route';
+import * as v1ApiKeysId from './routes/v1/api-keys/[id]/route';
+import * as v1ApiKeys from './routes/v1/api-keys/route';
+import * as v1ArrivalsId from './routes/v1/arrivals/[id]/route';
+import * as v1Arrivals from './routes/v1/arrivals/route';
+import * as v1AssignmentsId from './routes/v1/assignments/[id]/route';
+import * as v1Assignments from './routes/v1/assignments/route';
+import * as v1Audit from './routes/v1/audit/route';
+import * as v1AuthConfig from './routes/v1/auth/config/route';
+import * as v1BatchesIdFiles from './routes/v1/batches/[id]/files/route';
+import * as v1BatchesIdItems from './routes/v1/batches/[id]/items/route';
+import * as v1BatchesId from './routes/v1/batches/[id]/route';
+import * as v1Batches from './routes/v1/batches/route';
+import * as v1CaseStudiesId from './routes/v1/case-studies/[id]/route';
+import * as v1CaseStudies from './routes/v1/case-studies/route';
+import * as v1CrmResource from './routes/v1/crm/[resource]/route';
+import * as v1DevUsers from './routes/v1/dev/users/route';
+import * as v1Feedback from './routes/v1/feedback/route';
+import * as v1HandoffBatchesId from './routes/v1/handoff-batches/[id]/route';
+import * as v1HandoffBatches from './routes/v1/handoff-batches/route';
+import * as v1HandoffMessagesId from './routes/v1/handoff-messages/[id]/route';
+import * as v1ImportsId from './routes/v1/imports/[id]/route';
+import * as v1Imports from './routes/v1/imports/route';
+import * as v1InboundHubspotConnectionId from './routes/v1/inbound/hubspot/[connectionId]/route';
+import * as v1IntegrationsKeyCalls from './routes/v1/integrations/[key]/calls/route';
+import * as v1IntegrationsKeyCredential from './routes/v1/integrations/[key]/credential/route';
+import * as v1IntegrationsKeyDisabled from './routes/v1/integrations/[key]/disabled/route';
+import * as v1IntegrationsKeyMode from './routes/v1/integrations/[key]/mode/route';
+import * as v1IntegrationsKey from './routes/v1/integrations/[key]/route';
+import * as v1Integrations from './routes/v1/integrations/route';
+import * as v1MeCounts from './routes/v1/me/counts/route';
+import * as v1Me from './routes/v1/me/route';
+import * as v1MeSessions from './routes/v1/me/sessions/route';
+import * as v1MeWorkspace from './routes/v1/me/workspace/route';
+import * as v1MembersId from './routes/v1/members/[id]/route';
+import * as v1Members from './routes/v1/members/route';
+import * as v1OffersIdCaseStudies from './routes/v1/offers/[id]/case-studies/route';
+import * as v1OffersId from './routes/v1/offers/[id]/route';
+import * as v1OffersIdSignalRules from './routes/v1/offers/[id]/signal-rules/route';
+import * as v1Offers from './routes/v1/offers/route';
+import * as v1PeopleId from './routes/v1/people/[id]/route';
+import * as v1PracticesId from './routes/v1/practices/[id]/route';
+import * as v1Practices from './routes/v1/practices/route';
+import * as v1Rescore from './routes/v1/rescore/route';
+import * as v1ReviewQueueBulk from './routes/v1/review-queue/bulk/route';
+import * as v1ReviewQueueCount from './routes/v1/review-queue/count/route';
+import * as v1ReviewQueue from './routes/v1/review-queue/route';
+import * as v1Roles from './routes/v1/roles/route';
+import * as v1ScoringProfileReset from './routes/v1/scoring/profile/reset/route';
+import * as v1ScoringProfile from './routes/v1/scoring/profile/route';
+import * as v1SettingsCrm from './routes/v1/settings/crm/route';
+import * as v1SettingsExclusionsListsKind from './routes/v1/settings/exclusions/lists/[kind]/route';
+import * as v1SettingsExclusions from './routes/v1/settings/exclusions/route';
+import * as v1SettingsExclusionsRulesKey from './routes/v1/settings/exclusions/rules/[key]/route';
+import * as v1SettingsReview from './routes/v1/settings/review/route';
+import * as v1SettingsWarmIntrosKey from './routes/v1/settings/warm-intros/[key]/route';
+import * as v1SettingsWarmIntros from './routes/v1/settings/warm-intros/route';
+import * as v1SignalTypes from './routes/v1/signal-types/route';
+import * as v1SignalsId from './routes/v1/signals/[id]/route';
+import * as v1SourcesIdKeys from './routes/v1/sources/[id]/keys/route';
+import * as v1SourcesIdMappingsMappingId from './routes/v1/sources/[id]/mappings/[mappingId]/route';
+import * as v1SourcesIdMappings from './routes/v1/sources/[id]/mappings/route';
+import * as v1SourcesId from './routes/v1/sources/[id]/route';
+import * as v1Sources from './routes/v1/sources/route';
+import * as v1Waiting from './routes/v1/waiting/route';
+
+/** Where the public API is mounted. */
+export const V1 = '/v1';
+
+/** The methods a route module may export. HEAD is answered from GET, as Next did. */
+export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const;
+export type Method = (typeof METHODS)[number];
+
+type Handler = (req: Request) => Response | Promise<Response>;
+export type RouteEntry = { path: string; module: Partial<Record<Method, Handler>> };
+
+export const routes: RouteEntry[] = [
+  { path: '/api/auth/*', module: apiAuthAll },
+  { path: '/api/dev/sign-in', module: apiDevSignIn },
+  { path: '/healthz', module: healthz },
+  { path: '/readyz', module: readyz },
+  { path: `${V1}/:resource`, module: v1Resource },
+  { path: `${V1}/accounts/:id/arrivals`, module: v1AccountsIdArrivals },
+  { path: `${V1}/accounts/:id/assignments`, module: v1AccountsIdAssignments },
+  { path: `${V1}/accounts/:id/exclusion-override`, module: v1AccountsIdExclusionOverride },
+  { path: `${V1}/accounts/:id/facts`, module: v1AccountsIdFacts },
+  { path: `${V1}/accounts/:id/handoffs`, module: v1AccountsIdHandoffs },
+  { path: `${V1}/accounts/:id/insights`, module: v1AccountsIdInsights },
+  { path: `${V1}/accounts/:id/matches`, module: v1AccountsIdMatches },
+  { path: `${V1}/accounts/:id/people`, module: v1AccountsIdPeople },
+  { path: `${V1}/accounts/:id/practices`, module: v1AccountsIdPractices },
+  { path: `${V1}/accounts/:id/review-status`, module: v1AccountsIdReviewStatus },
+  { path: `${V1}/accounts/:id`, module: v1AccountsId },
+  { path: `${V1}/accounts/:id/score/history`, module: v1AccountsIdScoreHistory },
+  { path: `${V1}/accounts/:id/score`, module: v1AccountsIdScore },
+  { path: `${V1}/accounts/:id/signals`, module: v1AccountsIdSignals },
+  { path: `${V1}/accounts/:id/status`, module: v1AccountsIdStatus },
+  { path: `${V1}/accounts`, module: v1Accounts },
+  { path: `${V1}/admin/ai-runs/:id`, module: v1AdminAiRunsId },
+  { path: `${V1}/admin/ai-runs`, module: v1AdminAiRuns },
+  { path: `${V1}/admin/health`, module: v1AdminHealth },
+  { path: `${V1}/admin/jobs/:id`, module: v1AdminJobsId },
+  { path: `${V1}/admin/platform-admins/:id`, module: v1AdminPlatformAdminsId },
+  { path: `${V1}/admin/platform-admins`, module: v1AdminPlatformAdmins },
+  { path: `${V1}/admin/schedules/:id`, module: v1AdminSchedulesId },
+  { path: `${V1}/admin/tenants/:id`, module: v1AdminTenantsId },
+  { path: `${V1}/admin/tenants`, module: v1AdminTenants },
+  { path: `${V1}/admin/test-event`, module: v1AdminTestEvent },
+  { path: `${V1}/ai-runs/:id`, module: v1AiRunsId },
+  { path: `${V1}/ai-runs`, module: v1AiRuns },
+  { path: `${V1}/api-keys/:id`, module: v1ApiKeysId },
+  { path: `${V1}/api-keys`, module: v1ApiKeys },
+  { path: `${V1}/arrivals/:id`, module: v1ArrivalsId },
+  { path: `${V1}/arrivals`, module: v1Arrivals },
+  { path: `${V1}/assignments/:id`, module: v1AssignmentsId },
+  { path: `${V1}/assignments`, module: v1Assignments },
+  { path: `${V1}/audit`, module: v1Audit },
+  { path: `${V1}/auth/config`, module: v1AuthConfig },
+  { path: `${V1}/batches/:id/files`, module: v1BatchesIdFiles },
+  { path: `${V1}/batches/:id/items`, module: v1BatchesIdItems },
+  { path: `${V1}/batches/:id`, module: v1BatchesId },
+  { path: `${V1}/batches`, module: v1Batches },
+  { path: `${V1}/case-studies/:id`, module: v1CaseStudiesId },
+  { path: `${V1}/case-studies`, module: v1CaseStudies },
+  { path: `${V1}/crm/:resource`, module: v1CrmResource },
+  { path: `${V1}/dev/users`, module: v1DevUsers },
+  { path: `${V1}/feedback`, module: v1Feedback },
+  { path: `${V1}/handoff-batches/:id`, module: v1HandoffBatchesId },
+  { path: `${V1}/handoff-batches`, module: v1HandoffBatches },
+  { path: `${V1}/handoff-messages/:id`, module: v1HandoffMessagesId },
+  { path: `${V1}/imports/:id`, module: v1ImportsId },
+  { path: `${V1}/imports`, module: v1Imports },
+  { path: `${V1}/inbound/hubspot/:connectionId`, module: v1InboundHubspotConnectionId },
+  { path: `${V1}/integrations/:key/calls`, module: v1IntegrationsKeyCalls },
+  { path: `${V1}/integrations/:key/credential`, module: v1IntegrationsKeyCredential },
+  { path: `${V1}/integrations/:key/disabled`, module: v1IntegrationsKeyDisabled },
+  { path: `${V1}/integrations/:key/mode`, module: v1IntegrationsKeyMode },
+  { path: `${V1}/integrations/:key`, module: v1IntegrationsKey },
+  { path: `${V1}/integrations`, module: v1Integrations },
+  { path: `${V1}/me/counts`, module: v1MeCounts },
+  { path: `${V1}/me`, module: v1Me },
+  { path: `${V1}/me/sessions`, module: v1MeSessions },
+  { path: `${V1}/me/workspace`, module: v1MeWorkspace },
+  { path: `${V1}/members/:id`, module: v1MembersId },
+  { path: `${V1}/members`, module: v1Members },
+  { path: `${V1}/offers/:id/case-studies`, module: v1OffersIdCaseStudies },
+  { path: `${V1}/offers/:id`, module: v1OffersId },
+  { path: `${V1}/offers/:id/signal-rules`, module: v1OffersIdSignalRules },
+  { path: `${V1}/offers`, module: v1Offers },
+  { path: `${V1}/people/:id`, module: v1PeopleId },
+  { path: `${V1}/practices/:id`, module: v1PracticesId },
+  { path: `${V1}/practices`, module: v1Practices },
+  { path: `${V1}/rescore`, module: v1Rescore },
+  { path: `${V1}/review-queue/bulk`, module: v1ReviewQueueBulk },
+  { path: `${V1}/review-queue/count`, module: v1ReviewQueueCount },
+  { path: `${V1}/review-queue`, module: v1ReviewQueue },
+  { path: `${V1}/roles`, module: v1Roles },
+  { path: `${V1}/scoring/profile/reset`, module: v1ScoringProfileReset },
+  { path: `${V1}/scoring/profile`, module: v1ScoringProfile },
+  { path: `${V1}/settings/crm`, module: v1SettingsCrm },
+  { path: `${V1}/settings/exclusions/lists/:kind`, module: v1SettingsExclusionsListsKind },
+  { path: `${V1}/settings/exclusions`, module: v1SettingsExclusions },
+  { path: `${V1}/settings/exclusions/rules/:key`, module: v1SettingsExclusionsRulesKey },
+  { path: `${V1}/settings/review`, module: v1SettingsReview },
+  { path: `${V1}/settings/warm-intros/:key`, module: v1SettingsWarmIntrosKey },
+  { path: `${V1}/settings/warm-intros`, module: v1SettingsWarmIntros },
+  { path: `${V1}/signal-types`, module: v1SignalTypes },
+  { path: `${V1}/signals/:id`, module: v1SignalsId },
+  { path: `${V1}/sources/:id/keys`, module: v1SourcesIdKeys },
+  { path: `${V1}/sources/:id/mappings/:mappingId`, module: v1SourcesIdMappingsMappingId },
+  { path: `${V1}/sources/:id/mappings`, module: v1SourcesIdMappings },
+  { path: `${V1}/sources/:id`, module: v1SourcesId },
+  { path: `${V1}/sources`, module: v1Sources },
+  { path: `${V1}/waiting`, module: v1Waiting },
+];

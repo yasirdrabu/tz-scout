@@ -10,7 +10,7 @@ vi.mock('@/platform/config', async (orig) => {
 });
 
 import '@/entry/compose';
-import { POST } from '@/app/v1/inbound/hubspot/[connectionId]/route';
+import { POST } from '@/http/routes/v1/inbound/hubspot/[connectionId]/route';
 import { leadQualified } from '@/modules/crm';
 import { webhookReceipt } from '@/modules/crm/db/schema';
 import { ensureConnectionId, saveCredential, setDisabled } from '@/modules/integrations';

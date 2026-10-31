@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GET as listArrivalsRoute, POST as postArrival } from '@/app/v1/arrivals/route';
-import { GET as listBatchesRoute, POST as postBatch } from '@/app/v1/batches/route';
-import { GET as itemsRoute } from '@/app/v1/batches/[id]/items/route';
-import { POST as filesRoute } from '@/app/v1/batches/[id]/files/route';
-import { POST as postImport } from '@/app/v1/imports/route';
-import { GET as listSourcesRoute } from '@/app/v1/sources/route';
+import { GET as listArrivalsRoute, POST as postArrival } from '@/http/routes/v1/arrivals/route';
+import { GET as listBatchesRoute, POST as postBatch } from '@/http/routes/v1/batches/route';
+import { GET as itemsRoute } from '@/http/routes/v1/batches/[id]/items/route';
+import { POST as filesRoute } from '@/http/routes/v1/batches/[id]/files/route';
+import { POST as postImport } from '@/http/routes/v1/imports/route';
+import { GET as listSourcesRoute } from '@/http/routes/v1/sources/route';
 import { closeDbs } from '@/platform/db/client';
 import { validArrival } from '../intake/helpers';
 import { call, freshTenant, keyFor, personAndAgent, SEND, uploadForm, type Tenant } from './intake-helpers';

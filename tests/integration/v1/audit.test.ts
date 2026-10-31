@@ -5,8 +5,8 @@ vi.mock('@/platform/config', async (orig) => {
   const real = await orig<typeof import('@/platform/config')>();
   return { ...real, config: new Proxy(real.config, { get: (t, p) => (p === 'trustedProxyHops' ? 1 : (t as never)[p]) }) };
 });
-import { GET as listAuditRoute } from '@/app/v1/audit/route';
-import { POST as invite } from '@/app/v1/members/route';
+import { GET as listAuditRoute } from '@/http/routes/v1/audit/route';
+import { POST as invite } from '@/http/routes/v1/members/route';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';

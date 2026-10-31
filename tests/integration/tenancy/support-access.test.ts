@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { v1Route } from '@/app/v1/_lib/v1-route';
+import { v1Route } from '@/http/routes/v1/_lib/v1-route';
 import { addMember, createTenant, handleDevSignIn, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
 import { adminDb } from '@/platform/db/client';

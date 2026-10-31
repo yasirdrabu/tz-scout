@@ -1,10 +1,10 @@
 import { and, eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { GET as listTenantsRoute, POST as createTenantRoute } from '@/app/v1/admin/tenants/route';
-import { POST as tenantAction } from '@/app/v1/admin/tenants/[id]/route';
-import { GET as listAdmins, POST as addAdmin } from '@/app/v1/admin/platform-admins/route';
-import { DELETE as removeAdmin } from '@/app/v1/admin/platform-admins/[id]/route';
-import { GET as me } from '@/app/v1/me/route';
+import { GET as listTenantsRoute, POST as createTenantRoute } from '@/http/routes/v1/admin/tenants/route';
+import { POST as tenantAction } from '@/http/routes/v1/admin/tenants/[id]/route';
+import { GET as listAdmins, POST as addAdmin } from '@/http/routes/v1/admin/platform-admins/route';
+import { DELETE as removeAdmin } from '@/http/routes/v1/admin/platform-admins/[id]/route';
+import { GET as me } from '@/http/routes/v1/me/route';
 import { SYSTEM_GRANTOR, checkSignIn, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { membership, user } from '@/modules/tenancy/db/schema';
 import { auditLog } from '@/platform/db/schema';

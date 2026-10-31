@@ -13,7 +13,7 @@ vi.mock('@/platform/config', async (orig) => {
   };
 });
 
-import { v1Route } from '@/app/v1/_lib/v1-route';
+import { v1Route } from '@/http/routes/v1/_lib/v1-route';
 import {
   gateway,
   saveCredential,

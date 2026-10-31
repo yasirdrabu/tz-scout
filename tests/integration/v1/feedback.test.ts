@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GET as getArrivalRoute } from '@/app/v1/arrivals/[id]/route';
-import { GET as getBatchRoute } from '@/app/v1/batches/[id]/route';
-import { GET as feedbackRoute } from '@/app/v1/feedback/route';
+import { GET as getArrivalRoute } from '@/http/routes/v1/arrivals/[id]/route';
+import { GET as getBatchRoute } from '@/http/routes/v1/batches/[id]/route';
+import { GET as feedbackRoute } from '@/http/routes/v1/feedback/route';
 import { accountSummary } from '@/modules/accounts/db/schema';
 import { arrival } from '@/modules/intake/db/schema';
 import { getArrival, submitArrival, submitBatch } from '@/modules/intake';

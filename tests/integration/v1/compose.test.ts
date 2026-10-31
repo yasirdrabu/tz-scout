@@ -20,7 +20,7 @@ const provider = async () => (await import('@/modules/accounts/contracts/ports')
 
 describe('composition root', () => {
   it('is loaded by the /v1 route module', async () => {
-    await import('@/app/v1/_lib/v1-route');
+    await import('@/http/routes/v1/_lib/v1-route');
     expect(await provider()).toBe(stub);
   });
 

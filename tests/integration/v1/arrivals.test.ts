@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GET as listArrivalsRoute, POST as postArrival } from '@/app/v1/arrivals/route';
-import { GET as getArrivalRoute } from '@/app/v1/arrivals/[id]/route';
-import { GET as listSourcesRoute, POST as postSource } from '@/app/v1/sources/route';
+import { GET as listArrivalsRoute, POST as postArrival } from '@/http/routes/v1/arrivals/route';
+import { GET as getArrivalRoute } from '@/http/routes/v1/arrivals/[id]/route';
+import { GET as listSourcesRoute, POST as postSource } from '@/http/routes/v1/sources/route';
 import { registerSource, updateSource } from '@/modules/intake';
 import { arrival } from '@/modules/intake/db/schema';
 import { closeDbs } from '@/platform/db/client';

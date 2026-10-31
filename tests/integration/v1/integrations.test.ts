@@ -13,12 +13,12 @@ vi.mock('@/platform/config', async (orig) => {
   };
 });
 
-import { GET as list } from '@/app/v1/integrations/route';
-import { POST as action } from '@/app/v1/integrations/[key]/route';
-import { PUT as putCredential } from '@/app/v1/integrations/[key]/credential/route';
-import { PUT as putMode } from '@/app/v1/integrations/[key]/mode/route';
-import { PUT as putDisabled } from '@/app/v1/integrations/[key]/disabled/route';
-import { GET as calls } from '@/app/v1/integrations/[key]/calls/route';
+import { GET as list } from '@/http/routes/v1/integrations/route';
+import { POST as action } from '@/http/routes/v1/integrations/[key]/route';
+import { PUT as putCredential } from '@/http/routes/v1/integrations/[key]/credential/route';
+import { PUT as putMode } from '@/http/routes/v1/integrations/[key]/mode/route';
+import { PUT as putDisabled } from '@/http/routes/v1/integrations/[key]/disabled/route';
+import { GET as calls } from '@/http/routes/v1/integrations/[key]/calls/route';
 import { webhookSecret } from '@/modules/integrations';
 import { registerDemoAdapter } from '@/modules/integrations/adapters/demo/mock';
 import { DEMO_PROVIDER, registerAdapter } from '@/modules/integrations/providers';

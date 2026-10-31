@@ -1,9 +1,9 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { GET as listMembers, POST as invite } from '@/app/v1/members/route';
-import { DELETE as remove, PATCH as patch, POST as act } from '@/app/v1/members/[id]/route';
-import { GET as roles } from '@/app/v1/roles/route';
-import { GET as me } from '@/app/v1/me/route';
+import { GET as listMembers, POST as invite } from '@/http/routes/v1/members/route';
+import { DELETE as remove, PATCH as patch, POST as act } from '@/http/routes/v1/members/[id]/route';
+import { GET as roles } from '@/http/routes/v1/roles/route';
+import { GET as me } from '@/http/routes/v1/me/route';
 import { ACCOUNT_TURNED_OFF, ROLE_PERMISSIONS, addMember, checkSignIn, completeSignIn, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { assignment } from '@/modules/routing/db/schema';
 import { membership, session, user } from '@/modules/tenancy/db/schema';

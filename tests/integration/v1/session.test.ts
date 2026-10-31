@@ -1,9 +1,9 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { GET as me } from '@/app/v1/me/route';
-import { GET as counts } from '@/app/v1/me/counts/route';
-import { PUT as putWorkspace } from '@/app/v1/me/workspace/route';
-import { adminRoute, assertSameOrigin, sessionRoute } from '@/app/v1/_lib/v1-route';
+import { GET as me } from '@/http/routes/v1/me/route';
+import { GET as counts } from '@/http/routes/v1/me/counts/route';
+import { PUT as putWorkspace } from '@/http/routes/v1/me/workspace/route';
+import { adminRoute, assertSameOrigin, sessionRoute } from '@/http/routes/v1/_lib/v1-route';
 import {
   PERMISSIONS,
   SYSTEM_GRANTOR,

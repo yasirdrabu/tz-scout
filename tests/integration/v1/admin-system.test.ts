@@ -1,9 +1,9 @@
 import { and, eq, gt, sql } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { GET as health } from '@/app/v1/admin/health/route';
-import { POST as jobAction } from '@/app/v1/admin/jobs/[id]/route';
-import { POST as scheduleAction } from '@/app/v1/admin/schedules/[id]/route';
-import { POST as testEvent } from '@/app/v1/admin/test-event/route';
+import { GET as health } from '@/http/routes/v1/admin/health/route';
+import { POST as jobAction } from '@/http/routes/v1/admin/jobs/[id]/route';
+import { POST as scheduleAction } from '@/http/routes/v1/admin/schedules/[id]/route';
+import { POST as testEvent } from '@/http/routes/v1/admin/test-event/route';
 import { SYSTEM_GRANTOR, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { recordDeadJob } from '@/platform/dead-jobs';
 import { adminDb } from '@/platform/db/client';

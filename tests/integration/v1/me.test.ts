@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { GET as me } from '@/app/v1/me/route';
-import { assertSameSite, v1Route } from '@/app/v1/_lib/v1-route';
+import { GET as me } from '@/http/routes/v1/me/route';
+import { assertSameSite, v1Route } from '@/http/routes/v1/_lib/v1-route';
 import { SYSTEM_GRANTOR, createApiKey, createTenant, revokeApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
 import { adminDb } from '@/platform/db/client';

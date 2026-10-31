@@ -1,11 +1,11 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { GET as listPracticesRoute, POST as createPracticeRoute } from '@/app/v1/practices/route';
-import { PATCH as patchPractice, POST as practiceAction } from '@/app/v1/practices/[id]/route';
-import { GET as listOffersRoute, POST as createOfferRoute } from '@/app/v1/offers/route';
-import { GET as getOfferRoute, PATCH as patchOffer, POST as offerAction } from '@/app/v1/offers/[id]/route';
-import { PUT as putOfferCases } from '@/app/v1/offers/[id]/case-studies/route';
-import { GET as listCasesRoute, POST as createCaseRoute } from '@/app/v1/case-studies/route';
-import { POST as caseAction } from '@/app/v1/case-studies/[id]/route';
+import { GET as listPracticesRoute, POST as createPracticeRoute } from '@/http/routes/v1/practices/route';
+import { PATCH as patchPractice, POST as practiceAction } from '@/http/routes/v1/practices/[id]/route';
+import { GET as listOffersRoute, POST as createOfferRoute } from '@/http/routes/v1/offers/route';
+import { GET as getOfferRoute, PATCH as patchOffer, POST as offerAction } from '@/http/routes/v1/offers/[id]/route';
+import { PUT as putOfferCases } from '@/http/routes/v1/offers/[id]/case-studies/route';
+import { GET as listCasesRoute, POST as createCaseRoute } from '@/http/routes/v1/case-studies/route';
+import { POST as caseAction } from '@/http/routes/v1/case-studies/[id]/route';
 import { approveOffer, createCaseStudy, createOffer, createPractice } from '@/modules/offers';
 import { SYSTEM_GRANTOR, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { completeOffer, freshTenant } from '../offers/helpers';

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { POST as offerAction } from '@/app/v1/offers/[id]/route';
-import { GET as getRules, PUT as putRules } from '@/app/v1/offers/[id]/signal-rules/route';
-import { GET as getSignalTypes } from '@/app/v1/signal-types/route';
+import { POST as offerAction } from '@/http/routes/v1/offers/[id]/route';
+import { GET as getRules, PUT as putRules } from '@/http/routes/v1/offers/[id]/signal-rules/route';
+import { GET as getSignalTypes } from '@/http/routes/v1/signal-types/route';
 import { approveOffer, createOffer, createPractice, listSignalRules } from '@/modules/offers';
 import { SYSTEM_GRANTOR, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { closeDbs } from '@/platform/db/client';

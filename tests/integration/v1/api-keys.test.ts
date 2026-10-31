@@ -6,10 +6,10 @@ vi.mock('@/platform/config', async (orig) => {
   const real = await orig<typeof import('@/platform/config')>();
   return { ...real, config: new Proxy(real.config, { get: (t, p) => (p === 'trustedProxyHops' ? 2 : (t as never)[p]) }) };
 });
-import { GET as listKeys, POST as createKey } from '@/app/v1/api-keys/route';
-import { DELETE as revokeKey } from '@/app/v1/api-keys/[id]/route';
-import { GET as listSourceKeys, POST as createSourceKey } from '@/app/v1/sources/[id]/keys/route';
-import { GET as me } from '@/app/v1/me/route';
+import { GET as listKeys, POST as createKey } from '@/http/routes/v1/api-keys/route';
+import { DELETE as revokeKey } from '@/http/routes/v1/api-keys/[id]/route';
+import { GET as listSourceKeys, POST as createSourceKey } from '@/http/routes/v1/sources/[id]/keys/route';
+import { GET as me } from '@/http/routes/v1/me/route';
 import { registerSource } from '@/modules/intake';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { apiKey } from '@/modules/tenancy/db/schema';

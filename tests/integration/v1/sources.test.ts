@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { POST as postSource } from '@/app/v1/sources/route';
+import { POST as postSource } from '@/http/routes/v1/sources/route';
 import { personSourceFor } from '@/modules/intake';
 import { addMember } from '@/modules/tenancy';
 import { closeDbs } from '@/platform/db/client';

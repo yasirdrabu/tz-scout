@@ -11,8 +11,8 @@ vi.mock('@/platform/config', async (orig) => {
   };
 });
 
-const { GET: authConfig } = await import('@/app/v1/auth/config/route');
-const { GET: devUsers } = await import('@/app/v1/dev/users/route');
+const { GET: authConfig } = await import('@/http/routes/v1/auth/config/route');
+const { GET: devUsers } = await import('@/http/routes/v1/dev/users/route');
 const { seedUser } = await import('../tenancy/helpers');
 const { adminDb } = await import('@/platform/db/client');
 const { user } = await import('@/modules/tenancy/db/schema');

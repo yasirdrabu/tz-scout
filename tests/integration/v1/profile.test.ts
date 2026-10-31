@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { DELETE as resourceDelete, GET as resourceGet, POST as resourceAction } from '@/app/v1/[resource]/route';
-import { GET as me } from '@/app/v1/me/route';
-import { GET as sessions } from '@/app/v1/me/sessions/route';
+import { DELETE as resourceDelete, GET as resourceGet, POST as resourceAction } from '@/http/routes/v1/[resource]/route';
+import { GET as me } from '@/http/routes/v1/me/route';
+import { GET as sessions } from '@/http/routes/v1/me/sessions/route';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { inTenant, seedUser } from '../tenancy/helpers';
 import { signedIn, tenantOwnedBy, v1Req, type Person } from './session-helpers';

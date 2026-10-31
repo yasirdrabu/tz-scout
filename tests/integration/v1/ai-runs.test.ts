@@ -1,9 +1,9 @@
 import { sql } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { GET as adminRuns } from '@/app/v1/admin/ai-runs/route';
-import { GET as adminRun } from '@/app/v1/admin/ai-runs/[id]/route';
-import { GET as tenantRuns } from '@/app/v1/ai-runs/route';
-import { GET as tenantRun } from '@/app/v1/ai-runs/[id]/route';
+import { GET as adminRuns } from '@/http/routes/v1/admin/ai-runs/route';
+import { GET as adminRun } from '@/http/routes/v1/admin/ai-runs/[id]/route';
+import { GET as tenantRuns } from '@/http/routes/v1/ai-runs/route';
+import { GET as tenantRun } from '@/http/routes/v1/ai-runs/[id]/route';
 import { aiRun } from '@/modules/ai-tasks/db/schema';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { adminDb } from '@/platform/db/client';

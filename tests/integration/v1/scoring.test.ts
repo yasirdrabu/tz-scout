@@ -1,11 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import '@/entry/compose';
-import { GET as getHistory } from '@/app/v1/accounts/[id]/score/history/route';
-import { GET as getMatches } from '@/app/v1/accounts/[id]/matches/route';
-import { GET as getScore } from '@/app/v1/accounts/[id]/score/route';
-import { POST as rescore } from '@/app/v1/rescore/route';
-import { POST as resetProfile } from '@/app/v1/scoring/profile/reset/route';
-import { GET as getProfile, PUT as putProfile } from '@/app/v1/scoring/profile/route';
+import { GET as getHistory } from '@/http/routes/v1/accounts/[id]/score/history/route';
+import { GET as getMatches } from '@/http/routes/v1/accounts/[id]/matches/route';
+import { GET as getScore } from '@/http/routes/v1/accounts/[id]/score/route';
+import { POST as rescore } from '@/http/routes/v1/rescore/route';
+import { POST as resetProfile } from '@/http/routes/v1/scoring/profile/reset/route';
+import { GET as getProfile, PUT as putProfile } from '@/http/routes/v1/scoring/profile/route';
 import { upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { approveOffer, createOffer, createPractice, replaceSignalRules } from '@/modules/offers';
 import { scoreAccount } from '@/modules/scoring';

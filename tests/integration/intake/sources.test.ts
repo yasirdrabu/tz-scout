@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { v1Route } from '@/app/v1/_lib/v1-route';
+import { v1Route } from '@/http/routes/v1/_lib/v1-route';
 import { sourceAccessProvider, sourceInfoProvider } from '@/modules/accounts';
 import {
   childSources,

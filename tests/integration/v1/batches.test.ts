@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GET as listBatchesRoute, POST as postBatch } from '@/app/v1/batches/route';
-import { GET as getBatchRoute } from '@/app/v1/batches/[id]/route';
-import { GET as getArrivalRoute } from '@/app/v1/arrivals/[id]/route';
-import { GET as itemsRoute } from '@/app/v1/batches/[id]/items/route';
-import { POST as filesRoute } from '@/app/v1/batches/[id]/files/route';
+import { GET as listBatchesRoute, POST as postBatch } from '@/http/routes/v1/batches/route';
+import { GET as getBatchRoute } from '@/http/routes/v1/batches/[id]/route';
+import { GET as getArrivalRoute } from '@/http/routes/v1/arrivals/[id]/route';
+import { GET as itemsRoute } from '@/http/routes/v1/batches/[id]/items/route';
+import { POST as filesRoute } from '@/http/routes/v1/batches/[id]/files/route';
 import { closeDbs } from '@/platform/db/client';
 import { validArrival } from '../intake/helpers';
 import { runOutbox } from '../helpers/run-outbox';
