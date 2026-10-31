@@ -60,3 +60,34 @@ a:hover {
 .mono {
   font-family: var(--font-mono);
 }
+
+/* The control look for inputs, selects and textareas: add class "input". */
+.input {
+  width: 100%;
+  min-height: var(--control-md);
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-base);
+}
+
+.input:focus-visible {
+  border-color: var(--accent-300);
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--bad);
+}
+
+.input:disabled {
+  background: var(--sunken);
+  color: var(--text-muted);
+}
+
+textarea.input {
+  min-height: 84px;
+  resize: vertical;
+}

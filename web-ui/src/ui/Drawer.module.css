@@ -1,0 +1,87 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(31, 28, 25, 0.18);
+  animation: fade var(--duration) var(--ease);
+}
+
+.content {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  max-width: 100vw;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  animation: slide var(--duration) var(--ease);
+}
+
+.content:focus-visible {
+  box-shadow: var(--shadow-pop), inset var(--ring);
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.subtitle {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 22px;
+  padding: 18px 20px 24px;
+  overflow: auto;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--line);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}

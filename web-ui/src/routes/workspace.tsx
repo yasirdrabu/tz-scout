@@ -1,9 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { createRoute, Link, notFound } from '@tanstack/react-router';
-import { meQuery } from '../api/me';
-import { SETTINGS_TABS, visibleSettingsTabs } from '../app/nav';
+import { createRoute } from '@tanstack/react-router';
 import { Placeholder } from './Placeholder';
-import styles from './Placeholder.module.css';
 import { SCREENS } from './screens';
 import { tenantRoute } from './tenant';
 
@@ -77,39 +73,3 @@ export const costsRoute = createRoute({
   path: 'costs',
   component: () => <Placeholder screen={SCREENS.costs} />,
 });
-
-export const profileRoute = createRoute({
-  getParentRoute: () => tenantRoute,
-  path: 'profile',
-  component: () => <Placeholder screen={SCREENS.profile} />,
-});
-
-export const settingsRoute = createRoute({
-  getParentRoute: () => tenantRoute,
-  path: 'settings/$tab',
-  beforeLoad: ({ params }) => {
-    if (!SETTINGS_TABS.some((t) => t.tab === params.tab)) throw notFound();
-  },
-  component: SettingsPlaceholder,
-});
-
-function SettingsPlaceholder() {
-  const { tenant, tab } = settingsRoute.useParams();
-  const { data: me } = useQuery(meQuery(tenant));
-  const current = SETTINGS_TABS.find((t) => t.tab === tab);
-  if (!me || !current) return null;
-  return (
-    <Placeholder
-      screen={{ title: 'Settings', section: current.section, tag: current.tag }}
-      subtitle={`${current.label}. This tab is not built yet.`}
-    >
-      <nav aria-label="Settings" className={styles.tabs}>
-        {visibleSettingsTabs(me).map((t) => (
-          <Link key={t.tab} to="/t/$tenant/settings/$tab" params={{ tenant, tab: t.tab }} className={styles.tab}>
-            {t.label}
-          </Link>
-        ))}
-      </nav>
-    </Placeholder>
-  );
-}

@@ -5,6 +5,8 @@ import { adminAiRunsRoute, adminHealthRoute, adminIndexRoute, adminRoute, adminT
 import { homeRoute } from './routes/home';
 import { LoadError } from './routes/LoadError';
 import { rootRoute } from './routes/root';
+import { profileRoute } from './routes/profile';
+import { settingsRoute } from './routes/settings';
 import { signinRoute } from './routes/signin';
 import { tenantIndexRoute, tenantRoute } from './routes/tenant';
 import {
@@ -17,9 +19,7 @@ import {
   offersRoute,
   overviewRoute,
   playbooksRoute,
-  profileRoute,
   queueRoute,
-  settingsRoute,
   sourcesRoute,
 } from './routes/workspace';
 import { ToastProvider } from './ui/Toast';

@@ -22,31 +22,3 @@
   font-family: var(--font-mono);
   font-size: var(--text-sm);
 }
-
-.tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--line);
-}
-
-.tab {
-  display: inline-flex;
-  align-items: center;
-  height: 36px;
-  padding: 0 12px;
-  margin-bottom: -1px;
-  border-bottom: 2px solid transparent;
-  color: var(--text-soft);
-  font-weight: 500;
-}
-
-.tab:hover {
-  color: var(--text);
-  text-decoration: none;
-}
-
-.tab[aria-current='page'] {
-  border-bottom-color: var(--accent);
-  color: var(--text);
-  font-weight: 600;
-}
