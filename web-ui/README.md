@@ -30,7 +30,8 @@ The dev server proxies `/v1`, `/api` and `/healthz` to the backend at `http://lo
 The backend refuses cookie-authenticated writes whose `Origin` header is not the origin of
 `APP_PUBLIC_URL` (`assertSameSite` in `src/app/v1/_lib/v1-route.ts`). Locally that is
 `http://localhost:4240`, but the browser sends `Origin: http://localhost:5173`. So the proxy in
-`vite.config.ts` uses `changeOrigin: true` and rewrites the `Origin` header to the backend origin.
+`vite.config.ts` uses `changeOrigin: true` and rewrites the `Origin` header to the backend origin,
+but only when it is the dev server's own origin; any other `Origin` is passed on unchanged.
 Do not copy this to production: there the app and the API share one origin (spec W2), so no rewrite
 is needed.
 
