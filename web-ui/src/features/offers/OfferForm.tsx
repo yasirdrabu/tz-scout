@@ -28,6 +28,8 @@ type Values = {
   status: 'approved' | 'draft';
   priceModel: PriceModel | '';
   amount: string;
+  /** The top of a price range; empty when the price is one amount. */
+  amountMax: string;
   lengthWeeks: string;
   promise: string;
   description: string;
@@ -44,7 +46,8 @@ type Values = {
 };
 
 const num = (n: number | null) => (n === null ? '' : String(n));
-const dollars = (cents: number | null) => (cents === null ? '' : String(Math.round(cents / 100)));
+/** Minor units as a plain amount, cents kept ("25000.5"). */
+const dollars = (cents: number | null) => (cents === null ? '' : String(cents / 100));
 
 function valuesOf(o: Offer | undefined, practiceId: string, copy: boolean): Values {
   return {
@@ -53,6 +56,7 @@ function valuesOf(o: Offer | undefined, practiceId: string, copy: boolean): Valu
     status: o && !copy && o.status === 'approved' ? 'approved' : 'draft',
     priceModel: o?.price_model ?? '',
     amount: dollars(o?.price_min_cents ?? o?.price_max_cents ?? null),
+    amountMax: o && o.price_min_cents !== null && o.price_max_cents !== null && o.price_max_cents !== o.price_min_cents ? dollars(o.price_max_cents) : '',
     lengthWeeks: num(o?.length_weeks ?? null),
     promise: o?.promise ?? '',
     description: o?.description ?? '',
@@ -74,15 +78,24 @@ const int = (s: string): number | null => {
   return s.trim() === '' || !Number.isFinite(n) ? null : Math.round(n);
 };
 const cents = (s: string): number | null => {
-  const n = int(s);
-  return n === null ? null : n * 100;
+  const n = Number(s.trim());
+  return s.trim() === '' || !Number.isFinite(n) ? null : Math.round(n * 100);
 };
 const textOrNull = (s: string) => (s.trim() ? s.trim() : null);
 
-/** The body for POST and PATCH. Custom quote sends no amount; the amount goes as both min and max. */
-function bodyOf(v: Values): OfferBody {
-  const amount = v.priceModel === 'custom' ? null : cents(v.amount);
+const priceChanged = (v: Values, base: Values) => v.priceModel !== base.priceModel || v.amount !== base.amount || v.amountMax !== base.amountMax;
+
+/**
+ * The body for POST and PATCH. The price goes only when Pricing or an amount changed against `base` (the offer as
+ * loaded), so a save never rewrites a price nobody touched. Custom quote sends no amount; one amount goes as both
+ * min and max, a range as min and max.
+ */
+function bodyOf(v: Values, base: Values | null): OfferBody {
+  const min = v.priceModel === 'custom' ? null : cents(v.amount);
+  const max = v.priceModel === 'custom' ? null : (cents(v.amountMax) ?? min);
+  const price = !base || priceChanged(v, base) ? { price_model: v.priceModel || null, price_min_cents: min, price_max_cents: max } : {};
   return {
+    ...price,
     name: v.name.trim(),
     practice_id: v.practiceId,
     promise: v.promise.trim(),
@@ -90,9 +103,6 @@ function bodyOf(v: Values): OfferBody {
     key_offer: textOrNull(v.key_offer),
     why_us: textOrNull(v.why_us),
     why_now: textOrNull(v.why_now),
-    price_model: v.priceModel || null,
-    price_min_cents: amount,
-    price_max_cents: amount,
     length_weeks: int(v.lengthWeeks),
     typical_deal_cents: cents(v.typicalDeal),
     sales_cycle_days: int(v.salesCycleDays),
@@ -118,7 +128,7 @@ const FIELD_OF: Record<string, keyof Values> = {
   why_now: 'why_now',
   price_model: 'priceModel',
   price_min_cents: 'amount',
-  price_max_cents: 'amount',
+  price_max_cents: 'amountMax',
   length_weeks: 'lengthWeeks',
   typical_deal_cents: 'typicalDeal',
   sales_cycle_days: 'salesCycleDays',
@@ -182,6 +192,9 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
   const toast = useToast();
   const statusName = useId();
   const [v, setV] = useState<Values>(() => valuesOf(initial, practiceId, mode === 'new'));
+  // What the price fields are compared with: the offer as loaded, then as last saved. A new offer sends them all.
+  const [base, setBase] = useState<Values | null>(() => (mode === 'edit' ? valuesOf(initial, practiceId, false) : null));
+  const ranged = !!base && base.amountMax !== '';
   // The offer as saved: an edit, or a new one once it has been added (an incomplete approve keeps it open).
   const [savedId, setSavedId] = useState<string | null>(mode === 'edit' ? (initial?.id ?? null) : null);
   const [savedStatus, setSavedStatus] = useState<OfferStatus>(mode === 'edit' && initial ? initial.status : 'draft');
@@ -223,18 +236,19 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
     try {
       let warning: string | undefined;
       if (id) {
-        const saved = await patchOffer(tenant, id, bodyOf(v));
+        const saved = await patchOffer(tenant, id, bodyOf(v, base));
         warning = saved.warning;
         status = saved.status;
         toast.show(`Changes to ${saved.name} saved.`);
       } else {
-        const made = await createOffer(tenant, bodyOf(v));
+        const made = await createOffer(tenant, bodyOf(v, null));
         id = made.id;
         status = made.status;
         setSavedId(id);
         toast.show(`${made.name} added to ${practiceName}.`);
       }
       setSavedStatus(status);
+      setBase(v);
       const name = v.name.trim();
       if (warning) {
         // A buyer edit moved it back to Draft: show it, and leave making it active again to the person.
@@ -274,9 +288,9 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
       {(c) => <textarea {...c} className="input" rows={3} value={v[k]} data-field={k} onChange={(e) => set(k, e.target.value)} />}
     </Field>
   );
-  const number = (k: 'amount' | 'lengthWeeks' | 'typicalDeal' | 'salesCycleDays' | 'sizeMin' | 'sizeMax', label: string, hint?: string) => (
+  const number = (k: 'amount' | 'amountMax' | 'lengthWeeks' | 'typicalDeal' | 'salesCycleDays' | 'sizeMin' | 'sizeMax', label: string, hint?: string) => (
     <Field label={label} error={errors[k] ?? null} {...(hint ? { hint } : {})}>
-      {(c) => <input {...c} className="input" type="number" min={0} inputMode="numeric" value={v[k]} onChange={(e) => set(k, e.target.value)} />}
+      {(c) => <input {...c} className="input" type="number" min={0} step={k === 'amount' || k === 'amountMax' || k === 'typicalDeal' ? 'any' : 1} inputMode={k === 'amount' || k === 'amountMax' || k === 'typicalDeal' ? 'decimal' : 'numeric'} value={v[k]} onChange={(e) => set(k, e.target.value)} />}
     </Field>
   );
 
@@ -337,6 +351,7 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
             )}
           </Field>
           {v.priceModel !== 'custom' && number('amount', 'Amount')}
+          {v.priceModel !== 'custom' && ranged && number('amountMax', 'Up to')}
           {number('lengthWeeks', 'Length (weeks)')}
         </div>
         {SECTIONS.map((s) => area(s.field, s.label))}

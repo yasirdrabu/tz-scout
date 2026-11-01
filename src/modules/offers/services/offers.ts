@@ -24,12 +24,12 @@ const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: '
 const invalid = (path: string, message: string) =>
   new ScoutError({ slug: 'validation', status: 400, title: 'Check the offer.', errors: [{ path, message }] });
 
-async function load(ctx: ModuleContext, id: string, lock = false): Promise<Offer> {
+async function load(ctx: ModuleContext, id: string, lock: boolean | 'share' = false): Promise<Offer> {
   const q = ctx.tx
     .select()
     .from(offer)
     .where(and(eq(offer.id, id), eq(offer.tenantId, ctx.tenantId)));
-  const [row] = await (lock ? q.for('update') : q);
+  const [row] = await (lock === 'share' ? q.for('share') : lock ? q.for('update') : q);
   if (!row) throw notFound();
   return row;
 }
@@ -215,6 +215,14 @@ export async function archiveOffer(ctx: ModuleContext, id: string): Promise<Offe
 
 export function getOffer(ctx: ModuleContext, id: string): Promise<Offer> {
   return load(ctx, id);
+}
+
+/**
+ * Reads an offer FOR SHARE, for a module that is about to record a reference to it (a lead offer pick):
+ * a concurrent `deleteOffer` (FOR UPDATE) then either waits and sees the reference, or ran first and this is a 404.
+ */
+export function getOfferForShare(ctx: ModuleContext, id: string): Promise<Offer> {
+  return load(ctx, id, 'share');
 }
 
 export async function listOffers(

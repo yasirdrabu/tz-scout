@@ -17,6 +17,7 @@ export {
   archiveOffer,
   createOffer,
   getOffer,
+  getOfferForShare,
   listOffers,
   unapproveOffer,
   updateOffer,

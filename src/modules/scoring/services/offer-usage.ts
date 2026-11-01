@@ -1,15 +1,15 @@
 import { and, eq, inArray, ne, or } from 'drizzle-orm';
-import { countAccountsBy, filterVisibleAccountIds } from '@/modules/accounts';
+import { getSummaries, type AccountSummaryView } from '@/modules/accounts';
 import type { OfferCounts, OfferUsage } from '@/modules/offers';
 import type { ModuleContext } from '@/platform/context';
 import { offerMatch, scoreChange } from '../db/schema';
 
 const CHUNK = 1_000;
 
-/** The visible subset of `ids`, a chunk at a time so the query stays within the parameter limit. */
-async function visible(ctx: ModuleContext, ids: string[]): Promise<Set<string>> {
-  const out = new Set<string>();
-  for (let i = 0; i < ids.length; i += CHUNK) for (const id of await filterVisibleAccountIds(ctx, ids.slice(i, i + CHUNK))) out.add(id);
+/** The summaries of the visible accounts among `ids`, a chunk at a time (getSummaries takes at most 1,000). */
+async function visible(ctx: ModuleContext, ids: string[]): Promise<Map<string, AccountSummaryView>> {
+  const out = new Map<string, AccountSummaryView>();
+  for (let i = 0; i < ids.length; i += CHUNK) for (const s of await getSummaries(ctx, ids.slice(i, i + CHUNK))) out.set(s.accountId, s);
   return out;
 }
 
@@ -30,16 +30,24 @@ export const scoringOfferUsage: OfferUsage = {
     return !!change;
   },
 
-  /** Matched: accounts whose current match is not `not_fit`. Won: accounts at stage won with the offer as lead offer. */
+  /**
+   * Matched: accounts whose current match is not `not_fit`. Won: those matched accounts at stage won with the offer as
+   * lead offer (the pick, else the best offer), so won never exceeds matched.
+   */
   async counts(ctx, offerIds) {
     const rows = await ctx.tx
       .select({ offerId: offerMatch.offerId, accountId: offerMatch.accountId })
       .from(offerMatch)
       .where(and(eq(offerMatch.tenantId, ctx.tenantId), inArray(offerMatch.offerId, offerIds), ne(offerMatch.tier, 'not_fit')));
     const seen = await visible(ctx, [...new Set(rows.map((r) => r.accountId))]);
-    const won = await countAccountsBy(ctx, { stage: 'won' }, 'offer');
-    const out = new Map<string, OfferCounts>(offerIds.map((id) => [id, { matched: 0, won: won.get(id) ?? 0 }]));
-    for (const r of rows) if (seen.has(r.accountId)) out.get(r.offerId)!.matched += 1;
+    const out = new Map<string, OfferCounts>(offerIds.map((id) => [id, { matched: 0, won: 0 }]));
+    for (const r of rows) {
+      const s = seen.get(r.accountId);
+      if (!s) continue;
+      const c = out.get(r.offerId)!;
+      c.matched += 1;
+      if (s.stage === 'won' && (s.leadOfferOverrideId ?? s.bestOfferId) === r.offerId) c.won += 1;
+    }
     return out;
   },
 };

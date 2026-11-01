@@ -123,7 +123,7 @@ describe('offers on /api/v1', () => {
     const res = await call(patchOffer, manageKey, `offers/${o.id}`, 'PATCH', { industries: ['retail'] });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.warning).toBe('This sends the offer back to draft until an owner approves it.');
+    expect(body.warning).toBe('This sends the offer back to draft until someone who manages offers approves it.');
     expect(body).toMatchObject({ status: 'draft', industries: ['retail'] });
     const quiet = await call(patchOffer, manageKey, `offers/${o.id}`, 'PATCH', { name: 'Renamed' });
     expect((await quiet.json()).warning).toBeUndefined();
@@ -360,6 +360,17 @@ describe('R1 offer and practice routes (Rulings 12 to 14)', () => {
 
     const { practiceId } = await theirs();
     expect((await w.as(seller, getPracticeRoute, `practices/${practiceId}`)).status).toBe(404);
+  });
+
+  it('offer_count counts only the offers the caller is shown', async () => {
+    const p = (await (await w.as(w.owner, createPracticeRoute, 'practices', 'POST', { name: 'Counts' })).json()).id;
+    const active = await (await w.as(w.owner, createOfferRoute, 'offers', 'POST', { name: 'Counted active', practice_id: p, ...ready })).json();
+    await w.as(w.owner, createOfferRoute, 'offers', 'POST', { name: 'Counted draft', practice_id: p, ...ready });
+    await w.as(operator, offerAction, `offers/${active.id}:approve`, 'POST');
+    expect((await (await w.as(w.owner, getPracticeRoute, `practices/${p}`)).json()).offer_count).toBe(2);
+    expect((await (await w.as(seller, getPracticeRoute, `practices/${p}`)).json()).offer_count).toBe(1);
+    const row = (await (await w.as(seller, listPracticesRoute, 'practices')).json()).data.find((x: { id: string }) => x.id === p);
+    expect(row.offer_count).toBe(1);
   });
 
   it(':archive on a practice with an active offer gives the new copy', async () => {

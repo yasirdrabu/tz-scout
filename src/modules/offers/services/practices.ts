@@ -168,14 +168,17 @@ export async function listPractices(ctx: ModuleContext, opts: { includeArchived?
     .orderBy(asc(practice.sort), asc(practice.name));
 }
 
-/** Adds each practice's lead name and its count of offers that are not retired. */
-export async function practiceViews(ctx: ModuleContext, rows: Practice[]): Promise<PracticeView[]> {
+/**
+ * Adds each practice's lead name and its offer count: offers that are not retired, or only the active ones for a
+ * caller who cannot see drafts (`activeOnly`), so the count matches the offers they are shown.
+ */
+export async function practiceViews(ctx: ModuleContext, rows: Practice[], opts: { activeOnly?: boolean } = {}): Promise<PracticeView[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((p) => p.id);
   const counts = await ctx.tx
     .select({ practiceId: offer.practiceId, n: count() })
     .from(offer)
-    .where(and(eq(offer.tenantId, ctx.tenantId), inArray(offer.practiceId, ids), ne(offer.status, 'archived')))
+    .where(and(eq(offer.tenantId, ctx.tenantId), inArray(offer.practiceId, ids), opts.activeOnly ? eq(offer.status, 'approved') : ne(offer.status, 'archived')))
     .groupBy(offer.practiceId);
   const byPractice = new Map(counts.map((c) => [c.practiceId, c.n]));
   const names = await userNames(ctx, rows.flatMap((p) => (p.leadUserId ? [p.leadUserId] : [])));
@@ -186,13 +189,13 @@ export async function practiceViews(ctx: ModuleContext, rows: Practice[]): Promi
   }));
 }
 
-export async function listPracticeViews(ctx: ModuleContext, opts: { includeArchived?: boolean } = {}): Promise<PracticeView[]> {
-  return practiceViews(ctx, await listPractices(ctx, opts));
+export async function listPracticeViews(ctx: ModuleContext, opts: { includeArchived?: boolean; activeOnly?: boolean } = {}): Promise<PracticeView[]> {
+  return practiceViews(ctx, await listPractices(ctx, opts), opts);
 }
 
 /** One practice, archived ones too; another tenant's is a 404. */
-export async function getPractice(ctx: ModuleContext, id: string): Promise<PracticeView> {
-  return (await practiceViews(ctx, [await load(ctx, id)]))[0]!;
+export async function getPractice(ctx: ModuleContext, id: string, opts: { activeOnly?: boolean } = {}): Promise<PracticeView> {
+  return (await practiceViews(ctx, [await load(ctx, id)], opts))[0]!;
 }
 
 const NO_HINT = new Set(['', 'null', 'unknown']);

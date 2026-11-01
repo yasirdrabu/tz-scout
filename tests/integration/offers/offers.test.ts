@@ -157,7 +157,7 @@ describe('OFF-E2-S2 approve', () => {
     await t.run((ctx) => approveOffer(ctx, o.id));
     const r = await t.run((ctx) => updateOffer(ctx, o.id, { industries: ['retail'] }));
     expect(r.warning).toBe(BUYER_DEFINITION_WARNING);
-    expect(BUYER_DEFINITION_WARNING).toBe('This sends the offer back to draft until an owner approves it.');
+    expect(BUYER_DEFINITION_WARNING).toBe('This sends the offer back to draft until someone who manages offers approves it.');
     expect(r.offer).toMatchObject({ status: 'draft', approvedBy: null, approvedAt: null, industries: ['retail'] });
     const ev = (await events('offers.offer.changed')).filter((e) => e.payload.data.offerId === o.id);
     expect(ev.at(-1)!.payload.data).toMatchObject({ changed: ['industries', 'status'], affectsMatching: true });

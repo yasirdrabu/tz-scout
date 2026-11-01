@@ -2,8 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { shows, signInAs } from './helpers';
 
 // An owner edits an offer (§19): a content edit keeps it Active, a change to who it is for moves it
-// back to Draft, and making it Active again approves it. The offer's industries are put back at the end
-// through the page's fetch, so later specs score against the seeded offers.
+// back to Draft, and making it Active again approves it. Every field it changes is put back at the end
+// through the page's fetch, so later specs see the seeded offer.
 
 const OWNER = 'zach.wiant@taazaa.com';
 
@@ -36,7 +36,9 @@ test('an owner edits an offer', async ({ page }) => {
   await expect(heading).toBeVisible();
   const title = (await heading.textContent())!;
   const before = await api(page, `offers/${offerId}`, 'GET');
-  const industries = before.body!.industries as string[];
+  const b = before.body!;
+  // Every field this test changes, as seeded, to put back at the end.
+  const restore = { why_us: b.why_us, price_model: b.price_model, price_min_cents: b.price_min_cents, price_max_cents: b.price_max_cents, length_weeks: b.length_weeks, industries: b.industries };
 
   try {
     // A content edit: Why us, pricing and length. It stays Active.
@@ -73,8 +75,10 @@ test('an owner edits an offer', async ({ page }) => {
     expect(after.body).toMatchObject({ why_us: whyUs, price_model: 'fixed', length_weeks: 6, status: 'approved' });
     expect(after.body!.industries).toContain(industry);
   } finally {
-    // Put who it is for back, and make it Active again.
-    await api(page, `offers/${offerId}`, 'PATCH', { industries });
-    await api(page, `offers/${offerId}:approve`, 'POST');
+    // Put back every field this test changed, and make it Active again (the industries edit sent it to Draft).
+    const put = await api(page, `offers/${offerId}`, 'PATCH', restore);
+    expect(put.status).toBe(200);
+    if (b.status === 'approved') expect((await api(page, `offers/${offerId}:approve`, 'POST')).status).toBe(200);
+    expect((await api(page, `offers/${offerId}`, 'GET')).body).toMatchObject({ ...restore, status: b.status });
   }
 });

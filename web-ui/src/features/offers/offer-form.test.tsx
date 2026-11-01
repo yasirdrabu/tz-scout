@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse } from 'msw';
 import { renderApp } from '../../test/renderApp';
-import { serveOffers } from './testing';
+import { offer, serveOffers } from './testing';
 
 const drawer = (name: string) => screen.findByRole('dialog', { name });
 const bodies = (seen: ReturnType<typeof serveOffers>, method: string, end: string) =>
@@ -31,6 +31,33 @@ describe('Offer form (§19)', () => {
     expect(seen.some((r) => /:(approve|unapprove)$/.test(r.url.pathname))).toBe(false);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit offer' })).toBeNull());
     expect(app.path()).toBe('/t/taazaa/offers/prc_ai/off_mb');
+  });
+
+  it('a save that does not touch the price leaves the price fields out, so a range stays', async () => {
+    const seen = serveOffers({ offers: [offer({ id: 'off_r', name: 'Ranged', practice_id: 'prc_ai', price_min_cents: 2_500_000, price_max_cents: 4_500_050, price_label: '$25,000 to $45,000.50' })] });
+    const user = userEvent.setup();
+    renderApp('/t/taazaa/offers/prc_ai/off_r?edit=offer');
+    const d = await drawer('Edit offer');
+    expect(await within(d).findByLabelText('Amount')).toHaveValue(25000);
+    expect(within(d).getByLabelText('Up to')).toHaveValue(45000.5);
+    await user.type(within(d).getByLabelText('Why us'), 'Because.');
+    await user.click(within(d).getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Changes to Ranged saved.');
+    const [body] = bodies(seen, 'PATCH', '/offers/off_r');
+    expect(body).toMatchObject({ why_us: 'Because.' });
+    for (const k of ['price_model', 'price_min_cents', 'price_max_cents']) expect(body).not.toHaveProperty(k);
+  });
+
+  it('editing Amount sends the cents, and the top of a range stays', async () => {
+    const seen = serveOffers({ offers: [offer({ id: 'off_r', name: 'Ranged', practice_id: 'prc_ai', price_min_cents: 2_500_000, price_max_cents: 4_500_000 })] });
+    const user = userEvent.setup();
+    renderApp('/t/taazaa/offers/prc_ai/off_r?edit=offer');
+    const d = await drawer('Edit offer');
+    await user.clear(await within(d).findByLabelText('Amount'));
+    await user.type(within(d).getByLabelText('Amount'), '30000.25');
+    await user.click(within(d).getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Changes to Ranged saved.');
+    expect(bodies(seen, 'PATCH', '/offers/off_r')[0]).toMatchObject({ price_model: null, price_min_cents: 3_000_025, price_max_cents: 4_500_000 });
   });
 
   it('Custom quote sends no amount', async () => {

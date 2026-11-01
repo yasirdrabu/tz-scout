@@ -37,6 +37,7 @@ beforeAll(async () => {
   const acc1 = await w.account('Won One');
   const acc2 = await w.account('Open One');
   const acc3 = await w.account('Won Two');
+  const acc4 = await w.account('Won, picked, no match');
   await w.deliver();
   seller = await w.person('seller', { dataLimit: { kind: 'practices', ids: [p1] } });
 
@@ -47,6 +48,8 @@ beforeAll(async () => {
   await summary(acc1, { practiceIds: [p1], practiceId: p1, stage: 'won', bestOfferId: a, leadOfferOverrideId: null });
   await summary(acc2, { practiceIds: [p1], practiceId: p1, stage: 'arrived', bestOfferId: a, leadOfferOverrideId: null });
   await summary(acc3, { practiceIds: [p2], practiceId: p2, stage: 'won', bestOfferId: b, leadOfferOverrideId: null });
+  // Won with A as the pick, but no current match for A: it is not counted, so won never exceeds matched.
+  await summary(acc4, { practiceIds: [p1], practiceId: p1, stage: 'won', bestOfferId: null, leadOfferOverrideId: a });
   const match = (accountId: string, offerId: string, tier: string) => ({
     id: newId('om'),
     tenantId: w.tenantId,

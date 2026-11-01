@@ -13,11 +13,14 @@ import {
   offerCanDelete,
 } from '@/modules/offers';
 import { offerCaseStudy, signalRule } from '@/modules/offers/db/schema';
-import { leadOfferChange } from '@/modules/routing/db/schema';
+import { setLeadOffer } from '@/modules/routing';
+import { accountReview, leadOfferChange } from '@/modules/routing/db/schema';
 import { offerMatch, scoreChange } from '@/modules/scoring/db/schema';
 import { adminDb } from '@/platform/db/client';
 import { auditLog } from '@/platform/db/schema';
 import { newId } from '@/platform/ids';
+import { arrivedAccount, asPerson, routingTenant } from '../routing/helpers';
+import { inTenant } from '../tenancy/helpers';
 import { completeOffer, freshTenant } from './helpers';
 
 let t: Awaited<ReturnType<typeof freshTenant>>;
@@ -102,4 +105,48 @@ describe('DELETE an offer (Ruling 12)', () => {
     await expect(t.run((ctx) => deleteOffer(ctx, o.id))).rejects.toMatchObject({ status: 404 });
     expect((await other.run((ctx) => getOffer(ctx, o.id))).id).toBe(o.id);
   });
+});
+
+describe('DELETE and a lead offer pick', () => {
+  it('an offer picked as lead offer with no change row yet is 409', async () => {
+    const r = await routingTenant();
+    // The account first: its arrival delivers the outbox, which would score it against an approved offer.
+    const accountId = await arrivedAccount(r);
+    const p = await r.run((ctx) => createPractice(ctx, { name: 'Picks' }));
+    const o = await r.run((ctx) => createOffer(ctx, { name: 'Picked', practiceId: p.id, ...completeOffer }));
+    await r.run((ctx) => approveOffer(ctx, o.id));
+    await adminDb.update(accountReview).set({ leadOfferOverrideId: o.id }).where(eq(accountReview.accountId, accountId));
+    expect(await adminDb.select().from(leadOfferChange).where(eq(leadOfferChange.accountId, accountId))).toHaveLength(0);
+    await expect(r.run((ctx) => deleteOffer(ctx, o.id))).rejects.toMatchObject({ status: 409, slug: 'offer-has-history' });
+  });
+
+  it('a pick made while a delete holds the offer waits for it, then is refused; the offer is gone', async () => {
+    const r = await routingTenant();
+    // The account first: its arrival delivers the outbox, which would score it against an approved offer.
+    const accountId = await arrivedAccount(r);
+    const p = await r.run((ctx) => createPractice(ctx, { name: 'Race' }));
+    const o = await r.run((ctx) => createOffer(ctx, { name: 'Raced', practiceId: p.id, ...completeOffer }));
+    await r.run((ctx) => approveOffer(ctx, o.id));
+
+    let release!: () => void;
+    const gate = new Promise<void>((done) => (release = done));
+    let deleted!: () => void;
+    const holding = new Promise<void>((done) => (deleted = done));
+    const del = inTenant(r.tenantId, r.actor, async (ctx) => {
+      await deleteOffer(ctx, o.id);
+      deleted();
+      await gate;
+    });
+    await Promise.race([holding, del]);
+    let settled = false;
+    const pick = asPerson(r, (ctx) => setLeadOffer(ctx, accountId, o.id)).finally(() => (settled = true));
+    await new Promise((done) => setTimeout(done, 500));
+    expect(settled).toBe(false); // FOR SHARE waits on the delete's FOR UPDATE
+    release();
+    await del;
+    await expect(pick).rejects.toMatchObject({ status: 400 });
+    const [review] = await adminDb.select().from(accountReview).where(eq(accountReview.accountId, accountId));
+    expect(review!.leadOfferOverrideId).toBeNull();
+    await expect(r.run((ctx) => getOffer(ctx, o.id))).rejects.toMatchObject({ status: 404 });
+  }, 20_000);
 });

@@ -271,6 +271,18 @@ describe('fan-out on offers (SCO-E5-S2)', () => {
     expect(await pages()).toBe(before + 1);
     expect((await current(t, a.accountId))!.bestOfferId).toBeNull();
   });
+
+  it('an offer that left approved (unapprove) also gets the practice page, so a rescore in flight cannot keep it', async () => {
+    const { t, practice } = await world();
+    const o = await approved(t, practice.id, 'Unapproved');
+    await runOutbox(t.tenantId);
+    const pages = async () => (await outboxOf(t, 'jobs.scoring.rescore.page')).length;
+    await t.run((ctx) => ctx.tx.execute(sql`update offers.offer set status = 'draft' where id = ${o.id}`));
+    const before = await pages();
+    await publishTestEvent(t.tenantId, offerChanged, { offerId: o.id, practiceId: practice.id, changed: ['status'], affectsMatching: true });
+    await runOutbox(t.tenantId);
+    expect(await pages()).toBe(before + 2);
+  });
 });
 
 describe('fan-out on trust and rules', () => {

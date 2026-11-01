@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { getSummaries } from '@/modules/accounts';
-import { getOffer } from '@/modules/offers';
+import { getOfferForShare } from '@/modules/offers';
 import { members } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -123,7 +123,8 @@ export async function previewBulkAssign(ctx: ModuleContext, accountIds: string[]
 }
 
 async function checkLeadOffer(ctx: ModuleContext, offerId: string): Promise<void> {
-  const offer = await getOffer(ctx, offerId).catch((e: unknown) => {
+  // FOR SHARE, so an offer delete running now either sees this pick or has already removed the offer.
+  const offer = await getOfferForShare(ctx, offerId).catch((e: unknown) => {
     if (e instanceof ScoutError && e.status === 404) return null;
     throw e;
   });

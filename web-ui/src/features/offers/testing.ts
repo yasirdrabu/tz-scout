@@ -139,7 +139,7 @@ export function serveOffers(opts: Opts = {}) {
       const before = offers.find((x) => x.id === params.id)!;
       const buyer = JSON.stringify(body.industries ?? before.industries) !== JSON.stringify(before.industries);
       const saved = update(String(params.id), { ...body, ...(buyer && before.status === 'approved' ? { status: 'draft', status_label: 'Draft' } : {}) });
-      return HttpResponse.json(buyer && before.status === 'approved' ? { ...saved, warning: 'This sends the offer back to draft until an owner approves it.' } : saved);
+      return HttpResponse.json(buyer && before.status === 'approved' ? { ...saved, warning: 'This sends the offer back to draft until someone who manages offers approves it.' } : saved);
     }),
     http.post(/\/api\/v1\/offers\/[^/]+:approve$/, async ({ request }) => {
       await log(request);
