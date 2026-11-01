@@ -1,7 +1,8 @@
 import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { upsertFromArrival } from '@/modules/accounts';
-import { EMPTY_SECTION, NO_SUCH_SECTION, SECTION_CHANGED, SECTION_TOO_LONG, editSection, getBrief } from '@/modules/playbooks';
+import { EMPTY_SECTION, NO_SUCH_SECTION, SECTION_CHANGED, SECTION_TOO_LONG, editSection, getBrief, requestDraft } from '@/modules/playbooks';
+import { runOutbox } from '../helpers/run-outbox';
 import { createApiKey, SYSTEM_GRANTOR } from '@/modules/tenancy';
 import { adminDb } from '@/platform/db/client';
 import { inTenant } from '../tenancy/helpers';
@@ -35,6 +36,20 @@ describe('editSection', () => {
     await expect(edit('overview', 'Later text', 1)).rejects.toMatchObject({ status: 409, message: SECTION_CHANGED });
     expect(SECTION_CHANGED).toBe('Someone changed this section since you opened it. Reload to see their version.');
     await expect(edit('why_now', 'Not a page section')).rejects.toMatchObject({ status: 404, message: NO_SUCH_SECTION });
+  });
+
+  it('a save on a version only a draft has moved past is accepted; a person changing it since is a 409', async () => {
+    const t = await routingTenant();
+    const id = await scoredAccount(t, 'watch');
+    await t.run((ctx) => requestDraft(ctx, id, { manual: true }));
+    await runOutbox(t.tenantId);
+    expect((await sectionRows(id)).find((s) => s.key === 'approach')).toMatchObject({ version: 2, origin: 'ai' });
+    const saved = await asPerson(t, (ctx) => editSection(ctx, id, 'approach', { body: 'Opened at version 1.', ifVersion: 1 }));
+    expect(saved).toMatchObject({ version: 3, body: 'Opened at version 1.' });
+    await t.run((ctx) => requestDraft(ctx, id, { manual: true, includeEdited: ['approach'] }));
+    await runOutbox(t.tenantId);
+    // Version 3 (a person's) sits between 2 and the current 4.
+    await expect(asPerson(t, (ctx) => editSection(ctx, id, 'approach', { body: 'Stale', ifVersion: 2 }))).rejects.toMatchObject({ status: 409 });
   });
 
   it('an API key editor shows the key name (PLB-E3-S2-AC2)', async () => {

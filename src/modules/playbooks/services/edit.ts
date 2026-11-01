@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gt } from 'drizzle-orm';
 import { getAccount } from '@/modules/accounts';
 import { listApiKeys, members } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
@@ -52,8 +52,20 @@ export async function editSection(ctx: ModuleContext, accountId: string, key: st
   const row = await readBrief(ctx, id);
   const where = and(eq(briefSection.tenantId, ctx.tenantId), eq(briefSection.accountId, id), eq(briefSection.key, key));
   const [current] = await ctx.tx.select().from(briefSection).where(where).for('update');
-  const stale = input.ifVersion !== undefined && input.ifVersion !== null && input.ifVersion !== (current?.version ?? 0);
-  if (stale) throw new ScoutError({ slug: 'conflict', status: 409, title: SECTION_CHANGED });
+  if (input.ifVersion !== undefined && input.ifVersion !== null && input.ifVersion !== (current?.version ?? 0)) {
+    // Only a person's change since the editor opened it is a conflict; a draft that wrote over it is not.
+    const since = input.ifVersion;
+    const humanSince =
+      current?.origin === 'human' ||
+      (
+        await ctx.tx
+          .select({ v: briefSectionHistory.version })
+          .from(briefSectionHistory)
+          .where(and(eq(briefSectionHistory.tenantId, ctx.tenantId), eq(briefSectionHistory.accountId, id), eq(briefSectionHistory.key, key), gt(briefSectionHistory.version, since), eq(briefSectionHistory.origin, 'human')))
+          .limit(1)
+      ).length > 0;
+    if (humanSince || !current) throw new ScoutError({ slug: 'conflict', status: 409, title: SECTION_CHANGED });
+  }
 
   const values = {
     body,
