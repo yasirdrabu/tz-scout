@@ -15,6 +15,13 @@
       "when": 1793137233758,
       "tag": "0001_signal_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793522919884,
+      "tag": "0002_offer_content_practice_lead",
+      "breakpoints": true
     }
   ]
 }

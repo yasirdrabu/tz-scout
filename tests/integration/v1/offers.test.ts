@@ -1,14 +1,18 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as listPracticesRoute, POST as createPracticeRoute } from '@/http/routes/v1/practices/route';
-import { PATCH as patchPractice, POST as practiceAction } from '@/http/routes/v1/practices/[id]/route';
+import { GET as getPracticeRoute, PATCH as patchPractice, POST as practiceAction } from '@/http/routes/v1/practices/[id]/route';
 import { GET as listOffersRoute, POST as createOfferRoute } from '@/http/routes/v1/offers/route';
-import { GET as getOfferRoute, PATCH as patchOffer, POST as offerAction } from '@/http/routes/v1/offers/[id]/route';
+import { DELETE as deleteOfferRoute, GET as getOfferRoute, PATCH as patchOffer, POST as offerAction } from '@/http/routes/v1/offers/[id]/route';
 import { PUT as putOfferCases } from '@/http/routes/v1/offers/[id]/case-studies/route';
 import { GET as listCasesRoute, POST as createCaseRoute } from '@/http/routes/v1/case-studies/route';
 import { POST as caseAction } from '@/http/routes/v1/case-studies/[id]/route';
 import { approveOffer, createCaseStudy, createOffer, createPractice } from '@/modules/offers';
 import { SYSTEM_GRANTOR, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
+import { offerMatch } from '@/modules/scoring/db/schema';
+import { adminDb } from '@/platform/db/client';
+import { newId } from '@/platform/ids';
 import { completeOffer, freshTenant } from '../offers/helpers';
+import { workspace, type Workspace } from './review-helpers';
 
 let t: Awaited<ReturnType<typeof freshTenant>>;
 let practiceId: string;
@@ -99,11 +103,11 @@ describe('offers on /api/v1', () => {
     expect((await call(createOfferRoute, readKey, 'offers', 'POST', {})).status).toBe(403);
   });
 
-  it('approving with an API key returns 403 with the owner copy', async () => {
-    const o = await draft('Needs owner');
+  it('approving with an API key returns 403: only a person can approve', async () => {
+    const o = await draft('Needs a person');
     const res = await call(offerAction, manageKey, `offers/${o.id}:approve`, 'POST');
     expect(res.status).toBe(403);
-    expect((await res.json()).title).toBe('Only an owner can approve an offer.');
+    expect((await res.json()).detail).toBe('Only a person can approve an offer.');
   });
 
   it('archives an offer and 404s an unknown action', async () => {
@@ -207,5 +211,164 @@ describe('practices on /api/v1', () => {
     expect((await arch.json()).status).toBe('archived');
     expect((await call(practiceAction, manageKey, `practices/${p.id}:nope`, 'POST')).status).toBe(404);
     expect((await call(createPracticeRoute, readKey, 'practices', 'POST', { name: 'x' })).status).toBe(403);
+  });
+});
+
+describe('R1 offer and practice routes (Rulings 12 to 14)', () => {
+  let w: Workspace;
+  let other: Workspace;
+  let practice: string;
+  let operator: string;
+  let leader: string;
+  let seller: string;
+  const ready = {
+    promise: 'Ship it.',
+    target_titles: ['CTO'],
+    industries: ['logistics'],
+    typical_deal_cents: 5_000_000,
+    sales_cycle_days: 60,
+  };
+
+  beforeAll(async () => {
+    w = await workspace('Offer Routes Co');
+    other = await workspace('Other Offers Co');
+    operator = await w.person('operator', { name: 'Olive Operator' });
+    leader = await w.person('leader');
+    seller = await w.person('seller');
+    const res = await w.as(w.owner, createPracticeRoute, 'practices', 'POST', { name: 'Routes', lead_user_id: operator });
+    expect(res.status).toBe(201);
+    practice = (await res.json()).id;
+  });
+
+  const create = async (name: string, extra: Record<string, unknown> = {}) => {
+    const res = await w.as(w.owner, createOfferRoute, 'offers', 'POST', { name, practice_id: practice, ...ready, ...extra });
+    expect(res.status).toBe(201);
+    return res.json();
+  };
+  const theirs = async () =>
+    other.run(async (ctx) => {
+      const p = await createPractice(ctx, { name: `Theirs ${newId('om')}` });
+      return { practiceId: p.id, offerId: (await createOffer(ctx, { name: `Their offer ${newId('om')}`, practiceId: p.id, promise: 'x' })).id };
+    });
+
+  it('create, patch and read carry the content fields and the labels', async () => {
+    const o = await create('Content offer', {
+      price_model: 'fixed',
+      price_min_cents: 4_000_000,
+      price_max_cents: 4_000_000,
+      length_weeks: 6,
+      key_offer: 'Key',
+      why_us: 'Us',
+      why_now: 'Now',
+    });
+    expect(o).toMatchObject({ price_model: 'fixed', length_weeks: 6, key_offer: 'Key', why_us: 'Us', why_now: 'Now', price_label: 'Fixed fee · $40,000 · 6 weeks', status_label: 'Draft' });
+    const read = await (await w.as(w.owner, getOfferRoute, `offers/${o.id}`)).json();
+    expect(read).toMatchObject({ price_label: 'Fixed fee · $40,000 · 6 weeks', status_label: 'Draft', practice_lead_name: 'Olive Operator', can_delete: true });
+    const patched = await (await w.as(w.owner, patchOffer, `offers/${o.id}`, 'PATCH', { price_model: 'custom', why_us: 'Better' })).json();
+    expect(patched).toMatchObject({ price_label: 'Custom quote · 6 weeks', why_us: 'Better' });
+    const list = await (await w.as(w.owner, listOffersRoute, `offers?practice_id=${practice}`)).json();
+    expect(list.data.find((x: { id: string }) => x.id === o.id)).toMatchObject({ price_label: 'Custom quote · 6 weeks', status_label: 'Draft' });
+  });
+
+  it('validates the new fields at their paths', async () => {
+    const bad = async (body: Record<string, unknown>, path: string) => {
+      const res = await w.as(w.owner, createOfferRoute, 'offers', 'POST', { name: 'Bad', practice_id: practice, promise: 'x', ...body });
+      expect(res.status, path).toBe(400);
+      expect((await res.json()).errors.map((e: { path: string }) => e.path), path).toContain(path);
+    };
+    await bad({ length_weeks: 0 }, 'length_weeks');
+    await bad({ length_weeks: 261 }, 'length_weeks');
+    await bad({ price_model: 'hourly' }, 'price_model');
+    await bad({ why_us: 'x'.repeat(4001) }, 'why_us');
+  });
+
+  it('a content edit keeps an active offer active; a buyer edit sends it back with the warning', async () => {
+    const o = await create('Edit me');
+    expect((await w.as(operator, offerAction, `offers/${o.id}:approve`, 'POST')).status).toBe(200);
+    const content = await (await w.as(w.owner, patchOffer, `offers/${o.id}`, 'PATCH', { why_us: 'Because.' })).json();
+    expect(content).toMatchObject({ status: 'approved', status_label: 'Active' });
+    expect(content.warning).toBeUndefined();
+    const buyer = await (await w.as(w.owner, patchOffer, `offers/${o.id}`, 'PATCH', { industries: ['retail'] })).json();
+    expect(buyer).toMatchObject({ status: 'draft' });
+    expect(buyer.warning).toEqual(expect.any(String));
+  });
+
+  it(':approve needs offers:manage and a person, and lists what is missing', async () => {
+    const o = await create('Approve me');
+    expect((await w.as(leader, offerAction, `offers/${o.id}:approve`, 'POST')).status).toBe(403);
+    const ok = await w.as(operator, offerAction, `offers/${o.id}:approve`, 'POST');
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ status: 'approved', status_label: 'Active' });
+    const thin = await (await w.as(w.owner, createOfferRoute, 'offers', 'POST', { name: 'Thin', practice_id: practice, promise: 'x' })).json();
+    const incomplete = await w.as(operator, offerAction, `offers/${thin.id}:approve`, 'POST');
+    expect(incomplete.status).toBe(400);
+    const body = await incomplete.json();
+    expect(body.type).toContain('offer-incomplete');
+    expect(body.errors.length).toBeGreaterThan(0);
+    const { offerId } = await theirs();
+    expect((await w.as(operator, offerAction, `offers/${offerId}:approve`, 'POST')).status).toBe(404);
+  });
+
+  it(':unapprove returns the draft; refuses people without offers:manage; 404 across tenants; 409 retired', async () => {
+    const o = await create('Unapprove me');
+    await w.as(operator, offerAction, `offers/${o.id}:approve`, 'POST');
+    expect((await w.as(seller, offerAction, `offers/${o.id}:unapprove`, 'POST')).status).toBe(403);
+    const res = await w.as(operator, offerAction, `offers/${o.id}:unapprove`, 'POST');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: o.id, status: 'draft', status_label: 'Draft', approved_by: null });
+    const { offerId } = await theirs();
+    expect((await w.as(operator, offerAction, `offers/${offerId}:unapprove`, 'POST')).status).toBe(404);
+    await w.as(operator, offerAction, `offers/${o.id}:archive`, 'POST');
+    expect((await w.as(operator, offerAction, `offers/${o.id}:unapprove`, 'POST')).status).toBe(409);
+  });
+
+  it('DELETE answers 204 for a never-matched offer, 409 with history, 403 and 404 otherwise', async () => {
+    const o = await create('Delete me');
+    expect((await w.as(seller, deleteOfferRoute, `offers/${o.id}`, 'DELETE')).status).toBe(403);
+    const res = await w.as(operator, deleteOfferRoute, `offers/${o.id}`, 'DELETE');
+    expect(res.status).toBe(204);
+    expect((await w.as(w.owner, getOfferRoute, `offers/${o.id}`)).status).toBe(404);
+    expect((await w.as(operator, deleteOfferRoute, `offers/${o.id}`, 'DELETE')).status).toBe(404);
+
+    const kept = await create('Has history');
+    await adminDb.insert(offerMatch).values({ id: newId('om'), tenantId: w.tenantId, accountId: 'acc_x', offerId: kept.id, fit: 1, intent: 1, matchTotal: 1, tier: 'watch', fitParts: {}, ruleHits: [], profileVersion: 1 });
+    const conflict = await w.as(operator, deleteOfferRoute, `offers/${kept.id}`, 'DELETE');
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ title: 'Has history has matched accounts, so it can only be retired.' });
+    expect((await (await w.as(w.owner, getOfferRoute, `offers/${kept.id}`)).json()).can_delete).toBe(false);
+
+    const { offerId } = await theirs();
+    expect((await w.as(operator, deleteOfferRoute, `offers/${offerId}`, 'DELETE')).status).toBe(404);
+  });
+
+  it('practices carry lead_name and offer_count; GET one; the lead must be a member', async () => {
+    await create('Counted');
+    const one = await w.as(seller, getPracticeRoute, `practices/${practice}`);
+    expect(one.status).toBe(200);
+    const p = await one.json();
+    expect(p).toMatchObject({ id: practice, lead_user_id: operator, lead_name: 'Olive Operator' });
+    expect(p.offer_count).toBeGreaterThan(0);
+    const list = await (await w.as(seller, listPracticesRoute, 'practices')).json();
+    expect(list.data.find((x: { id: string }) => x.id === practice)).toMatchObject({ lead_name: 'Olive Operator', offer_count: p.offer_count });
+
+    const bad = await w.as(w.owner, patchPractice, `practices/${practice}`, 'PATCH', { lead_user_id: 'usr_nobody' });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).errors).toEqual([{ path: 'lead_user_id', message: 'That person is not a member of this workspace.' }]);
+    const cleared = await w.as(w.owner, patchPractice, `practices/${practice}`, 'PATCH', { lead_user_id: null });
+    expect(await cleared.json()).toMatchObject({ lead_user_id: null, lead_name: null });
+    expect((await w.as(seller, patchPractice, `practices/${practice}`, 'PATCH', { lead_user_id: null })).status).toBe(403);
+
+    const { practiceId } = await theirs();
+    expect((await w.as(seller, getPracticeRoute, `practices/${practiceId}`)).status).toBe(404);
+  });
+
+  it(':archive on a practice with an active offer gives the new copy', async () => {
+    const res = await w.as(w.owner, createPracticeRoute, 'practices', 'POST', { name: 'Blocked practice' });
+    const p = (await res.json()).id;
+    const o = await (await w.as(w.owner, createOfferRoute, 'offers', 'POST', { name: 'Blocker', practice_id: p, ...ready })).json();
+    await w.as(operator, offerAction, `offers/${o.id}:approve`, 'POST');
+    const blocked = await w.as(w.owner, practiceAction, `practices/${p}:archive`, 'POST');
+    expect(blocked.status).toBe(409);
+    expect((await blocked.json()).title).toBe('Retire or move its active offers first.');
   });
 });

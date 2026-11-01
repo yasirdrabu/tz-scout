@@ -1,10 +1,12 @@
 import { z } from 'zod';
+import { PRICE_MODELS } from '@/modules/offers';
 
 const text = z.string();
 const list = z.array(z.string());
 const int = z.number().int();
 const cents = int.nonnegative().nullable();
 const rate = z.number().nonnegative().nullable();
+const section = z.string().max(4000, 'Keep this under 4,000 characters.').nullable();
 
 // Only fields a person may set. Status, approval, tenant, id and origin are never accepted.
 const editable = {
@@ -31,6 +33,11 @@ const editable = {
   excluded_domains: list,
   excluded_categories: list,
   proof_points: list,
+  price_model: z.enum(PRICE_MODELS, 'Pick fixed, starting_at, per_month or custom.').nullable(),
+  length_weeks: int.min(1, 'Use 1 to 260 weeks.').max(260, 'Use 1 to 260 weeks.').nullable(),
+  key_offer: section,
+  why_us: section,
+  why_now: section,
 };
 
 export const createOfferBody = z

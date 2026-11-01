@@ -38,6 +38,7 @@ export { backfillLeadOffers, backfillReviews } from './services/backfill';
 export { publishReviewSnapshot } from './services/snapshot';
 export { moveStage } from './services/stage';
 export { routingReviewStatusValidator } from './services/status-validator';
+export { routingOfferUsage } from './services/offer-usage';
 export { assign, bulk, MAX_BULK, previewAssign, previewBulkAssign, setLeadOffer, type BulkPreviewRow, type LeadOfferView, type AssignInput, type AssignmentView, type AssignPreview, type BulkAction, type BulkResult } from './services/assign';
 export { accept, autoAccept, decline, markSeen, MAX_AUTO_ACCEPT, withdraw, type DeclineInput } from './services/respond';
 export { countQueue, getQueueColumns, listQueue, queueFacets, resetQueueColumns, setQueueColumns, type FacetOption, type QueueFacets, type QueueFilters, type QueueRow } from './services/queue';

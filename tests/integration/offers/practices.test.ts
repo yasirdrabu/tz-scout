@@ -52,7 +52,7 @@ describe('OFF-E1-S1 manage practices', () => {
     await t.run((ctx) => approveOffer(ctx, o.id));
     await expect(t.run((ctx) => archivePractice(ctx, p.id))).rejects.toMatchObject({
       status: 409,
-      message: 'Move or archive these offers first: Pilot Package.',
+      message: 'Retire or move its active offers first.',
     });
   });
 

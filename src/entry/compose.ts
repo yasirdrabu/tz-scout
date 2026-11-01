@@ -3,7 +3,9 @@
 // (through registry.ts) import it, so all processes see the same implementations.
 import { registerMergeGuard, registerSourceAccessProvider, registerSourceInfoProvider } from '@/modules/accounts';
 import { intakeSourceAccess, intakeSourceInfo, intakeSourceValidator, registerReviewStatusValidator } from '@/modules/intake';
-import { registerOwnershipPreflight, routingReviewStatusValidator } from '@/modules/routing';
+import { registerOfferUsage } from '@/modules/offers';
+import { registerOwnershipPreflight, routingOfferUsage, routingReviewStatusValidator } from '@/modules/routing';
+import { scoringOfferUsage } from '@/modules/scoring';
 import { crmMergeGuard, crmOwnershipPreflight, registerHandoffPackageProvider, registerHubspotAdapter } from '@/modules/crm';
 import { playbooksHandoffPackage } from '@/modules/playbooks';
 import { registerSourceValidator } from '@/modules/tenancy';
@@ -16,3 +18,4 @@ registerHubspotAdapter();
 registerOwnershipPreflight(crmOwnershipPreflight);
 registerMergeGuard(crmMergeGuard);
 registerHandoffPackageProvider(playbooksHandoffPackage);
+registerOfferUsage(scoringOfferUsage, routingOfferUsage);

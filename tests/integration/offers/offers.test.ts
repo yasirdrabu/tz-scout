@@ -125,20 +125,17 @@ describe('OFF-E2-S2 approve', () => {
     expect(audits.map((a) => a.action)).toContain('offers.offer.approved');
   });
 
-  it('AC1: a leader gets the owner copy', async () => {
-    const leader = await memberWith(t.tenantId, t.actor, 'leader');
-    const o = await draft('Leader Tries');
-    await expect(inTenant(t.tenantId, leader, (ctx) => approveOffer(ctx, o.id))).rejects.toMatchObject({
-      status: 403,
-      message: 'Only an owner can approve an offer.',
-    });
+  it('AC1 (Ruling 12): an operator approves too; offers:manage is checked by the route', async () => {
+    const operator = await memberWith(t.tenantId, t.actor, 'operator');
+    const o = await draft('Operator Tries');
+    await expect(inTenant(t.tenantId, operator, (ctx) => approveOffer(ctx, o.id))).resolves.toMatchObject({ status: 'approved' });
   });
 
   it('AC1: an API key (agent actor) cannot approve', async () => {
     const o = await draft('Key Tries');
     await expect(
       inTenant(t.tenantId, { kind: 'agent', id: 'key_1' }, (ctx) => approveOffer(ctx, o.id)),
-    ).rejects.toMatchObject({ status: 403, message: 'Only an owner can approve an offer.' });
+    ).rejects.toMatchObject({ status: 403, message: 'Only a person can approve an offer.' });
   });
 
   it('approving twice is quiet and publishes once', async () => {

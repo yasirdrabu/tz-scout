@@ -1,9 +1,10 @@
-import { and, asc, eq, ne } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, ne } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
+import { memberRole, userNames } from '@/modules/tenancy';
 import { practiceChanged } from '../contracts/events';
 import { offer, practice } from '../db/schema';
 import { slugify } from '../domain/slug';
@@ -17,7 +18,11 @@ export type PracticeInput = {
   defaultPlaybookId?: string | null;
   briefTemplateKey?: string | null;
   sort?: number;
+  /** A member of the workspace, shown as "Led by {name}"; null for none. */
+  leadUserId?: string | null;
 };
+/** A practice with its lead's name and how many offers it has that are not retired. */
+export type PracticeView = Practice & { leadName: string | null; offerCount: number };
 
 export const slugTaken = () => new ScoutError({ slug: 'slug-taken', status: 409, title: 'That short name is taken.' });
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That practice was not found.' });
@@ -52,6 +57,10 @@ export const rethrowTaken = (e: unknown): never => {
   throw isUniqueViolation(e) ? slugTaken() : e;
 };
 const pick = (o: Practice, keys: string[]) => Object.fromEntries(keys.map((k) => [k, o[k as keyof Practice]]));
+/** The lead must be a member of the workspace. */
+async function checkLead(ctx: ModuleContext, userId: string | null | undefined): Promise<void> {
+  if (userId && !(await memberRole(ctx, userId))) throw invalid('lead_user_id', 'That person is not a member of this workspace.');
+}
 const cleanKeywords = (keywords: string[]) => [...new Set(keywords.map((k) => k.trim()).filter(Boolean))];
 
 export async function createPractice(ctx: ModuleContext, input: PracticeInput): Promise<Practice> {
@@ -60,6 +69,7 @@ export async function createPractice(ctx: ModuleContext, input: PracticeInput): 
   const slug = slugify(input.slug ?? name);
   if (!slug) throw invalid('slug', 'Use letters or numbers in the short name.');
   await assertSlugFree(ctx, slug);
+  await checkLead(ctx, input.leadUserId);
   const [row] = await ctx.tx
     .insert(practice)
     .values({
@@ -72,6 +82,7 @@ export async function createPractice(ctx: ModuleContext, input: PracticeInput): 
       defaultPlaybookId: input.defaultPlaybookId ?? null,
       briefTemplateKey: input.briefTemplateKey ?? null,
       sort: input.sort ?? 0,
+      leadUserId: input.leadUserId ?? null,
     })
     .returning()
     .catch(rethrowTaken);
@@ -102,6 +113,10 @@ export async function updatePractice(
   if (patch.defaultPlaybookId !== undefined) set.defaultPlaybookId = patch.defaultPlaybookId;
   if (patch.briefTemplateKey !== undefined) set.briefTemplateKey = patch.briefTemplateKey;
   if (patch.sort !== undefined) set.sort = patch.sort;
+  if (patch.leadUserId !== undefined) {
+    await checkLead(ctx, patch.leadUserId);
+    set.leadUserId = patch.leadUserId;
+  }
 
   const changed = Object.keys(set).filter(
     (k) => JSON.stringify(set[k as keyof typeof set]) !== JSON.stringify(before[k as keyof Practice]),
@@ -126,17 +141,13 @@ export async function archivePractice(ctx: ModuleContext, id: string): Promise<P
   // The row lock serialises with approveOffer, which locks the practice FOR SHARE.
   const before = await load(ctx, id, true);
   if (before.status === 'archived') return before;
-  const blocking = await ctx.tx
-    .select({ name: offer.name })
+  const [blocking] = await ctx.tx
+    .select({ id: offer.id })
     .from(offer)
     .where(and(eq(offer.tenantId, ctx.tenantId), eq(offer.practiceId, id), eq(offer.status, 'approved')))
-    .orderBy(asc(offer.name));
-  if (blocking.length > 0) {
-    throw new ScoutError({
-      slug: 'practice-has-offers',
-      status: 409,
-      title: `Move or archive these offers first: ${blocking.map((o) => o.name).join(', ')}.`,
-    });
+    .limit(1);
+  if (blocking) {
+    throw new ScoutError({ slug: 'practice-has-offers', status: 409, title: 'Retire or move its active offers first.' });
   }
   const [row] = await ctx.tx
     .update(practice)
@@ -155,6 +166,33 @@ export async function listPractices(ctx: ModuleContext, opts: { includeArchived?
     .from(practice)
     .where(and(eq(practice.tenantId, ctx.tenantId), opts.includeArchived ? undefined : eq(practice.status, 'active')))
     .orderBy(asc(practice.sort), asc(practice.name));
+}
+
+/** Adds each practice's lead name and its count of offers that are not retired. */
+export async function practiceViews(ctx: ModuleContext, rows: Practice[]): Promise<PracticeView[]> {
+  if (rows.length === 0) return [];
+  const ids = rows.map((p) => p.id);
+  const counts = await ctx.tx
+    .select({ practiceId: offer.practiceId, n: count() })
+    .from(offer)
+    .where(and(eq(offer.tenantId, ctx.tenantId), inArray(offer.practiceId, ids), ne(offer.status, 'archived')))
+    .groupBy(offer.practiceId);
+  const byPractice = new Map(counts.map((c) => [c.practiceId, c.n]));
+  const names = await userNames(ctx, rows.flatMap((p) => (p.leadUserId ? [p.leadUserId] : [])));
+  return rows.map((p) => ({
+    ...p,
+    leadName: p.leadUserId ? (names.get(p.leadUserId) ?? null) : null,
+    offerCount: byPractice.get(p.id) ?? 0,
+  }));
+}
+
+export async function listPracticeViews(ctx: ModuleContext, opts: { includeArchived?: boolean } = {}): Promise<PracticeView[]> {
+  return practiceViews(ctx, await listPractices(ctx, opts));
+}
+
+/** One practice, archived ones too; another tenant's is a 404. */
+export async function getPractice(ctx: ModuleContext, id: string): Promise<PracticeView> {
+  return (await practiceViews(ctx, [await load(ctx, id)]))[0]!;
 }
 
 const NO_HINT = new Set(['', 'null', 'unknown']);

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createOffer, listOffers, type OfferInput } from '@/modules/offers';
+import { createOffer, listOffers, withLabel, withLabels, type OfferInput } from '@/modules/offers';
 import { can } from '@/modules/tenancy';
 import { ScoutError } from '@/platform/errors';
 import { parseBody } from '../_lib/body';
@@ -23,9 +23,9 @@ export const GET = v1Route({ permission: 'offers:read' }, async (req, principal,
     });
   }
   const status = can(principal, 'offers:manage') ? parsed?.data : 'approved';
-  return pageOfList(req, await listOffers(ctx, { practiceId: q.get('practice_id') ?? undefined, status }));
+  return pageOfList(req, await withLabels(ctx, await listOffers(ctx, { practiceId: q.get('practice_id') ?? undefined, status })));
 });
 
 export const POST = v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) =>
-  created(await createOffer(ctx, await parseBody<OfferInput>(req, createOfferBody))),
+  created(await withLabel(ctx, await createOffer(ctx, await parseBody<OfferInput>(req, createOfferBody)))),
 );

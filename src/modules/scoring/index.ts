@@ -23,3 +23,4 @@ export { getMatches, getScore, getScoreHistory, tierDetails, type OfferMatchView
 export { explainScore, type ScoreExplanation } from './services/explain';
 export { setTierOverride, type TierView } from './services/tier';
 export { causeInWords } from './domain/explain';
+export { scoringOfferUsage } from './services/offer-usage';

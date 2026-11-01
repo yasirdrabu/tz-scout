@@ -22,7 +22,7 @@ All v1 responses are snake_case JSON (`v1Route` runs `snakeCase`); field names b
 | scoring | 12 | 4 | 0 | 2 | 3 | 21 |
 | intake | 27 | 10 | 0 | 4 | 6 | 47 |
 | crm | 8 | 2 | 0 | 1 | 1 | 12 |
-| offers | 15 | 7 | 0 | 3 | 3 | 28 |
+| offers | 25 | 0 | 0 | 0 | 3 | 28 |
 | integrations | 1 | 5 | 5 | 1 | 3 | 15 |
 | ai-tasks | 0 | 2 | 1 | 5 | 1 | 9 |
 | platform | 1 | 8 | 11 | 1 | 2 | 23 |
@@ -831,26 +831,26 @@ services `src/modules/offers/services/{offers,practices}.ts`; schema `src/module
 | 3 | Best offer select options | READY | `GET /api/v1/offers?status=approved` | `lead_offer_id` rejects non-approved offers (400). |
 | 6, 7 | "{offer} · {practice}" sub-line | READY | `GET /api/v1/offers/{id}` | Has `practice_id`; join `/practices`. |
 | 19 | Practice tree: name, status | READY | `GET /api/v1/practices` | |
-| 19 | Offer count per practice | SMALL GAP | `GET /api/v1/practices` `offer_count` | Non-archived offers (C8). |
+| 19 | Offer count per practice | READY | `GET /api/v1/practices` `offer_count` | Non-archived offers (C8), on the list, the read, create and patch. |
 | 19 | Positioning | READY | `practice.description` | Label only. |
-| 19 | "Led by {lead}", practice lead picker | SMALL GAP | `POST/PATCH /api/v1/practices` `lead_user_id`; read `lead_name` | No lead column on `offers.practice`; must be a member. |
-| 19 | Read one practice (deep link) | SMALL GAP | `GET /api/v1/practices/{id}` | Only POST and PATCH today. |
+| 19 | "Led by {lead}", practice lead picker | READY | `POST/PATCH /api/v1/practices` `lead_user_id`; read `lead_name` | `offers.practice.lead_user_id` (offers 0002). A member, else 400 at `lead_user_id` "That person is not a member of this workspace."; null clears it. Picker from `GET /api/v1/members/directory`. |
+| 19 | Read one practice (deep link) | READY | `GET /api/v1/practices/{id}` (`offers:read`) | With `lead_name` and `offer_count`; an archived practice opens; another tenant's is a 404. |
 | 19 | Offers per practice with status | READY | `GET /api/v1/offers?practice_id=&status=` | `draft`, `approved`, `archived` map to Draft, Active, Retired. |
-| 19 | Card: title, status, summary, price | SMALL GAP | `GET /api/v1/offers` | Has name, promise, description, `price_min_cents`, `price_max_cents`. Missing `price_model` (fixed, starting_at, per_month, custom) and `length_weeks`. Decision 16. |
-| 19 | "{n} accounts matched · {n} won"; Accounts matched, Won, Win rate | NEW ENDPOINT | `GET /api/v1/offers/stats` (`offers:read`, data-limited) | Matched = `scoring.offer_match` with tier not `not_fit`; won = `account_summary.stage='won'` by `best_offer_id`. Cross-module: compose in the route or a scoring read. Attributed win rate is analytics (R3): label these "current". |
+| 19 | Card: title, status, summary, price | READY | `GET /api/v1/offers` | Every offer response adds `price_model`, `length_weeks`, `price_label` (Ruling 13, in the workspace currency) and `status_label` (Active, Draft, Retired). |
+| 19 | "{n} accounts matched · {n} won"; Accounts matched, Won, Win rate | READY | `GET /api/v1/offers/stats?practice_id=` (`offers:read`, data-limited) | `{data:[{offer_id, practice_id, matched, won, win_rate}]}`. Matched = current `scoring.offer_match` not `not_fit`; won = stage `won` with the offer as lead offer (the pick, else best); `win_rate` a whole percent, null at 0 matched. Answered by scoring through the `OfferUsage` port. Approved offers only without `offers:manage`. Attributed win rate is analytics (R3): label these "current". |
 | 19 | Offer view: breadcrumb, title, status, "Updated {date}" | READY | `GET /api/v1/offers/{id}` | `updated_at`, `status`, `practice_id`, `case_studies`. A draft is 404 without `offers:manage`. |
 | 19 | `See accounts for this offer` | READY | `GET /api/v1/accounts?offer_id=` | Filters on best offer. |
-| 19 | Sections Summary, Ideal customer, Key offer, Why us, Why now | SMALL GAP | `GET/PATCH /api/v1/offers/{id}` | Only `promise`, `description` and structured buyer fields. Decision 16. |
+| 19 | Sections Summary, Ideal customer, Key offer, Why us, Why now | READY | `GET/PATCH /api/v1/offers/{id}` | Summary `promise`, Ideal customer `description`, plus `key_offer`, `why_us`, `why_now` (up to 4,000 characters). Content edits keep an approved offer approved. |
 | 19 | Proof points | READY | `proof_points` (text[]) | |
 | 19 | Create offer | READY | `POST /api/v1/offers` (`offers:manage`) | Requires `name`, `practice_id`, `promise`; slug auto; 201. |
 | 19 | Edit offer | READY | `PATCH /api/v1/offers/{id}` (`offers:manage`) | Editing a buyer field on an approved offer drops it to draft with `warning` (show it). Archived: 409 `offer-archived`. |
-| 19 | Status Active | SMALL GAP | `POST /api/v1/offers/{id}:approve` | Owner only; needs `typical_deal_cents`, `sales_cycle_days`, a target title or role, industries or size, else 400 `offer-incomplete` with `errors[]`. Decision 15. |
-| 19 | Status back to Draft | NEW ENDPOINT | `POST /api/v1/offers/{id}:unapprove` (`offers:manage`) | Draft today only as a side effect of a buyer edit. |
+| 19 | Status Active | READY | `POST /api/v1/offers/{id}:approve` (`offers:manage`, people only) | Needs `typical_deal_cents`, `sales_cycle_days`, a target title or role, industries or size, else 400 `offer-incomplete` with `errors[]`. Decision 15. |
+| 19 | Status back to Draft | READY | `POST /api/v1/offers/{id}:unapprove` (`offers:manage`, people only) | Approved to draft, approver cleared, publishes `offers.offer.changed` (`affectsMatching`), so scoring rescores. A draft stays; retired is 409. |
 | 19 | `Retire` | READY | `POST /api/v1/offers/{id}:archive` (`offers:manage`) | Idempotent; no un-retire. |
-| 19 | `Delete offer` (never matched); Retire vs Delete choice | NEW ENDPOINT | `DELETE /api/v1/offers/{id}` (`offers:manage`) -> 204 or 409 `offer-has-history`; choice from `GET /api/v1/offers/stats` `matched` | Allowed only when no `offer_match` ever existed and nothing references it; cascade signal rules and case-study links; audit. |
+| 19 | `Delete offer` (never matched); Retire vs Delete choice | READY | `DELETE /api/v1/offers/{id}` (`offers:manage`, people only) -> 204 or 409 `offer-has-history`; choice from `can_delete` on `GET /api/v1/offers/{id}` | Never matched = no `offer_match`, no `score_change` naming it, no lead offer pick now or in `lead_offer_change` (the `OfferUsage` port, scoring and routing). Removes its signal rules and case-study links; audited `offers.offer.deleted`; an approved one also publishes `offers.offer.archived`. |
 | 19 | `Duplicate` | READY | `GET` then `POST /api/v1/offers` | Client copies fields into a draft. |
 | 19 | Create, edit practice | READY | `POST /api/v1/practices`, `PATCH /api/v1/practices/{id}` (`offers:manage`) | name, description, keywords, default playbook, brief template, sort. Lead missing (row above). |
-| 19 | `Delete practice` ("Move or delete its offers first") | SMALL GAP | `POST /api/v1/practices/{id}:archive` | Archive only; blocks only while approved offers exist (409 `practice-has-offers`). Decision 15. |
+| 19 | `Delete practice` ("Move or delete its offers first") | READY | `POST /api/v1/practices/{id}:archive` | Archive only; blocks only while approved offers exist: 409 `practice-has-offers` "Retire or move its active offers first.". Decision 15. |
 | 19 | Initial message with Copy | LATER (R2) | none | Better owned by playbook templates. |
 | 19 | Seller guide: talking points, objections, avoid | LATER (R2) | none | Tagged R2 in screens.md. |
 | 19 | Playbook by tier, "{n} steps over {d} days", "{x}% book a meeting" | LATER (R2) | none | No offer-to-playbook-by-tier mapping; practice has `default_playbook_id` only. Rates R3. Decision 25. |
