@@ -151,3 +151,23 @@ export async function pageArrivals(
 export async function findArrival(ctx: ModuleContext, id: string): Promise<ArrivalRow | null> {
   return (await pageArrivals(ctx, { where: [eq(arrival.id, id)], limit: 1 })).data[0] ?? null;
 }
+
+/** How many arrivals `pageArrivals` would list with this `where`: one count when the chain decides, else page by page. */
+export async function countArrivals(ctx: ModuleContext, where: (SQL | undefined)[]): Promise<number> {
+  const scope = await visibleArrivals(ctx);
+  if (!scope.viaAccounts) {
+    const [row] = await ctx.tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(arrival)
+      .where(and(eq(arrival.tenantId, ctx.tenantId), chainInScope(scope, arrivalChain), ...where));
+    return row?.n ?? 0;
+  }
+  let n = 0;
+  let cursor: string | undefined;
+  do {
+    const page = await pageArrivals(ctx, { where, cursor, limit: 200 });
+    n += page.data.length;
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return n;
+}

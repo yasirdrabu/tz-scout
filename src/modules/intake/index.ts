@@ -133,8 +133,10 @@ export {
 } from './services/mappings';
 export { attachFile, listBatchFiles, readFile, type BatchFileView, type FileInput, type StoredFile } from './services/files';
 export {
+  CREDIT_ANOTHER_SOURCE,
   confirmImport,
   createImport,
+  discardImport,
   getImport,
   previewImport,
   setImportChunkSize,
@@ -142,3 +144,20 @@ export {
   type ImportView,
 } from './services/imports';
 export { registerReviewStatusValidator, type ReviewStatusValidator } from './contracts/ports';
+export {
+  ITEM_STATUSES,
+  fileIdOf,
+  listBatchItemRows,
+  listBatchRows,
+  readBatchFile,
+  readBatchRow,
+  rejectionRows,
+  type BatchDetailRow,
+  type BatchItemView,
+  type BatchListFilters,
+  type BatchRowView,
+  type ItemStatus,
+  type RejectionRow,
+} from './services/batches-read';
+export { BATCH_STATUS_KEYS, BATCH_STATUS_LABELS, type BatchStatusKey } from './domain/batch-status';
+export { retryBatch } from './services/retry';

@@ -58,14 +58,22 @@ export async function workspace(name = 'Review Co') {
     return u.id;
   };
 
-  const as = (userId: string, handler: Handler, path: string, method = 'GET', body?: unknown) =>
-    handler(
+  /** A request as the person; a FormData body goes as multipart, anything else as JSON. */
+  const as = (userId: string, handler: Handler, path: string, method = 'GET', body?: unknown) => {
+    const form = body instanceof FormData;
+    return handler(
       new Request(`http://localhost:4240/api/v1/${path}`, {
         method,
-        headers: { cookie: cookies.get(userId)!, 'x-scout-tenant': slug, origin: 'http://localhost:4240', 'content-type': 'application/json' },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        headers: {
+          cookie: cookies.get(userId)!,
+          'x-scout-tenant': slug,
+          origin: 'http://localhost:4240',
+          ...(form ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: form ? body : JSON.stringify(body) }),
       }),
     );
+  };
 
   const account = (accountName = 'Route Co', agentSourceId = source.agentId) => arrivedAccount(tenant, { name: accountName, sourceChain: { agentSourceId } });
 

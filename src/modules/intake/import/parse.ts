@@ -174,6 +174,12 @@ async function readWorkbook(bytes: Uint8Array, want: string | undefined): Promis
   }
 }
 
+/** The kind of file, in the words the import shows (`file.type`). */
+export function fileTypeLabel(fileName: string, contentType?: string): 'CSV' | 'Excel' | 'Markdown' {
+  const ext = extensionOf(fileName, contentType);
+  return ext === 'xlsx' || ext === 'xls' ? 'Excel' : ext === 'md' || ext === 'markdown' ? 'Markdown' : 'CSV';
+}
+
 function extensionOf(fileName: string, contentType?: string): string {
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
   if (['csv', 'tsv', 'txt', 'md', 'markdown', 'xlsx', 'xls'].includes(ext)) return ext;

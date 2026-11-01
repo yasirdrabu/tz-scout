@@ -56,8 +56,10 @@ import * as v1Assignments from './routes/v1/assignments/route';
 import * as v1Audit from './routes/v1/audit/route';
 import * as v1AuthConfig from './routes/v1/auth/config/route';
 import * as v1BuyingRoles from './routes/v1/buying-roles/route';
+import * as v1BatchesIdFilesFileId from './routes/v1/batches/[id]/files/[fileId]/route';
 import * as v1BatchesIdFiles from './routes/v1/batches/[id]/files/route';
 import * as v1BatchesIdItems from './routes/v1/batches/[id]/items/route';
+import * as v1BatchesIdRejections from './routes/v1/batches/[id]/rejections/route';
 import * as v1BatchesId from './routes/v1/batches/[id]/route';
 import * as v1Batches from './routes/v1/batches/route';
 import * as v1CaseStudiesId from './routes/v1/case-studies/[id]/route';
@@ -188,8 +190,10 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/audit`, module: v1Audit },
   { path: `${V1}/auth/config`, module: v1AuthConfig },
   { path: `${V1}/buying-roles`, module: v1BuyingRoles },
+  { path: `${V1}/batches/:id/files/:fileId`, module: v1BatchesIdFilesFileId },
   { path: `${V1}/batches/:id/files`, module: v1BatchesIdFiles },
   { path: `${V1}/batches/:id/items`, module: v1BatchesIdItems },
+  { path: `${V1}/batches/:id/rejections`, module: v1BatchesIdRejections },
   { path: `${V1}/batches/:id`, module: v1BatchesId },
   { path: `${V1}/batches`, module: v1Batches },
   { path: `${V1}/case-studies/:id`, module: v1CaseStudiesId },

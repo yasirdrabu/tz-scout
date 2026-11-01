@@ -1,3 +1,4 @@
+import type { ImportView } from '@/modules/intake';
 import { ScoutError } from '@/platform/errors';
 
 export const JSON_MAX_BYTES = 5 * 1024 * 1024;
@@ -112,4 +113,56 @@ export function withoutContacts<T>(value: T): T {
 /** The AI suggester's reasons may quote cells from the file, so they are shown only with people:read. */
 export function withoutReasons<T extends { reason?: string }>(mapping: T[]): Omit<T, 'reason'>[] {
   return mapping.map(({ reason: _reason, ...rest }) => rest);
+}
+
+/**
+ * `Content-Disposition` for a download: the name with quotes, backslashes, control and non-ASCII characters replaced
+ * in `filename`, and the exact name in `filename*` when they differ, so a file name can't break the header.
+ */
+export function attachment(fileName: string): string {
+  const safe = fileName.replace(/[^\x20-\x7e]|["\\]/g, '_').trim() || 'download';
+  return safe === fileName ? `attachment; filename="${safe}"` : `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+/** A stored content type, or `application/octet-stream` when it is not a plain `type/subtype` (with parameters). */
+export function safeContentType(type: string): string {
+  return /^[\w.+-]+\/[\w.+-]+(\s*;\s*[\w.+-]+=[\w.+"-]+)*$/.test(type) ? type : 'application/octet-stream';
+}
+
+/** One CSV cell: a value a spreadsheet would read as a formula gets a leading `'`, then quotes where needed. */
+export function csvCell(value: string | number | null | undefined): string {
+  let s = value === null || value === undefined ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+export const csvLine = (cells: (string | number | null | undefined)[]): string => cells.map(csvCell).join(',');
+
+const CONTACT_TARGET = /^people\[\d+\]\.(email|phone|linkedin_url)$/;
+const LOOKS_LIKE_CONTACT = /@|^\+?[\d\s().-]{7,}$|linkedin\.com\/in\//i;
+
+/**
+ * The file's first rows for the Match step. Without `people:read`, cells in columns mapped to a person's email, phone or
+ * LinkedIn page are blanked, and so is any other cell that looks like one.
+ */
+export function sampleRowsFor(view: Pick<ImportView, 'sampleRows' | 'headers' | 'mapping'>, peopleRead: boolean): string[][] {
+  if (peopleRead) return view.sampleRows;
+  const target = new Map(view.mapping.map((c) => [c.header, c.target]));
+  const hidden = view.headers.map((h) => CONTACT_TARGET.test(target.get(h) ?? ''));
+  return view.sampleRows.map((row) => row.map((cell, i) => (hidden[i] || LOOKS_LIKE_CONTACT.test(cell.trim()) ? '' : cell)));
+}
+
+/** What the Match step reads beside the mapping (§15), the same on the 202 and on GET /imports/{id}. */
+export function importExtras(view: ImportView, peopleRead: boolean) {
+  const { storageKey: _storageKey, ...file } = view.file;
+  return {
+    file,
+    sampleRows: sampleRowsFor(view, peopleRead),
+    targets: view.targets,
+    uploadedBy: view.uploadedBy,
+    source: view.source,
+    notes: view.notes,
+    mappingOrigin: view.mappingOrigin,
+    suggestedCount: view.suggestedCount,
+  };
 }

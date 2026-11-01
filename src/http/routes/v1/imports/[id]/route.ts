@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { confirmImport, getImport, previewImport } from '@/modules/intake';
+import { confirmImport, discardImport, getImport, previewImport } from '@/modules/intake';
 import { can } from '@/modules/tenancy';
 import { parseBody } from '../../_lib/body';
-import { withoutContacts, withoutReasons } from '../../_lib/intake';
+import { importExtras, withoutContacts, withoutReasons } from '../../_lib/intake';
 import { idAndAction, notFound } from '../../_lib/path';
-import { accepted, v1Route } from '../../_lib/v1-route';
+import { accepted, noContent, v1Route } from '../../_lib/v1-route';
 
 const column = z.strictObject({
   header: z.string(),
@@ -20,9 +20,9 @@ export const GET = v1Route({ permission: 'imports:run' }, async (req, principal,
   if (action) throw notFound();
   const found = await getImport(ctx, id);
   if (!found) throw notFound();
-  const { storageKey: _storageKey, ...file } = found.file;
-  const mapping = can(principal, 'people:read') ? found.mapping : withoutReasons(found.mapping);
-  return { ...found, mapping, file };
+  const peopleRead = can(principal, 'people:read');
+  const mapping = peopleRead ? found.mapping : withoutReasons(found.mapping);
+  return { ...found, ...importExtras(found, peopleRead), mapping };
 });
 
 // POST /api/v1/imports/{id}:preview and /api/v1/imports/{id}:confirm
@@ -40,4 +40,12 @@ export const POST = v1Route({ permission: 'imports:run' }, async (req, principal
     : undefined;
   const preview = await previewImport(ctx, id, given);
   return can(principal, 'people:read') ? preview : withoutContacts(preview);
+});
+
+/** Ruling 11: discards an import that waits for its columns to be confirmed (`Use a different file`). Again is a 204 too. */
+export const DELETE = v1Route({ permission: 'imports:run', peopleOnly: true }, async (req, _principal, ctx) => {
+  const { id, action } = idAndAction(req, 'imports');
+  if (action) throw notFound();
+  await discardImport(ctx, id);
+  return noContent();
 });

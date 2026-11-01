@@ -1,4 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
+import { userNames } from '@/modules/tenancy';
+import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { enqueueJob, publish } from '@/platform/events/outbox';
@@ -6,17 +8,18 @@ import { newId } from '@/platform/ids';
 import type { ArrivalV1 } from '../contracts/arrival';
 import { batchCreated } from '../contracts/events';
 import { importRunJob } from '../contracts/jobs';
-import { batch, batchFile, fileImport } from '../db/schema';
+import { batch, batchFile, fileBlob, fileImport, source } from '../db/schema';
+import { normaliseArrival } from '../domain/normalise-arrival';
 import { LAYOUTS } from '../import/layouts';
-import { FileParseError, parseFile, type ParsedFile } from '../import/parse';
+import { FileParseError, fileTypeLabel, parseFile, type ParsedFile } from '../import/parse';
 import { rowsToArrivals, type SkippedRow } from '../import/rows-to-arrivals';
-import type { MappingColumn } from '../import/synonyms';
+import { IMPORT_TARGETS, MIN_CONFIDENCE, isAllowedTarget, targetLabel, type MappingColumn } from '../import/synonyms';
 import { storeFile, readFile } from './files';
 import { chooseMapping, cleanChosen, hasRequiredFields, saveMapping, type MappingOrigin } from './mappings';
 import { settleBatch } from './resolve';
-import { loadSource } from './sources';
+import { loadSource, visibleSourceIds } from './sources';
 import { getBatch, listArrivals } from './status';
-import { senderOf, storeItems, vendorChain } from './submit';
+import { senderOf, storeItems, vendorChain, type Sender } from './submit';
 
 // SRC-E4: a file import is a batch with the original file attached. Parse first, store second, submit one arrival per company.
 
@@ -36,6 +39,10 @@ type RunStats = {
   skipped?: SkippedRow[];
   /** Why the import stopped, when it is `failed`. */
   error?: string;
+  /** `paused` when it stopped because its source was paused: a retry picks it up again (Ruling 8). */
+  stopped?: 'paused' | 'other';
+  /** The first rows of the file, for the Match step's sample values. */
+  sampleRows?: string[][];
 };
 
 export type ImportCreated =
@@ -53,7 +60,30 @@ export type ImportCreated =
     };
 
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That import was not found.' });
-const invalid = (title: string) => new ScoutError({ slug: 'validation', status: 400, title });
+const invalid = (title: string, path?: string) =>
+  new ScoutError({ slug: 'validation', status: 400, title, ...(path ? { errors: [{ path, message: title }] } : {}) });
+
+export const MAX_IMPORT_NOTES = 1000;
+export const MAX_IMPORT_NAME = 200;
+export const CREDIT_ANOTHER_SOURCE = 'Only people who manage sources can credit another source.';
+/** Kinds an import may credit (Ruling 10). */
+const CREDITABLE = ['person', 'partner', 'list'];
+
+/**
+ * The source the import credits: the caller's own, or the `sourceId` they named (Ruling 10). Naming another source
+ * needs `canCredit` (a person with `sources:manage`); it must be one they can see and an active person, partner or
+ * list source. A paused one is refused as any paused sender is.
+ */
+async function creditedSender(ctx: ModuleContext, sourceId: string | undefined, canCredit: boolean): Promise<Sender> {
+  if (!sourceId || sourceId === ctx.access?.sourceId) return senderOf(ctx);
+  if (!canCredit) throw new ScoutError({ slug: 'forbidden', status: 403, title: 'Forbidden', detail: CREDIT_ANOTHER_SOURCE });
+  const visible = await visibleSourceIds(ctx);
+  const row = visible && !visible.includes(sourceId) ? undefined : await loadSource(ctx, sourceId);
+  if (!row) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That source was not found.' });
+  if (!CREDITABLE.includes(row.kind)) throw invalid('Pick a person, partner or list source.', 'source_id');
+  if (row.status === 'archived') throw invalid('That source is archived. Pick an active one.', 'source_id');
+  return senderOf({ ...ctx, access: { ...ctx.access!, sourceId } });
+}
 
 async function parse(file: { fileName: string; contentType?: string; bytes: Uint8Array }, sheet?: string): Promise<ParsedFile> {
   try {
@@ -72,9 +102,26 @@ async function parse(file: { fileName: string; contentType?: string; bytes: Uint
  */
 export async function createImport(
   ctx: ModuleContext,
-  input: { fileName: string; contentType: string; bytes: Uint8Array; sheet?: string; vendorSourceId?: string },
+  input: {
+    fileName: string;
+    contentType: string;
+    bytes: Uint8Array;
+    sheet?: string;
+    vendorSourceId?: string;
+    /** The source to credit (Ruling 10); the caller's own when left out. */
+    sourceId?: string;
+    /** The caller may credit another source: a person with `sources:manage`. */
+    canCredit?: boolean;
+    notes?: string;
+    /** The batch name; the file name when left out. */
+    name?: string;
+  },
 ): Promise<ImportCreated> {
-  const sender = await senderOf(ctx);
+  const notes = input.notes?.trim() || null;
+  if (notes && notes.length > MAX_IMPORT_NOTES) throw invalid('Notes can be up to 1,000 characters.', 'notes');
+  const given = input.name?.trim();
+  if (given && given.length > MAX_IMPORT_NAME) throw invalid('A batch name can be up to 200 characters.', 'name');
+  const sender = await creditedSender(ctx, input.sourceId, input.canCredit ?? false);
   if (input.vendorSourceId) {
     const vendor = await loadSource(ctx, input.vendorSourceId);
     if (!vendor || vendor.kind !== 'vendor' || vendor.status === 'archived') throw invalid('Choose a vendor from the list.');
@@ -88,7 +135,7 @@ export async function createImport(
   const chain = vendorChain(sender.chain, input.vendorSourceId) ?? sender.chain;
   const batchId = newId('bat');
   const runAt = new Date();
-  const name = parsed.sheet && parsed.sheets.length > 1 ? `${input.fileName} (${parsed.sheet})` : input.fileName;
+  const name = given || (parsed.sheet && parsed.sheets.length > 1 ? `${input.fileName} (${parsed.sheet})` : input.fileName);
   await ctx.tx.insert(batch).values({
     id: batchId,
     tenantId: ctx.tenantId,
@@ -98,6 +145,7 @@ export async function createImport(
     principal: `${ctx.actor.kind}:${ctx.actor.id}`,
     name,
     runAt,
+    notes,
   });
   const file = await storeFile(ctx, batchId, input);
 
@@ -115,7 +163,7 @@ export async function createImport(
     mapping: chosen.mapping,
     mappingOrigin: chosen.origin,
     status,
-    stats: { sheet: parsed.sheet } satisfies RunStats,
+    stats: { sheet: parsed.sheet, sampleRows: parsed.rows.slice(0, 5) } satisfies RunStats,
   });
   if (status === 'queued') await enqueueJob(ctx, importRunJob, { importId: id });
   return {
@@ -160,11 +208,16 @@ export async function previewImport(
   ctx: ModuleContext,
   importId: string,
   mapping?: MappingColumn[],
-): Promise<{ arrivals: ArrivalV1[]; total: number; skipped: SkippedRow[] }> {
+): Promise<{ arrivals: ArrivalV1[]; total: number; skipped: SkippedRow[]; withoutWebsite: number; goAhead: number }> {
   const imp = await loadImport(ctx, importId);
   if (!imp) throw notFound();
   const { drafts, skipped } = await draftsOf(ctx, imp, mapping ? cleanChosen(mapping) : ((imp.mapping as MappingColumn[] | null) ?? []));
-  return { arrivals: drafts.slice(0, 5).map((d) => d.body), total: drafts.length, skipped };
+  // Held in the batch until someone adds a website: no domain and no LinkedIn page to find the company by.
+  const withoutWebsite = drafts.filter((d) => {
+    const n = normaliseArrival(d.body, null);
+    return !n.account.domain && !n.account.linkedinUrl;
+  }).length;
+  return { arrivals: drafts.slice(0, 5).map((d) => d.body), total: drafts.length, skipped, withoutWebsite, goAhead: drafts.length - withoutWebsite };
 }
 
 /** Saves the confirmed mapping for the source and its headers, then queues the run. */
@@ -223,7 +276,8 @@ export async function runImport(ctx: ModuleContext, importId: string, cursor = 0
     sender = await senderOf(sending);
   } catch (e) {
     if (!(e instanceof ScoutError)) throw e;
-    await setImport({ status: 'failed', stats: { ...stats, error: `Import stopped: ${e.message}` } });
+    const paused = (await loadSource(ctx, imp.sourceId))?.status === 'paused';
+    await setImport({ status: 'failed', stats: { ...stats, error: `Import stopped: ${e.message}`, stopped: paused ? 'paused' : 'other' } });
     await settleBatch(ctx, batchId);
     return;
   }
@@ -276,7 +330,16 @@ export type ImportView = {
   headers: string[];
   rowCount: number;
   mapping: MappingColumn[];
-  file: { storageKey: string; contentType: string; sizeBytes: number; sha256: string };
+  file: { storageKey: string; contentType: string; sizeBytes: number; sha256: string; name: string; type: 'CSV' | 'Excel' | 'Markdown'; sheet: string | null };
+  /** The first rows of the file. Callers without `people:read` blank the contact columns. */
+  sampleRows: string[][];
+  /** The fields a column can map to, with their words. */
+  targets: { key: string | null; label: string }[];
+  uploadedBy: { userId: string | null; name: string };
+  source: { id: string; name: string; kind: string } | null;
+  notes: string | null;
+  /** Columns Scout suggested a field for. */
+  suggestedCount: number;
   stats: {
     /** Companies the file made. */
     companies: number;
@@ -311,6 +374,14 @@ export async function getImport(ctx: ModuleContext, id: string): Promise<ImportV
   } while (cursor);
 
   const run = (imp.stats ?? {}) as RunStats;
+  const [b] = await ctx.tx.select({ principal: batch.principal, notes: batch.notes }).from(batch).where(and(eq(batch.tenantId, ctx.tenantId), eq(batch.id, batchId)));
+  const [src] = await ctx.tx.select({ id: source.id, name: source.name, kind: source.kind }).from(source).where(and(eq(source.tenantId, ctx.tenantId), eq(source.id, imp.sourceId)));
+  const [actorKind, actorId] = (b?.principal ?? '').split(':');
+  const uploader = actorKind === 'user' && actorId ? ((await userNames(ctx, [actorId])).get(actorId) ?? 'A former member') : 'An API key';
+  const mapping = (imp.mapping as MappingColumn[] | null) ?? [];
+  const known = new Set(IMPORT_TARGETS.map((t) => t.key));
+  // A target outside the list (a custom field, a second person) is added so the select can show it.
+  const extra = [...new Set(mapping.map((c) => c.target).filter((t): t is string => !!t && !known.has(t) && isAllowedTarget(t)))];
   return {
     id: imp.id,
     batchId,
@@ -321,7 +392,21 @@ export async function getImport(ctx: ModuleContext, id: string): Promise<ImportV
     headers: (imp.headers as string[] | null) ?? [],
     rowCount: imp.rowCount ?? 0,
     mapping: (imp.mapping as MappingColumn[] | null) ?? [],
-    file: { storageKey: file!.storageKey, contentType: file!.contentType, sizeBytes: file!.sizeBytes, sha256: file!.sha256 },
+    file: {
+      storageKey: file!.storageKey,
+      contentType: file!.contentType,
+      sizeBytes: file!.sizeBytes,
+      sha256: file!.sha256,
+      name: imp.fileName,
+      type: fileTypeLabel(imp.fileName, file!.contentType),
+      sheet: run.sheet ?? null,
+    },
+    sampleRows: run.sampleRows ?? [],
+    targets: [...IMPORT_TARGETS, ...extra.map((key) => ({ key, label: targetLabel(key) }))],
+    uploadedBy: { userId: actorKind === 'user' ? (actorId ?? null) : null, name: uploader },
+    source: src ?? null,
+    notes: b?.notes ?? null,
+    suggestedCount: mapping.filter((c) => c.target !== null && c.confidence >= MIN_CONFIDENCE).length,
     stats: {
       companies: run.companies ?? 0,
       created: detail.counts.newAccounts,
@@ -332,4 +417,61 @@ export async function getImport(ctx: ModuleContext, id: string): Promise<ImportV
       error: run.error ?? null,
     },
   };
+}
+
+/**
+ * Ruling 11: discards an import that still waits for its columns to be confirmed. It becomes `cancelled`, its stored
+ * file is deleted, and its batch (left with no rows) drops out of the batch list. Discarding it again does nothing.
+ */
+export async function discardImport(ctx: ModuleContext, id: string): Promise<void> {
+  const [imp] = await ctx.tx
+    .select()
+    .from(fileImport)
+    .where(and(eq(fileImport.tenantId, ctx.tenantId), eq(fileImport.id, id)))
+    .for('update');
+  if (!imp?.batchId || !(await getBatch(ctx, imp.batchId, { includeCancelled: true }))) throw notFound();
+  if (imp.status === 'cancelled') return;
+  if (imp.status !== 'needs_confirm') {
+    throw new ScoutError({ slug: 'conflict', status: 409, title: "This import has started, so it can't be discarded." });
+  }
+  await ctx.tx.delete(batchFile).where(and(eq(batchFile.tenantId, ctx.tenantId), eq(batchFile.batchId, imp.batchId), eq(batchFile.storageKey, imp.storageKey)));
+  await ctx.tx.delete(fileBlob).where(and(eq(fileBlob.tenantId, ctx.tenantId), eq(fileBlob.storageKey, imp.storageKey)));
+  await ctx.tx
+    .update(fileImport)
+    .set({ status: 'cancelled', updatedAt: new Date() })
+    .where(and(eq(fileImport.tenantId, ctx.tenantId), eq(fileImport.id, id)));
+  await audit(ctx, { action: 'intake.import.discarded', subject: { type: 'import', id }, before: { status: imp.status }, after: { status: 'cancelled', batchId: imp.batchId } });
+}
+
+/**
+ * Picks up an import that stopped because its source was paused (Ruling 8): it is queued again from where it stopped.
+ * Returns how many companies are left to send; 0 when it did not stop that way. The caller has checked the source can send.
+ */
+export async function resumeStoppedImport(ctx: ModuleContext, batchId: string): Promise<number> {
+  const [imp] = await ctx.tx
+    .select()
+    .from(fileImport)
+    .where(and(eq(fileImport.tenantId, ctx.tenantId), eq(fileImport.batchId, batchId), eq(fileImport.status, 'failed')))
+    .for('update');
+  const stats = (imp?.stats ?? {}) as RunStats;
+  if (!imp || stats.stopped !== 'paused') return 0;
+  const cursor = stats.cursor ?? 0;
+  const left = Math.max(0, (stats.companies ?? imp.rowCount ?? 0) - cursor);
+  if (left === 0) return 0;
+  const { error: _error, stopped: _stopped, ...rest } = stats;
+  await ctx.tx
+    .update(fileImport)
+    .set({ status: 'queued', stats: rest, updatedAt: new Date() })
+    .where(and(eq(fileImport.tenantId, ctx.tenantId), eq(fileImport.id, imp.id)));
+  await enqueueJob(ctx, importRunJob, { importId: imp.id, cursor });
+  return left;
+}
+
+/** The source of the batch's import when it stopped because that source was paused, else null. */
+export async function stoppedImportSource(ctx: ModuleContext, batchId: string): Promise<string | null> {
+  const [imp] = await ctx.tx
+    .select({ sourceId: fileImport.sourceId, stats: fileImport.stats })
+    .from(fileImport)
+    .where(and(eq(fileImport.tenantId, ctx.tenantId), eq(fileImport.batchId, batchId), eq(fileImport.status, 'failed')));
+  return imp && (imp.stats as RunStats | null)?.stopped === 'paused' ? imp.sourceId : null;
 }
