@@ -22,7 +22,7 @@ export const hasLinkOrEmail = (s: string) =>
 /** Task input caps (Global Constraints). */
 export const INPUT_CAPS = { signals: 20, facts: 40, people: 15, notes: 10, caseStudies: 3 } as const;
 
-const tier = z.enum(['not_fit', 'watch', 'good_fit', 'act_now']);
+const tier = z.enum(['not_fit', 'nurture', 'watch', 'good_fit', 'act_now']);
 
 export const briefInputSchema = z.object({
   account: z.object({

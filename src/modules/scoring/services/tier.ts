@@ -7,7 +7,7 @@ import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { accountScored } from '../contracts/events';
-import { TIERS, type Tier } from '../contracts/types';
+import { TIERS, type RevenueBand, type Tier } from '../contracts/types';
 import { accountScore, scoreChange } from '../db/schema';
 
 const MAX_NOTE = 4000;
@@ -101,7 +101,7 @@ export async function setTierOverride(ctx: ModuleContext, accountId: string, inp
       bestOfferId: row!.bestOfferId,
       previousBestOfferId: prev.bestOfferId,
       practiceId: row!.practiceId,
-      revenueBand: null,
+      revenueBand: row!.revenueBand as RevenueBand | null,
       cause: 'tier_override',
       profileVersion: row!.profileVersion,
       version: row!.version,

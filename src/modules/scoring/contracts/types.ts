@@ -99,6 +99,10 @@ export type ScoringOffer = {
   companySizeMax: number | null;
   revenueMinCents: number | null;
   revenueMaxCents: number | null;
+  typicalDealCents: number | null;
+  priceMinCents: number | null;
+  /** Extra yearly value as a share of the deal, 0.2 for 20%. */
+  expansionRate: number | null;
   regions: string[];
   targetTitles: string[];
   targetBuyingRoles: string[];

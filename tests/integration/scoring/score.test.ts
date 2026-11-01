@@ -5,7 +5,7 @@ import { upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { account } from '@/modules/accounts/db/schema';
 import { getArrival, intakeSourceInfo, registerSource, submitArrival } from '@/modules/intake';
 import { approveOffer, archiveOffer, createOffer, createPractice, listApprovedOffers, replaceSignalRules } from '@/modules/offers';
-import { getMatches, getScore, getScoreHistory, scoreAccount } from '@/modules/scoring';
+import { explainScore, getMatches, getScore, getScoreHistory, scoreAccount } from '@/modules/scoring';
 import { accountScore, offerMatch, scoreChange } from '@/modules/scoring/db/schema';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb, closeDbs } from '@/platform/db/client';
@@ -96,6 +96,56 @@ describe('scoreAccount offers (SCO-E1-S1)', () => {
     const a = await seed(t);
     await score(t, a.accountId);
     expect((await matchRows(t, a.accountId)).map((r) => r.offerId).sort()).toEqual([keep.id, elsewhere.id].sort());
+  });
+});
+
+describe('scoreAccount four scores (SCO-E6)', () => {
+  it('stores the four scores, the weighted match score, and publishes the revenue band', async () => {
+    const { t, practice } = await world();
+    const o = await approved(t, practice.id, 'Lead');
+    const a = await seed(t);
+    const r = await score(t, a.accountId);
+    const [m] = await matchRows(t, a.accountId);
+    // The offer has a $50,000 typical deal and no size range: revenue 50. Trust is the neutral 0.60.
+    expect(m).toMatchObject({ offerId: o.id, revenueScore: 50, trustScore: 60 });
+    expect(m!.matchTotal).toBe(Math.round((40 * m!.fit + 25 * m!.intent + 15 * 50 + 20 * 60) / 100));
+    expect(r.score).toMatchObject({ matchTotal: m!.matchTotal, revenueScore: 50, trustScore: 60, trustModifier: 0, revenuePotentialCents: 5_000_000, revenueBand: 'medium' });
+    expect((await scoredEvents(t, a.accountId))[0]).toMatchObject({ revenueBand: 'medium' });
+  });
+
+  it('an offer with no deal size scores revenue 50, no band, and says why', async () => {
+    const { t, practice } = await world();
+    await t.run(async (ctx) => {
+      const o = await createOffer(ctx, { name: 'No Price', practiceId: practice.id, ...completeOffer });
+      await approveOffer(ctx, o.id);
+      await ctx.tx.execute(sql`update offers.offer set typical_deal_cents = null where id = ${o.id}`);
+    });
+    const a = await seed(t);
+    const r = await score(t, a.accountId);
+    expect(r.score).toMatchObject({ revenueScore: 50, revenuePotentialCents: null, revenueBand: null });
+    const line = (r.score.explanation as { lines: { label: string; reason?: string }[] }).lines.find((l) => l.label === 'Revenue potential');
+    expect(line?.reason).toBe('No deal size on No Price.');
+  });
+});
+
+describe('a score written by the old model (Review Focus 2)', () => {
+  it('still reads and explains: no revenue or trust value, the old trust line kept, nothing throws', async () => {
+    const { t, practice } = await world();
+    const o = await approved(t, practice.id, 'Lead');
+    const a = await seed(t);
+    await score(t, a.accountId);
+    await t.run(async (ctx) => {
+      const old = [{ group: 'adjust', label: 'Source trust 0.72 (Agent)', points: 3, max: 5 }];
+      await ctx.tx.execute(sql`update scoring.account_score set revenue_score = null, trust_score = null, trust_modifier = 3,
+        explanation = jsonb_set(explanation, '{lines}', (select jsonb_agg(l) from jsonb_array_elements(explanation->'lines') l where l->>'group' <> 'combine') || ${JSON.stringify(old)}::jsonb)
+        where account_id = ${a.accountId}`);
+      await ctx.tx.execute(sql`update scoring.offer_match set revenue_score = null, trust_score = null where account_id = ${a.accountId}`);
+    });
+    const ex = await t.run((ctx) => explainScore(ctx, a.accountId));
+    expect(ex!.tiles.slice(3)).toMatchObject([{ key: 'revenue_potential', value: null }, { key: 'source_trust', value: null }]);
+    expect(ex!.lines.some((l) => l.label.startsWith('Source trust 0.72'))).toBe(true);
+    expect((await t.run((ctx) => getScore(ctx, a.accountId)))!.trustModifier).toBe(3);
+    expect((await t.run((ctx) => getMatches(ctx, a.accountId)))[0]).toMatchObject({ offerId: o.id, revenueScore: null });
   });
 });
 
@@ -267,10 +317,11 @@ describe('explanation lines', () => {
     const accountId = (await t.run((ctx) => getArrival(ctx, sent.arrivalId)))!.accountId!;
     const r = await score(t, accountId);
     const lines = (r.score.explanation as { lines: { group: string; label: string; points?: number }[] }).lines.filter((l) => l.group === 'adjust');
-    expect(lines.map((l) => l.label)).toEqual(['Warm intro from Ash', "Source trust 0.72 (Ash's research agent)"]);
+    expect(lines.map((l) => l.label)).toEqual(['Warm intro from Ash']);
     expect(lines[0]!.points).toBeGreaterThan(0);
-    expect(lines[1]!.points).toBe(3);
-    expect(r.score).toMatchObject({ trustModifier: 3, trustSourceId: agentId, warmIntroducerName: 'Ash' });
+    const trust = (r.score.explanation as { lines: { label: string; points?: number; reason?: string }[] }).lines.find((l) => l.label === 'Source trust');
+    expect(trust).toMatchObject({ points: 72, reason: "Ash's research agent is rated 0.72." });
+    expect(r.score).toMatchObject({ trustModifier: 0, trustScore: 72, trustSourceId: agentId, warmIntroducerName: 'Ash' });
   });
 
   it('a dated signal that matches an offer rule produces an intent line', async () => {

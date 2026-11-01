@@ -10,7 +10,8 @@ export {
   type ScoreCause,
   type Tier,
   type TierReason,
-  type TierThresholds,
+  type TierCutoffs,
+  type Weights,
 } from './contracts/types';
 export { scoringConsumers, scoringTenantDefaults } from './consumers';
 export { ageingHandler, rescoreAccountsHandler, rescorePageHandler } from './jobs';

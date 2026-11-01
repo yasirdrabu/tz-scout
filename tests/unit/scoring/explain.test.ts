@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ScoringAccount, ScoringOffer, ScoringSignal } from '@/modules/scoring/contracts/types';
-import { matchTotal } from '@/modules/scoring/domain/combine';
+import { matchScore } from '@/modules/scoring/domain/combine';
 import { buildExplanation, NO_OFFER_TEXT, summarySentence, wouldRaise, type Explanation } from '@/modules/scoring/domain/explain';
 import { fit } from '@/modules/scoring/domain/fit';
 import { intent } from '@/modules/scoring/domain/intent';
 import { priority } from '@/modules/scoring/domain/priority';
+import { revenuePotential, trustScore } from '@/modules/scoring/domain/revenue';
 import { applyFloors, tierFor } from '@/modules/scoring/domain/tiers';
 import { account, daysAgo, NOW, offer, person, profile, rule, signal } from './fixtures';
 
@@ -19,25 +20,25 @@ type Extras = {
 function explain(acc: ScoringAccount, off: ScoringOffer, signals: ScoringSignal[], x: Extras = {}) {
   const f = fit(acc, off, profile);
   const i = intent(acc, signals, off.rules, profile, NOW);
-  const combine = matchTotal(f.fit, i.intent, profile);
-  const computed = tierFor(
-    { fit: f.fit, intent: i.intent, total: combine.total, disqualifiedReason: f.disqualifiedReason, hasResearchOrTrigger: i.hits.some((h) => h.kind !== 'pain') },
-    profile,
-  );
+  const revenue = revenuePotential({ typicalDealCents: off.typicalDealCents, priceMinCents: off.priceMinCents, expansionRate: off.expansionRate, sizeMin: off.companySizeMin, sizeMax: off.companySizeMax, employees: acc.employees, referenceCents: null });
+  const scores = { fit: f.fit, intent: i.intent, revenue: revenue.score, trust: trustScore(x.trust?.value ?? null, profile) };
+  const combine = matchScore(scores, profile);
+  const computed = tierFor({ score: combine.score, disqualifiedReason: f.disqualifiedReason, hasResearchOrTrigger: i.hits.some((h) => h.kind !== 'pain') }, profile);
   const floored = applyFloors(
     computed,
     { disqualified: f.disqualifiedReason !== null, researchTier: x.researchTier ?? null, researchSignalAt: daysAgo(30), warmIntro: x.warm !== undefined, bestFit: f.fit },
     profile,
     NOW,
   );
-  const p = priority({ matchTotal: combine.total, finalTier: floored.tier, warmPoints: x.warm?.points ?? 0, trust: x.trust?.value ?? null }, profile);
+  const p = priority({ score: combine.score, finalTier: floored.tier, warmPoints: x.warm?.points ?? 0 }, profile);
   const e = buildExplanation({
     offer: { id: off.id, name: 'Modernization Blueprint' },
     fit: f,
     hits: i.hits,
-    intent: i.intent,
     signals,
     now: NOW,
+    scores,
+    revenue,
     combine,
     profile,
     tier: floored.tier,
@@ -53,15 +54,13 @@ function explain(acc: ScoringAccount, off: ScoringOffer, signals: ScoringSignal[
   return { e, f, i, p };
 }
 
-/** The priority the lines add up to: fit lines (or the capped fit) and intent lines by weight, then adjustments. */
+/** The priority the lines add up to: the four score lines weighted, the low fit cap, then adjustments. */
 function sumLines(e: Explanation): number {
   const sum = (group: string) => e.lines.filter((l) => l.group === group).reduce((s, l) => s + (l.points ?? 0), 0);
-  const capped = e.lines.find((l) => l.group === 'combine' && l.label === 'Hard miss');
-  const fitPts = capped ? capped.points! : sum('fit');
-  const intentPts = Math.min(100, sum('intent'));
-  const w = profile.fitWeight + profile.intentWeight;
-  let total = Math.round((fitPts * profile.fitWeight + intentPts * profile.intentWeight) / w);
-  if (fitPts < 50) total = Math.min(total, fitPts);
+  const score = (label: string) => e.lines.find((l) => l.group === 'combine' && l.label === label)!.points!;
+  const w = profile.weights;
+  let total = Math.round((score('Fit') * w.fit + score('Buying intent') * w.intent + score('Revenue potential') * w.revenue + score('Source trust') * w.trust) / 100);
+  if (score('Fit') < 50) total = Math.min(total, score('Fit'));
   return total + sum('adjust');
 }
 
@@ -88,17 +87,22 @@ const exampleA = () => {
 };
 
 describe('buildExplanation', () => {
-  it('SCO-E4-S1-AC1: example A lines add up to the priority, with warm and trust lines', () => {
+  it('SCO-E4-S1-AC1: example A lines add up to the priority, with the four scores, a warm line and no trust modifier line', () => {
     const { off, acc, sigs } = exampleA();
     const { e, f, i, p } = explain(acc, off, sigs, { warm: { name: 'Zach Wiant', points: 8 }, trust: { value: 0.72, sourceName: "Yasir's research agent" } });
-    expect([f.fit, i.intent, p.priority]).toEqual([100, 22, 76]);
-    expect(e.priority).toBe(76);
+    expect([f.fit, i.intent, p.priority]).toEqual([100, 22, 75]);
+    expect(e.priority).toBe(75);
     expect(Math.abs(sumLines(e) - e.priority)).toBeLessThanOrEqual(1);
-    expect(e.lines.find((l) => l.group === 'combine' && l.label === 'Match')).toMatchObject({ points: 65, text: '55% fit (100) and 45% intent (22).' });
-    expect(e.lines.filter((l) => l.group === 'adjust')).toEqual([
-      { group: 'adjust', label: 'Warm intro from Zach Wiant', points: 8, max: 20 },
-      { group: 'adjust', label: "Source trust 0.72 (Yasir's research agent)", points: 3, max: 5 },
+    expect(e.lines.find((l) => l.group === 'combine' && l.label === 'Match')).toMatchObject({ points: 67, text: 'Score 67 from the four scores.' });
+    expect(e.lines.filter((l) => l.group === 'combine').map((l) => l.text).slice(0, 4)).toEqual([
+      'Fit 100 × 40%',
+      'Buying intent 22 × 25%',
+      'Revenue potential 50 × 15%',
+      'Source trust 72 × 20%',
     ]);
+    expect(e.lines.find((l) => l.label === 'Revenue potential')?.reason).toBe('No deal size on Modernization Blueprint.');
+    expect(e.lines.find((l) => l.label === 'Source trust')?.reason).toBe("Yasir's research agent is rated 0.72.");
+    expect(e.lines.filter((l) => l.group === 'adjust')).toEqual([{ group: 'adjust', label: 'Warm intro from Zach Wiant', points: 8, max: 20 }]);
     const news = e.lines.find((l) => l.label.startsWith('Re-solicitation'));
     expect(news).toMatchObject({ group: 'intent', points: 15.7, max: 25, kind: 'trigger', signalIds: ['sig_news'] });
     expect(news?.text).toBe('News from Sep 14, 2026 (30 days ago, counts 63%).');
@@ -117,7 +121,7 @@ describe('buildExplanation', () => {
     expect([f.fit, i.intent, p.priority]).toEqual([45, 80, 45]);
     const text = e.lines.filter((l) => l.group === 'combine').map((l) => l.text);
     expect(text).toContain('Hard miss: fit capped at 45.');
-    expect(text).toContain('Fit below 50: total capped at fit (45).');
+    expect(text).toContain('Fit below 50: score capped at fit (45).');
     expect(Math.abs(sumLines(e) - e.priority)).toBeLessThanOrEqual(1);
   });
 
@@ -129,7 +133,7 @@ describe('buildExplanation', () => {
     const acc = account({ revenueCents: null, country: null });
     const sigs = [signal({ id: 'sig_res', type: 'intent', title: 'AI strategy', value: 0.7, occurredAt: daysAgo(10) })];
     const { e, f, i, p } = explain(acc, off, sigs);
-    expect([f.fit, i.intent, p.priority]).toEqual([70, 26, 50]);
+    expect([f.fit, i.intent, p.priority]).toEqual([70, 26, 54]);
     expect(Math.abs(sumLines(e) - e.priority)).toBeLessThanOrEqual(1);
     expect(e.lines.find((l) => l.group === 'intent')).toMatchObject({ kind: 'research', signalIds: ['sig_res'] });
     expect(e.missing).toEqual([
@@ -164,13 +168,19 @@ describe('buildExplanation', () => {
     expect(Math.abs(sumLines(e) - e.priority)).toBeLessThanOrEqual(1);
   });
 
-  it('a negative trust line shows, a zero modifier line is omitted', () => {
+  it('revenue potential explains itself when the offer has a deal size', () => {
+    const { acc, sigs } = exampleA();
+    const off = { ...exampleA().off, typicalDealCents: 5_000_000 };
+    const { e } = explain(acc, off, sigs);
+    expect(e.lines.find((l) => l.label === 'Revenue potential')).toMatchObject({ points: 38, reason: "About $37,500 a deal at this company's size (medium)." });
+    expect(Math.abs(sumLines(e) - e.priority)).toBeLessThanOrEqual(1);
+  });
+
+  it('a source with no rating counts as the neutral trust', () => {
     const { off, acc, sigs } = exampleA();
-    const low = explain(acc, off, sigs, { trust: { value: 0.4, sourceName: 'Feed' } }).e;
-    expect(low.lines.filter((l) => l.group === 'adjust')).toEqual([{ group: 'adjust', label: 'Source trust 0.40 (Feed)', points: -5, max: 5 }]);
-    expect(Math.abs(sumLines(low) - low.priority)).toBeLessThanOrEqual(1);
-    const neutral = explain(acc, off, sigs, { trust: { value: 0.6, sourceName: 'Feed' } }).e;
-    expect(neutral.lines.some((l) => l.group === 'adjust')).toBe(false);
+    const { e } = explain(acc, off, sigs);
+    expect(e.lines.find((l) => l.label === 'Source trust')).toMatchObject({ points: 60, reason: 'No source has been rated yet, so it counts as 60.' });
+    expect(e.lines.some((l) => l.group === 'adjust')).toBe(false);
   });
 
   it('intent lines above 100 still add up through the clamp', () => {
@@ -194,7 +204,7 @@ describe('summarySentence', () => {
     const { off, acc, sigs } = exampleA();
     const { e } = explain(acc, off, sigs, { warm: { name: 'Zach Wiant', points: 8 }, trust: { value: 0.72, sourceName: 'Agent' } });
     expect(summarySentence(e)).toBe(
-      'Good fit for Modernization Blueprint (priority 76): strong fit, Re-solicitation of the paratransit software contract 30 days ago, and a warm intro from Zach Wiant.',
+      'Good fit for Modernization Blueprint (priority 75): strong fit, Re-solicitation of the paratransit software contract 30 days ago, and a warm intro from Zach Wiant.',
     );
   });
 });

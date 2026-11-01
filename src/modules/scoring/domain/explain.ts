@@ -1,6 +1,6 @@
 // The score explanation: every point of a priority as a line a person can check (SCO-E4).
 
-import type { RuleHit, ScoreCause, ScoringAccount, ScoringOffer, ScoringProfile, ScoringSignal, ScoringSignalKind, Tier, TierReason } from '../contracts/types';
+import type { RevenueBand, RuleHit, ScoreCause, ScoringAccount, ScoringOffer, ScoringProfile, ScoringSignal, ScoringSignalKind, Tier, TierReason, Weights } from '../contracts/types';
 import type { FitResult } from './fit';
 import { SIGNAL_TYPES } from '@/modules/accounts/contracts/signal-types';
 import { CURRENT_STATE, recency, signalDate } from './intent';
@@ -8,7 +8,7 @@ import { CURRENT_STATE, recency, signalDate } from './intent';
 export const HARD_MISS_CAP = 45;
 const DAY_MS = 86_400_000;
 export const NO_OFFER_TEXT = 'No approved offer to match against.';
-const TIER_TITLE: Record<Tier, string> = { not_fit: 'Not a fit', watch: 'Watch', good_fit: 'Good fit', act_now: 'Act now' };
+const TIER_TITLE: Record<Tier, string> = { not_fit: 'Not a fit', nurture: 'Nurture', watch: 'Watch', good_fit: 'Good fit', act_now: 'Act now' };
 
 export type ExplanationLine = {
   group: 'fit' | 'intent' | 'combine' | 'adjust';
@@ -22,6 +22,8 @@ export type ExplanationLine = {
   kind?: ScoringSignalKind;
   /** Intent lines only: days since the strongest signal, when it has a date that counts. */
   ageDays?: number;
+  /** The Revenue potential and Source trust score lines: why the score is what it is. */
+  reason?: string;
 };
 
 export type Explanation = {
@@ -31,7 +33,7 @@ export type Explanation = {
   /** Null when the tenant has no approved offer to match against. */
   bestOffer: { id: string; name: string } | null;
   lines: ExplanationLine[];
-  otherOffers: { id: string; name: string; total: number; tier: Tier }[];
+  otherOffers: { id: string; name: string; total: number; tier: Tier }[]; // `total` is the offer's match score
   missing: string[];
   computedAt: string;
   profileVersion: number;
@@ -42,16 +44,18 @@ export type ExplanationInput = {
   offer: { id: string; name: string };
   fit: FitResult;
   hits: RuleHit[];
-  intent: number;
   /** The signals the hits matched, for dates and recency. */
   signals: ScoringSignal[];
   now: Date;
-  combine: { total: number; cappedAtFit: boolean };
-  profile: Pick<ScoringProfile, 'fitWeight' | 'intentWeight' | 'warmIntroCap' | 'trustModifierMax' | 'halfLifeDays' | 'maxSignalAgeDays'>;
+  /** The four scores of this match, each 0 to 100. */
+  scores: { fit: number; intent: number; revenue: number; trust: number };
+  revenue: { cents: number | null; band: RevenueBand | null };
+  combine: { score: number; cappedAtFit: boolean };
+  profile: Pick<ScoringProfile, 'weights' | 'warmIntroCap' | 'trustNeutral' | 'halfLifeDays' | 'maxSignalAgeDays'>;
   tier: Tier;
   tierReason: TierReason;
   tierText?: string;
-  priority: { priority: number; warmPoints: number; trustModifier: number };
+  priority: { priority: number; warmPoints: number };
   warmIntroFrom: string | null;
   trust: { value: number; sourceName: string } | null;
   otherOffers: Explanation['otherOffers'];
@@ -85,11 +89,33 @@ export function intentText(
   return { text: `${what} from ${dateText(at)} (${ago(ageDays)}, counts ${counts}%).`, ageDays };
 }
 
-/** "55% fit (100) and 45% intent (22)." */
-export function matchText(fit: number, intent: number, profile: Pick<ScoringProfile, 'fitWeight' | 'intentWeight'>): string {
-  const weights = profile.fitWeight + profile.intentWeight || 1;
-  const fitShare = Math.round((profile.fitWeight / weights) * 100);
-  return `${fitShare}% fit (${fit}) and ${100 - fitShare}% intent (${intent}).`;
+const usd = (cents: number) => `$${Math.round(cents / 100).toLocaleString('en-US')}`;
+
+/** Why the revenue score is what it is: the offer's value at this company's size, or that the offer has no deal size. */
+export function revenueReason(r: { cents: number | null; band: RevenueBand | null }, offerName: string): string {
+  return r.cents === null || r.band === null ? `No deal size on ${offerName}.` : `About ${usd(r.cents)} a deal at this company's size (${r.band}).`;
+}
+
+export function trustReason(trust: { value: number; sourceName: string } | null, neutral: number): string {
+  return trust === null ? `No source has been rated yet, so it counts as ${Math.round(neutral * 100)}.` : `${trust.sourceName} is rated ${trust.value.toFixed(2)}.`;
+}
+
+/** The four scores with their weights ("Fit 82 × 40%"). The caller adds the reasons it knows for revenue and trust. */
+export function scoreLines(s: { fit: number; intent: number; revenue: number; trust: number }, weights: Weights, reasons: { revenue?: string; trust?: string } = {}): ExplanationLine[] {
+  const line = (label: string, score: number, weight: number, reason?: string): ExplanationLine => ({
+    group: 'combine',
+    label,
+    points: score,
+    max: 100,
+    text: `${label} ${score} × ${weight}%`,
+    ...(reason === undefined ? {} : { reason }),
+  });
+  return [
+    line('Fit', s.fit, weights.fit),
+    line('Buying intent', s.intent, weights.intent),
+    line('Revenue potential', s.revenue, weights.revenue, reasons.revenue),
+    line('Source trust', s.trust, weights.trust, reasons.trust),
+  ];
 }
 
 export function buildExplanation(input: ExplanationInput): Explanation {
@@ -118,8 +144,9 @@ export function buildExplanation(input: ExplanationInput): Explanation {
 
   const rawFit = fit.parts.reduce((sum, p) => sum + p.points, 0);
   if (fit.hardMiss && rawFit > HARD_MISS_CAP) lines.push({ group: 'combine', label: 'Hard miss', points: fit.fit, text: `Hard miss: fit capped at ${HARD_MISS_CAP}.` });
-  if (input.combine.cappedAtFit) lines.push({ group: 'combine', label: 'Low fit', points: fit.fit, text: `Fit below 50: total capped at fit (${fit.fit}).` });
-  lines.push({ group: 'combine', label: 'Match', points: input.combine.total, text: matchText(fit.fit, input.intent, profile) });
+  lines.push(...scoreLines(input.scores, profile.weights, { revenue: revenueReason(input.revenue, input.offer.name), trust: trustReason(input.trust, profile.trustNeutral) }));
+  if (input.combine.cappedAtFit) lines.push({ group: 'combine', label: 'Low fit', points: fit.fit, text: `Fit below 50: score capped at fit (${fit.fit}).` });
+  lines.push({ group: 'combine', label: 'Match', points: input.combine.score, text: `Score ${input.combine.score} from the four scores.` });
   if (input.tierText) lines.push({ group: 'combine', label: 'Tier', text: input.tierText });
 
   if (priority.warmPoints > 0) {
@@ -128,14 +155,6 @@ export function buildExplanation(input: ExplanationInput): Explanation {
       label: input.warmIntroFrom === null ? 'Warm intro' : `Warm intro from ${input.warmIntroFrom}`,
       points: priority.warmPoints,
       max: profile.warmIntroCap,
-    });
-  }
-  if (input.trust !== null && priority.trustModifier !== 0) {
-    lines.push({
-      group: 'adjust',
-      label: `Source trust ${input.trust.value.toFixed(2)} (${input.trust.sourceName})`,
-      points: priority.trustModifier,
-      max: profile.trustModifierMax,
     });
   }
 
