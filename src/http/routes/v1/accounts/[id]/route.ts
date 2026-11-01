@@ -3,7 +3,7 @@ import { convertShell, filterVisibleAccountIds, editAccount, mergeAccounts, over
 import { checkFollowThrough, crmCheckCard, push } from '@/modules/crm';
 import { submitArrival } from '@/modules/intake';
 import { PAGE_SECTIONS, requestDraft } from '@/modules/playbooks';
-import { assign, markSeen, previewAssign, type AssignInput } from '@/modules/routing';
+import { assign, markSeen, moveToStage, previewAssign, type AssignInput } from '@/modules/routing';
 import { can } from '@/modules/tenancy';
 import { parseBody } from '../../_lib/body';
 import { idAndAction, notFound } from '../../_lib/path';
@@ -44,6 +44,7 @@ const assignBody = z.strictObject({
   ownership_decision: z.enum(['assign', 'keep']).optional(),
 });
 const previewBody = z.strictObject({ seller_user_id: z.string() });
+const moveStageBody = z.strictObject({ stage: z.string(), note: z.string().nullish() });
 const pushBody = z.strictObject({ keep_current_owner: z.boolean().optional() });
 const shellBody = z.strictObject({ name: z.string(), domain: z.string() });
 const pageKey = z.enum(PAGE_SECTIONS.map((s) => s.key) as [string, ...string[]]);
@@ -101,6 +102,11 @@ export const POST = byAction('accounts', {
   }),
   /** Asks HubSpot about the company now and returns the In HubSpot card; 503 `crm_unavailable` when it does not answer. No body. */
   'check-crm': v1Route({ permission: 'accounts:read', peopleOnly: true }, async (req, _principal, ctx) => crmCheckCard(ctx, idAndAction(req, 'accounts').id, { refresh: true })),
+  /** REV-E5-S4: put the account in any live stage by hand, with an optional note. Returns the review state. */
+  'move-stage': v1Route({ permission: 'review:act', peopleOnly: true }, async (req, _principal, ctx) => {
+    const { id } = idAndAction(req, 'accounts');
+    return moveToStage(ctx, id, await parseBody<{ stage: string; note?: string | null }>(req, moveStageBody));
+  }),
   /** The assigned seller has seen the new arrival ("New from <source>"). No body. */
   seen: v1Route({ permission: 'assignments:respond', peopleOnly: true }, async (req, _principal, ctx) => markSeen(ctx, idAndAction(req, 'accounts').id)),
 });

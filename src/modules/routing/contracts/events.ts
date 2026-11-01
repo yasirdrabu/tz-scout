@@ -82,5 +82,13 @@ export const assignmentWithdrawn = defineEvent(
 export const stageChanged = defineEvent(
   'routing.stage.changed',
   1,
-  z.object({ accountId: z.string(), from: stageKeySchema, to: stageKeySchema, causeEventId: z.string() }),
+  z.object({
+    accountId: z.string(),
+    from: stageKeySchema,
+    to: stageKeySchema,
+    /** Added with configurable stages (REV-E5), so events stored before it have none. */
+    fromName: z.string().optional(),
+    toName: z.string().optional(),
+    causeEventId: z.string(),
+  }),
 );

@@ -15,7 +15,8 @@ type EventOf<T> = T extends EventDef<infer D> ? Envelope<D> : never;
 
 /**
  * `crm.activity.observed` (Ruling 19): the open pending assignment's seller doing something in the CRM
- * accepts it, with `crm_activity`; a reply or meeting moves the stage to `engaged`. The two moves use
+ * accepts it, with `crm_activity`; a reply or meeting moves the stage to the one that owns "a reply or meeting is
+ * logged" (a meeting also fires "a meeting is booked"). The two moves use
  * distinct causes, since one cause moves an account at most once. One snapshot, only when something changed.
  */
 export async function onCrmActivity(e: EventOf<typeof activityObserved>, ctx: ModuleContext): Promise<void> {
@@ -28,7 +29,7 @@ export async function onCrmActivity(e: EventOf<typeof activityObserved>, ctx: Mo
     await acceptLocked(ctx, open, 'crm_activity', new Date());
     changed = true;
   }
-  if (kind === 'reply' || kind === 'meeting') changed = !!(await moveStage(ctx, accountId, 'engaged', e.id)) || changed;
+  if (kind === 'reply' || kind === 'meeting') changed = !!(await moveStage(ctx, accountId, kind === 'meeting' ? 'meeting' : 'engaged', e.id)) || changed;
   if (changed) await publishReviewSnapshot(ctx, accountId);
 }
 
