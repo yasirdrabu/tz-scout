@@ -1,4 +1,4 @@
-import { DEFAULT_BUYING_ROLES, getAccount, getFacts, getSignals, listNotes, type FactView, type SignalView } from '@/modules/accounts';
+import { getAccount, getFacts, getSignals, listNotes, type FactView, type SignalView } from '@/modules/accounts';
 import { companyChecks } from '@/modules/crm';
 import { sourceNames } from '@/modules/intake';
 import { getOffer, listPractices, matchCaseStudies, type Offer } from '@/modules/offers';
@@ -12,7 +12,6 @@ export type BuiltInput = { input: BriefInput; accountId: string; offerId: string
 
 /** Facts the overview leans on come first, so the cap never drops them. */
 const CORE_FACT_KEYS = ['name', 'domain', 'industry', 'employees', 'hq_city', 'hq_state', 'hq_country', 'description', 'revenue_cents'];
-const ROLE_LABELS = new Map(DEFAULT_BUYING_ROLES.map((r) => [r.key, r.label]));
 
 export const closestSource = (c: SignalView['sourceChain']) => c.agentSourceId ?? c.vendorSourceId ?? c.personSourceId;
 const text = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
@@ -106,7 +105,7 @@ export async function buildBriefInput(ctx: ModuleContext, accountId: string): Pr
       name: [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unnamed contact',
       title: p.title,
       roleKeys: p.roles.map((r) => r.key),
-      roleLabels: p.roles.map((r) => ROLE_LABELS.get(r.key) ?? r.key),
+      roleLabels: p.roles.map((r) => r.label),
       isPrimary: p.isPrimary,
     })),
     score: {

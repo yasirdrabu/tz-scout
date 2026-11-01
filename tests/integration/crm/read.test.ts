@@ -55,7 +55,7 @@ describe('handoff reads', () => {
     expect(r.links.tasks).toHaveLength(4);
     expect(r.handoffs).toHaveLength(1);
     expect(Object.keys(r.handoffs[0]!).sort()).toEqual(
-      ['attempts', 'completedAt', 'id', 'lastError', 'ownershipAction', 'queuedAt', 'status', 'takenFromOwner', 'undone'].sort(),
+      ['attempts', 'completedAt', 'crmUrl', 'id', 'lastError', 'ownershipAction', 'queuedAt', 'status', 'takenFromOwner', 'undone'].sort(),
     );
     expect(r.handoffs[0]).toMatchObject({ status: 'completed', ownershipAction: 'assign', attempts: 1, lastError: null, undone: null });
     expect(r.followThrough).toMatchObject({ handoffId: r.handoffs[0]!.id, counts: { tasksTotal: 4, tasksDone: 0, emails: 0 } });

@@ -49,7 +49,9 @@ export {
 export { activityPollHandler, companyCheckHandler, dealsPollHandler, crmJobHandlers, syncHandler, handoffPushHandler, handoffUndoHandler, ownersSyncHandler, personPushHandler } from './jobs';
 export { ASSIGN_FIRST, push, queuePersonPush, runPersonPush } from './services/push';
 export { POLL_LIMIT, POLL_WINDOW_MS, checkFollowThrough, followThrough, pollActivity, syncAccount } from './services/follow-through';
-export { crmFacts, getHandoffs, lastActivityAt, latestHandoff, type AccountCrmFacts, type HandoffRow, type HandoffsView } from './services/read';
+export { crmCheckCard, crmFacts, getHandoffs, lastActivityAt, latestHandoff, type AccountCrmFacts, type CrmCheckCard, type HandoffRow, type HandoffsView } from './services/read';
+export { ACTIVITY_PAGE, activityCursor, listActivity, type ActivityCursor } from './services/activity';
+export type { ActivityEntry } from './domain/activity';
 export {
   DEFAULT_QUALIFIED_LEAD_RULE,
   getCrmSettings,

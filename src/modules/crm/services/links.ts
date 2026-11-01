@@ -1,9 +1,17 @@
 import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import { getAccount } from '@/modules/accounts';
+import { connectionSettings } from '@/modules/integrations';
 import type { ModuleContext } from '@/platform/context';
 import { withTenant } from '@/platform/db/tenant';
 import { newId } from '@/platform/ids';
 import { deal, handoff, link } from '../db/schema';
+
+/** The company's page in HubSpot, once the portal id is known; else null. */
+export async function crmCompanyUrl(ctx: ModuleContext, system: string, companyExternalId: string | null): Promise<string | null> {
+  if (system !== 'hubspot' || !companyExternalId) return null;
+  const portal = (await connectionSettings(ctx, 'hubspot')).portal_id;
+  return (typeof portal === 'string' || typeof portal === 'number') && portal !== '' ? `https://app.hubspot.com/contacts/${portal}/record/0-2/${companyExternalId}` : null;
+}
 
 export type LinkRow = { scoutType: string; scoutId: string; system: string; externalId: string; fingerprint: string | null; lastSyncedAt: Date };
 

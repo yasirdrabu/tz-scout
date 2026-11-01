@@ -4,6 +4,7 @@ import type { ModuleContext } from '@/platform/context';
 import type { FitPart, RuleHit, ScoringProfile, ScoringSignal } from '../contracts/types';
 import { matchTotal } from '../domain/combine';
 import { HARD_MISS_CAP, intentText, matchText, missingInputs, summarySentence, wouldRaise, type Explanation, type ExplanationLine } from '../domain/explain';
+import { scoreTiles, warmIntro, type ScoreTile } from '../domain/tiles';
 import { getMatches, getScore } from './read';
 import { getProfile } from './profile';
 import { toScoringAccount, toScoringOffer, toScoringSignals } from './score';
@@ -23,6 +24,9 @@ export type ScoreExplanation = Explanation & {
   warmIntroPoints: number;
   wouldRaise: string[];
   summary: string;
+  /** The account page's score strip (screens.md §4a). */
+  tiles: ScoreTile[];
+  warmIntro: { introducerName: string | null; points: number } | null;
 };
 
 const oneDecimal = (n: number) => Math.round(n * 10) / 10;
@@ -84,6 +88,7 @@ export async function explainScore(ctx: ModuleContext, accountId: string, opts: 
   let fit = score.fit;
   let intent = score.intent;
   let warmIntroPoints = score.warmPoints;
+  const profile = await getProfile(ctx);
   if (opts.offerId && opts.offerId !== score.bestOfferId) {
     const matches = await getMatches(ctx, accountId);
     const m = matches.find((x) => x.offerId === opts.offerId);
@@ -98,7 +103,7 @@ export async function explainScore(ctx: ModuleContext, accountId: string, opts: 
       tier: m.tier as Explanation['tier'],
       tierReason: 'computed',
       bestOffer: offer,
-      lines: matchLines(m, toScoringSignals(view), await getProfile(ctx)),
+      lines: matchLines(m, toScoringSignals(view), profile),
       otherOffers: matches
         .filter((x) => x !== m)
         .flatMap((x) => {
@@ -127,5 +132,7 @@ export async function explainScore(ctx: ModuleContext, accountId: string, opts: 
     warmIntroPoints,
     wouldRaise: scoringOffer ? wouldRaise(explanation, toScoringOffer(scoringOffer), account) : [],
     summary: summarySentence(explanation),
+    tiles: scoreTiles({ priority: explanation.priority, fit, intent, lines: explanation.lines }, profile.tierThresholds),
+    warmIntro: warmIntro(explanation.lines),
   };
 }

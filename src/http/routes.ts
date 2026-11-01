@@ -7,11 +7,13 @@ import * as apiDevSignIn from './routes/api/dev/sign-in/route';
 import * as healthz from './routes/healthz/route';
 import * as readyz from './routes/readyz/route';
 import * as v1Resource from './routes/v1/[resource]/route';
+import * as v1AccountsIdActivity from './routes/v1/accounts/[id]/activity/route';
 import * as v1AccountsIdArrivals from './routes/v1/accounts/[id]/arrivals/route';
 import * as v1AccountsIdAssignments from './routes/v1/accounts/[id]/assignments/route';
 import * as v1AccountsIdBriefSectionsKey from './routes/v1/accounts/[id]/brief/sections/[key]/route';
 import * as v1AccountsIdBrief from './routes/v1/accounts/[id]/brief/route';
 import * as v1AccountsIdChanges from './routes/v1/accounts/[id]/changes/route';
+import * as v1AccountsIdCrmCheck from './routes/v1/accounts/[id]/crm-check/route';
 import * as v1AccountsIdExclusionOverride from './routes/v1/accounts/[id]/exclusion-override/route';
 import * as v1AccountsIdFacts from './routes/v1/accounts/[id]/facts/route';
 import * as v1AccountsIdHandoffs from './routes/v1/accounts/[id]/handoffs/route';
@@ -53,6 +55,7 @@ import * as v1AssignmentsId from './routes/v1/assignments/[id]/route';
 import * as v1Assignments from './routes/v1/assignments/route';
 import * as v1Audit from './routes/v1/audit/route';
 import * as v1AuthConfig from './routes/v1/auth/config/route';
+import * as v1BuyingRoles from './routes/v1/buying-roles/route';
 import * as v1BatchesIdFiles from './routes/v1/batches/[id]/files/route';
 import * as v1BatchesIdItems from './routes/v1/batches/[id]/items/route';
 import * as v1BatchesId from './routes/v1/batches/[id]/route';
@@ -131,11 +134,13 @@ export const routes: RouteEntry[] = [
   { path: '/healthz', module: healthz },
   { path: '/readyz', module: readyz },
   { path: `${V1}/:resource`, module: v1Resource },
+  { path: `${V1}/accounts/:id/activity`, module: v1AccountsIdActivity },
   { path: `${V1}/accounts/:id/arrivals`, module: v1AccountsIdArrivals },
   { path: `${V1}/accounts/:id/assignments`, module: v1AccountsIdAssignments },
   { path: `${V1}/accounts/:id/brief/sections/:key`, module: v1AccountsIdBriefSectionsKey },
   { path: `${V1}/accounts/:id/brief`, module: v1AccountsIdBrief },
   { path: `${V1}/accounts/:id/changes`, module: v1AccountsIdChanges },
+  { path: `${V1}/accounts/:id/crm-check`, module: v1AccountsIdCrmCheck },
   { path: `${V1}/accounts/:id/exclusion-override`, module: v1AccountsIdExclusionOverride },
   { path: `${V1}/accounts/:id/facts`, module: v1AccountsIdFacts },
   { path: `${V1}/accounts/:id/handoffs`, module: v1AccountsIdHandoffs },
@@ -177,6 +182,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/assignments`, module: v1Assignments },
   { path: `${V1}/audit`, module: v1Audit },
   { path: `${V1}/auth/config`, module: v1AuthConfig },
+  { path: `${V1}/buying-roles`, module: v1BuyingRoles },
   { path: `${V1}/batches/:id/files`, module: v1BatchesIdFiles },
   { path: `${V1}/batches/:id/items`, module: v1BatchesIdItems },
   { path: `${V1}/batches/:id`, module: v1BatchesId },

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { convertShell, filterVisibleAccountIds, editAccount, mergeAccounts, overrideExclusion, pinPrimary } from '@/modules/accounts';
-import { checkFollowThrough, push } from '@/modules/crm';
+import { checkFollowThrough, crmCheckCard, push } from '@/modules/crm';
 import { submitArrival } from '@/modules/intake';
 import { PAGE_SECTIONS, requestDraft } from '@/modules/playbooks';
 import { assign, markSeen, previewAssign, type AssignInput } from '@/modules/routing';
@@ -99,6 +99,8 @@ export const POST = byAction('accounts', {
     const { state } = await requestDraft(ctx, id, { manual: true, includeEdited: includeEdited ?? [] });
     return accepted({ state });
   }),
+  /** Asks HubSpot about the company now and returns the In HubSpot card; 503 `crm_unavailable` when it does not answer. No body. */
+  'check-crm': v1Route({ permission: 'accounts:read', peopleOnly: true }, async (req, _principal, ctx) => crmCheckCard(ctx, idAndAction(req, 'accounts').id, { refresh: true })),
   /** The assigned seller has seen the new arrival ("New from <source>"). No body. */
   seen: v1Route({ permission: 'assignments:respond', peopleOnly: true }, async (req, _principal, ctx) => markSeen(ctx, idAndAction(req, 'accounts').id)),
 });

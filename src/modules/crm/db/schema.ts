@@ -242,6 +242,11 @@ export const companyCheck = crm.table(
     /** The CRM's own lifecycle stage, before deals are folded in (Ruling 12). */
     crmLifecycle: text('crm_lifecycle'),
     openDeals: integer('open_deals').notNull().default(0),
+    /** The biggest open deal, for the account page's In HubSpot card. */
+    openDealName: text('open_deal_name'),
+    openDealAmountCents: bigint('open_deal_amount_cents', { mode: 'number' }),
+    openDealCurrency: text('open_deal_currency'),
+    openDealLastActivityAt: at('open_deal_last_activity_at'),
     checkedAt: at('checked_at').notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.accountId, t.system] }), index('company_check_domain_idx').on(t.tenantId, t.system, t.domain)],
