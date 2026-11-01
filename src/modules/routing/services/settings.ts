@@ -6,7 +6,7 @@ import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { accountReview, assignment, declineReasonDef, reviewStatusDef, routingSetting, statusChange } from '../db/schema';
 import { DEFAULT_AUTO_ACCEPT_WORKING_DAYS, DEFAULT_REASONS, DEFAULT_STATUSES, seedRoutingDefaults } from '../defaults';
-import { isFinal, isRequired, keyFor, reasonEditProblems, statusEditProblems, type Problem, type ReasonEdit, type StatusEdit } from '../domain/review-settings';
+import { isFinal, isRequired, keyFor, STATUS_COLOR_OPTIONS, reasonEditProblems, statusEditProblems, type Problem, type ReasonEdit, type StatusEdit } from '../domain/review-settings';
 import type { ReasonList } from '../domain/status-rules';
 import { applyStatusChange, lockRow, requirePerson } from './review';
 import { publishReviewSnapshot } from './snapshot';
@@ -49,6 +49,8 @@ export type ReviewSettings = {
   declineReasons: ReasonView[];
   /** 1 to 10 working days, or null when auto-acceptance is off. */
   autoAcceptWorkingDays: number | null;
+  /** The colors a status can take, with their words (the editor's picker). */
+  colors: { value: string; label: string }[];
 };
 
 /** Whether the lists carry tenant-wide counts (only for people who manage settings). */
@@ -139,6 +141,7 @@ export async function getReviewSettings(ctx: ModuleContext): Promise<ReviewSetti
     statuses: await listStatuses(ctx, { counts: true }),
     declineReasons: await listReasons(ctx, { counts: true }),
     autoAcceptWorkingDays: setting ? setting.days : DEFAULT_AUTO_ACCEPT_WORKING_DAYS,
+    colors: STATUS_COLOR_OPTIONS,
   };
 }
 

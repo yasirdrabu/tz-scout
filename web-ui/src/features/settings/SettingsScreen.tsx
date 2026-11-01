@@ -10,6 +10,7 @@ import { ApiKeysTab } from './keys/ApiKeysTab';
 import { AuditTab } from './audit/AuditTab';
 import { IntegrationsTab } from './integrations/IntegrationsTab';
 import { MembersTab } from './members/MembersTab';
+import { ReviewStatusesTab } from './review-statuses/ReviewStatusesTab';
 import styles from './Settings.module.css';
 
 /** What every tab gets: the person, the workspace, and the item open in a drawer (from the URL). */
@@ -18,6 +19,7 @@ export type TabProps = { me: Me; tenant: string; open: string | undefined; setOp
 const SCREENS: Record<string, (props: TabProps) => ReactNode> = {
   members: (p) => <MembersTab {...p} />,
   integrations: (p) => <IntegrationsTab {...p} />,
+  'review-statuses': (p) => <ReviewStatusesTab {...p} />,
   'api-keys': (p) => <ApiKeysTab {...p} />,
   'audit-log': (p) => <AuditTab {...p} />,
   'ai-runs': (p) => <AiRunsTab {...p} />,

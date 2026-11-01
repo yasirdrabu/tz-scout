@@ -474,6 +474,13 @@ describe('review settings', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.auto_accept_working_days).toBe(2);
+    expect(body.colors).toEqual([
+      { value: 'plum', label: 'Plum' },
+      { value: 'amber', label: 'Amber' },
+      { value: 'green', label: 'Green' },
+      { value: 'red', label: 'Red' },
+      { value: 'gray', label: 'Gray' },
+    ]);
     expect(body.statuses.map((s: { key: string }) => s.key)).toEqual(['unvetted', 'needs_review', 'reviewed', 'declined', 'sent_back']);
     expect(body.statuses[3]).toMatchObject({ key: 'declined', label: 'Not pursued', counts_as_reviewed: true, is_declined: true, is_initial: false, returns_to_source: false, archived: false });
     expect(body.decline_reasons.map((r: { key: string }) => r.key)).toEqual(expect.arrayContaining(['not_a_fit', 'other', 'not_my_territory']));
