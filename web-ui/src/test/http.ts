@@ -19,3 +19,14 @@ export function problem(status: number, title: string, opts: { detail?: string; 
  * path parameter, so `/t1:suspend` would also match `/t1:resume`; this matches the path exactly.
  */
 export const exactly = (path: string) => new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+
+/** The fields of a multipart request the test fetch sent (src/test/setup.ts): text values, and a file's name. */
+export async function multipartFields(request: Request): Promise<Record<string, string>> {
+  const text = await request.text();
+  const out: Record<string, string> = {};
+  for (const part of text.split(/--scout-test-boundary(?:--)?\r\n/)) {
+    const m = part.match(/^Content-Disposition: form-data; name="([^"]+)"(?:; filename="([^"]*)")?\r\n(?:Content-Type: [^\r\n]*\r\n)?\r\n([\s\S]*)\r\n$/);
+    if (m) out[m[1]!] = m[2] ?? m[3]!;
+  }
+  return out;
+}

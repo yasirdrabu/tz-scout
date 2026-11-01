@@ -73,8 +73,6 @@ export type SourceAccount = AccountRow & {
   first_arrival: { at: string; batch_id: string | null; batch_name: string | null; source_id: string; source_name: string } | null;
 };
 
-export type BatchRow = { id: string; name: string; run_at: string; status: string; item_count: number; counts: { resolved?: number; rejected?: number } };
-
 /** The Sources screen's search params (C10): `kind` comma separated. */
 export type SourcesFilters = { kind?: string; q?: string };
 
@@ -148,12 +146,6 @@ export const sourceAccountFacetsQuery = (tenant: string, sourceId: string, f: So
   queryOptions({
     queryKey: ['sources', tenant, 'account-facets', sourceId, f],
     queryFn: () => apiFetch<AccountFacets & { tiers: { value: string; label: string; count: number }[] }>(`/accounts/facets?${accountParams(sourceId, f)}`, { tenant }),
-  });
-
-export const sourceBatchesQuery = (tenant: string, sourceId: string) =>
-  queryOptions({
-    queryKey: ['sources', tenant, 'batches', sourceId],
-    queryFn: () => apiFetch<{ data: BatchRow[]; next_cursor: string | null; total: number }>(`/batches?source_id=${encodeURIComponent(sourceId)}&limit=50`, { tenant }),
   });
 
 export type SourcePatch = { status?: 'active' | 'paused' | 'archived'; owner_user_id?: string | null; name?: string };

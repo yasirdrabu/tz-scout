@@ -1,11 +1,12 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { hasScope, meQuery } from '../../api/me';
 import page from '../../routes/Page.module.css';
 import { Tabs } from '../../ui/Tabs';
 import { LoadFailed, LoadingRows, useRun } from '../settings/shared';
 import { usePause } from './hooks';
-import { childTab, sourceBatchesQuery, sourceQuery, statsQuery, syncSource } from './api';
+import { sourceBatchesQuery } from '../batches/api';
+import { childTab, sourceQuery, statsQuery, syncSource } from './api';
 import { SourceHeader } from './SourceHeader';
 import { StatTiles } from './StatTiles';
 import { AccountsTab } from './tabs/AccountsTab';
@@ -24,7 +25,7 @@ export function SourcePage() {
   const { data: me } = useQuery(meQuery(tenant));
   const one = useQuery(sourceQuery(tenant, id));
   const stats = useQuery(statsQuery(tenant));
-  const batches = useQuery(sourceBatchesQuery(tenant, id));
+  const batches = useInfiniteQuery(sourceBatchesQuery(tenant, id));
   const pause = usePause(tenant, one.data);
   const sync = useRun();
 
@@ -43,7 +44,7 @@ export function SourcePage() {
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'accounts', label: 'Accounts', ...(stat ? { count: stat.sent } : {}) },
-    { id: 'batches', label: 'Batches', ...(batches.data ? { count: batches.data.total } : {}) },
+    { id: 'batches', label: 'Batches', ...(batches.data?.pages[0] ? { count: batches.data.pages[0].total } : {}) },
     ...(kids ? [kids] : []),
     { id: 'settings', label: 'Settings' },
   ];
@@ -67,7 +68,7 @@ export function SourcePage() {
       <Tabs label="Source" tabs={tabs} value={current} onChange={go}>
         {current === 'overview' && <OverviewTab tenant={tenant} source={s} stat={stat} />}
         {current === 'accounts' && <AccountsTab tenant={tenant} source={s} />}
-        {current === 'batches' && <BatchesTab batches={batches} />}
+        {current === 'batches' && <BatchesTab tenant={tenant} batches={batches} canRetry={!!me && hasScope(me, 'imports:run')} />}
         {current === kids?.id && <ChildrenTab tenant={tenant} source={s} />}
         {current === 'settings' && <SettingsTab tenant={tenant} source={s} me={me} />}
       </Tabs>
