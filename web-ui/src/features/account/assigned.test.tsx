@@ -112,7 +112,14 @@ describe('Account page after assignment', () => {
         cursors.push(cursor);
         return HttpResponse.json(
           cursor
-            ? { data: [{ id: 'hnd_1:sent', kind: 'scout', at: '2026-10-27T09:00:00Z', summary: 'Scout sent the account to HubSpot with Ash Patel as owner and logged the brief.' }], next_cursor: null, synced_at: null }
+            ? {
+                data: [
+                  { id: 'hnd_1:undone', kind: 'scout', at: '2026-10-28T09:00:00Z', summary: 'Scout took the account back: Ash Patel declined it (Not my territory). Closed 2 tasks and gave the company back to Rita Gomez.' },
+                  { id: 'hnd_1:sent', kind: 'scout', at: '2026-10-27T09:00:00Z', summary: 'Scout sent the account to HubSpot with Ash Patel as owner and logged the brief.' },
+                ],
+                next_cursor: null,
+                synced_at: null,
+              }
             : { data: [{ id: 'a1', kind: 'reply', at: '2026-11-13T09:00:00Z', summary: 'Reply received' }], next_cursor: 'c2', synced_at: new Date(Date.now() - 2 * 60_000).toISOString() },
         );
       }),
@@ -123,6 +130,8 @@ describe('Account page after assignment', () => {
     expect(activity).toHaveTextContent('Synced 2 minutes ago');
     await userEvent.click(within(activity).getByRole('button', { name: 'Show more' }));
     expect(await within(activity).findByText('Scout sent the account to HubSpot with Ash Patel as owner and logged the brief.')).toBeInTheDocument();
+    // The take-back row reads as the API words it, reason and all.
+    expect(within(activity).getByText('Scout took the account back: Ash Patel declined it (Not my territory). Closed 2 tasks and gave the company back to Rita Gomez.')).toBeInTheDocument();
     expect(cursors).toEqual([null, 'c2']);
     expect(within(activity).queryByRole('button', { name: 'Show more' })).toBeNull();
   });

@@ -57,18 +57,20 @@ export async function refreshBatch(ctx: ModuleContext, batchId: string): Promise
     .where(and(eq(handoffBatch.tenantId, ctx.tenantId), eq(handoffBatch.id, batchId)));
 
   const portal = (await connectionSettings(ctx, 'hubspot')).portal_id;
+  const sending = rows.filter((h) => h.status === 'completed' && !h.undone && h.sellerUserId && accounts.has(h.accountId));
+  const provider = handoffPackageProvider();
+  const offers = provider.bestOfferNames ? await provider.bestOfferNames(ctx, [...new Set(sending.map((h) => h.accountId))]) : new Map<string, string | null>();
   const sent: Parameters<typeof handoffMessages>[0]['accounts'] = [];
-  for (const h of rows) {
-    const a = accounts.get(h.accountId);
-    if (h.status !== 'completed' || h.undone || !h.sellerUserId || !a) continue;
+  for (const h of sending) {
+    const a = accounts.get(h.accountId)!;
     const buyer = a.people.find((p) => p.isPrimary && personName(p)) ?? a.people.find((p) => personName(p));
-    const best = (await handoffPackageProvider().package(ctx, h.accountId, h.assignmentId))?.properties.best_offer;
+    const best = offers.get(h.accountId);
     sent.push({
-      sellerId: h.sellerUserId,
+      sellerId: h.sellerUserId!,
       seller: nameOfUser(h.sellerUserId),
       name: a.name,
       domain: a.domain ?? '',
-      offer: typeof best === 'string' && best.trim() ? best : null,
+      offer: best?.trim() ? best : null,
       buyer: buyer ? { name: personName(buyer), title: buyer.title, email: buyer.email } : null,
       crmUrl: (typeof portal === 'string' || typeof portal === 'number') && portal !== '' && h.companyExternalId
         ? `https://app.hubspot.com/contacts/${portal}/record/0-2/${h.companyExternalId}`

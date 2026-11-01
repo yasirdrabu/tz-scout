@@ -62,6 +62,13 @@ describe('addMember / removeMember', () => {
     expect(u!.email).toBe('new.seller@example.com');
   });
 
+  it('names a new person from their email, not a handle', async () => {
+    const id = await inTenant(tenantId, owner, (ctx) => addMember(ctx, { email: 'new.person@x.com', role: 'seller' }));
+    const [m] = await adminDb.select().from(membership).where(eq(membership.id, id));
+    const [u] = await adminDb.select().from(user).where(eq(user.id, m!.userId));
+    expect(u!.name).toBe('New Person');
+  });
+
   it('adds a signed-in person as active', async () => {
     const p = await seedUser({ signedIn: true });
     const id = await inTenant(tenantId, owner, (ctx) => addMember(ctx, { email: p.email, role: 'leader' }));

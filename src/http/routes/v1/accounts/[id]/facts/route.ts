@@ -1,4 +1,4 @@
-import { getAccount, getFacts } from '@/modules/accounts';
+import { factLabel, getAccount, getFacts } from '@/modules/accounts';
 import { sourceNames } from '@/modules/intake';
 import { can } from '@/modules/tenancy';
 import { pageOfList } from '../../../_lib/pagination';
@@ -24,6 +24,6 @@ export const GET = v1Route({ permission: 'accounts:read' }, async (req, principa
   const name = (id: string | null | undefined) => (id ? (names.get(id) ?? null) : null);
   return pageOfList(
     req,
-    shown.map((f) => ({ ...f, sourceNames: { person: name(f.sourceChain.personSourceId), agent: name(f.sourceChain.agentSourceId), vendor: name(f.sourceChain.vendorSourceId) } })),
+    shown.map((f) => ({ ...f, label: factLabel(f.key), sourceNames: { person: name(f.sourceChain.personSourceId), agent: name(f.sourceChain.agentSourceId), vendor: name(f.sourceChain.vendorSourceId) } })),
   );
 });

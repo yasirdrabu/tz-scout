@@ -109,11 +109,17 @@ describe('ownership preflight with the mock CRM', () => {
   it('a seller linked to an inactive roster owner is blocked', async () => {
     expect(await check('owned-elsewhere.example', rahulSeller)).toMatchObject({ result: 'blocked', message: 'Link this person to a HubSpot owner first' });
   });
-  it('calls the CRM now and refreshes the stored check; the port shape is result and message', async () => {
+  it('calls the CRM now and refreshes the stored check; the port carries the result, message, reason, owner and deal', async () => {
     const id = await arrive('owned-elsewhere.example');
     await t.run((ctx) => preflightOwnership(ctx, id, ash));
     await t.run((ctx) => ctx.tx.update(companyCheck).set({ ownerName: 'Stale Name', exists: false }).where(eq(companyCheck.accountId, id)));
-    expect(await t.run((ctx) => crmOwnershipPreflight.check(ctx, id, ash))).toEqual({ result: 'assign', message: 'Owned by Vijay Kumar: will move to Ash' });
+    expect(await t.run((ctx) => crmOwnershipPreflight.check(ctx, id, ash))).toEqual({
+      result: 'assign',
+      message: 'Owned by Vijay Kumar: will move to Ash',
+      reason: null,
+      currentOwnerName: 'Vijay Kumar',
+      deal: null,
+    });
     const [row] = await t.run((ctx) => ctx.tx.select().from(companyCheck).where(eq(companyCheck.accountId, id)));
     expect(row).toMatchObject({ exists: true, ownerName: 'Vijay Kumar' });
   });

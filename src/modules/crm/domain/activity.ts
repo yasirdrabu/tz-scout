@@ -41,6 +41,23 @@ export type ScoutHandoff = {
   undone: HandoffUndone | null;
 };
 
+const upperFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * "Scout took the account back: …" (Ruling 18). With a cause it says who declined it and why, or who withdrew it,
+ * then what the undo did; an undo stored before causes were kept says only what it did.
+ */
+export function undoSummary(u: HandoffUndone, returnedToName: string | null): string {
+  const did = undoReason(u, returnedToName);
+  const c = u.cause;
+  if (!c) return `Scout took the account back: ${did}.`;
+  const who =
+    c.kind === 'declined'
+      ? `${c.byName ?? 'the seller'} declined it${c.reasonLabel ? ` (${noStop(c.reasonLabel)})` : ''}`
+      : `${c.byName ?? 'the assigner'} withdrew the assignment`;
+  return `Scout took the account back: ${who}. ${upperFirst(did)}.`;
+}
+
 /** Scout's rows for one handoff: the push once it completed, and the undo once it ran. */
 export function scoutEntries(h: ScoutHandoff, names: { seller: string | null; owner: string | null; returnedTo: string | null }): ActivityEntry[] {
   const out: ActivityEntry[] = [];
@@ -56,7 +73,7 @@ export function scoutEntries(h: ScoutHandoff, names: { seller: string | null; ow
     });
   }
   if (h.undone) {
-    out.push({ id: `${h.id}:undone`, kind: 'scout', at: new Date(h.undone.at), summary: `Scout took the account back: ${undoReason(h.undone, names.returnedTo)}.` });
+    out.push({ id: `${h.id}:undone`, kind: 'scout', at: new Date(h.undone.at), summary: undoSummary(h.undone, names.returnedTo) });
   }
   return out;
 }

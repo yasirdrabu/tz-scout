@@ -14,6 +14,7 @@ export {
 } from './contracts/ports';
 export { SIGNAL_TYPES, type SignalType } from './domain/signals';
 export { FACT_KEYS, isKnownFactKey } from './contracts/types';
+export { factLabel } from './contracts/fact-labels';
 export {
   archiveSignal,
   convertShell,

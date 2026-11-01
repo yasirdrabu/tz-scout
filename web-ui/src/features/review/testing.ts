@@ -2,7 +2,7 @@ import { http, HttpResponse } from 'msw';
 import { exactly } from '../../test/http';
 import { serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
-import type { Columns, QueueFacets, QueueRow, Reason, ReviewStatus, Sellers } from './api';
+import type { Columns, LastRescore, QueueFacets, QueueRow, Reason, ReviewStatus, Sellers } from './api';
 
 // Fixtures in the API's shapes (snake_case), for the review screens' tests.
 
@@ -71,6 +71,8 @@ export const PINEGATE = row({
 
 export const FACETS: QueueFacets = {
   total: 3,
+  total_all_tiers: 3,
+  source_count: 1,
   oldest_arrived_at: '2026-10-20T10:00:00Z',
   last_reviewed_at: '2026-10-31T09:14:00Z',
   tiers: [
@@ -148,8 +150,19 @@ export const SELLERS: Sellers = {
 
 export const LEADER = ['review:act', 'assign:act', 'accounts:read', 'offers:read', 'imports:run', 'sources:manage', 'members:manage', 'crm:push'];
 
+export const NEW_PREFLIGHT = { result: 'new', message: 'New in the CRM', reason: null, current_owner_name: null, deal: null } as const;
+
 /** Everything the queue screen reads, answered; returns the request URLs seen per path. */
-export function serveQueue(opts: { rows?: QueueRow[]; facets?: QueueFacets; scopes?: string[] } = {}) {
+export const RESCORE: LastRescore = {
+  version: 7,
+  changed_at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+  changed_by_name: 'Zach Wiant',
+  summary: 'Scoring settings changed',
+  weights_text: 'Fit 60%, buying intent 40%',
+  tier_changed_count: 12,
+};
+
+export function serveQueue(opts: { rows?: QueueRow[]; facets?: QueueFacets; scopes?: string[]; rescore?: LastRescore | null } = {}) {
   const seen: Record<string, URL[]> = {};
   const note = (req: Request) => {
     const u = new URL(req.url);
@@ -164,6 +177,10 @@ export function serveQueue(opts: { rows?: QueueRow[]; facets?: QueueFacets; scop
     http.get('/api/v1/review-queue/facets', ({ request }) => {
       note(request);
       return HttpResponse.json(opts.facets ?? FACETS);
+    }),
+    http.get('/api/v1/scoring/last-rescore', ({ request }) => {
+      note(request);
+      return HttpResponse.json({ data: opts.rescore ?? null });
     }),
     http.get('/api/v1/me/preferences/review-queue-columns', () => HttpResponse.json(COLUMNS)),
     http.get('/api/v1/settings/review/statuses', () => HttpResponse.json({ data: STATUSES })),
@@ -191,7 +208,7 @@ export function serveQueue(opts: { rows?: QueueRow[]; facets?: QueueFacets; scop
       }),
     ),
     http.get('/api/v1/assignable-sellers', () => HttpResponse.json(SELLERS)),
-    http.post(exactly('/api/v1/accounts/acc_mdc:assign-preview'), () => HttpResponse.json({ preflight: { result: 'new', message: 'New in the CRM' }, approves_to: null, replaces: null })),
+    http.post(exactly('/api/v1/accounts/acc_mdc:assign-preview'), () => HttpResponse.json({ preflight: NEW_PREFLIGHT, approves_to: null, replaces: null })),
   );
   return seen;
 }

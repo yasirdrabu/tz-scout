@@ -30,8 +30,12 @@ export type HandoffUndone = {
   /** Set when the undo job gave up; the other fields say what it had done by then. */
   failed?: boolean;
   reason?: string;
+  /** Why Scout took it back: who declined it and why, or who withdrew it (Ruling 18). Undo records stored before this have none. */
+  cause?: UndoCause;
   at: string;
 };
+
+export type UndoCause = { kind: 'declined' | 'withdrawn'; reasonLabel: string | null; byName: string | null };
 
 /** Default follow-up days after the handoff. A tenant's list holds 1 to 5 unique ascending integers, each 1 to 60. */
 export const DEFAULT_FOLLOW_UP_DAYS = [3, 7, 14];

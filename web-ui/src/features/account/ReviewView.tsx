@@ -69,7 +69,7 @@ export function WhyNow({ account }: { account: AccountDetail }) {
                 {s.detail && <span className={styles.muted}>{s.detail}</span>}
                 {s.url && (
                   <a href={s.url} target="_blank" rel="noreferrer" className={styles.small}>
-                    {hostOf(s.url)}
+                    {s.source_name ?? hostOf(s.url)}
                   </a>
                 )}
               </span>
@@ -80,12 +80,6 @@ export function WhyNow({ account }: { account: AccountDetail }) {
     </Card>
   );
 }
-
-/** A fact key in words, until the API names facts (backend gap in the report). */
-const factLabel = (key: string) => {
-  const words = key.replace(/_/g, ' ');
-  return words.charAt(0).toUpperCase() + words.slice(1);
-};
 
 function useFactValue() {
   const f = useFormat();
@@ -118,7 +112,7 @@ export function AccountFacts({ tenant, id }: { tenant: string; id: string }) {
         <dl className={styles.rows}>
           {rows.map((x) => (
             <div key={x.id} className={styles.fact}>
-              <dt className={styles.factLabel}>{factLabel(x.key)}</dt>
+              <dt className={styles.factLabel}>{x.label}</dt>
               <dd className={styles.stack}>
                 <span>{value(x.value)}</span>
                 <span className={cx(styles.muted, styles.small)}>{[sourceOf(x), f.date(x.observed_at)].filter(Boolean).join(' · ')}</span>

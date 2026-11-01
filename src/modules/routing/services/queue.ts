@@ -148,6 +148,10 @@ export type FacetOption = { value: string; label: string; count: number };
 
 export type QueueFacets = {
   total: number;
+  /** The "All" tab: the total with every filter but `tier`. */
+  totalAllTiers: number;
+  /** "Loading accounts from {n} sources": the sources with an account in the queue, every filter but `source_id` applied. */
+  sourceCount: number;
   /** "Oldest arrived {age} ago": the earliest arrival in the filtered queue. */
   oldestArrivedAt: Date | null;
   /** "Last account reviewed {when}": the latest move to a status that counts as reviewed. */
@@ -180,7 +184,8 @@ export async function queueFacets(ctx: ModuleContext, f: QueueFilters = {}): Pro
   const statuses = await loadStatuses(ctx);
   const without = async (drop: Partial<Record<keyof QueueFilters, undefined>>) => queryFor(ctx, { ...f, ...drop }, statuses);
   const names = await loadNames(ctx);
-  const tierCounts = await countAccountsBy(ctx, await without({ tier: undefined }), 'tier');
+  const allTiers = await without({ tier: undefined });
+  const tierCounts = await countAccountsBy(ctx, allTiers, 'tier');
   const practiceCounts = await countAccountsBy(ctx, await without({ practiceId: undefined }), 'practice');
   const offerCounts = await countAccountsBy(ctx, await without({ offerId: undefined }), 'offer');
   const sourceCounts = await countAccountsBy(ctx, await without({ sourceId: undefined }), 'source');
@@ -192,6 +197,8 @@ export async function queueFacets(ctx: ModuleContext, f: QueueFilters = {}): Pro
   const lastReviewedAt = await lastReviewed(ctx, reviewedKeys);
   return {
     total: await countAccounts(ctx, base),
+    totalAllTiers: await countAccounts(ctx, allTiers),
+    sourceCount: [...sourceCounts.entries()].filter(([id, n]) => id !== null && n > 0).length,
     oldestArrivedAt: await oldestCreatedAt(ctx, base),
     lastReviewedAt,
     tiers: [...TIERS].reverse().map((t) => ({ value: t, label: TIER_NAMES[t], count: tierCounts.get(t) ?? 0 })),

@@ -30,9 +30,9 @@ export const ACCOUNT: AccountDetail = {
     },
   ],
   signals: [
-    { id: 'sig_1', type: 'company_event', kind: 'trigger', title: 'RFP re-issue expected in December', detail: null, url: 'https://www.miamidade.gov/procurement/notice', occurred_at: '2026-10-14T12:00:00Z' },
-    { id: 'sig_0', type: 'research', kind: 'research', title: 'Undated research', detail: null, url: null, occurred_at: null },
-    { id: 'sig_2', type: 'funding', kind: 'trigger', title: 'FY2027 budget adds $3.2M for DTPW tech modernization', detail: null, url: null, occurred_at: '2026-09-18T12:00:00Z' },
+    { id: 'sig_1', type: 'company_event', kind: 'trigger', title: 'RFP re-issue expected in December', detail: null, url: 'https://www.miamidade.gov/procurement/notice', occurred_at: '2026-10-14T12:00:00Z', source_name: 'RFP Watch' },
+    { id: 'sig_0', type: 'research', kind: 'research', title: 'Undated research', detail: null, url: null, occurred_at: null, source_name: null },
+    { id: 'sig_2', type: 'funding', kind: 'trigger', title: 'FY2027 budget adds $3.2M for DTPW tech modernization', detail: null, url: 'https://www.govspend.com/budget', occurred_at: '2026-09-18T12:00:00Z', source_name: null },
   ],
 };
 
@@ -94,9 +94,9 @@ export const SCORE: AccountScore = {
 };
 
 export const FACTS: Fact[] = [
-  { id: 'fct_1', person_id: null, key: 'employees', value: 3800, observed_at: '2026-09-01T12:00:00Z', source_names: { person: 'Marcus Lee', agent: 'RFP Watch', vendor: 'GovSpend' } },
-  { id: 'fct_2', person_id: null, key: 'buying_process', value: 'Formal RFP with Board approval', observed_at: '2026-10-01T12:00:00Z', source_names: { person: null, agent: 'RFP Watch', vendor: null } },
-  { id: 'fct_3', person_id: 'per_jr', key: 'email', value: 'jr@miamidade.gov', observed_at: '2026-10-01T12:00:00Z', source_names: { person: null, agent: null, vendor: null } },
+  { id: 'fct_1', person_id: null, key: 'employees', label: 'Staff', value: 3800, observed_at: '2026-09-01T12:00:00Z', source_names: { person: 'Marcus Lee', agent: 'RFP Watch', vendor: 'GovSpend' } },
+  { id: 'fct_2', person_id: null, key: 'buying_process', label: 'Buying process', value: 'Formal RFP with Board approval', observed_at: '2026-10-01T12:00:00Z', source_names: { person: null, agent: 'RFP Watch', vendor: null } },
+  { id: 'fct_3', person_id: 'per_jr', key: 'email', label: 'Email', value: 'jr@miamidade.gov', observed_at: '2026-10-01T12:00:00Z', source_names: { person: null, agent: null, vendor: null } },
 ];
 
 const section = (s: Partial<BriefSection> & Pick<BriefSection, 'key' | 'title'>): BriefSection => ({

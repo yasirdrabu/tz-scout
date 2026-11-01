@@ -247,7 +247,7 @@ describe('assign, respond and withdraw', () => {
     const a = await arrivedAccount(tenant(), { name: 'Open Deal Co', domain: 'open-deal.example', sourceChain: { agentSourceId: ash.agentId } });
     const message = 'Open deal owned by Vijay Kumar: will not change owner';
     const preview = await as('leader', accountAction, `accounts/${a}:assign-preview`, 'POST', { seller_user_id: ids.seller });
-    expect((await preview.json()).preflight).toEqual({ result: 'stop', message });
+    expect((await preview.json()).preflight).toMatchObject({ result: 'stop', message, reason: 'open_deal', current_owner_name: 'Vijay Kumar' });
     const refused = await as('leader', accountAction, `accounts/${a}:assign`, 'POST', { seller_user_id: ids.seller });
     expect(refused.status).toBe(409);
     expect(JSON.stringify(await refused.json())).toContain(message);

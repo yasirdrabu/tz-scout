@@ -13,19 +13,21 @@ import {
   ensurePlatformAdmin,
   listTenants,
   members,
+  renameHandleUsers,
   revokeActiveKeysNamed,
   userIdForEmail,
 } from '@/modules/tenancy';
 import { seedAccountDefaults } from '@/modules/accounts';
 import { backfillCrm, seedCrmDefaults, seedMockCrm } from '@/modules/crm';
 import { listConnections } from '@/modules/integrations';
-import { listSources, personSourceFor, registerSource, seedIntakeDefaults } from '@/modules/intake';
+import { listSources, personSourceFor, registerSource, renamePersonSources, seedIntakeDefaults } from '@/modules/intake';
 import { seedMissingSignalRules, seedOffers } from '@/modules/offers';
 import { backfillBriefs, seedPlaybooksDefaults } from '@/modules/playbooks';
 import { backfillLeadOffers, backfillReviews, seedRoutingDefaults } from '@/modules/routing';
 import { requestRescore, seedScoringDefaults } from '@/modules/scoring';
 
 export const ADMIN_EMAIL = 'yasir@taazaa.com';
+const ADMIN_NAME = 'Yasir Drabu';
 const PLATFORM_TENANT = 't_platform';
 const DEV_KEY_NAME = 'Local development key';
 const DEV_AGENT_NAME = 'Local development agent';
@@ -48,12 +50,14 @@ const TENANTS = [
     currency: 'USD',
     timezone: 'America/New_York',
     ownerEmail: 'zach.wiant@taazaa.com',
+    ownerName: 'Zach Wiant',
     // Placeholder CRM owner ids until the real ones are linked.
     sellers: [
-      { email: 'ash@taazaa.com', hubspotOwnerId: 'placeholder-owner-ash' },
-      { email: 'mike@taazaa.com', hubspotOwnerId: 'placeholder-owner-mike' },
-      { email: 'andy@taazaa.com', hubspotOwnerId: 'placeholder-owner-andy' },
+      { email: 'ash@taazaa.com', name: 'Ash', hubspotOwnerId: 'placeholder-owner-ash' },
+      { email: 'mike@taazaa.com', name: 'Mike', hubspotOwnerId: 'placeholder-owner-mike' },
+      { email: 'andy@taazaa.com', name: 'Andy', hubspotOwnerId: 'placeholder-owner-andy' },
     ],
+    operators: [{ email: 'riley@taazaa.com', name: 'Riley' }],
   },
   {
     slug: 'northwind',
@@ -61,9 +65,30 @@ const TENANTS = [
     currency: 'USD',
     timezone: 'America/Chicago',
     ownerEmail: 'owner@northwind.example',
+    ownerName: 'Northwind Owner',
     sellers: [],
+    operators: [],
   },
 ] as const;
+
+/** The seeded people's display names, by email. */
+const NAMES: Readonly<Record<string, string>> = Object.fromEntries([
+  [ADMIN_EMAIL, ADMIN_NAME],
+  ...TENANTS.flatMap((t) => [[t.ownerEmail, t.ownerName], ...[...t.sellers, ...t.operators].map((p) => [p.email, p.name])]),
+]);
+
+/**
+ * People are named, not handled: the seeded people take their names, any other user named by their email's local part
+ * gets a name from the email, and person sources still named by a handle take their person's name. Safe to run again.
+ */
+export async function backfillDisplayNames(): Promise<void> {
+  const people = await renameHandleUsers(NAMES);
+  for (const t of await listTenants()) {
+    await withTenant(t.id, (tx) =>
+      renamePersonSources({ tenantId: t.id, actor: { kind: 'system', id: 'seed' }, correlationId: newId('cor'), tx }, people),
+    );
+  }
+}
 
 /**
  * Brings a tenant built before R1b up to date: the scoring and routing defaults (with their schedules), default signal rules for each offer that has none, a review row and
@@ -137,6 +162,9 @@ export async function seed(): Promise<{ devApiKey: string }> {
         if (have.has(s.email)) continue;
         await addMember(ctx(tx), { email: s.email, role: 'seller', crmOwnerIds: { hubspot: s.hubspotOwnerId } });
       }
+      for (const o of t.operators) {
+        if (!have.has(o.email)) await addMember(ctx(tx), { email: o.email, role: 'operator' });
+      }
       await seedAccountDefaults(ctx(tx));
       // Taazaa's own catalogue; other tenants start with no offers.
       if (t.slug === 'taazaa') await seedOffers(ctx(tx));
@@ -149,15 +177,16 @@ export async function seed(): Promise<{ devApiKey: string }> {
       await seedPlaybooksDefaults(ctx(tx));
       await backfillBriefs(ctx(tx));
     });
-    // Sources come after the first transaction commits, so the sellers' users exist.
-    const emails = [ADMIN_EMAIL, t.ownerEmail, ...t.sellers.map((s) => s.email)];
+    // Sources come after the first transaction commits, so the people's users exist, named.
+    await renameHandleUsers(NAMES);
+    const emails = [ADMIN_EMAIL, t.ownerEmail, ...[...t.sellers, ...t.operators].map((s) => s.email)];
     await withTenant(row.id, async (tx) => {
       const c = ctx(tx);
       let adminSourceId = '';
       for (const email of emails) {
         const userId = await userIdForEmail(email);
         if (!userId) continue;
-        const id = (await personSourceFor(c, userId)) ?? (await registerSource(c, { kind: 'person', name: email.split('@')[0]!, userId })).id;
+        const id = (await personSourceFor(c, userId)) ?? (await registerSource(c, { kind: 'person', name: NAMES[email]!, userId })).id;
         if (email === ADMIN_EMAIL) adminSourceId = id;
       }
       const have = (await listSources(c)).find((s) => s.kind === 'agent' && s.name === DEV_AGENT_NAME);
@@ -168,6 +197,8 @@ export async function seed(): Promise<{ devApiKey: string }> {
     });
     if (t.slug === 'taazaa') taazaaId = row.id;
   }
+
+  await backfillDisplayNames();
 
   await upsertSchedule(
     { actor },

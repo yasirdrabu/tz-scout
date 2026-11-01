@@ -22,7 +22,7 @@ async function openFromQueue(page: Page, name: string) {
 async function assignFromPage(page: Page, name: string) {
   await page.getByRole('button', { name: 'Approve and assign' }).click();
   const dialog = page.getByRole('dialog', { name: `Assign ${name}` });
-  await dialog.getByRole('radio', { name: /^ash/i }).check();
+  await dialog.getByRole('radio', { name: /^Ash/ }).check();
   const go = dialog.getByRole('button', { name: /^Assign to / });
   await expect(go).toBeEnabled();
   await go.click();
@@ -49,14 +49,14 @@ test('a leader opens an account from the queue, edits a brief section, approves 
   await overview.getByRole('textbox', { name: 'Overview' }).fill(line);
   await overview.getByRole('button', { name: 'Save' }).click();
   await shows(page, 'Overview saved');
-  await expect(overview.getByText(/^Edited by Zach/i)).toBeVisible();
+  await expect(overview.getByText(/^Edited by Zach Wiant/)).toBeVisible();
 
   await page.reload();
   await expect(overview.getByText(line)).toBeVisible();
-  await expect(overview.getByText(/^Edited by Zach/i)).toBeVisible();
+  await expect(overview.getByText(/^Edited by Zach Wiant/)).toBeVisible();
 
   await assignFromPage(page, name);
-  await expect(page.getByRole('region', { name: 'Assignment' })).toContainText(/Waiting for Ash.* to accept/i);
+  await expect(page.getByRole('region', { name: 'Assignment' })).toContainText(/Waiting for Ash to accept/);
   // The page polls while the send runs.
   await expect(page.getByText(/^In HubSpot/).first()).toBeVisible({ timeout: 60_000 });
 

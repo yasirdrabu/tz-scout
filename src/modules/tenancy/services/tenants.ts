@@ -8,6 +8,7 @@ import type { Actor } from '@/platform/events/envelope';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { tenantCreated } from '../contracts/events';
+import { displayNameFromEmail } from '../domain/display-name';
 import { membership, tenant, user } from '../db/schema';
 import { forgetAccess } from './principal';
 
@@ -71,7 +72,7 @@ export async function createTenant(
 
       await tx
         .insert(user)
-        .values({ id: newId('usr'), name: email.split('@')[0] ?? email, email })
+        .values({ id: newId('usr'), name: displayNameFromEmail(email), email })
         .onConflictDoNothing({ target: user.email });
       const [owner] = await tx.select({ id: user.id }).from(user).where(eq(user.email, email));
 
@@ -147,7 +148,7 @@ export async function ensurePlatformAdmin(email: string): Promise<string> {
   const e = email.trim().toLowerCase();
   await adminDb
     .insert(user)
-    .values({ id: newId('usr'), name: e.split('@')[0] ?? e, email: e, platformAdmin: true })
+    .values({ id: newId('usr'), name: displayNameFromEmail(e), email: e, platformAdmin: true })
     .onConflictDoUpdate({ target: user.email, set: { platformAdmin: true } });
   const [u] = await adminDb.select({ id: user.id }).from(user).where(eq(user.email, e));
   return u!.id;
@@ -160,6 +161,28 @@ export async function userIdForEmail(email: string): Promise<string | null> {
     .from(user)
     .where(eq(user.email, email.trim().toLowerCase()));
   return u?.id ?? null;
+}
+
+/** A user's display name and the handle-like names they may have had before it. */
+export type DisplayNameRow = { userId: string; email: string; name: string; staleNames: string[] };
+
+/**
+ * For seeding local data. A user named by their email's local part (a handle), or by the name derived from the email,
+ * takes `explicit[email]` when one is given; any other user still named by a handle gets `displayNameFromEmail`.
+ * Safe to run again. Returns every user with the names that are now stale, so callers can rename what used them.
+ */
+export async function renameHandleUsers(explicit: Readonly<Record<string, string>> = {}): Promise<DisplayNameRow[]> {
+  const rows = await adminDb.select({ id: user.id, email: user.email, name: user.name }).from(user);
+  const out: DisplayNameRow[] = [];
+  for (const r of rows) {
+    const handle = r.email.split('@')[0] ?? r.email;
+    const derived = displayNameFromEmail(r.email);
+    const given = explicit[r.email];
+    const target = given && (r.name === handle || r.name === derived) ? given : r.name === handle ? derived : r.name;
+    if (target !== r.name) await adminDb.update(user).set({ name: target, updatedAt: new Date() }).where(eq(user.id, r.id));
+    out.push({ userId: r.id, email: r.email, name: target, staleNames: [...new Set([handle, derived])].filter((n) => n !== target) });
+  }
+  return out;
 }
 
 export type AdminTenantRow = TenantRow & {

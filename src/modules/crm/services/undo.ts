@@ -10,7 +10,7 @@ import { log } from '@/platform/log';
 import type { CrmAdapter } from '../contracts/adapter';
 import { handoffCancelled } from '../contracts/events';
 import { handoffUndoJob, UNDO_MAX_ATTEMPTS } from '../contracts/jobs';
-import type { HandoffUndone } from '../contracts/types';
+import type { HandoffUndone, UndoCause } from '../contracts/types';
 import { crmSetting, handoff, link } from '../db/schema';
 import { esc } from '../domain/note';
 import { classifyPushError, REASON_LIMIT, RETRIES_FAILED } from '../domain/push-errors';
@@ -145,8 +145,9 @@ export async function runUndo(ctx: ModuleContext, handoffId: string, now: Date, 
     return row ?? null;
   });
   if (!run) return; // gone, or already undone
+  const cause = await causeOf(ctx, run, why);
   if (run.undoAttempts > UNDO_MAX_ATTEMPTS) {
-    await failUndo(ctx, run.id, now, RETRIES_FAILED);
+    await failUndo(ctx, run.id, now, RETRIES_FAILED, cause);
     return;
   }
   try {
@@ -160,14 +161,21 @@ export async function runUndo(ctx: ModuleContext, handoffId: string, now: Date, 
     }
     const job = group.find((x) => x.id === handoffId)!;
     const undone = await undoWrites(ctx, merged(job, group), now, why);
-    await record(ctx, group, undone, now);
+    await record(ctx, group, { ...undone, cause }, now);
   } catch (e) {
     if (transactionClosed(e)) throw e;
     const f = classifyPushError(e);
     if (f.unexpected) log.error({ err: e, tenantId: ctx.tenantId, handoffId }, 'crm: handoff undo failed unexpectedly');
     if (f.retryable && run.undoAttempts < UNDO_MAX_ATTEMPTS) throw e;
-    if (!(await failUndo(ctx, handoffId, now, f.retryable ? RETRIES_FAILED : f.reason))) throw e;
+    if (!(await failUndo(ctx, handoffId, now, f.retryable ? RETRIES_FAILED : f.reason, cause))) throw e;
   }
+}
+
+/** Who declined it (the seller) and with what reason, or who withdrew it (the assigner unless the event names someone else). */
+async function causeOf(ctx: ModuleContext, h: Handoff, why: UndoReason): Promise<UndoCause> {
+  const by = why.by ?? (why.kind === 'declined' ? h.sellerUserId : h.assignedBy);
+  const byName = by ? ((await members(ctx)).find((m) => m.userId === by)?.name ?? null) : null;
+  return { kind: why.kind, reasonLabel: why.kind === 'declined' ? why.reasonLabel : null, byName };
 }
 
 /**
@@ -195,7 +203,7 @@ async function record(ctx: ModuleContext, group: Handoff[], undone: HandoffUndon
  * aborted). False when the job's own transaction holds one of the rows (it wrote `undone` before failing):
  * waiting for it would never end, so the caller rethrows and the platform keeps the job.
  */
-async function failUndo(ctx: ModuleContext, handoffId: string, now: Date, reason: string): Promise<boolean> {
+async function failUndo(ctx: ModuleContext, handoffId: string, now: Date, reason: string, cause: UndoCause): Promise<boolean> {
   return withTenant(ctx.tenantId, async (tx) => {
     const c = { ...ctx, tx };
     const [current] = await tx.select().from(handoff).where(byId(c, handoffId));
@@ -205,7 +213,7 @@ async function failUndo(ctx: ModuleContext, handoffId: string, now: Date, reason
     const group = await groupOf(c, current).for('update', { skipLocked: true });
     if (group.length < all.length) return false;
     const done = await undoLinks(c, current);
-    await record(c, group, { ...emptyUndone(now), tasksClosed: done.tasks, noteExternalId: done.note, failed: true, reason: reason.slice(0, REASON_LIMIT) }, now);
+    await record(c, group, { ...emptyUndone(now), tasksClosed: done.tasks, noteExternalId: done.note, failed: true, reason: reason.slice(0, REASON_LIMIT), cause }, now);
     return true;
   });
 }

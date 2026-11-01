@@ -1,15 +1,17 @@
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useId, useState } from 'react';
 import { ApiError } from '../../api/errors';
 import { hasScope, type Me } from '../../api/me';
+import { formatMoney } from '../../lib/format';
+import { useFormat } from '../../lib/useFormat';
 import { Avatar } from '../../ui/Avatar';
 import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { Field } from '../../ui/Field';
 import { useToast } from '../../ui/Toast';
 import { errorText } from '../settings/shared';
-import { assign, bulk, previewAssign, sellersQuery, type BulkResult, type DialogAccount, type Seller } from './api';
+import { assign, bulk, previewAssign, previewBulkAssign, sellersQuery, type BulkResult, type DialogAccount, type Preflight, type Seller } from './api';
 import { NOTE_MAX } from './ReasonPicker';
 import styles from './Review.module.css';
 
@@ -25,6 +27,44 @@ export type AssignProps = {
 
 const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
 
+type Words = { money: (minor: number, currency: string | null) => string; monthDay: (when: string) => string };
+
+/** "Open Deal renewal, $50,000, last activity Oct 2": the parts the API has. */
+function dealText(deal: NonNullable<Preflight['deal']>, w: Words, withActivity = true): string {
+  const parts = [deal.name, deal.amount_cents !== null ? w.money(deal.amount_cents, deal.currency) : null, withActivity && deal.last_activity_at ? `last activity ${w.monthDay(deal.last_activity_at)}` : null];
+  return parts.filter(Boolean).join(', ');
+}
+
+/** The single-account warning body (screens.md §6), from the preflight's reason, owner and deal. */
+function warningText(p: Preflight, aeName: string, w: Words): string {
+  const owner = p.current_owner_name ?? 'The current owner';
+  const ownerFirst = p.current_owner_name ? firstName(p.current_owner_name) : 'them';
+  const head =
+    p.reason === 'open_deal'
+      ? `${owner} owns an open deal on this company${p.deal ? `: ${dealText(p.deal, w)}` : ''}.`
+      : p.reason === 'customer'
+        ? `${owner} owns this company and it is a customer in HubSpot.`
+        : p.reason === 'owned_elsewhere'
+          ? `${owner} owns this company in HubSpot.`
+          : `${p.message}.`;
+  return `${head} Scout will send the account and leave ${ownerFirst} as owner. Ask ${ownerFirst} to hand it over if ${firstName(aeName)} should lead.`;
+}
+
+/** One bulk warning line: "{account}: {owner}, {deal or reason words}". */
+function stopLine(name: string, p: Preflight, w: Words): string {
+  const why =
+    p.reason === 'open_deal'
+      ? p.deal
+        ? `open deal ${dealText(p.deal, w, false)}`
+        : 'an open deal'
+      : p.reason === 'customer'
+        ? 'a customer in HubSpot'
+        : p.reason === 'owned_elsewhere'
+          ? 'owns it in HubSpot'
+          : p.message;
+  return `${name}: ${p.current_owner_name ?? 'The current owner'}, ${why}`;
+}
+
 function focusOf(s: Seller): string {
   if (s.all_practices) return 'All practices';
   return s.practices.length > 0 ? s.practices.map((p) => p.name).join(', ') : 'No practice access yet';
@@ -36,6 +76,8 @@ function focusOf(s: Seller): string {
  */
 export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignProps) {
   const toast = useToast();
+  const f = useFormat();
+  const words: Words = { money: (minor, currency) => (currency ? formatMoney(minor, currency) : f.money(minor)), monthDay: f.monthDay };
   const radios = useId();
   const ids = accounts.map((a) => a.account_id);
   const single = accounts.length === 1 ? accounts[0]! : null;
@@ -51,58 +93,72 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
   const sellerId = picked ?? bestPickable;
   const seller = list.find((s) => s.user_id === sellerId) ?? null;
 
-  const previews = useQueries({
-    queries: accounts.map((a) => ({
-      queryKey: ['assign-preview', tenant, a.account_id, sellerId],
-      queryFn: () => previewAssign(tenant, a.account_id, sellerId!),
-      enabled: sellerId !== null,
-      retry: false,
-      gcTime: 0,
-    })),
+  // One account: its own fresh preview. Several: one bulk preview from the stored check (Ruling 17).
+  const preview = useQuery({
+    queryKey: ['assign-preview', tenant, ids, sellerId],
+    queryFn: async () => {
+      if (single) return [{ account_id: single.account_id, ok: true as const, ...(await previewAssign(tenant, single.account_id, sellerId!)) }];
+      return (await previewBulkAssign(tenant, ids, sellerId!)).data;
+    },
+    enabled: sellerId !== null,
+    retry: false,
+    gcTime: 0,
   });
-  const failed = previews.find((p) => p.isError)?.error ?? null;
-  const unavailable = failed instanceof ApiError && failed.status === 503;
-  const checking = sellerId !== null && previews.some((p) => p.isPending);
-  const stops = accounts.flatMap((a, i) => {
-    const p = previews[i]?.data?.preflight;
-    return p?.result === 'stop' ? [{ name: a.name, message: p.message }] : [];
-  });
-  const blocked = previews.some((p) => p.data?.preflight.result === 'blocked');
+  const rows = preview.data ?? [];
+  const failed = preview.error;
+  const names = new Map(accounts.map((a) => [a.account_id, a.name]));
+  // Accounts the bulk preview refused (hidden, gone, or HubSpot not answering for them), with the API's words.
+  // They are listed and left out of the assign; the rest can still go.
+  const refusedRows = rows.flatMap((r) => (r.ok ? [] : [{ account_id: r.account_id, name: names.get(r.account_id) ?? r.account_id, status: r.status, message: r.message }]));
+  const assignable = rows.filter((r) => r.ok).map((r) => r.account_id);
+  const unavailable = (failed instanceof ApiError && failed.status === 503) || (!!single && refusedRows.some((r) => r.status === 503));
+  const refusedOther = single ? refusedRows.filter((r) => r.status !== 503) : refusedRows;
+  const checking = sellerId !== null && preview.isPending;
+  const stops = rows.flatMap((r) => (r.ok && r.preflight.result === 'stop' ? [{ account_id: r.account_id, name: names.get(r.account_id) ?? r.account_id, preflight: r.preflight }] : []));
+  const blocked = rows.some((r) => r.ok && r.preflight.result === 'blocked');
+  const owners = [...new Set(stops.map((s) => s.preflight.current_owner_name))];
+  const keptOwner = owners.length === 1 && owners[0] ? owners[0] : 'the current HubSpot owner';
 
-  const what = single ? single.name : `${accounts.length} accounts`;
   const title = single ? `Assign ${single.name}` : `Assign ${accounts.length} accounts`;
   const offer = single?.lead_offer;
   const sub = single ? [offer?.name, offer?.practice_name].filter(Boolean).join(' · ') : accounts.map((a) => a.name).join(', ');
+  const moving = assignable.length - stops.length;
+  const plural = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`);
   const sentence = !seller
     ? null
-    : stops.length > 0
-      ? `Scout sends ${what} to HubSpot and leaves the current HubSpot owner as owner.`
-      : `Scout sends ${what} to HubSpot with ${seller.name} as owner and logs the brief.`;
-  const ready = !!seller && seller.crm_owner_linked && !checking && !failed && !blocked && !busy;
+    : stops.length === 0
+      ? `Scout sends ${single ? single.name : plural(assignable.length || accounts.length, 'account', 'accounts')} to HubSpot with ${seller.name} as owner and logs the brief.`
+      : single || moving === 0
+        ? `Scout sends ${single ? single.name : plural(stops.length, 'account', 'accounts')} to HubSpot and leaves ${keptOwner} as owner.`
+        : // Each group as it will go (the decision is per account).
+          `${plural(moving, 'account moves', 'accounts move')} to ${seller.name}; ${plural(stops.length, 'keeps its', 'keep their')} HubSpot owner.`;
+  const ready = !!seller && seller.crm_owner_linked && !checking && !failed && assignable.length > 0 && (!single || refusedRows.length === 0) && !blocked && !busy;
 
   async function submit() {
     if (!seller) return;
     setBusy(true);
     setError(null);
-    const body = {
-      seller_user_id: seller.user_id,
-      ...(note.trim() ? { notes: note.trim() } : {}),
-      ...(stops.length > 0 ? { ownership_decision: 'keep' as const } : {}),
-    };
+    const base = { seller_user_id: seller.user_id, ...(note.trim() ? { notes: note.trim() } : {}) };
     try {
       if (single) {
-        await assign(tenant, single.account_id, body);
+        await assign(tenant, single.account_id, { ...base, ...(stops.length > 0 ? { ownership_decision: 'keep' as const } : {}) });
         toast.show(`Assigned to ${seller.name}. Sending ${single.name} to HubSpot.`);
         onDone([single.account_id], []);
       } else {
-        const { results } = await bulk(tenant, ids, { action: 'assign', ...body });
+        // Only the accounts the preview could check; each stopped one keeps its HubSpot owner, the rest move.
+        const keep = Object.fromEntries(stops.map((s) => [s.account_id, 'keep' as const]));
+        const { results } = await bulk(tenant, assignable, { action: 'assign', ...base, ...(stops.length > 0 ? { ownership_decisions: keep } : {}) });
         const done = results.filter((r) => r.ok).map((r) => r.account_id);
-        const refused = results.filter((r): r is Extract<BulkResult, { ok: false }> => !r.ok).map((r) => ({ account_id: r.account_id, message: r.message }));
+        const refused = [
+          ...refusedRows.map((r) => ({ account_id: r.account_id, message: r.message })),
+          ...results.filter((r): r is Extract<BulkResult, { ok: false }> => !r.ok).map((r) => ({ account_id: r.account_id, message: r.message })),
+        ];
         if (done.length > 0) {
+          const assigned = `Assigned ${plural(done.length, 'account', 'accounts')} to ${seller.name}.`;
           toast.show(
-            done.length === 1
-              ? `Assigned 1 account to ${seller.name}. Sending it to HubSpot.`
-              : `Assigned ${done.length} accounts to ${seller.name}. Sending them to HubSpot.`,
+            refused.length > 0
+              ? `${assigned} ${refused.length} could not be assigned.`
+              : `${assigned} ${done.length === 1 ? 'Sending it to HubSpot.' : 'Sending them to HubSpot.'}`,
           );
         }
         onDone(done, refused);
@@ -191,7 +247,7 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
         {seller && unavailable && (
           <div role="alert" className={styles.blocked}>
             HubSpot isn&apos;t answering, so Scout can&apos;t check who owns this company. Try again in a moment.{' '}
-            <Button size="sm" variant="secondary" onClick={() => previews.forEach((p) => p.isError && void p.refetch())}>
+            <Button size="sm" variant="secondary" onClick={() => void preview.refetch()}>
               Try again
             </Button>
           </div>
@@ -200,6 +256,20 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
           <p role="alert" className={styles.blocked}>
             {errorText(failed)}
           </p>
+        )}
+        {seller && refusedOther.length > 0 && (
+          <div role="alert" className={styles.blocked}>
+            {single
+              ? 'Scout could not check this account:'
+              : refusedOther.length === 1
+                ? 'Scout could not check 1 account, so it is left out:'
+                : `Scout could not check ${refusedOther.length} accounts, so they are left out:`}
+            <ul>
+              {refusedOther.map((r) => (
+                <li key={r.name}>{`${r.name}: ${r.message}`}</li>
+              ))}
+            </ul>
+          </div>
         )}
         {seller && blocked && (
           <p role="alert" className={styles.blocked}>
@@ -211,11 +281,11 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
             <span>
               <strong>Scout can&apos;t take over the HubSpot owner</strong>
               {single ? (
-                <span>{`${stops[0]!.message}. Scout will send the account and leave the current owner. Ask them to hand it over if ${firstName(seller.name)} should lead.`}</span>
+                <span>{warningText(stops[0]!.preflight, seller.name, words)}</span>
               ) : (
                 <ul>
                   {stops.map((s) => (
-                    <li key={s.name}>{`${s.name}: ${s.message}`}</li>
+                    <li key={s.name}>{stopLine(s.name, s.preflight, words)}</li>
                   ))}
                 </ul>
               )}

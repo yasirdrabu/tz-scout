@@ -115,3 +115,25 @@ describe('the brief routes and their permissions', () => {
     expect((await res.json()).detail).toBe(`This key can't do that. It needs the \`${scope}\` scope.`);
   });
 });
+
+describe('the polish routes and their permissions', () => {
+  it('GET scoring/last-rescore needs review:act', async () => {
+    const { GET } = await import('@/http/routes/v1/scoring/last-rescore/route');
+    const res = await GET(new Request('http://x/api/v1/scoring/last-rescore', { headers: { authorization: `Bearer ${await apiKey()}` } }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).detail).toBe("This key can't do that. It needs the `review:act` scope.");
+    expect((await GET(withCookie(ownerHeaders))).status).toBe(200);
+  });
+
+  it('POST review-queue/assign-preview needs assign:act and a person', async () => {
+    const { POST } = await import('@/http/routes/v1/review-queue/assign-preview/route');
+    const res = await POST(
+      new Request('http://x/api/v1/review-queue/assign-preview', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${await apiKey()}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ account_ids: ['acc_1'], seller_user_id: 'usr_1' }),
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+});

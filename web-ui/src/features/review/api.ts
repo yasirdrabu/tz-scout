@@ -64,6 +64,10 @@ export type FacetOption = { value: string; label: string; count: number };
 
 export type QueueFacets = {
   total: number;
+  /** The "All" tab: the total with every filter but the tier. */
+  total_all_tiers: number;
+  /** "Loading accounts from {n} sources". */
+  source_count: number;
   oldest_arrived_at: string | null;
   last_reviewed_at: string | null;
   tiers: FacetOption[];
@@ -111,6 +115,24 @@ export const facetsQuery = (tenant: string, f: QueueFilters) =>
     queryKey: ['review-queue', tenant, 'facets', f],
     queryFn: () => apiFetch<QueueFacets>(withQuery('/review-queue/facets', queueParams(f)), { tenant }),
     refetchInterval: QUEUE_REFRESH_MS,
+  });
+
+/** The last scoring settings change in the last 7 days, for the banner (Ruling 16); null when there is none. */
+export type LastRescore = {
+  version: number;
+  changed_at: string;
+  changed_by_name: string | null;
+  summary: string;
+  weights_text: string;
+  tier_changed_count: number;
+};
+
+export const lastRescoreQuery = (tenant: string) =>
+  queryOptions({
+    queryKey: ['review-queue', tenant, 'last-rescore'],
+    queryFn: () => apiFetch<{ data: LastRescore | null }>('/scoring/last-rescore', { tenant }),
+    select: (r) => r.data,
+    staleTime: 5 * 60_000,
   });
 
 export type Column = { key: string; label: string; visible: boolean };
@@ -271,7 +293,7 @@ export type BulkResult = { account_id: string; ok: true } | { account_id: string
 
 export type BulkAction =
   | ({ action: 'status' } & StatusChange)
-  | { action: 'assign'; seller_user_id: string; notes?: string; ownership_decision?: 'assign' | 'keep' };
+  | { action: 'assign'; seller_user_id: string; notes?: string; ownership_decision?: 'assign' | 'keep'; ownership_decisions?: Record<string, 'assign' | 'keep'> };
 
 export const bulk = (tenant: string, accountIds: string[], action: BulkAction) =>
   apiFetch<{ results: BulkResult[] }>('/review-queue/bulk', { tenant, method: 'POST', body: { account_ids: accountIds, ...action } });
@@ -293,14 +315,30 @@ export const sellersQuery = (tenant: string, accountIds: string[]) =>
     queryFn: () => apiFetch<Sellers>(`/assignable-sellers?account_ids=${accountIds.map(encodeURIComponent).join(',')}`, { tenant }),
   });
 
+export type Preflight = {
+  result: 'new' | 'assign' | 'stop' | 'blocked';
+  message: string;
+  /** Why the CRM stops a takeover. */
+  reason: 'open_deal' | 'customer' | 'owned_elsewhere' | 'no_owner' | null;
+  current_owner_name: string | null;
+  /** The top open deal, only when `reason` is `open_deal`. */
+  deal: { name: string; amount_cents: number | null; currency: string | null; last_activity_at: string | null } | null;
+};
+
 export type Preview = {
-  preflight: { result: 'new' | 'assign' | 'stop' | 'blocked'; message: string };
+  preflight: Preflight;
   approves_to: { key: string; label: string } | null;
   replaces: { assignment_id: string; seller_user_id: string } | null;
 };
 
 export const previewAssign = (tenant: string, id: string, sellerUserId: string) =>
   apiFetch<Preview>(`/accounts/${encodeURIComponent(id)}:assign-preview`, { tenant, method: 'POST', body: { seller_user_id: sellerUserId } });
+
+export type BulkPreviewRow = ({ account_id: string; ok: true } & Preview) | { account_id: string; ok: false; status: number; message: string };
+
+/** The bulk dialog's preview: one request for every account, from the stored HubSpot check (Ruling 17). */
+export const previewBulkAssign = (tenant: string, accountIds: string[], sellerUserId: string) =>
+  apiFetch<{ data: BulkPreviewRow[] }>('/review-queue/assign-preview', { tenant, method: 'POST', body: { account_ids: accountIds, seller_user_id: sellerUserId } });
 
 export const assign = (tenant: string, id: string, body: { seller_user_id: string; notes?: string; ownership_decision?: 'assign' | 'keep' }) =>
   apiFetch<{ id: string }>(`/accounts/${encodeURIComponent(id)}:assign`, { tenant, method: 'POST', body });

@@ -347,6 +347,8 @@ export type AccountSummaryView = {
   priority: number | null;
   tier: string | null;
   bestOfferId: string | null;
+  /** The offer someone picked over Scout's best (Decision 5), or null. */
+  leadOfferOverrideId: string | null;
 };
 
 /** The summary row of each account the principal can see, for at most 1,000 ids. Ids with no row or no access are left out. */
@@ -364,6 +366,7 @@ export async function getSummaries(ctx: ModuleContext, ids: string[]): Promise<A
       priority: accountSummary.priority,
       tier: accountSummary.tier,
       bestOfferId: accountSummary.bestOfferId,
+      leadOfferOverrideId: accountSummary.leadOfferOverrideId,
     })
     .from(accountSummary)
     .where(and(eq(accountSummary.tenantId, ctx.tenantId), inArray(accountSummary.accountId, ids), await visibleAccounts(ctx)))

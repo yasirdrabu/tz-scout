@@ -17,18 +17,18 @@ All v1 responses are snake_case JSON (`v1Route` runs `snakeCase`); field names b
 | Module | READY | SMALL GAP | SERVER ACTION ONLY | NEW ENDPOINT | LATER | Total |
 |---|---|---|---|---|---|---|
 | tenancy (incl. auth, HTTP layer) | 7 | 17 | 8 | 21 | 10 | 63 |
-| routing | 18 | 20 | 0 | 10 | 12 | 60 |
+| routing | 20 | 18 | 0 | 10 | 12 | 60 |
 | accounts | 11 | 10 | 0 | 5 | 3 | 29 |
-| scoring | 11 | 4 | 0 | 3 | 3 | 21 |
+| scoring | 12 | 4 | 0 | 2 | 3 | 21 |
 | intake | 13 | 20 | 0 | 8 | 6 | 47 |
-| crm | 7 | 3 | 0 | 1 | 1 | 12 |
+| crm | 8 | 2 | 0 | 1 | 1 | 12 |
 | offers | 15 | 7 | 0 | 3 | 3 | 28 |
 | integrations | 1 | 5 | 5 | 1 | 3 | 15 |
 | ai-tasks | 0 | 2 | 1 | 5 | 1 | 9 |
 | platform | 1 | 8 | 11 | 1 | 2 | 23 |
 | playbooks | 1 | 0 | 0 | 0 | 11 | 12 |
 | analytics (not built) | 1 | 0 | 0 | 0 | 14 | 15 |
-| **Total** | **86** | **96** | **25** | **58** | **69** | **334** |
+| **Total** | **90** | **93** | **25** | **57** | **69** | **334** |
 
 Rows are de-duplicated across the four source passes; a need that spans modules is counted once, in
 the module that owns the data.
@@ -505,8 +505,8 @@ Files: `src/http/routes/v1/review-queue/**`, `src/http/routes/v1/accounts/[id]/{
 | 2 | Review status list (labels, tone) for dots, filter and inline select | SMALL GAP | `GET /api/v1/settings/review` | Needs `settings:manage` (owner only); leaders and sellers cannot read it. Allow `review:act` or `assignments:respond` to read, or add `GET /api/v1/review-settings`. `getReviewSettings` returns `statuses[]` and `decline_reasons[]`. |
 | 2 | Flags the spec lacks: `declined_by_seller` (seller, reason, when), `new_from`, `handoff_needs_decision`, `handoff_failed` | READY | `QueueRow.flags` | SPA needs chips for them. |
 | 2 | Flags "{n} conflicts", "Enrichment requested" | LATER (R2) | none | Conflicts and enrichment requests are R2. |
-| 2 | Bulk assign (up to 50) | READY | `POST /api/v1/review-queue/bulk` `{account_ids, action:'assign', seller_user_id, notes, lead_offer_id, ownership_decision}` (`review:act` + `assign:act`) | `MAX_BULK` 50: "select all visible" with pages up to 200 must cap. `results[]` per account `{ok}` or `{ok:false,status,message}`; a `stop` preflight is a per-account 409 unless `ownership_decision:'keep'`. Uses the stored CRM check (`fresh:false`). |
-| 2, 6 | Bulk assign warning listing each affected account | SMALL GAP | `POST /api/v1/review-queue/assign-preview` `{account_ids[], seller_user_id}` (`assign:act`) | Loop of `previewAssign`; per account `{account_id, preflight{result,message}, replaces}`. |
+| 2 | Bulk assign (up to 50) | READY | `POST /api/v1/review-queue/bulk` `{account_ids, action:'assign', seller_user_id, notes, lead_offer_id, ownership_decision}` (`review:act` + `assign:act`) | `MAX_BULK` 50: "select all visible" with pages up to 200 must cap. `results[]` per account `{ok}` or `{ok:false,status,message}`; a `stop` preflight is a per-account 409 unless that account is kept: `ownership_decisions:{[account_id]:'keep'}` per account (or `ownership_decision` for all). Uses the stored CRM check (`fresh:false`). |
+| 2, 6 | Bulk assign warning listing each affected account | READY | `POST /api/v1/review-queue/assign-preview` `{account_ids[1..50], seller_user_id}` (`assign:act`, people only) | `{data[{account_id, ok:true, preflight, approves_to, replaces} | {account_id, ok:false, status, message}]}` in the order asked; uses the stored check (`fresh:false`), each account in its own savepoint (Ruling 17). |
 | 2, 5 | Bulk send back with one reason | SMALL GAP | `POST /api/v1/review-queue/bulk` `{action:'status', to, note, reason_key}` | Needs a `returns_to_source` status (none seeded); requires a note, not a reason. Decision 1. |
 | 2 | Empty footnote "{n} sources are scheduled to send this week" | LATER (R1d) | none | Scheduled Apollo and Vibe pulls are R1d. Omit the sentence until then. |
 | 2, 3 | 30 s poll and "{n} updates" bar | SMALL GAP | list and count | Add `updated_since` (`account_summary.updated_at >`) next to `arrived_since`. |
@@ -527,7 +527,7 @@ Files: `src/http/routes/v1/review-queue/**`, `src/http/routes/v1/accounts/[id]/{
 | 5, 21d | Send-back reasons editable | LATER (R2) | `PUT /api/v1/settings/review/reasons` | Decision 2. |
 | 6 | Assign (account page, peek, bulk) | READY | `POST /api/v1/accounts/{id}:assign` -> 202 `{seller_user_id, notes, lead_offer_id, ownership_decision}` (`assign:act`) | Approves in the same step (first non-declined counts-as-reviewed status) and starts the CRM handoff. Declined account: 409 "Reopen it before assigning." `notes` max 4,000. |
 | 6 | Assign preview, CRM owner warning | READY | `POST /api/v1/accounts/{id}:assign-preview` `{seller_user_id}` (`assign:act`) | `{preflight{result:new\|assign\|stop\|blocked, message}, approves_to, replaces}`. `blocked` = AE has no HubSpot owner (no spec state). 503 `crm_unavailable` is a dialog state. |
-| 6 | Warning detail: deal name, amount, last activity, current owner | SMALL GAP | `:assign-preview` | `OwnershipPreflightDetail` has `reason`, `currentOwnerName`, `takenFrom` but the port keeps only `result, message`. Add them plus deal `{name, amount_cents, last_activity_at}` (crm). |
+| 6 | Warning detail: deal name, amount, last activity, current owner | READY | `:assign-preview` | `preflight{result, message, reason:open_deal|customer|owned_elsewhere|no_owner|null, current_owner_name, deal{name, amount_cents, currency, last_activity_at}|null}`; `deal` only for `open_deal`, from the stored top open deal. |
 | 6 | "Scout adds {AE} as collaborator, leaves Rita owner" | SMALL GAP | `ownership_decision:'keep'` | `keep` pushes and does not change the owner (`crm/services/push.ts`, `keepCurrentOwner`); no collaborator code exists in crm. Reword (Spec corrections). |
 | 6, 7 | Playbook cards, playbook name | LATER (R2) | none | `assignment.template_id` is null in R1. |
 | 7 | New assignments list | SMALL GAP | `GET /api/v1/assignments?mine=true&status=pending` (`assignments:respond`) | Row has `assigned_by` as id. Add `assigned_by_name`, `offer_id`, `offer_name`. A page can be short with `next_cursor`: follow it. |
@@ -604,7 +604,7 @@ Files: `src/http/routes/v1/accounts/**`, `src/http/routes/v1/people/**`; service
 | 4 | Pills Practice and Best offer | SMALL GAP | `GET /api/v1/accounts/{id}` + `/score` | `practice_ids` only; best offer in `/score` `best_offer{id,name}`. Return `practice{id,name}` and `best_offer` on the account read, or put them in `GET /api/v1/accounts/{id}/review`. |
 | 4 | "Not found or outside your data" | READY | 404 | Hidden and missing are both 404. |
 | 4 | Error "Batch B-1042 is still matching facts" | SMALL GAP | none | An unresolved arrival has no account, so the page is a 404. Arrival state lives at `GET /api/v1/arrivals/{id}`. Drop the state (Spec corrections). |
-| 4a | Why now: dated signals, newest first | READY | `GET /api/v1/accounts/{id}` `signals[]` | `title, detail, url, occurred_at, kind, type, source_chain`. Filter `occurred_at != null` for the two in the drawer (§3). |
+| 4a | Why now: dated signals, newest first | READY | `GET /api/v1/accounts/{id}` `signals[]` | `title, detail, url, occurred_at, kind, type, source_chain`, `source_name` (nearest of vendor, agent, person) and `source_names{person,agent,vendor}`, no `arrivals:read` needed. Filter `occurred_at != null` for the two in the drawer (§3). |
 | 4a | Account facts with source and date | READY | `GET /api/v1/accounts/{id}/facts[?field][&include=history]` (`accounts:read`) | `FactView`: key, value, status (current, candidate, superseded), source_chain, observed_at, url, note, pinned_by. Source names need `GET /api/v1/sources` (`arrivals:read`, sellers cannot): resolve names in the response. |
 | 4a | Conflict badge, side by side, `Keep this one` | LATER (R2) | none | Candidate facts exist; no conflict list or pin endpoint. |
 | 4a | Buying committee: people, titles, roles, notes | READY | `GET /api/v1/accounts/{id}/people` (`accounts:read`; contact fields need `people:read`) | `PersonView.roles[{key,origin}]`, `decision_note`, `is_primary`. Role labels need a lookup. |
@@ -656,7 +656,7 @@ Files: `src/http/routes/v1/accounts/[id]/{score,matches}/**`, `src/http/routes/v
 
 | Screen § | Need | Status | Endpoint / proposed | Notes |
 |---|---|---|---|---|
-| 2 | Rescore banner "Priorities were recalculated ... {n} accounts changed tier", when, by | NEW ENDPOINT | `GET /api/v1/scoring/rescores/latest` (`review:act` or `scoring:manage`) | `POST /api/v1/rescore` returns only `{job_id}`. Data exists: `scoring_profile.version, updated_at, updated_by`; `score_change` rows with `cause='rules_changed'`. Return `{at, by_name, profile{fit_weight, intent_weight, ...}, accounts_changed_tier, accounts_rescored}`. |
+| 2 | Rescore banner "Priorities were recalculated ... {n} accounts changed tier", when, by | READY | `GET /api/v1/scoring/last-rescore` (`review:act`) | `{data:{version, changed_at, changed_by_name, summary, weights_text, tier_changed_count} | null}`; null when never changed by a person or over 7 days ago (Ruling 16). |
 | 2 | "Was {old}" after a rescore | SMALL GAP | `previous_tier` on the queue row | Last `score_change.from_tier` (routing row). |
 | 2, 3, 4a | Priority, fit, intent, tier | READY | `GET /api/v1/accounts/{id}/score[?offer_id]` (`accounts:read`) | `priority, tier, tier_reason, fit, intent, best_offer, lines[], other_offers[], missing[], summary, would_raise[], warm_intro_points, computed_at`. |
 | 3 | "Scored {n} and placed in {tier}" | READY | `GET /api/v1/accounts/{id}/score/history?limit` (`accounts:read`) | `from_priority, to_priority, from_tier, to_tier, cause, cause_text, at`. |
@@ -802,7 +802,7 @@ Files: `src/modules/crm/services/{push,read,leads,settings}.ts`, `src/modules/cr
 | 4b | Replies "3 of 9" | READY | `follow_through.counts.replies` | Counts `reply` activity of the latest completed handoff. |
 | 4b | Buyers engaged "2 of 4", "Next: Nov 18 with ...", committee engagement per person | LATER (R2) | none | Activity is per account; no next meeting stored. |
 | 4b | HubSpot activity feed, "Synced {when}" | READY | `GET /api/v1/accounts/{id}/activity?cursor` (`accounts:read`) | `{data[{id, kind, at, summary}], next_cursor, synced_at}`, 25 a page; Scout rows (kind `scout`) from `crm.handoff`. |
-| 6 | Deal detail in the owner warning | SMALL GAP | `:assign-preview` deal fields | Stored top open deal (row above); see routing. |
+| 6 | Deal detail in the owner warning | READY | `:assign-preview` `preflight.deal` | Stored top open deal (row above); see routing. |
 | 6 | Seller without a HubSpot owner | NEW ENDPOINT | `crm_owner_linked` in `GET /api/v1/assignable-sellers` | Today a `blocked` preflight. `GET /api/v1/crm/owners` needs `members:manage`. |
 | 6, 7 | Push failures as a row flag; handoff progress | READY | `QueueRow.flags.handoff`, `GET /api/v1/accounts/{id}/handoffs` (`handoffs[].status, attempts, last_error`) | Push is async (202, 6 attempts, retries from 30 s). |
 

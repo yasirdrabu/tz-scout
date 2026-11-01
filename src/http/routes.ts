@@ -92,11 +92,13 @@ import * as v1PeopleId from './routes/v1/people/[id]/route';
 import * as v1PracticesId from './routes/v1/practices/[id]/route';
 import * as v1Practices from './routes/v1/practices/route';
 import * as v1Rescore from './routes/v1/rescore/route';
+import * as v1ReviewQueueAssignPreview from './routes/v1/review-queue/assign-preview/route';
 import * as v1ReviewQueueBulk from './routes/v1/review-queue/bulk/route';
 import * as v1ReviewQueueCount from './routes/v1/review-queue/count/route';
 import * as v1ReviewQueueFacets from './routes/v1/review-queue/facets/route';
 import * as v1ReviewQueue from './routes/v1/review-queue/route';
 import * as v1Roles from './routes/v1/roles/route';
+import * as v1ScoringLastRescore from './routes/v1/scoring/last-rescore/route';
 import * as v1ScoringProfileReset from './routes/v1/scoring/profile/reset/route';
 import * as v1ScoringProfile from './routes/v1/scoring/profile/route';
 import * as v1SettingsSetting from './routes/v1/settings/[setting]/route';
@@ -219,11 +221,13 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/practices/:id`, module: v1PracticesId },
   { path: `${V1}/practices`, module: v1Practices },
   { path: `${V1}/rescore`, module: v1Rescore },
+  { path: `${V1}/review-queue/assign-preview`, module: v1ReviewQueueAssignPreview },
   { path: `${V1}/review-queue/bulk`, module: v1ReviewQueueBulk },
   { path: `${V1}/review-queue/count`, module: v1ReviewQueueCount },
   { path: `${V1}/review-queue/facets`, module: v1ReviewQueueFacets },
   { path: `${V1}/review-queue`, module: v1ReviewQueue },
   { path: `${V1}/roles`, module: v1Roles },
+  { path: `${V1}/scoring/last-rescore`, module: v1ScoringLastRescore },
   { path: `${V1}/scoring/profile/reset`, module: v1ScoringProfileReset },
   { path: `${V1}/scoring/profile`, module: v1ScoringProfile },
   { path: `${V1}/settings/:setting`, module: v1SettingsSetting },

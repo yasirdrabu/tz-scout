@@ -4,6 +4,7 @@ import { adminDb, adminTransaction } from '@/platform/db/client';
 import type { Tx } from '@/platform/db/tenant';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
+import { displayNameFromEmail } from '../domain/display-name';
 import { adminRemovalRefusal, isStaffEmail } from '../domain/platform-admin-rules';
 import { user } from '../db/schema';
 import { forgetAccess } from './principal';
@@ -32,7 +33,7 @@ export async function addPlatformAdmin(by: AdminActor, rawEmail: string): Promis
   const added = await adminTransaction(by.tx, async (tx) => {
     await tx
       .insert(user)
-      .values({ id: newId('usr'), name: email.split('@')[0] ?? email, email })
+      .values({ id: newId('usr'), name: displayNameFromEmail(email), email })
       .onConflictDoNothing({ target: user.email });
     const [u] = await tx
       .select({ ...cols, platformAdmin: user.platformAdmin, disabledAt: user.disabledAt })

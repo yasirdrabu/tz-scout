@@ -11,7 +11,21 @@ import type { ModuleContext } from '@/platform/context';
  */
 export const PREFLIGHT_RESULTS = ['new', 'assign', 'stop', 'blocked'] as const;
 export type PreflightResultKey = (typeof PREFLIGHT_RESULTS)[number];
-export type OwnershipPreflightResult = { result: PreflightResultKey; message: string };
+
+/** Why the CRM stops a takeover; null when it does not. */
+export type PreflightStopReason = 'open_deal' | 'customer' | 'owned_elsewhere' | 'no_owner' | null;
+
+/** The CRM's top open deal on the company, when that is why it stops. */
+export type PreflightDeal = { name: string; amountCents: number | null; currency: string | null; lastActivityAt: Date | null };
+
+/** The CRM's answer. CRM fills in the details; Routing's previews give them as null when a preflight leaves them out. */
+export type OwnershipPreflightResult = {
+  result: PreflightResultKey;
+  message: string;
+  reason?: PreflightStopReason;
+  currentOwnerName?: string | null;
+  deal?: PreflightDeal | null;
+};
 
 /** `fresh` (default true) asks the CRM now; false lets the CRM answer from a check under a day old (a bulk assign). */
 export type PreflightOptions = { fresh?: boolean };

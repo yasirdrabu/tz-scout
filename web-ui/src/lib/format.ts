@@ -32,6 +32,11 @@ export function formatDate(when: When, timeZone: string): string {
   return new Intl.DateTimeFormat(LOCALE, { timeZone, month: 'short', day: 'numeric', year: 'numeric' }).format(toDate(when));
 }
 
+/** "Aug 2" in the given IANA timezone. */
+export function formatMonthDay(when: When, timeZone: string): string {
+  return new Intl.DateTimeFormat(LOCALE, { timeZone, month: 'short', day: 'numeric' }).format(toDate(when));
+}
+
 /** "Oct 26, 10:48 AM" in the given IANA timezone. */
 export function formatDateTime(when: When, timeZone: string): string {
   return new Intl.DateTimeFormat(LOCALE, { timeZone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(

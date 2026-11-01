@@ -5,16 +5,19 @@ import { GET as getMatches } from '@/http/routes/v1/accounts/[id]/matches/route'
 import { GET as getScore } from '@/http/routes/v1/accounts/[id]/score/route';
 import { POST as rescore } from '@/http/routes/v1/rescore/route';
 import { POST as resetProfile } from '@/http/routes/v1/scoring/profile/reset/route';
+import { GET as getLastRescore } from '@/http/routes/v1/scoring/last-rescore/route';
 import { GET as getProfile, PUT as putProfile } from '@/http/routes/v1/scoring/profile/route';
 import { upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { approveOffer, createOffer, createPractice, replaceSignalRules } from '@/modules/offers';
-import { scoreAccount } from '@/modules/scoring';
+import { lastRescore, scoreAccount } from '@/modules/scoring';
 import { setPrincipalCacheTtl, type Permission } from '@/modules/tenancy';
 import { closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { runOutbox } from '../helpers/run-outbox';
 import { completeOffer } from '../offers/helpers';
 import { call, freshTenant, keyFor, personAndAgent } from './intake-helpers';
+import { setSummary } from '../routing/helpers';
+import { workspace } from './review-helpers';
 
 afterAll(closeDbs);
 beforeEach(() => setPrincipalCacheTtl(0));
@@ -293,5 +296,62 @@ describe('POST /api/v1/rescore', () => {
     expect(both.status).toBe(400);
     expect((await json(both)).title).toBe('Choose a practice or a source, not both.');
     expect((await call(rescore, key, 'rescore', { body: { nope: 1 } })).status).toBe(400);
+  });
+});
+
+describe('GET /api/v1/scoring/last-rescore (Ruling 16)', () => {
+  it('is null before a change; after a settings change and the rescore it names who, the weights and the accounts that changed tier', async () => {
+    const w = await workspace('Rescore Co');
+    const leader = await w.person('leader', { name: 'Dana Ruiz' });
+    const seller = await w.person('seller', { name: 'Sam Seller' });
+    const practice = await w.run((ctx) => createPractice(ctx, { name: 'Rescore Practice', slug: `rp-${newId('prc').slice(-8).toLowerCase()}` }));
+    const offer = await w.run((ctx) => createOffer(ctx, { name: 'Rescore Offer', practiceId: practice.id, ...completeOffer }));
+    await w.run((ctx) => approveOffer(ctx, offer.id));
+    const accounts = [await w.sent({ name: 'Rescore A', industry: 'Logistics' }), await w.sent({ name: 'Rescore B', industry: 'Logistics' })];
+    await w.deliver();
+    const tiers = async () => Promise.all(accounts.map(async (a) => (await json(await w.as(leader, getScore, `accounts/${a}/score`))).tier as string));
+
+    const empty = await w.as(leader, getLastRescore, 'scoring/last-rescore');
+    expect(empty.status).toBe(200);
+    expect((await json(empty)).data).toBeNull();
+
+    const before = await tiers();
+    const put = await w.as(w.owner, putProfile, 'scoring/profile', 'PUT', { fit_weight: 0.6, intent_weight: 0.4, tier_thresholds: { not_fit_below: 100 } });
+    expect(put.status).toBe(202);
+    await w.deliver();
+    const after = await tiers();
+    const moved = after.filter((t, i) => t !== before[i]).length;
+    expect(moved).toBeGreaterThan(0);
+
+    const data = (await json(await w.as(leader, getLastRescore, 'scoring/last-rescore'))).data;
+    expect(data).toEqual({
+      version: expect.any(Number),
+      changed_at: expect.any(String),
+      changed_by_name: 'Rescore Co Owner',
+      summary: 'Scoring settings changed',
+      weights_text: 'Fit 60%, buying intent 40%',
+      tier_changed_count: moved,
+    });
+
+    // A reviewer limited to one practice counts only the accounts they can see (the queue's visibility).
+    const limited = await w.person('leader', { name: 'Pat Practice', dataLimit: { kind: 'practices', ids: [practice.id] } });
+    await setSummary(w.tenant, accounts[0]!, { practiceId: practice.id, practiceIds: [practice.id] });
+    await setSummary(w.tenant, accounts[1]!, { practiceId: 'prc_elsewhere', practiceIds: ['prc_elsewhere'] });
+    const seen = (await json(await w.as(limited, getLastRescore, 'scoring/last-rescore'))).data;
+    expect(seen.tier_changed_count).toBe(after[0] !== before[0] ? 1 : 0);
+    expect(seen.tier_changed_count).toBeLessThan(moved);
+
+    const later = new Date(Date.now() + 8 * 86_400_000);
+    expect(await w.run((ctx) => lastRescore(ctx, later))).toBeNull();
+    expect((await w.as(seller, getLastRescore, 'scoring/last-rescore')).status).toBe(403);
+    const key = await keyFor(w.tenant, ['accounts:read'], ALL);
+    expect((await call(getLastRescore, key, 'scoring/last-rescore')).status).toBe(403);
+  });
+
+  it("never reports another tenant's change", async () => {
+    const mine = await workspace('Rescore Mine');
+    const theirs = await workspace('Rescore Theirs');
+    expect((await theirs.as(theirs.owner, putProfile, 'scoring/profile', 'PUT', { fit_weight: 0.7, intent_weight: 0.3 })).status).toBe(202);
+    expect((await json(await mine.as(mine.owner, getLastRescore, 'scoring/last-rescore'))).data).toBeNull();
   });
 });

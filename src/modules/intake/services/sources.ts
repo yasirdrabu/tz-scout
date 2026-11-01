@@ -220,6 +220,24 @@ export async function childSources(ctx: ModuleContext, sourceIds: string[]): Pro
   return rows.map((r) => r.id).filter((id) => !given.has(id));
 }
 
+/**
+ * For seeding: a person source still named by one of its person's stale names (an email handle) takes the person's name.
+ * Safe to run again. Returns how many it renamed.
+ */
+export async function renamePersonSources(ctx: ModuleContext, people: readonly { userId: string; name: string; staleNames: readonly string[] }[]): Promise<number> {
+  let renamed = 0;
+  for (const p of people) {
+    if (p.staleNames.length === 0) continue;
+    const rows = await ctx.tx
+      .update(source)
+      .set({ name: p.name, updatedAt: new Date() })
+      .where(and(eq(source.tenantId, ctx.tenantId), eq(source.kind, 'person'), eq(source.userId, p.userId), inArray(source.name, [...p.staleNames])))
+      .returning({ id: source.id });
+    renamed += rows.length;
+  }
+  return renamed;
+}
+
 /** The person source of a tenant user, if they have one. */
 export async function personSourceFor(ctx: ModuleContext, userId: string): Promise<string | undefined> {
   const [row] = await ctx.tx

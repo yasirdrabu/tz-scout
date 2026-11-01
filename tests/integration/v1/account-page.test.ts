@@ -8,12 +8,14 @@ import { GET as getHandoffs } from '@/http/routes/v1/accounts/[id]/handoffs/rout
 import { GET as getPeople } from '@/http/routes/v1/accounts/[id]/people/route';
 import { GET as getAccountRoute, POST as accountAction } from '@/http/routes/v1/accounts/[id]/route';
 import { GET as getScore } from '@/http/routes/v1/accounts/[id]/score/route';
+import { POST as postArrival } from '@/http/routes/v1/arrivals/route';
 import { GET as getBuyingRoles } from '@/http/routes/v1/buying-roles/route';
 import { upsertFromArrival } from '@/modules/accounts';
 import { buyingRole } from '@/modules/accounts/db/schema';
 import { seedMockCrm, syncOwners } from '@/modules/crm';
 import { activity, companyCheck, followThrough, handoff } from '@/modules/crm/db/schema';
 import { setMockFailure } from '@/modules/crm/fixtures';
+import { arrival } from '@/modules/intake/db/schema';
 import { setConnectionSettings } from '@/modules/integrations';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
 import { setPrincipalCacheTtl } from '@/modules/tenancy';
@@ -21,7 +23,7 @@ import { adminDb, closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { completeOffer } from '../offers/helpers';
 import { setSummary } from '../routing/helpers';
-import { call, keyFor } from './intake-helpers';
+import { call, keyFor, SEND } from './intake-helpers';
 import { workspace, type Workspace } from './review-helpers';
 
 let w: Workspace;
@@ -153,6 +155,36 @@ describe('GET /accounts/{id}/facts source_names', () => {
     expect((await w.as(leader, getFacts, `accounts/${otherAccount}/facts`)).status).toBe(404);
     const key = await keyFor(w.tenant, ['playbooks:read'], { dataLimit: { kind: 'all' } });
     expect((await call(getFacts, key, `accounts/${a}/facts`)).status).toBe(403);
+  });
+});
+
+describe('fact labels and signal source names', () => {
+  it('each fact has a label', async () => {
+    const a = await w.sent({ name: 'Label Co', industry: 'Logistics', employees: 40 });
+    const facts = (await json(w.as(leader, getFacts, `accounts/${a}/facts`))).data as { key: string; label: string }[];
+    expect(facts.find((f) => f.key === 'industry')!.label).toBe('Industry');
+    expect(facts.find((f) => f.key === 'employees')!.label).toBe('Employees');
+  });
+
+  it('a signal from the agent carries its source name, for a seller without arrivals:read', async () => {
+    const key = await keyFor(w.tenant, SEND, { sourceId: w.source.agentId, dataLimit: { kind: 'own_source' } });
+    const domain = `${newId('acc').slice(-10).toLowerCase()}-example.com`;
+    const signals = [{ type: 'trigger', title: 'Hired a CIO', occurred_at: '2026-10-01', url: 'https://news.example.com/cio' }];
+    const posted = await call(postArrival, key, 'arrivals', { body: { account: { name: 'Signal Source Co', domain }, signals } });
+    expect(posted.status).toBe(202);
+    await w.deliver();
+    const [row] = await adminDb.select({ id: arrival.accountId }).from(arrival).where(eq(arrival.id, (await posted.json()).arrival_id));
+    const a = row!.id!;
+    await own(a);
+    for (const who of [leader, seller]) {
+      const res = await w.as(who, getAccountRoute, `accounts/${a}`);
+      expect(res.status).toBe(200);
+      const signals = (await res.json()).signals as { title: string; source_name: string | null; source_names: Record<string, string | null> }[];
+      const s = signals.find((x) => x.title === 'Hired a CIO')!;
+      expect(s.source_name).toBe('Page Co Ash agent');
+      expect(s.source_names).toEqual({ person: 'Page Co Ash', agent: 'Page Co Ash agent', vendor: null });
+    }
+    expect((await w.as(leader, getAccountRoute, `accounts/${otherAccount}`)).status).toBe(404);
   });
 });
 

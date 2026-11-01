@@ -4,7 +4,7 @@ import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { crmSetting, handoff } from '../db/schema';
 import { decideOwnership } from '../domain/ownership';
-import { checkCompany, refreshCheck, type CompanyCheck } from './checks';
+import { checkCompany, refreshCheck, type CompanyCheck, type OpenDeal } from './checks';
 import { crmSystem, isOwnerActive } from './owners';
 
 export type OwnershipPreflightDetail = {
@@ -13,9 +13,11 @@ export type OwnershipPreflightDetail = {
   reason: 'open_deal' | 'customer' | 'owned_elsewhere' | 'no_owner' | null;
   currentOwnerName: string | null;
   takenFrom: string | null;
+  /** The stored top open deal, only when `reason` is `open_deal`. */
+  deal: OpenDeal | null;
 };
 
-const blocked = (message: string, reason: OwnershipPreflightDetail['reason']): OwnershipPreflightDetail => ({ result: 'blocked', message, reason, currentOwnerName: null, takenFrom: null });
+const blocked = (message: string, reason: OwnershipPreflightDetail['reason']): OwnershipPreflightDetail => ({ result: 'blocked', message, reason, currentOwnerName: null, takenFrom: null, deal: null });
 
 /** The owner Scout set on the account's latest completed `assign` handoff whose undo has not given it back, or null. */
 async function pushedOwnerId(ctx: ModuleContext, accountId: string): Promise<string | null> {
@@ -89,7 +91,7 @@ async function preflight(ctx: ModuleContext, accountId: string, sellerUserId: st
   if ((await isOwnerActive(ctx, system, sellerOwner)) === false) return blocked('Link this person to a HubSpot owner first', 'no_owner');
 
   const { check, decision, currentActive, currentOwnerName: name } = await recheckOwnership(ctx, accountId, sellerOwner, false, fresh);
-  if (!check?.exists) return { result: 'new', message: 'New in the CRM', reason: null, currentOwnerName: null, takenFrom: null };
+  if (!check?.exists) return { result: 'new', message: 'New in the CRM', reason: null, currentOwnerName: null, takenFrom: null, deal: null };
 
   const out = (result: 'assign' | 'stop', message: string, reason: OwnershipPreflightDetail['reason'], takenFrom: string | null = null): OwnershipPreflightDetail => ({
     result,
@@ -97,6 +99,7 @@ async function preflight(ctx: ModuleContext, accountId: string, sellerUserId: st
     reason,
     currentOwnerName: name,
     takenFrom,
+    deal: reason === 'open_deal' ? check.openDeal : null,
   });
 
   if (decision.action === 'stop') {
@@ -113,8 +116,13 @@ async function preflight(ctx: ModuleContext, accountId: string, sellerUserId: st
 /** The port Routing calls before an assignment; CRM implements it and the composition root registers it. */
 // Typed structurally: CRM does not import Routing, and compose.ts checks the shape against Routing's port.
 export const crmOwnershipPreflight = {
-  check: async (ctx: ModuleContext, accountId: string, sellerUserId: string, opts?: { fresh?: boolean }): Promise<Pick<OwnershipPreflightDetail, 'result' | 'message'>> => {
-    const { result, message } = await preflightOwnership(ctx, accountId, sellerUserId, opts);
-    return { result, message };
+  check: async (
+    ctx: ModuleContext,
+    accountId: string,
+    sellerUserId: string,
+    opts?: { fresh?: boolean },
+  ): Promise<Pick<OwnershipPreflightDetail, 'result' | 'message' | 'reason' | 'currentOwnerName' | 'deal'>> => {
+    const { result, message, reason, currentOwnerName, deal } = await preflightOwnership(ctx, accountId, sellerUserId, opts);
+    return { result, message, reason, currentOwnerName, deal };
   },
 };
