@@ -247,6 +247,30 @@ describe('runTask', () => {
   });
 });
 
+describe('runTask cost cap for the whole run', () => {
+  it('skips the second attempt when spend so far plus its worst case would pass the cap', async () => {
+    const t = await freshTenant();
+    const complete = fakeLive([{ wrong: 1 }, { echoed: 'too late' }], { inputTokens: 120, outputTokens: 2000, cacheReadTokens: 0 });
+    await goLive(t);
+    const capped = defineTask({ ...echo, name: 'echo_capped', model: 'claude-sonnet-5-5', maxTokens: 2000, maxCostCents: 5 });
+    await expect(t.run((ctx) => runTask(ctx, capped, { text: 'hi' }, { subject }))).rejects.toMatchObject({ slug: 'invalid_output' });
+    expect(complete).toHaveBeenCalledTimes(1);
+    const [row] = await runsOf(t.tenantId);
+    expect(row).toMatchObject({ status: 'invalid_output', mode: 'live', outputTokens: 2000 });
+    expect(row!.costCents).toBeLessThanOrEqual(5);
+    expect(row!.error).toContain('cost limit');
+  });
+
+  it('still asks once more when the second attempt fits under the cap', async () => {
+    const t = await freshTenant();
+    const complete = fakeLive([{ wrong: 1 }, { echoed: 'ok' }]);
+    await goLive(t);
+    const capped = defineTask({ ...echo, name: 'echo_capped_ok', model: 'claude-sonnet-5-5', maxTokens: 2000, maxCostCents: 5 });
+    expect((await t.run((ctx) => runTask(ctx, capped, { text: 'hi' }, { subject }))).output).toEqual({ echoed: 'ok' });
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('runTask rulesOnly', () => {
   it('records a rules run and makes no gateway call', async () => {
     const t = await freshTenant();

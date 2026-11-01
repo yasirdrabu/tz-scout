@@ -157,16 +157,26 @@ type Attempt = { ok: true; output: unknown; usage: Usage } | { ok: false; errors
 
 const zodErrors = (e: z.ZodError) => e.issues.map((i) => `- ${i.path.join('.') || '(root)'}: ${i.message}`).join('\n');
 
-/** Asks the model, checks the answer, and asks once more with the problems listed if it does not fit. */
+export const SECOND_TRY_OVER_CAP = 'Stopped before a second try: it could pass the cost limit for this task.';
+
+/**
+ * Asks the model, checks the answer, and asks once more with the problems listed if it does not fit. With `capCents`
+ * the cap holds for the whole run: the second try is skipped when what the first cost plus its worst case would pass it.
+ */
 async function completeValidated<O>(
   adapter: AnthropicAdapter,
   base: CompleteRequest,
   schema: z.ZodType<O>,
+  capCents?: number,
 ): Promise<Attempt> {
   const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
   let user = base.user;
   let errors = '';
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0 && capCents !== undefined) {
+      const next = worstCaseCents(base.model, Math.ceil((base.system.length + user.length) / 4), base.maxTokens);
+      if (costCents(base.model, usage) + next > capCents) return { ok: false, errors: `${SECOND_TRY_OVER_CAP}\n${errors}`, usage };
+    }
     const r = await adapter.complete({ ...base, user });
     usage.inputTokens += r.inputTokens;
     usage.outputTokens += r.outputTokens;
@@ -290,6 +300,7 @@ export async function runTask<I, O>(
               ...(mockOutput !== undefined ? { mockOutput } : {}),
             },
             task.output,
+            mode === 'live' ? costCap : undefined,
           );
           return a;
         },
