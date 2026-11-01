@@ -482,7 +482,7 @@ describe('review settings', () => {
     expect((await viaKey(await keyIn(['accounts:read']), getSettings, 'settings/review')).status).toBe(403);
   });
 
-  it('PUT changes only auto_accept_working_days (1 to 10, or null), audits it, and refuses the rest', async () => {
+  it('PUT sets auto_accept_working_days (1 to 10, or null), audits it, and refuses bad values and an empty save', async () => {
     const put = (body: unknown, who: Who = 'owner') => as(who, putSettings, 'settings/review', 'PUT', body);
     const ok = await put({ auto_accept_working_days: 5 });
     expect(ok.status).toBe(200);

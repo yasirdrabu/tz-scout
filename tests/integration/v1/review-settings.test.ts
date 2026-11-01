@@ -3,9 +3,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PATCH as patchReviewStatus } from '@/http/routes/v1/accounts/[id]/review-status/route';
 import { GET as getStatus } from '@/http/routes/v1/accounts/[id]/status/route';
 import { POST as bulkRoute } from '@/http/routes/v1/review-queue/bulk/route';
+import { GET as facetsRoute } from '@/http/routes/v1/review-queue/facets/route';
 import { GET as queueRoute } from '@/http/routes/v1/review-queue/route';
 import { GET as getReasons, PUT as putReasons } from '@/http/routes/v1/settings/review/reasons/route';
-import { GET as getSettings } from '@/http/routes/v1/settings/review/route';
+import { GET as getSettings, PUT as putSettings } from '@/http/routes/v1/settings/review/route';
 import { GET as getStatuses, PUT as putStatuses } from '@/http/routes/v1/settings/review/statuses/route';
 import { POST as settingAction } from '@/http/routes/v1/settings/[setting]/route';
 import { statusChange } from '@/modules/routing/db/schema';
@@ -235,5 +236,120 @@ describe('send back with a reason (Decision 1)', () => {
     for (const id of [a, b]) expect((await summaryOf(w.tenant, id)).reviewStatusKey).toBe('sent_back');
     const moves = await w.run((ctx) => ctx.tx.select().from(statusChange).where(and(eq(statusChange.toKey, 'sent_back'), eq(statusChange.reasonKey, 'duplicate_account'))));
     expect(moves.map((m) => m.note)).toEqual(['Merge first.', 'Merge first.']);
+  });
+});
+
+describe('PUT /settings/review: statuses, reasons and auto-accept in one save (Ruling 19)', () => {
+  type Settings = { statuses: Status[]; decline_reasons: Reason[]; auto_accept_working_days: number | null };
+  const settings = async (who = w.owner, ws = w): Promise<Settings> => (await ws.as(who, getSettings, 'settings/review')).json();
+  const save = (body: unknown, who = w.owner, ws = w) => ws.as(who, putSettings, 'settings/review', 'PUT', body);
+  const audits = async (action: string) => (await adminDb.select().from(auditLog).where(and(eq(auditLog.tenantId, w.tenantId), eq(auditLog.action, action)))).length;
+  const auditCounts = async () => [await audits('routing.statuses.updated'), await audits('routing.reasons.updated'), await audits('routing.settings.updated')];
+
+  it('a bad reason in the same save leaves the statuses and auto-accept as they were, and audits nothing', async () => {
+    const before = await settings();
+    const counts = await auditCounts();
+    const statusEdits = asEdits(before.statuses).map((s) => (s.key === 'needs_review' ? { ...s, label: 'Checking' } : s));
+    const reasonList = reasonEdits(before.decline_reasons);
+    reasonList[0] = { ...reasonList[0]!, label: ' ' };
+    const res = await save({ statuses: statusEdits, reasons: reasonList, auto_accept_working_days: 7 });
+    expect(res.status).toBe(400);
+    expect((await res.json()).errors).toEqual([{ path: 'reasons.0.label', message: 'Give it a name.' }]);
+    const after = await settings();
+    expect(after.statuses.find((s) => s.key === 'needs_review')!.label).toBe('In review');
+    expect(after.decline_reasons[0]!.label).toBe(before.decline_reasons[0]!.label);
+    expect(after.auto_accept_working_days).toBe(before.auto_accept_working_days);
+    expect(await auditCounts()).toEqual(counts);
+  });
+
+  it('reports the problems of every part at their paths', async () => {
+    const before = await settings();
+    const statusEdits = asEdits(before.statuses).map((s) => (s.key === 'needs_review' ? { ...s, label: '' } : s));
+    const reasonList = reasonEdits(before.decline_reasons).map((r) => (r.applies_to === 'send_back' ? { ...r, archived: true } : r));
+    const res = await save({ statuses: statusEdits, reasons: reasonList, auto_accept_working_days: 11 });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.title).toBe('Give it a name.');
+    expect(body.errors).toEqual([
+      { path: 'statuses.1.label', message: 'Give it a name.' },
+      { path: 'reasons', message: 'Keep at least one send-back reason.' },
+      { path: 'auto_accept_working_days', message: 'Pick 1 to 10 working days, or turn it off.' },
+    ]);
+  });
+
+  it.each([
+    ['archiving a status Scout needs', (s: Status) => (s.key === 'sent_back' ? { archived: true } : {}), "Sent back to source can't be archived. Scout needs it."],
+    ['flagging a final status', (s: Status) => (s.key === 'reviewed' ? { flag_after_hours: 5 } : {}), 'Approved is final, so it is never flagged.'],
+    ['flag after out of range', (s: Status) => (s.key === 'needs_review' ? { flag_after_hours: 721 } : {}), 'Flag after 1 to 720 hours, or never.'],
+    ['an unknown color', (s: Status) => (s.key === 'needs_review' ? { color: 'pink' } : {}), 'Pick plum, amber, green, red or gray.'],
+    ['an unknown set by', (s: Status) => (s.key === 'needs_review' ? { set_by: 'robot' } : {}), 'Pick Scout or a reviewer.'],
+  ])('refuses %s', async (_name, change, message) => {
+    const edits = asEdits((await settings()).statuses).map((s) => ({ ...s, ...change(s as Status) }));
+    const res = await save({ statuses: edits });
+    expect(res.status).toBe(400);
+    expect((await res.json()).errors[0].message).toBe(message);
+  });
+
+  it('refuses removing a status from the list, and an empty save', async () => {
+    const edits = asEdits((await settings()).statuses).filter((s) => s.key !== 'needs_review');
+    expect((await (await save({ statuses: edits })).json()).title).toBe('Archive In review instead of removing it.');
+    const empty = await save({});
+    expect(empty.status).toBe(400);
+    expect((await empty.json()).title).toBe('Nothing to save.');
+  });
+
+  it('a good save changes all three; the queue facets and the send-back reasons show them; one audit row per part', async () => {
+    const counts = await auditCounts();
+    const before = await settings();
+    const statusEdits = asEdits(before.statuses).map((s) => (s.key === 'needs_review' ? { ...s, label: 'Being checked', color: 'green' } : s));
+    const res = await save({
+      statuses: statusEdits,
+      reasons: [...reasonEdits(before.decline_reasons), { label: 'Wrong region', applies_to: 'send_back', note_required: false }],
+      auto_accept_working_days: 4,
+    });
+    expect(res.status).toBe(200);
+    const saved: Settings = await res.json();
+    expect(saved.statuses.find((s) => s.key === 'needs_review')).toMatchObject({ label: 'Being checked', color: 'green', in_status_count: expect.any(Number) });
+    expect(saved.decline_reasons.find((r) => r.key === 'wrong_region')).toMatchObject({ applies_to: 'send_back', note_required: false, used_this_quarter: 0 });
+    expect(saved.auto_accept_working_days).toBe(4);
+    const facets = await (await w.as(leader, facetsRoute, 'review-queue/facets')).json();
+    expect(facets.statuses.find((s: { value: string }) => s.value === 'needs_review')).toMatchObject({ label: 'Being checked', color: 'green' });
+    expect((await reasons(leader)).filter((r) => r.applies_to === 'send_back').map((r) => r.label)).toContain('Wrong region');
+    expect(await auditCounts()).toEqual(counts.map((n) => n + 1));
+  });
+
+  it('archiving a status in the save moves its accounts to the first status', async () => {
+    const before = await settings();
+    const added = await save({ statuses: [...asEdits(before.statuses), { label: 'On hold', color: 'gray', set_by: 'reviewer', flag_after_hours: null }] });
+    expect(added.status).toBe(200);
+    const a = await w.account('Hold Co');
+    expect((await w.as(leader, patchReviewStatus, `accounts/${a}/review-status`, 'PATCH', { to: 'on_hold' })).status).toBe(200);
+    await w.deliver();
+    const archived = await save({ statuses: asEdits((await settings()).statuses).map((s) => (s.key === 'on_hold' ? { ...s, archived: true } : s)) });
+    expect(archived.status).toBe(200);
+    expect((await archived.json()).statuses.find((s: Status) => s.key === 'on_hold')).toMatchObject({ archived: true, in_status_count: 0 });
+    await w.deliver();
+    expect((await summaryOf(w.tenant, a)).reviewStatusKey).toBe('unvetted');
+  });
+
+  it('settings:manage people only', async () => {
+    const edits = asEdits((await settings()).statuses);
+    expect((await save({ statuses: edits }, leader)).status).toBe(403);
+    const key = await keyFor(w.tenant, ['settings:manage']);
+    expect((await call(putSettings, key, 'settings/review', { method: 'PUT', body: { statuses: edits } })).status).toBe(403);
+  });
+
+  it("another tenant's status keys can't be saved here, and their save leaves this tenant alone", async () => {
+    const theirs = await settings(other.owner, other);
+    const mine = await settings();
+    const their = asEdits(theirs.statuses).find((s) => s.key === 'their_own')!;
+    const res = await save({ statuses: [...asEdits(mine.statuses), { ...their, label: 'Stolen' }] });
+    expect(res.status).toBe(400);
+    expect((await res.json()).errors[0].path).toMatch(/^statuses\.\d+\.key$/);
+    const theirEdits = asEdits(theirs.statuses).map((s) => (s.key === 'needs_review' ? { ...s, label: 'Their review' } : s));
+    expect((await save({ statuses: theirEdits, auto_accept_working_days: 9 }, other.owner, other)).status).toBe(200);
+    const after = await settings();
+    expect(after.statuses.find((s) => s.key === 'needs_review')!.label).toBe(mine.statuses.find((s) => s.key === 'needs_review')!.label);
+    expect(after.auto_accept_working_days).toBe(mine.auto_accept_working_days);
   });
 });

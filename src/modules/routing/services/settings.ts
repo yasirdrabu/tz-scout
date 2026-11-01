@@ -258,13 +258,44 @@ export async function resetReviewSettings(ctx: ModuleContext): Promise<ReviewSet
   return getReviewSettings(ctx);
 }
 
+const autoAcceptProblem = (days: number | null): Problem | null =>
+  days !== null && (!Number.isInteger(days) || days < 1 || days > 10) ? { path: 'auto_accept_working_days', message: 'Pick 1 to 10 working days, or turn it off.' } : null;
+
+export type ReviewSettingsEdit = { statuses?: StatusEdit[]; reasons?: ReasonEdit[]; autoAcceptWorkingDays?: number | null };
+
+/**
+ * The editor's one save (Ruling 19): statuses, reasons and auto-accept together, in that order, in the
+ * caller's transaction. Every part is checked before anything is written, so one bad part saves
+ * nothing and the problems of all parts come back together at their paths. Audited per part.
+ */
+export async function saveReviewSettings(ctx: ModuleContext, edit: ReviewSettingsEdit): Promise<ReviewSettings> {
+  requirePerson(ctx);
+  if (edit.statuses === undefined && edit.reasons === undefined && edit.autoAcceptWorkingDays === undefined) {
+    throw new ScoutError({ slug: 'validation', status: 400, title: 'Nothing to save.' });
+  }
+  const problems: Problem[] = [];
+  if (edit.statuses) {
+    const rows = await ctx.tx.select().from(reviewStatusDef).where(eq(reviewStatusDef.tenantId, ctx.tenantId)).for('update');
+    problems.push(...statusEditProblems(rows, edit.statuses));
+  }
+  if (edit.reasons) {
+    const rows = await ctx.tx.select().from(declineReasonDef).where(eq(declineReasonDef.tenantId, ctx.tenantId)).for('update');
+    problems.push(...reasonEditProblems(rows.map((r) => ({ ...r, appliesTo: r.appliesTo as ReasonList })), edit.reasons));
+  }
+  const days = edit.autoAcceptWorkingDays === undefined ? null : autoAcceptProblem(edit.autoAcceptWorkingDays);
+  if (days) problems.push(days);
+  if (problems.length > 0) throw invalid(problems);
+  if (edit.statuses) await saveStatuses(ctx, edit.statuses);
+  if (edit.reasons) await saveReasons(ctx, edit.reasons);
+  if (edit.autoAcceptWorkingDays !== undefined) await setAutoAcceptWorkingDays(ctx, edit.autoAcceptWorkingDays);
+  return getReviewSettings(ctx);
+}
+
 /** Sets how many working days a pending assignment waits before it is accepted for the seller; null turns it off. Audited. */
 export async function setAutoAcceptWorkingDays(ctx: ModuleContext, days: number | null): Promise<ReviewSettings> {
   requirePerson(ctx);
-  if (days !== null && (!Number.isInteger(days) || days < 1 || days > 10)) {
-    const message = 'Pick 1 to 10 working days, or turn it off.';
-    throw new ScoutError({ slug: 'validation', status: 400, title: message, errors: [{ path: 'auto_accept_working_days', message }] });
-  }
+  const problem = autoAcceptProblem(days);
+  if (problem) throw invalid([problem]);
   // Locked, so two changes can't both audit the same "before".
   const [current] = await ctx.tx.select({ days: routingSetting.autoAcceptWorkingDays }).from(routingSetting).where(eq(routingSetting.tenantId, ctx.tenantId)).for('update');
   const before = current ? current.days : DEFAULT_AUTO_ACCEPT_WORKING_DAYS;
