@@ -70,3 +70,15 @@ test('an owner edits a review status and a send-back reason and the queue shows 
   await go.click();
   await shows(page, new RegExp(`^Sent back to .+\\. ${name} left the queue\\.$`));
 });
+
+test('the review statuses table fits the page at 1440 and 1280 px', async ({ page }) => {
+  await signInAs(page, OWNER);
+  for (const width of [1440, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/t/taazaa/settings/review-statuses');
+    const wrap = page.getByRole('region', { name: 'Review statuses' }).getByRole('table').locator('xpath=..');
+    await expect(wrap).toBeVisible();
+    const [scroll, client] = await wrap.evaluate((el) => [el.scrollWidth, el.clientWidth]);
+    expect(scroll, `at ${width} px`).toBeLessThanOrEqual(client);
+  }
+});

@@ -37,7 +37,7 @@ export function StatusTable({ rows, colors, errors, disabled, onChange, onMove, 
         </Button>
       </div>
       <div className={table.wrap}>
-        <table className={table.table}>
+        <table className={`${table.table} ${styles.statuses}`}>
           <thead>
             <tr>
               <th>Color</th>
@@ -91,8 +91,9 @@ export function StatusTable({ rows, colors, errors, disabled, onChange, onMove, 
                     ))}
                   </td>
                   <td>
-                    <input
+                    <textarea
                       className={`input ${styles.meaning}`}
+                      rows={2}
                       aria-label={`What ${name} means`}
                       value={row.description}
                       disabled={disabled}
@@ -148,7 +149,7 @@ export function StatusTable({ rows, colors, errors, disabled, onChange, onMove, 
                         <ArrowDown />
                       </IconButton>
                       {row.required ? (
-                        <span className={table.muted}>Scout needs this status</span>
+                        <span className={`${table.muted} ${styles.required}`}>Scout needs this status</span>
                       ) : (
                         <IconButton label={`Archive ${name}`} disabled={disabled} onClick={() => onArchive(index)}>
                           <Archive />
