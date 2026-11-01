@@ -20,6 +20,25 @@ describe('isBuyerSafe', () => {
     expect(isBuyerSafe('Hi Jo, the plant outage after ransomware must have hurt.', signals)).toBe(false);
   });
 
+  it.each([
+    'We saw the data breaches last spring.',
+    'After the breached vendor news, we can help.',
+    'The lawsuits must be a strain.',
+    'I heard you were sued last year.',
+    'With the litigation behind you, it is a good time.',
+    'Our research shows you need help.',
+    'Your team researched this topic.',
+    'Our intent data says you are in market.',
+  ])('rejects %s', (text) => {
+    expect(isBuyerSafe(text, [])).toBe(false);
+  });
+
+  it('rejects text that quotes a staff makeup (workforce) signal', () => {
+    const workforce = [{ type: 'workforce', kind: 'pain', title: 'Operations is 40% of staff' }];
+    expect(isBuyerSafe('Hi Jo, operations is 40% of staff at your company.', workforce)).toBe(false);
+    expect(isBuyerSafe('Hi Jo, I noticed you opened a new office.', workforce)).toBe(true);
+  });
+
   it('passes a public leadership hook', () => {
     expect(isBuyerSafe('Hi Maria, I noticed Metro Valley Transit just brought on a new Chief Information Officer.', signals)).toBe(true);
   });
