@@ -1,11 +1,12 @@
 import { and, eq, gte, inArray } from 'drizzle-orm';
-import { accountNames } from '@/modules/accounts';
+import { accountNames, floorBasics } from '@/modules/accounts';
+import { listApprovedOffers } from '@/modules/offers';
 import type { ModuleContext } from '@/platform/context';
 import { TIERS, type Match, type Tier } from '../contracts/types';
 import { accountScore, offerMatch } from '../db/schema';
 import { bestOffer } from '../domain/best-offer';
 import { matchScore } from '../domain/combine';
-import { tierFor } from '../domain/tiers';
+import { applyFloors, tierFor } from '../domain/tiers';
 import { draftProfile, getProfile, type ProfilePatch } from './profile';
 
 const DAY_MS = 86_400_000;
@@ -48,13 +49,19 @@ export async function previewProfile(ctx: ModuleContext, draft: ProfilePatch, no
         .from(offerMatch)
         .where(and(eq(offerMatch.tenantId, ctx.tenantId), inArray(offerMatch.accountId, scores.map((s) => s.accountId))));
   const byAccount = Map.groupBy(matches, (m) => m.accountId);
+  const approved = await listApprovedOffers(ctx);
+  const basics = await floorBasics(ctx, scores.map((s) => s.accountId));
   const neutralTrust = Math.round(profile.trustNeutral * 100);
 
   const before = counts();
   const after = counts();
   const rows = scores.map((s) => {
     const tierBefore = s.tier as Tier;
-    const scored = (byAccount.get(s.accountId) ?? []).map((m) => {
+    // As the scorer does: the approved offers for the account's practices, in approval order; a match for any other offer is stale.
+    const b = basics.get(s.accountId);
+    const practiceIds = b?.practiceIds ?? [];
+    const offerIds = approved.filter((o) => practiceIds.length === 0 || practiceIds.includes(o.practiceId)).map((o) => o.id);
+    const scored = (byAccount.get(s.accountId) ?? []).filter((m) => offerIds.includes(m.offerId)).map((m) => {
       const parts = { fit: m.fit, intent: m.intent, revenue: m.revenueScore ?? 50, trust: m.trustScore ?? neutralTrust };
       const { score } = matchScore(parts, profile);
       const hasResearchOrTrigger = (m.ruleHits as { kind: string }[]).some((h) => h.kind !== 'pain');
@@ -62,17 +69,28 @@ export async function previewProfile(ctx: ModuleContext, draft: ProfilePatch, no
       const match: Match = { offerId: m.offerId, fit: m.fit, intent: m.intent, score, tier };
       return { m, parts, match };
     });
-    const best = bestOffer(scored.map((x) => x.match), s.bestOfferId ? [s.bestOfferId] : []);
+    const best = bestOffer(scored.map((x) => x.match), offerIds);
     const top = scored.find((x) => x.match.offerId === best?.offerId);
-    let tierAfter = tierBefore;
+    let tierScored: Tier = 'not_fit';
     if (best && top) {
-      // A floor (research, warm intro) that lifted the scored tier still holds; a hand-set tier is kept as is.
-      const floored = s.tierReason !== 'computed' && top.m.disqualifiedReason === null && TIERS.indexOf(s.scoredTier as Tier) > TIERS.indexOf(best.tier);
-      tierAfter = (s.tierOverride as Tier | null) ?? (floored ? (s.scoredTier as Tier) : best.tier);
+      tierScored = applyFloors(
+        best.tier,
+        {
+          disqualified: top.m.disqualifiedReason !== null,
+          researchTier: b?.researchTier ?? null,
+          researchSignalAt: b?.researchTierSignalAt ?? null,
+          warmIntro: s.warmIntroducerId !== null || s.warmIntroducerName !== null || s.warmPoints > 0,
+          bestFit: best.fit,
+        },
+        profile,
+        now,
+      ).tier;
     }
+    // A tier set by hand stays through every rescore.
+    const tierAfter = (s.tierOverride as Tier | null) ?? tierScored;
     before[tierBefore]++;
     after[tierAfter]++;
-    return { s, top, tierBefore, tierAfter, scoreAfter: best?.score ?? s.matchTotal };
+    return { s, top, tierBefore, tierAfter, scoreAfter: best?.score ?? 0 };
   });
 
   const picked = rows

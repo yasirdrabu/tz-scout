@@ -32,6 +32,7 @@ export { findMatches, resolveAccountId, type AccountMatch, type MatchCandidate, 
 export {
   activeAccountIds,
   checkExclusion,
+  floorBasics,
   getAccount,
   getAccountForScoring,
   accountNames,
@@ -47,6 +48,7 @@ export {
   listPeople,
   type AccountSummaryView,
   type ExternalIdRow,
+  type FloorBasics,
   type ScoringView,
 } from './services/read';
 export { exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';
