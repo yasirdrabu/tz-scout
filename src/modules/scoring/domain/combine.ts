@@ -1,13 +1,16 @@
-// Match total: the weighted blend of fit and intent (SCO-E1).
+// Match score: the weighted blend of the four scores (SCO-E6).
 
 import type { ScoringProfile } from '../contracts/types';
 
-/** Signals cannot lift a poor fit: below this fit the total never exceeds fit. */
+/** Signals, size or trust cannot lift a poor fit: below this fit the score never exceeds fit. */
 const POOR_FIT = 50;
 
-export function matchTotal(fit: number, intent: number, profile: ScoringProfile): { total: number; cappedAtFit: boolean } {
-  const weights = profile.fitWeight + profile.intentWeight || 1;
-  const blend = Math.round((fit * profile.fitWeight + intent * profile.intentWeight) / weights);
-  const cappedAtFit = fit < POOR_FIT && blend > fit;
-  return { total: cappedAtFit ? fit : blend, cappedAtFit };
+export function matchScore(
+  s: { fit: number; intent: number; revenue: number; trust: number },
+  profile: ScoringProfile,
+): { score: number; cappedAtFit: boolean } {
+  const w = profile.weights;
+  const blend = Math.round((w.fit * s.fit + w.intent * s.intent + w.revenue * s.revenue + w.trust * s.trust) / 100);
+  const cappedAtFit = s.fit < POOR_FIT && blend > s.fit;
+  return { score: cappedAtFit ? s.fit : blend, cappedAtFit };
 }

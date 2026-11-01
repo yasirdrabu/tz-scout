@@ -5,23 +5,21 @@ import { dateText } from './explain';
 
 const DAY_MS = 86_400_000;
 const WARM_INTRO_MIN_FIT = 40;
-const TIER_LABEL: Record<Tier, string> = { not_fit: 'not a fit', watch: 'watch', good_fit: 'good fit', act_now: 'act now' };
+const TIER_LABEL: Record<Tier, string> = { not_fit: 'not a fit', nurture: 'nurture', watch: 'watch', good_fit: 'good fit', act_now: 'act now' };
 
 export type TierInput = {
-  fit: number;
-  intent: number;
-  total: number;
+  score: number;
   disqualifiedReason: string | null;
   /** At least one research or trigger signal hit; pain alone is not a reason to act now. */
   hasResearchOrTrigger: boolean;
 };
 
 export function tierFor(input: TierInput, profile: ScoringProfile): Tier {
-  const { notFitBelow, actNow, goodFit } = profile.tierThresholds;
-  if (input.disqualifiedReason !== null || input.fit < notFitBelow) return 'not_fit';
-  if (input.fit >= actNow.fit && input.intent >= actNow.intent && input.total >= actNow.total && input.hasResearchOrTrigger) return 'act_now';
-  if (input.fit >= goodFit.fit) return 'good_fit';
-  return 'watch';
+  const { actNow, goodFit, watch } = profile.tierCutoffs;
+  if (input.disqualifiedReason !== null) return 'not_fit';
+  if (input.score >= actNow && input.hasResearchOrTrigger) return 'act_now';
+  if (input.score >= goodFit) return 'good_fit';
+  return input.score >= watch ? 'watch' : 'nurture';
 }
 
 export type ResearchTier = 'A' | 'B' | 'C';

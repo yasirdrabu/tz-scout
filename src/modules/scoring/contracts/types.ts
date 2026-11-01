@@ -4,15 +4,15 @@ export const SCORE_CAUSES = ['new_signal', 'new_fact', 'rules_changed', 'offer_c
 export const scoreCauseSchema = z.enum(SCORE_CAUSES);
 export type ScoreCause = z.infer<typeof scoreCauseSchema>;
 
-export const TIERS = ['not_fit', 'watch', 'good_fit', 'act_now'] as const;
+export const TIERS = ['not_fit', 'nurture', 'watch', 'good_fit', 'act_now'] as const;
 export const tierSchema = z.enum(TIERS);
 export type Tier = z.infer<typeof tierSchema>;
 
 /** The tier names people see, best first ("Tier names come from the API"). */
-export const TIER_NAMES: Record<Tier, string> = { act_now: 'Act now', good_fit: 'Good fit', watch: 'Watch', not_fit: 'Not a fit' };
+export const TIER_NAMES: Record<Tier, string> = { act_now: 'Act now', good_fit: 'Good fit', watch: 'Watch', nurture: 'Nurture', not_fit: 'Not a fit' };
 
 /** One offer's score for an account, as the best-offer pick and priority read it. */
-export type Match = { offerId: string; fit: number; intent: number; total: number; tier: Tier };
+export type Match = { offerId: string; fit: number; intent: number; score: number; tier: Tier };
 
 export const TIER_REASONS = ['computed', 'research_floor', 'warm_intro_floor'] as const;
 export type TierReason = (typeof TIER_REASONS)[number];
@@ -29,23 +29,22 @@ export const fitPartsSchema = z.object({
 });
 export type FitParts = z.infer<typeof fitPartsSchema>;
 
-export const tierThresholdsSchema = z.object({
-  notFitBelow: z.number(),
-  actNow: z.object({ fit: z.number(), intent: z.number(), total: z.number() }),
-  goodFit: z.object({ fit: z.number() }),
-});
-export type TierThresholds = z.infer<typeof tierThresholdsSchema>;
+/** The four scores' weights, whole numbers adding to 100 (SCO-E6). */
+export const weightsSchema = z.object({ fit: z.number(), intent: z.number(), revenue: z.number(), trust: z.number() });
+export type Weights = z.infer<typeof weightsSchema>;
+
+/** The lowest score each tier starts at; Nurture is everything below `watch`. */
+export const tierCutoffsSchema = z.object({ actNow: z.number(), goodFit: z.number(), watch: z.number() });
+export type TierCutoffs = z.infer<typeof tierCutoffsSchema>;
 
 /** The tenant's scoring settings as the pure functions read them. */
 export type ScoringProfile = {
-  fitWeight: number;
-  intentWeight: number;
+  weights: Weights;
   fitParts: FitParts;
   halfLifeDays: number;
   maxSignalAgeDays: number;
-  tierThresholds: TierThresholds;
+  tierCutoffs: TierCutoffs;
   warmIntroCap: number;
-  trustModifierMax: number;
   trustNeutral: number;
   researchFloorDays: number;
 };

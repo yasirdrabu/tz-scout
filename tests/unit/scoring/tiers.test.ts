@@ -2,40 +2,44 @@ import { describe, expect, it } from 'vitest';
 import { applyFloors, tierFor } from '@/modules/scoring/domain/tiers';
 import { daysAgo, NOW, profile } from './fixtures';
 
-const t = (fit: number, intent: number, total: number, hasResearchOrTrigger = true, disqualifiedReason: string | null = null) =>
-  tierFor({ fit, intent, total, disqualifiedReason, hasResearchOrTrigger }, profile);
+const t = (score: number, hasResearchOrTrigger = true, disqualifiedReason: string | null = null) =>
+  tierFor({ score, disqualifiedReason, hasResearchOrTrigger }, profile);
 
 describe('tierFor', () => {
-  it('SCO-E3-S1-AC1: fit 65, intent 40, total 54 is good fit', () => {
-    expect(t(65, 40, 54)).toBe('good_fit');
+  it('SCO-E6-S1-AC1: score 62 is good fit', () => {
+    expect(t(62)).toBe('good_fit');
   });
-  it('SCO-E3-S1-AC2: fit 70, intent 50, total 61 with a trigger is act now, with only pain is good fit', () => {
-    expect(t(70, 50, 61, true)).toBe('act_now');
-    expect(t(70, 50, 61, false)).toBe('good_fit');
+  it('SCO-E6-S1-AC2: score 83 with a trigger is act now, with only pain is good fit', () => {
+    expect(t(83, true)).toBe('act_now');
+    expect(t(83, false)).toBe('good_fit');
   });
-  it('SCO-E3-S1-AC3: fit 35 is not a fit whatever the intent', () => {
-    expect(t(35, 100, 35)).toBe('not_fit');
+  it('SCO-E6-S1-AC3: score 45 is watch', () => {
+    expect(t(45)).toBe('watch');
   });
-  it('a disqualified match is not a fit', () => {
-    expect(t(90, 90, 90, true, 'Excluded category')).toBe('not_fit');
+  it('SCO-E6-S1-AC4: score 20 is nurture', () => {
+    expect(t(20)).toBe('nurture');
   });
-  it('fit between 40 and 59 is watch; fit 40 is not below the threshold', () => {
-    expect(t(40, 100, 40)).toBe('watch');
-    expect(t(59, 100, 59)).toBe('watch');
+  it('a disqualified match is not a fit whatever the score', () => {
+    expect(t(90, true, 'Excluded category')).toBe('not_fit');
   });
-  it('act now boundaries: intent 34/35, total 59/60, fit 59/60', () => {
-    expect(t(70, 34, 61)).toBe('good_fit');
-    expect(t(70, 35, 61)).toBe('act_now');
-    expect(t(70, 50, 59)).toBe('good_fit');
-    expect(t(70, 50, 60)).toBe('act_now');
-    expect(t(59, 50, 61)).toBe('watch');
-    expect(t(60, 50, 61)).toBe('act_now');
+  it('cutoff boundaries: 75 with a trigger is act now, 74 good fit, 55 good fit, 54 watch, 35 watch, 34 nurture', () => {
+    expect(t(75)).toBe('act_now');
+    expect(t(74)).toBe('good_fit');
+    expect(t(55)).toBe('good_fit');
+    expect(t(54)).toBe('watch');
+    expect(t(35)).toBe('watch');
+    expect(t(34)).toBe('nurture');
   });
-  it('SCO-E3-S1-AC4: a changed threshold moves the tier', () => {
-    const strict = { ...profile, tierThresholds: { ...profile.tierThresholds, notFitBelow: 50 } };
-    const input = { fit: 45, intent: 10, total: 45, disqualifiedReason: null, hasResearchOrTrigger: false };
-    expect(tierFor(input, profile)).toBe('watch');
-    expect(tierFor(input, strict)).toBe('not_fit');
+  it('SCO-E3-S1-AC4: changed cutoffs move the tier', () => {
+    const strict = { ...profile, tierCutoffs: { actNow: 90, goodFit: 70, watch: 50 } };
+    const input = { score: 60, disqualifiedReason: null, hasResearchOrTrigger: true };
+    expect(tierFor(input, profile)).toBe('good_fit');
+    expect(tierFor(input, strict)).toBe('watch');
+  });
+  it('cutoffs of 100/99/1 are honoured', () => {
+    const edge = { ...profile, tierCutoffs: { actNow: 100, goodFit: 99, watch: 1 } };
+    const at = (score: number) => tierFor({ score, disqualifiedReason: null, hasResearchOrTrigger: true }, edge);
+    expect([at(100), at(99), at(1), at(0)]).toEqual(['act_now', 'good_fit', 'watch', 'nurture']);
   });
 });
 

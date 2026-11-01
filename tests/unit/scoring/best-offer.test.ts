@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type { Match } from '@/modules/scoring/contracts/types';
 import { bestOffer } from '@/modules/scoring/domain/best-offer';
 
-const m = (offerId: string, total: number, tier: Match['tier'], fit = 70): Match => ({ offerId, fit, intent: 40, total, tier });
+const m = (offerId: string, score: number, tier: Match['tier'], fit = 70): Match => ({ offerId, fit, intent: 40, score, tier });
 
 describe('bestOffer', () => {
-  it('SCO-E3-S2-AC1: equal totals pick the better tier', () => {
+  it('SCO-E3-S2-AC1: equal scores pick the better tier', () => {
     expect(bestOffer([m('x', 62, 'good_fit'), m('y', 62, 'act_now')], ['x', 'y'])?.offerId).toBe('y');
   });
-  it('picks the highest total first', () => {
+  it('picks the highest score first', () => {
     expect(bestOffer([m('x', 60, 'act_now'), m('y', 61, 'watch')], ['x', 'y'])?.offerId).toBe('y');
+  });
+  it('ranks nurture above not a fit on an equal score', () => {
+    expect(bestOffer([m('x', 20, 'not_fit'), m('y', 20, 'nurture')], ['x', 'y'])?.offerId).toBe('y');
   });
   it('then the higher fit', () => {
     expect(bestOffer([m('x', 62, 'good_fit', 65), m('y', 62, 'good_fit', 70)], ['x', 'y'])?.offerId).toBe('y');
