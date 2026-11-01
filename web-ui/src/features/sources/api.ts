@@ -20,7 +20,7 @@ export type Source = {
   parent_id: string | null;
   parent: { id: string; name: string; kind: string } | null;
   owner: { user_id: string; name: string } | null;
-  method: 'api_key' | 'through_parent' | 'file_upload' | 'hubspot_sync' | 'none';
+  method: 'api_key' | 'through_parent' | 'through_children' | 'file_upload' | 'hubspot_sync' | 'none';
   method_label: string;
   active_key: ActiveKey | null;
   created_at: string;

@@ -5,7 +5,7 @@ import { activeKeysBySource, userNames, type ActiveKey } from '@/modules/tenancy
 import type { ModuleContext } from '@/platform/context';
 import { arrival, batch, source } from '../db/schema';
 import { syncStatus, type SyncStatus } from './qualified-leads';
-import { childSources, liveChildCounts, readSource, sourceBreadcrumb, sourceNames, type SourceKind, type SourceListRow, type SourceStatus, type SourceView } from './sources';
+import { childSources, liveChildren, readSource, sourceBreadcrumb, sourceNames, type SourceKind, type SourceListRow, type SourceStatus, type SourceView } from './sources';
 
 export const KIND_LABELS: Record<SourceKind, string> = {
   person: 'Person',
@@ -26,7 +26,7 @@ export const TRUST_LABEL = 'Not enough data yet';
 /** Fewer reviewed accounts than this and a source is "New" (Ruling 4). */
 const NEW_UNDER_REVIEWED = 10;
 
-export type SendMethod = 'api_key' | 'through_parent' | 'file_upload' | 'hubspot_sync' | 'none';
+export type SendMethod = 'api_key' | 'through_parent' | 'through_children' | 'file_upload' | 'hubspot_sync' | 'none';
 
 /** One source as Sources and the Source page show it. */
 export type SourceApiView = {
@@ -116,11 +116,23 @@ export async function sourceStats(ctx: ModuleContext, sourceIds: string[]): Prom
   return new Map(sourceIds.map((id) => [id, sourceFunnel(counts.get(id) ?? new Map())]));
 }
 
-function methodOf(row: SourceListRow, parentName: string | null, key: ActiveKey | undefined): { method: SendMethod; methodLabel: string } {
+function methodOf(
+  row: SourceListRow,
+  parentName: string | null,
+  key: ActiveKey | undefined,
+  children: { name: string; kind: string }[],
+): { method: SendMethod; methodLabel: string } {
   if (row.kind === 'agent' || row.kind === 'scheduled_pull') return { method: 'through_parent', methodLabel: `Through ${parentName ?? 'its parent'}` };
   if (row.kind === 'list') return { method: 'file_upload', methodLabel: 'File upload' };
   if (row.kind === 'crm') return { method: 'hubspot_sync', methodLabel: 'HubSpot sync' };
-  return key ? { method: 'api_key', methodLabel: 'API key' } : { method: 'none', methodLabel: 'Not sending yet' };
+  if (key) return { method: 'api_key', methodLabel: 'API key' };
+  // No key of its own: it sends through the sources under it, such as a person's agents.
+  if (children.length === 1) return { method: 'through_children', methodLabel: `Through ${children[0]!.name}` };
+  if (children.length > 1) {
+    const what = children.every((c) => c.kind === 'agent') ? 'agents' : 'sources';
+    return { method: 'through_children', methodLabel: `Runs ${children.length} ${what}` };
+  }
+  return { method: 'none', methodLabel: 'Not sending yet' };
 }
 
 /** The list rows as the API shows them: labels, parent, owner name, how it sends, its key, and what may be done to it. */
@@ -130,7 +142,7 @@ export async function sourceViews(ctx: ModuleContext, rows: SourceListRow[], sta
   const [keys, owners, children, funnels, parents] = await Promise.all([
     activeKeysBySource(ctx, ids),
     userNames(ctx, rows.map((r) => r.ownerUserId).filter((id): id is string => !!id)),
-    liveChildCounts(ctx, ids),
+    liveChildren(ctx, ids),
     stats ?? sourceStats(ctx, ids),
     parentIds.length
       ? ctx.tx
@@ -143,7 +155,8 @@ export async function sourceViews(ctx: ModuleContext, rows: SourceListRow[], sta
   return rows.map((r) => {
     const parent = r.parentId ? (parents.get(r.parentId) ?? null) : null;
     const key = keys.get(r.id);
-    const childrenCount = children.get(r.id) ?? 0;
+    const under = children.get(r.id) ?? [];
+    const childrenCount = under.length;
     const live = r.status !== 'archived';
     const ownerName = r.ownerUserId ? owners.get(r.ownerUserId) : undefined;
     return {
@@ -156,7 +169,7 @@ export async function sourceViews(ctx: ModuleContext, rows: SourceListRow[], sta
       parentId: r.parentId,
       parent,
       owner: r.ownerUserId && ownerName ? { userId: r.ownerUserId, name: ownerName } : null,
-      ...methodOf(r, parent?.name ?? null, key),
+      ...methodOf(r, parent?.name ?? null, key, under),
       activeKey: key ?? null,
       createdAt: r.createdAt,
       lastSentAt: r.lastSentAt,
