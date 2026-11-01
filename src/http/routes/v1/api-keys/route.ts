@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { listSources } from '@/modules/intake';
+import { LIST_HAS_NO_KEYS, listSources, readSource } from '@/modules/intake';
+import { ScoutError } from '@/platform/errors';
 import { KEY_ACCESS_CHOICES, createKeyWithAccess, listApiKeys, type KeyAccess } from '@/modules/tenancy';
 import { parseBody } from '../_lib/body';
 import { created, v1Route } from '../_lib/v1-route';
@@ -23,5 +24,7 @@ const createBody = z.strictObject({
 // Not idempotent: a stored response would keep the secret, and a replay would hand it out again.
 export const POST = v1Route({ permission: 'keys:manage', peopleOnly: true, idempotent: false }, async (req, principal, ctx) => {
   const body = await parseBody<{ name: string; sourceId: string; access: KeyAccess; environment?: 'live' | 'test' }>(req, createBody);
+  // A list gets its accounts from files, so it holds no keys (Ruling 1).
+  if ((await readSource(ctx, body.sourceId))?.kind === 'list') throw new ScoutError({ slug: 'validation', status: 400, title: LIST_HAS_NO_KEYS });
   return created(await createKeyWithAccess(ctx, body, principal));
 });

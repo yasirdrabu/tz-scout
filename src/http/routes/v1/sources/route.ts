@@ -76,6 +76,8 @@ export const POST = v1Route({ permission: 'sources:manage', idempotent: (body) =
   if (input.userId && !(await memberRole(ctx, input.userId))) {
     throw new ScoutError({ slug: 'validation', status: 400, title: 'That person is not a member of this workspace.' });
   }
+  // A key must not make keys: only a person may add a source with one (as POST /sources/{id}/keys is people only).
+  if (createKey && principal.kind !== 'user') throw new ScoutError({ slug: 'forbidden', status: 403, title: 'Forbidden', detail: 'Only a person can do this.' });
   if (createKey && input.kind === 'list') throw bad('create_key', LIST_HAS_NO_KEYS);
   if (createKey && input.kind !== 'agent' && input.kind !== 'partner') throw bad('create_key', 'Only an agent or a partner gets a key when it is added.');
   const added = await registerSource(ctx, input);

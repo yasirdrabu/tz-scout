@@ -166,7 +166,8 @@ export async function sourceViews(ctx: ModuleContext, rows: SourceListRow[], sta
       trustLabel: TRUST_LABEL,
       childrenCount,
       isNew: funnels.get(r.id)?.isNew ?? true,
-      canRemove: !r.hasSent && childrenCount === 0 && live,
+      // A member's own person source is never removed (it is how they send from the app).
+      canRemove: !r.hasSent && childrenCount === 0 && live && !(r.kind === 'person' && r.userId),
       canArchive: r.hasSent && childrenCount === 0 && live,
       userId: r.userId,
       ownerUserId: r.ownerUserId,

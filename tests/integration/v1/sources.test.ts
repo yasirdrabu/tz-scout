@@ -16,7 +16,7 @@ import { source } from '@/modules/intake/db/schema';
 import { addMember } from '@/modules/tenancy';
 import { authenticateKey, setKeyCacheTtl } from '@/modules/tenancy/services/api-keys';
 import { adminDb, closeDbs } from '@/platform/db/client';
-import { auditLog } from '@/platform/db/schema';
+import { auditLog, idempotencyKey } from '@/platform/db/schema';
 import { seedUser } from '../tenancy/helpers';
 import { workspace, type Workspace } from './review-helpers';
 import { call, freshTenant, keyFor, type Tenant } from './intake-helpers';
@@ -167,9 +167,12 @@ describe('POST /api/v1/sources', () => {
     const first = await json(req({ kind: 'agent', name: 'Keyed agent', parent_id: personSource, create_key: true }), 201);
     expect(first.api_key.secret).toMatch(/^scout_live_/);
     expect(first.method).toBe('through_parent');
-    const again = await (await req({ kind: 'agent', name: 'Keyed agent', parent_id: personSource, create_key: true })).json();
-    expect(again.api_key).toBeUndefined();
+    // The same request again is not a stored replay: it runs, and the name is taken.
+    const again = await json(req({ kind: 'agent', name: 'Keyed agent', parent_id: personSource, create_key: true }), 409);
+    expect(again.errors[0].path).toBe('name');
     expect(JSON.stringify(again)).not.toContain(first.api_key.secret);
+    const stored = await adminDb.select().from(idempotencyKey).where(and(eq(idempotencyKey.tenantId, w.tenantId), eq(idempotencyKey.key, 'add-agent-1')));
+    expect(stored).toEqual([]);
   });
 
   it('refuses a key for a list', async () => {
@@ -472,5 +475,59 @@ describe('the Source page reads: batches of a source, and tier names for the Acc
     ]);
     const rows = await json(w.as(operator, accountsRoute, `accounts?source_id=${w.source.personId}`));
     expect(rows.data[0]).toHaveProperty('tier_label');
+  });
+});
+
+describe('fix round: keys, members and sync', () => {
+  it('rotate refuses a key that holds more than the caller does, and the old key keeps working', async () => {
+    const { SYSTEM_GRANTOR, createApiKey } = await import('@/modules/tenancy');
+    const p = await json(w.as(operator, postSource, 'sources', 'POST', { kind: 'partner', name: 'Owner keyed partner' }), 201);
+    const big = await w.run((ctx) => createApiKey(ctx, { name: 'Big key', environment: 'live', scopes: ['arrivals:write', 'keys:manage'], sourceId: p.id, dataLimit: { kind: 'all' } }, SYSTEM_GRANTOR));
+    const res = await json(w.as(operator, keyAction, `sources/${p.id}/keys/${big.id}:rotate`, 'POST'), 403);
+    expect(res.type).toContain('scope-not-available');
+    expect(await authenticateKey(big.secret, null)).toMatchObject({ id: big.id });
+  });
+
+  it('POST /sources with create_key refuses an API key', async () => {
+    const manager = await keyFor(w.tenant as Tenant, ['sources:manage'], { dataLimit: { kind: 'all' } });
+    const res = await call(postSource, manager, 'sources', { body: { kind: 'partner', name: 'Key made partner', create_key: true } });
+    expect(res.status).toBe(403);
+    expect((await res.json()).detail).toBe('Only a person can do this.');
+    const plain = await call(postSource, manager, 'sources', { body: { kind: 'partner', name: 'Key made partner' } });
+    expect(plain.status).toBe(201);
+  });
+
+  it("will not remove a member's own person source", async () => {
+    const { intakeSourceAccess } = await import('@/modules/intake');
+    const member = await w.person('seller', { name: 'Remove Me Not' });
+    const own = (await w.run((ctx) => intakeSourceAccess.personSourceFor(ctx, member)))!;
+    expect((await json(w.as(operator, getSource, `sources/${own}`))).can_remove).toBe(false);
+    const body = await json(w.as(operator, deleteSource, `sources/${own}`, 'DELETE'), 409);
+    expect(body.title).toBe("Remove Me Not's own source can't be removed. Archive it instead, or remove the member.");
+  });
+
+  it('POST /api-keys refuses binding a key to a list (Ruling 1)', async () => {
+    const { POST: postApiKey } = await import('@/http/routes/v1/api-keys/route');
+    const list = await addList('Generic key list');
+    const body = await json(w.as(w.owner, postApiKey, 'api-keys', 'POST', { name: 'k', source_id: list.id, access: 'send_and_status' }), 400);
+    expect(body.title).toBe('A list gets its accounts from files, not the API.');
+  });
+
+  it('a poll skips while another poll of the tenant holds the lock', async () => {
+    const { pollQualifiedLeads } = await import('@/modules/intake');
+    let held: { submitted: number; skipped?: boolean } | undefined;
+    await adminDb.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'intake.qualified_leads.poll:' + w.tenantId}))`);
+      held = await w.run((ctx) => pollQualifiedLeads(ctx));
+    });
+    expect(held).toEqual({ submitted: 0, skipped: true });
+    expect((await w.run((ctx) => pollQualifiedLeads(ctx))).skipped).toBeUndefined();
+  });
+
+  it('GET /batches?source_id carries the total for the Batches tab count (C8)', async () => {
+    const { GET: batchesRoute } = await import('@/http/routes/v1/batches/route');
+    const body = await json(w.as(operator, batchesRoute, `batches?source_id=${w.source.personId}&limit=1`));
+    expect(body.total).toBeGreaterThanOrEqual(2);
+    expect(body.data).toHaveLength(1);
   });
 });

@@ -172,6 +172,8 @@ export async function hasSent(ctx: ModuleContext, id: string): Promise<boolean> 
   return !!row;
 }
 
+const memberSourceCopy = (name: string) => `${name}'s own source can't be removed. Archive it instead, or remove the member.`;
+
 const hasChildren = (name: string) => conflict('source-has-children', `Remove or archive the sources under ${name} first.`);
 
 /** Each given source's name, by id, in the context's tenant; unknown ids are left out. */
@@ -314,6 +316,8 @@ export async function removeSource(ctx: ModuleContext, id: string): Promise<void
   const visible = await visibleSourceIds(ctx);
   const current = await loadSource(ctx, id);
   if (!current || (visible && !visible.includes(id))) throw notFound();
+  // A member's own source is how they send from the app; removing it would leave them unable to send for good.
+  if (current.kind === 'person' && current.userId) throw conflict('source-is-a-member', memberSourceCopy(current.name));
   if (await hasSent(ctx, id)) throw conflict('source-has-sent', `${current.name} has sent accounts, so it can only be archived.`);
   if ((await liveChildCount(ctx, id)) > 0) throw hasChildren(current.name);
   await ctx.tx

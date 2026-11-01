@@ -22,6 +22,8 @@ import { submitArrival, type SubmitResult } from './submit';
 
 const SYSTEM = 'hubspot';
 const SOURCE_KEY = 'hubspot_qualified';
+/** The advisory lock key prefix (with the tenant id) that keeps one poll per tenant running. */
+const POLL_LOCK = 'intake.qualified_leads.poll:';
 
 /** The sample contact `seedMockCrm` qualifies, which "Simulate a qualified lead" sends. */
 export const SAMPLE_LEAD_EMAIL = 'pat.lee@qualified.example';
@@ -110,9 +112,13 @@ export async function takeQualifiedLead(ctx: ModuleContext, connection: string, 
  * that failed for a transient reason (CRM `classifyPushError`: 429, 5xx, network, transient Postgres); any other
  * failure is logged and counts as handled. A full page still inside the overlap is followed by a read from
  * `polled_until`. Stops at the source's daily cap or when the source is paused meanwhile, so the rest are read next
- * time. Skips a paused source and a connection that is off or not set up.
+ * time. Skips a paused source and a connection that is off or not set up, and returns `skipped` while another poll of
+ * the tenant holds the lock.
  */
-export async function pollQualifiedLeads(ctx: ModuleContext): Promise<{ submitted: number }> {
+export async function pollQualifiedLeads(ctx: ModuleContext): Promise<{ submitted: number; skipped?: true }> {
+  // One poll per tenant at a time: a Sync now during the scheduled poll (or two) would read and submit the same leads.
+  const [lock] = (await ctx.tx.execute(sql`select pg_try_advisory_xact_lock(hashtext(${POLL_LOCK + ctx.tenantId})) as ok`)) as unknown as { ok: boolean }[];
+  if (!lock?.ok) return { submitted: 0, skipped: true };
   const sender = await leadSource(ctx);
   if (sender?.status !== 'active') return { submitted: 0 };
   const status = await connectionStatus(ctx, SYSTEM);

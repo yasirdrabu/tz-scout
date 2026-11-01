@@ -104,6 +104,7 @@ export {
 export {
   accountForArrival,
   batchAccountIds,
+  countBatches,
   getArrival,
   getArrivalWithStatus,
   getBatch,

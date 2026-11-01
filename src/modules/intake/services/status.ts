@@ -309,6 +309,18 @@ export async function listBatches(ctx: ModuleContext, f: { cursor?: string; limi
   return { data, nextCursor: page.nextCursor };
 }
 
+/** How many batches `listBatches` would list for these sources, with the same visibility (the Source page's Batches tab count, C8). */
+export async function countBatches(ctx: ModuleContext, sourceIds: string[]): Promise<number> {
+  let n = 0;
+  let cursor: string | undefined;
+  do {
+    const page = await pageBatches(ctx, { sourceIds, cursor, limit: 200 });
+    n += page.data.length;
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return n;
+}
+
 const rejectionOf = (r: { id: string; externalRef: string | null; payload: unknown; rejectReason: string | null; rejectDetail: string | null }) => ({
   arrivalId: r.id,
   externalRef: r.externalRef ?? rawRefOf(r.payload),

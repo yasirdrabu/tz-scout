@@ -332,20 +332,20 @@ async function sourceKey(ctx: ModuleContext, sourceId: string, keyId: string) {
 
 /**
  * Rotates one key of a source (Decision 14, Ruling 7): a new key with the old one's name, scopes, data limit,
- * environment, expiry and limits, then the old one revoked as `Rotated`, in the caller's transaction, so a failed
+ * environment, expiry and limits, within what `grantor` (the caller) holds, then the old one revoked as `Rotated`, in the caller's transaction, so a failed
  * create leaves the old key working. Calls with the old key fail within 60 seconds (at once on this instance).
  */
 export async function rotateSourceKey(
   ctx: ModuleContext,
   sourceId: string,
   keyId: string,
+  grantor: Grantor,
 ): Promise<{ id: string; prefix: string; secret: string; environment: 'live' | 'test'; createdAt: Date }> {
   const old = await sourceKey(ctx, sourceId, keyId);
   const scopes = old.scopes.filter(isPermission);
   const dataLimit = old.dataLimit === null ? undefined : DataLimitSchema.parse(old.dataLimit);
   const environment = old.environment === 'test' ? 'test' : 'live';
-  // The new key holds exactly what the old one did, so the old key is the grantor.
-  const grantor: Grantor = { permissions: scopes, dataLimit: dataLimit ?? { kind: 'all' } };
+  // The caller is the grantor: a key that holds more than they do is refused (403), so a rotate never hands out more than the rotator has.
   const { id, secret } = await createApiKey(
     ctx,
     { name: old.name, environment, scopes, dataLimit, sourceId, ...(old.expiresAt ? { expiresAt: old.expiresAt } : {}) },

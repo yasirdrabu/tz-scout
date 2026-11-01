@@ -16,10 +16,10 @@ async function sourceAndKey(req: Request, ctx: Parameters<Parameters<typeof v1Ro
  * secret is in this response only. The old key stops working within a minute (at once on this instance).
  */
 // Not idempotent: a stored response would keep the secret, and a replay would hand it out again.
-export const POST = v1Route({ permission: 'sources:manage', peopleOnly: true, idempotent: false }, async (req, _principal, ctx) => {
+export const POST = v1Route({ permission: 'sources:manage', peopleOnly: true, idempotent: false }, async (req, principal, ctx) => {
   const { sourceId, key } = await sourceAndKey(req, ctx);
   if (key.action !== 'rotate') throw notFound();
-  return created(await rotateSourceKey(ctx, sourceId, key.id));
+  return created(await rotateSourceKey(ctx, sourceId, key.id, principal));
 });
 
 /** Revokes one key of this source; a key of another source is a 404. */
