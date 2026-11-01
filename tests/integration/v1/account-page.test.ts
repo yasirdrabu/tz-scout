@@ -78,6 +78,22 @@ describe('GET /accounts/{id}/score tiles and warm_intro', () => {
     expect(s.warm_intro).toBeNull();
   });
 
+  it('says no signal matched an intent rule when a dated signal matched none', async () => {
+    const key = await keyFor(w.tenant, SEND, { sourceId: w.source.agentId, dataLimit: { kind: 'own_source' } });
+    const body = {
+      account: { domain: `${newId('acc').slice(-10).toLowerCase()}-example.com`, name: 'Signal Tile Co', industry: 'Logistics' },
+      signals: [{ type: 'trigger', title: 'Opened a new depot', occurred_at: '2026-10-14' }],
+    };
+    const res = await call(postArrival, key, 'arrivals', { body });
+    expect(res.status).toBe(202);
+    const arrivalId = (await res.json()).arrival_id as string;
+    await w.deliver();
+    const [row] = await w.run((ctx) => ctx.tx.select({ accountId: arrival.accountId }).from(arrival).where(eq(arrival.id, arrivalId)));
+    const s = await json(w.as(leader, getScore, `accounts/${row!.accountId}/score`));
+    expect(s.intent).toBe(0);
+    expect(s.tiles[2]).toMatchObject({ value: 0, note: `No signal matched an intent rule for ${s.offer}.` });
+  });
+
   it('a non-best offer gets its own tiles; an offer with no match is a 404', async () => {
     const a = await w.sent({ name: 'Offer Tile Co', industry: 'Logistics' });
     const best = await json(w.as(leader, getScore, `accounts/${a}/score`));

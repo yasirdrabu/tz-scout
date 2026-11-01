@@ -14,7 +14,7 @@ const lines: ExplanationLine[] = [
 
 describe('scoreTiles', () => {
   it('gives five tiles in order with values, maxes and notes', () => {
-    expect(scoreTiles({ priority: 66, fit: 44, intent: 50, lines }, thresholds)).toEqual([
+    expect(scoreTiles({ priority: 66, fit: 44, intent: 50, lines, offer: 'Modernization Blueprint', datedSignals: 2 }, thresholds)).toEqual([
       { key: 'priority', label: 'Priority', value: 66, max: 100, note: 'Act now needs a priority of 75, fit 70 and buying intent 50.' },
       { key: 'fit', label: 'Fit', value: 44, max: 100, note: 'County transit agency with 3,000+ staff.' },
       { key: 'intent', label: 'Buying intent', value: 50, max: 100, note: 'RFP re-issue expected in December.' },
@@ -23,10 +23,24 @@ describe('scoreTiles', () => {
     ]);
   });
 
-  it('says No dated signals yet. without a dated intent line, and has an empty fit note without fit lines', () => {
-    const tiles = scoreTiles({ priority: 10, fit: 0, intent: 0, lines: [{ group: 'intent', label: 'Undated', points: 5, max: 10, text: 'Undated.' }] }, thresholds);
+  it('says No dated signals yet. without dated signals, and has an empty fit note without fit lines', () => {
+    const undated: ExplanationLine[] = [{ group: 'intent', label: 'Undated', points: 5, max: 10, text: 'Undated.' }];
+    const tiles = scoreTiles({ priority: 10, fit: 0, intent: 0, lines: undated, offer: 'FDE Sprint', datedSignals: 0 }, thresholds);
     expect(tiles[1]!.note).toBe('');
     expect(tiles[2]!.note).toBe('No dated signals yet.');
+  });
+
+  it('says no signal matched an intent rule when dated signals matched none', () => {
+    const fitOnly = lines.filter((l) => l.group === 'fit');
+    expect(scoreTiles({ priority: 30, fit: 45, intent: 0, lines: fitOnly, offer: 'FDE Sprint', datedSignals: 1 }, thresholds)[2]!.note).toBe(
+      'No signal matched an intent rule for FDE Sprint.',
+    );
+    expect(scoreTiles({ priority: 30, fit: 45, intent: 0, lines: fitOnly, offer: null, datedSignals: 1 }, thresholds)[2]!.note).toBe('No signal matched an intent rule.');
+  });
+
+  it('names the undated intent line when only that matched', () => {
+    const undated: ExplanationLine[] = [{ group: 'intent', label: 'Researching', points: 5, max: 10, text: 'Researching AI governance.' }];
+    expect(scoreTiles({ priority: 30, fit: 45, intent: 5, lines: undated, offer: 'FDE Sprint', datedSignals: 1 }, thresholds)[2]!.note).toBe('Researching AI governance.');
   });
 });
 
