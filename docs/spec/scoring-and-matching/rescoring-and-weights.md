@@ -2,6 +2,8 @@
 
 Release R1 (event-driven rescoring), R2 (weights editor)
 
+> **Scoring redesign:** [SCO-E6](four-weight-model.md) replaces this epic's match total, trust modifier, tier thresholds and weights editor. Where they differ, SCO-E6 wins.
+
 ## Why
 
 Scores go stale when facts arrive, signals age, rules change or a source earns or loses trust. Replay

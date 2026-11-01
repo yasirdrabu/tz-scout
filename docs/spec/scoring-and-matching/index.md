@@ -40,6 +40,7 @@ are owned by Sources and intake. Scoring reads them through those modules' publi
 | SCO-E3 Tiers and best offer | [tiers-and-best-offer.md](tiers-and-best-offer.md) | R1 |
 | SCO-E4 Explain a score | [explain-score.md](explain-score.md) | R1 |
 | SCO-E5 Rescoring and tenant weights | [rescoring-and-weights.md](rescoring-and-weights.md) | R1 (weights editor R2) |
+| SCO-E6 Four-weight scoring model (replaces the match total, trust modifier and tier thresholds of E1 to E3, and the E5 weights editor) | [four-weight-model.md](four-weight-model.md) | Scoring redesign (Decision 21) |
 
 ## Events published
 
