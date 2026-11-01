@@ -17,7 +17,11 @@ export async function briefOnMerge(ctx: ModuleContext, survivorId: string, merge
   const survivor = await readBrief(ctx, survivorId, { lock: true });
   if (merged) {
     if (!survivor) {
-      await ctx.tx.update(brief).set({ accountId: survivorId }).where(briefWhere(ctx, mergedId));
+      // A draft still running for the merged id settles against it, not here: start this row settled, so the request below queues.
+      await ctx.tx
+        .update(brief)
+        .set({ accountId: survivorId, draftState: merged.draftedAt ? 'ready' : 'not_drafted', draftedSeq: merged.requestedSeq, draftJobId: null, draftAttempts: 0 })
+        .where(briefWhere(ctx, mergedId));
     }
     const ours = new Map((await ctx.tx.select().from(briefSection).where(ofAccount(briefSection, ctx, survivorId))).map((s) => [s.key, s]));
     const theirs = await ctx.tx.select().from(briefSection).where(ofAccount(briefSection, ctx, mergedId));
