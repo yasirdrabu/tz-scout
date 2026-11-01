@@ -1,6 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { delay, http } from 'msw';
 import { renderApp } from '../../test/renderApp';
+import { server } from '../../test/server';
 import { problem } from '../../test/http';
 import { READER, serveOffers } from './testing';
 
@@ -34,6 +36,15 @@ describe('Offers and practices (§19)', () => {
     expect(draft).toHaveTextContent('No accounts matched yet');
     expect(draft).toHaveTextContent('Draft');
     for (const name of ['Delete practice', 'Edit practice', 'Add an offer to this practice']) expect(screen.getByRole('button', { name })).toBeInTheDocument();
+  });
+
+  it('shows the practice from the list without waiting for its own request', async () => {
+    serveOffers();
+    server.use(http.get('/api/v1/practices/:id', () => delay('infinite')));
+    renderApp('/t/taazaa/offers');
+    expect(await screen.findByRole('heading', { name: 'AI Transformation', level: 2 })).toBeInTheDocument();
+    expect(screen.getByText('Led by Ash Patel · 2 offers')).toBeInTheDocument();
+    expect(screen.queryByText('Loading the practice')).toBeNull();
   });
 
   it('a practice without a lead says so', async () => {

@@ -68,6 +68,7 @@ export function OffersScreen() {
               <PracticeView
                 tenant={tenant}
                 practiceId={practiceId}
+                listed={list.find((p) => p.id === practiceId)}
                 offers={offers.data.filter((o) => o.practice_id === practiceId)}
                 canManage={canManage}
                 onEdit={() => edit({ edit: 'practice' })}

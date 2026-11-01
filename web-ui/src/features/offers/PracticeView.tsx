@@ -7,12 +7,14 @@ import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { EmptyState } from '../../ui/EmptyState';
 import { Pill } from '../../ui/Pill';
 import { LoadFailed, LoadingRows, useRun } from '../settings/shared';
-import { archivePractice, offerStatsQuery, practiceQuery, statusTone, type Offer, type OfferStat } from './api';
+import { archivePractice, offerStatsQuery, practiceQuery, statusTone, type Offer, type OfferStat, type Practice } from './api';
 import styles from './Offers.module.css';
 
 type Props = {
   tenant: string;
   practiceId: string;
+  /** The practice as the list has it, shown while its own request loads. */
+  listed: Practice | undefined;
   offers: Offer[];
   canManage: boolean;
   onEdit: () => void;
@@ -26,11 +28,11 @@ export function matchedLine(stat: OfferStat | undefined, n: (x: number) => strin
 }
 
 /** §19 Practice view: name, lead and offer count, positioning, a card per offer, and the practice actions. */
-export function PracticeView({ tenant, practiceId, offers, canManage, onEdit, onAddOffer }: Props) {
+export function PracticeView({ tenant, practiceId, listed, offers, canManage, onEdit, onAddOffer }: Props) {
   const f = useFormat();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const practice = useQuery(practiceQuery(tenant, practiceId));
+  const practice = useQuery({ ...practiceQuery(tenant, practiceId), placeholderData: listed });
   const stats = useQuery(offerStatsQuery(tenant));
   const [confirming, setConfirming] = useState(false);
   const del = useRun();
