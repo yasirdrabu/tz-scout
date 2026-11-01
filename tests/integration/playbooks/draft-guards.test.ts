@@ -18,7 +18,7 @@ vi.mock('@/platform/config', async (orig) => {
 import type { AnthropicAdapter } from '@/modules/ai-tasks';
 import { anthropicMock } from '@/modules/ai-tasks/adapters/anthropic/mock';
 import { registerAdapter, saveCredential, setMode, testConnection } from '@/modules/integrations';
-import { briefFreeze, briefUnfreezeOnDeclined, requestDraft, runDraft, sweepBriefs, type BriefOutput } from '@/modules/playbooks';
+import { briefFreeze, briefUnfreezeOnDeclined, briefUnfreezeOnWithdrawn, requestDraft, runDraft, sweepBriefs, type BriefOutput } from '@/modules/playbooks';
 import { brief } from '@/modules/playbooks/db/schema';
 import { assign, decline } from '@/modules/routing';
 import { adminDb } from '@/platform/db/client';
@@ -155,6 +155,27 @@ describe('freezing (fixes 3 and 4)', () => {
     await deliverOnce(briefUnfreezeOnDeclined, declined!);
     expect(await briefRow(id)).toMatchObject({ frozenByAssignmentId: b.id });
     expect((await briefRow(id))!.frozenAt).not.toBeNull();
+  });
+});
+
+describe('withdrawal hand-off (fix round 2, item 4)', () => {
+  it('a reassignment whose new AE already declined does not hand the freeze on', async () => {
+    const t = await routingTenant();
+    const [s1, s2] = [await member(t, 'seller'), await member(t, 'seller')];
+    const id = await scoredAccount(t, 'watch');
+    await markAllSent(t.tenantId);
+    const a = await asPerson(t, (ctx) => assign(ctx, id, { sellerUserId: s1 }));
+    const [createdA] = await pending(t.tenantId, 'routing.assignment.created');
+    await deliverOnce(briefFreeze, createdA!);
+    await markAllSent(t.tenantId);
+    const b = await asPerson(t, (ctx) => assign(ctx, id, { sellerUserId: s2 }));
+    await asPerson(t, (ctx) => decline(ctx, b.id, { reasonKey: 'not_a_fit' }), { userId: s2, dataLimit: { kind: 'own_accounts' } });
+    const [withdrawn] = await pending(t.tenantId, 'routing.assignment.withdrawn');
+    expect(withdrawn!.data).toMatchObject({ assignmentId: a.id, replacedBy: b.id });
+    await deliverOnce(briefUnfreezeOnWithdrawn, withdrawn!);
+    const row = (await briefRow(id))!;
+    expect(row.frozenAt).toBeNull();
+    expect(row.frozenByAssignmentId).toBeNull();
   });
 });
 

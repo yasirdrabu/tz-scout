@@ -105,7 +105,8 @@ export async function freezeBrief(ctx: ModuleContext, accountId: string, assignm
 export async function unfreezeBrief(ctx: ModuleContext, accountId: string, assignmentId: string, replacedBy: string | null = null): Promise<void> {
   const row = await readBrief(ctx, accountId, { lock: true });
   if (!row || !row.frozenAt || row.frozenByAssignmentId !== assignmentId) return;
-  if (replacedBy) {
+  // Handed on only while the replacement is still the open assignment; one already declined or withdrawn takes nothing.
+  if (replacedBy && (await openAssignmentId(ctx, accountId)) === replacedBy) {
     await ctx.tx.update(brief).set({ frozenByAssignmentId: replacedBy }).where(briefWhere(ctx, accountId));
     return;
   }
