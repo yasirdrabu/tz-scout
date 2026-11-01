@@ -198,6 +198,63 @@ describe('Assign dialog', () => {
     expect(single).toBe(0);
   });
 
+  /** Five queue rows, all selected, with the bulk Assign dialog open; `preview` answers each account. */
+  async function bulkOf(preview: (id: string) => Record<string, unknown>) {
+    const rows = ['A', 'B', 'C', 'D', 'E'].map((x, i) => row({ account_id: `acc_${x.toLowerCase()}`, name: `Account ${x}`, priority: 90 - i }));
+    serveQueue({ rows });
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.post('/api/v1/review-queue/assign-preview', async ({ request }) => {
+        const { account_ids } = (await request.json()) as { account_ids: string[] };
+        return HttpResponse.json({ data: account_ids.map((id) => ({ account_id: id, ...preview(id) })) });
+      }),
+      http.post('/api/v1/review-queue/bulk', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ results: (body.account_ids as string[]).map((id) => ({ account_id: id, ok: true })) });
+      }),
+    );
+    renderApp('/t/taazaa/queue');
+    await screen.findByRole('button', { name: 'Account A' });
+    for (const x of ['A', 'B', 'C', 'D', 'E']) await userEvent.click(screen.getByRole('checkbox', { name: `Select Account ${x}` }));
+    await userEvent.click(within(screen.getByRole('region', { name: 'Bulk actions' })).getByRole('button', { name: 'Assign to an AE' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Assign 5 accounts' });
+    await within(dialog).findByRole('radio', { name: /^Ash Patel/ });
+    return { dialog, body: () => body };
+  }
+  const ok = (preflight: Record<string, unknown>) => ({ ok: true, preflight, approves_to: null, replaces: null });
+
+  it('bulk: keeps the HubSpot owner only for the stopped accounts, and the footer says what each group does', async () => {
+    const { dialog, body } = await bulkOf((id) => ok(id === 'acc_b' || id === 'acc_d' ? OPEN_DEAL : NEW_PREFLIGHT));
+    expect(await within(dialog).findByText('3 accounts move to Ash Patel; 2 keep their HubSpot owner.')).toBeInTheDocument();
+    const go = within(dialog).getByRole('button', { name: 'Assign to Ash Patel' });
+    await waitFor(() => expect(go).toBeEnabled());
+    await userEvent.click(go);
+    expect(await screen.findByText('Assigned 5 accounts to Ash Patel. Sending them to HubSpot.')).toBeInTheDocument();
+    expect(body()).toEqual({
+      account_ids: ['acc_a', 'acc_b', 'acc_c', 'acc_d', 'acc_e'],
+      action: 'assign',
+      seller_user_id: 'usr_ash',
+      ownership_decisions: { acc_b: 'keep', acc_d: 'keep' },
+    });
+  });
+
+  it('bulk: an account the preview refused is listed with its reason and left out; the rest are assigned', async () => {
+    const { dialog, body } = await bulkOf((id) =>
+      id === 'acc_c' ? { ok: false, status: 404, message: 'Not found or outside your data.' } : id === 'acc_e' ? { ok: false, status: 503, message: "HubSpot didn't answer. Try again in a minute." } : ok(NEW_PREFLIGHT),
+    );
+    const refused = await within(dialog).findByText(/Scout could not check 2 accounts, so they are left out:/);
+    expect(refused.closest('[role="alert"]')).toHaveTextContent("Account C: Not found or outside your data.Account E: HubSpot didn't answer. Try again in a minute.");
+    expect(dialog).toHaveTextContent('Scout sends 3 accounts to HubSpot with Ash Patel as owner and logs the brief.');
+    const go = within(dialog).getByRole('button', { name: 'Assign to Ash Patel' });
+    await waitFor(() => expect(go).toBeEnabled());
+    await userEvent.click(go);
+    expect(await screen.findByText('Assigned 3 accounts to Ash Patel. 2 could not be assigned.')).toBeInTheDocument();
+    expect(body()).toEqual({ account_ids: ['acc_a', 'acc_b', 'acc_d'], action: 'assign', seller_user_id: 'usr_ash' });
+    // The refused ones stay selected and are listed with the API's words.
+    expect(screen.getByRole('region', { name: 'Bulk actions' })).toHaveTextContent('2 selected');
+    expect(screen.getByRole('alert')).toHaveTextContent('Account C: Not found or outside your data.');
+  });
+
   it('bulk assigns the selected accounts to one AE', async () => {
     serveQueue();
     let body: unknown = null;

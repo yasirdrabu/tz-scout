@@ -293,7 +293,7 @@ export type BulkResult = { account_id: string; ok: true } | { account_id: string
 
 export type BulkAction =
   | ({ action: 'status' } & StatusChange)
-  | { action: 'assign'; seller_user_id: string; notes?: string; ownership_decision?: 'assign' | 'keep' };
+  | { action: 'assign'; seller_user_id: string; notes?: string; ownership_decision?: 'assign' | 'keep'; ownership_decisions?: Record<string, 'assign' | 'keep'> };
 
 export const bulk = (tenant: string, accountIds: string[], action: BulkAction) =>
   apiFetch<{ results: BulkResult[] }>('/review-queue/bulk', { tenant, method: 'POST', body: { account_ids: accountIds, ...action } });

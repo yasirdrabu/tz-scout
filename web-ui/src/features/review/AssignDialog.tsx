@@ -107,50 +107,58 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
   const rows = preview.data ?? [];
   const failed = preview.error;
   const names = new Map(accounts.map((a) => [a.account_id, a.name]));
-  // Accounts the bulk preview could not check: HubSpot not answering, or one the API refused (with its words).
-  const refusedRows = rows.flatMap((r) => (r.ok ? [] : [{ name: names.get(r.account_id) ?? r.account_id, status: r.status, message: r.message }]));
-  const unavailable = (failed instanceof ApiError && failed.status === 503) || refusedRows.some((r) => r.status === 503);
-  const refusedOther = refusedRows.filter((r) => r.status !== 503);
+  // Accounts the bulk preview refused (hidden, gone, or HubSpot not answering for them), with the API's words.
+  // They are listed and left out of the assign; the rest can still go.
+  const refusedRows = rows.flatMap((r) => (r.ok ? [] : [{ account_id: r.account_id, name: names.get(r.account_id) ?? r.account_id, status: r.status, message: r.message }]));
+  const assignable = rows.filter((r) => r.ok).map((r) => r.account_id);
+  const unavailable = (failed instanceof ApiError && failed.status === 503) || (!!single && refusedRows.some((r) => r.status === 503));
+  const refusedOther = single ? refusedRows.filter((r) => r.status !== 503) : refusedRows;
   const checking = sellerId !== null && preview.isPending;
-  const stops = rows.flatMap((r) => (r.ok && r.preflight.result === 'stop' ? [{ name: names.get(r.account_id) ?? r.account_id, preflight: r.preflight }] : []));
+  const stops = rows.flatMap((r) => (r.ok && r.preflight.result === 'stop' ? [{ account_id: r.account_id, name: names.get(r.account_id) ?? r.account_id, preflight: r.preflight }] : []));
   const blocked = rows.some((r) => r.ok && r.preflight.result === 'blocked');
   const owners = [...new Set(stops.map((s) => s.preflight.current_owner_name))];
   const keptOwner = owners.length === 1 && owners[0] ? owners[0] : 'the current HubSpot owner';
 
-  const what = single ? single.name : `${accounts.length} accounts`;
   const title = single ? `Assign ${single.name}` : `Assign ${accounts.length} accounts`;
   const offer = single?.lead_offer;
   const sub = single ? [offer?.name, offer?.practice_name].filter(Boolean).join(' · ') : accounts.map((a) => a.name).join(', ');
+  const moving = assignable.length - stops.length;
+  const plural = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`);
   const sentence = !seller
     ? null
-    : stops.length > 0
-      ? `Scout sends ${what} to HubSpot and leaves ${keptOwner} as owner.`
-      : `Scout sends ${what} to HubSpot with ${seller.name} as owner and logs the brief.`;
-  const ready = !!seller && seller.crm_owner_linked && !checking && !failed && refusedRows.length === 0 && !blocked && !busy;
+    : stops.length === 0
+      ? `Scout sends ${single ? single.name : plural(assignable.length || accounts.length, 'account', 'accounts')} to HubSpot with ${seller.name} as owner and logs the brief.`
+      : single || moving === 0
+        ? `Scout sends ${single ? single.name : plural(stops.length, 'account', 'accounts')} to HubSpot and leaves ${keptOwner} as owner.`
+        : // Each group as it will go (the decision is per account).
+          `${plural(moving, 'account moves', 'accounts move')} to ${seller.name}; ${plural(stops.length, 'keeps its', 'keep their')} HubSpot owner.`;
+  const ready = !!seller && seller.crm_owner_linked && !checking && !failed && assignable.length > 0 && (!single || refusedRows.length === 0) && !blocked && !busy;
 
   async function submit() {
     if (!seller) return;
     setBusy(true);
     setError(null);
-    const body = {
-      seller_user_id: seller.user_id,
-      ...(note.trim() ? { notes: note.trim() } : {}),
-      ...(stops.length > 0 ? { ownership_decision: 'keep' as const } : {}),
-    };
+    const base = { seller_user_id: seller.user_id, ...(note.trim() ? { notes: note.trim() } : {}) };
     try {
       if (single) {
-        await assign(tenant, single.account_id, body);
+        await assign(tenant, single.account_id, { ...base, ...(stops.length > 0 ? { ownership_decision: 'keep' as const } : {}) });
         toast.show(`Assigned to ${seller.name}. Sending ${single.name} to HubSpot.`);
         onDone([single.account_id], []);
       } else {
-        const { results } = await bulk(tenant, ids, { action: 'assign', ...body });
+        // Only the accounts the preview could check; each stopped one keeps its HubSpot owner, the rest move.
+        const keep = Object.fromEntries(stops.map((s) => [s.account_id, 'keep' as const]));
+        const { results } = await bulk(tenant, assignable, { action: 'assign', ...base, ...(stops.length > 0 ? { ownership_decisions: keep } : {}) });
         const done = results.filter((r) => r.ok).map((r) => r.account_id);
-        const refused = results.filter((r): r is Extract<BulkResult, { ok: false }> => !r.ok).map((r) => ({ account_id: r.account_id, message: r.message }));
+        const refused = [
+          ...refusedRows.map((r) => ({ account_id: r.account_id, message: r.message })),
+          ...results.filter((r): r is Extract<BulkResult, { ok: false }> => !r.ok).map((r) => ({ account_id: r.account_id, message: r.message })),
+        ];
         if (done.length > 0) {
+          const assigned = `Assigned ${plural(done.length, 'account', 'accounts')} to ${seller.name}.`;
           toast.show(
-            done.length === 1
-              ? `Assigned 1 account to ${seller.name}. Sending it to HubSpot.`
-              : `Assigned ${done.length} accounts to ${seller.name}. Sending them to HubSpot.`,
+            refused.length > 0
+              ? `${assigned} ${refused.length} could not be assigned.`
+              : `${assigned} ${done.length === 1 ? 'Sending it to HubSpot.' : 'Sending them to HubSpot.'}`,
           );
         }
         onDone(done, refused);
@@ -251,7 +259,11 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
         )}
         {seller && refusedOther.length > 0 && (
           <div role="alert" className={styles.blocked}>
-            {refusedOther.length === 1 ? 'Scout could not check 1 account:' : `Scout could not check ${refusedOther.length} accounts:`}
+            {single
+              ? 'Scout could not check this account:'
+              : refusedOther.length === 1
+                ? 'Scout could not check 1 account, so it is left out:'
+                : `Scout could not check ${refusedOther.length} accounts, so they are left out:`}
             <ul>
               {refusedOther.map((r) => (
                 <li key={r.name}>{`${r.name}: ${r.message}`}</li>
