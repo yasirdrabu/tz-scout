@@ -33,6 +33,15 @@ export const brief = playbooks.table(
     draftedSeq: integer('drafted_seq').notNull().default(0),
     /** Set while the account has an open or accepted assignment: automatic redrafts stop. */
     frozenAt: at('frozen_at'),
+    /** The open assignment that froze it; only that assignment's decline or withdrawal unfreezes it. */
+    frozenByAssignmentId: text('frozen_by_assignment_id'),
+    /** The latest request number that came from a person (manual: Claude at any tier, fresh). */
+    manualSeq: integer('manual_seq').notNull().default(0),
+    /** Edited sections a person asked a draft to overwrite, until a draft takes them. */
+    pendingIncludeEdited: text('pending_include_edited').array().notNull().default(sql`'{}'::text[]`),
+    /** Runs of the current draft job, counted in their own transaction so a run that times out still counts. */
+    draftJobId: text('draft_job_id'),
+    draftAttempts: integer('draft_attempts').notNull().default(0),
     lastError: text('last_error'),
     draftedAt: at('drafted_at'),
     createdAt: at('created_at').notNull().defaultNow(),

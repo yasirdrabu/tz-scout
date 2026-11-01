@@ -4,8 +4,8 @@ import { signalRecorded } from '@/modules/accounts/contracts/events';
 import { arrivalResolved } from '@/modules/intake/contracts/events';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
 import { editSection, getBrief } from '@/modules/playbooks';
-import { assignmentCreated, assignmentDeclined, assignmentWithdrawn } from '@/modules/routing/contracts/events';
-import { setLeadOffer } from '@/modules/routing';
+import { assign, decline, ensureReview, setLeadOffer, withdraw } from '@/modules/routing';
+import { member } from '../routing/helpers';
 import { scoreAccount } from '@/modules/scoring';
 import { newId } from '@/platform/ids';
 import { publishTestEvent } from '../helpers/publish';
@@ -13,18 +13,6 @@ import { runOutbox } from '../helpers/run-outbox';
 import { completeOffer } from '../offers/helpers';
 import { arrival, asPerson, briefRow, briefRuns, domain, draftJobs, routingTenant, runPlaybooks, scoredAccount, sectionRows } from './helpers';
 
-const created = (accountId: string, assignmentId = newId('asg')) => ({
-  assignmentId,
-  accountId,
-  sellerUserId: 'usr_seller',
-  assignedBy: 'usr_leader',
-  templateId: null,
-  offerId: null,
-  notes: null,
-  ownershipDecision: 'assign' as const,
-  previousAssignmentId: null,
-  bulkId: null,
-});
 const signal = (accountId: string) => ({
   accountId,
   signalId: newId('sig'),
@@ -64,36 +52,38 @@ describe('draft triggers', () => {
     expect(b.whyNow!.body).toContain('Brief Co opens office 1 (');
   });
 
-  it('no automatic redraft after assignment.created; a decline starts them again', async () => {
+  it('no automatic redraft after an assignment; its decline starts them again', async () => {
     const t = await routingTenant();
+    const seller = await member(t, 'seller');
     const id = await scoredAccount(t, 'watch');
     const before = (await briefRow(id))!;
-    const assignmentId = newId('asg');
-    await publishTestEvent(t.tenantId, assignmentCreated, created(id, assignmentId));
+    const a = await asPerson(t, (ctx) => assign(ctx, id, { sellerUserId: seller }));
     await runPlaybooks(t.tenantId);
-    expect((await briefRow(id))!.frozenAt).not.toBeNull();
+    expect(await briefRow(id)).toMatchObject({ frozenByAssignmentId: a.id });
 
     await publishTestEvent(t.tenantId, signalRecorded, signal(id));
     await runPlaybooks(t.tenantId);
-    const frozen = (await briefRow(id))!;
-    expect(frozen.requestedSeq).toBe(before.requestedSeq);
+    expect((await briefRow(id))!.requestedSeq).toBe(before.requestedSeq);
     expect(await draftJobs(t.tenantId, id)).toBe(1);
 
-    await publishTestEvent(t.tenantId, assignmentDeclined, { assignmentId, accountId: id, sellerUserId: 'usr_seller', reasonKey: 'not_my_area', note: null });
+    await asPerson(t, (ctx) => decline(ctx, a.id, { reasonKey: 'not_a_fit' }), { userId: seller, dataLimit: { kind: 'own_accounts' } });
     await runPlaybooks(t.tenantId);
     const after = (await briefRow(id))!;
-    expect(after).toMatchObject({ frozenAt: null, draftState: 'ready', draftedSeq: before.draftedSeq + 1 });
+    expect(after).toMatchObject({ frozenAt: null, frozenByAssignmentId: null, draftState: 'ready', draftedSeq: before.draftedSeq + 1 });
     expect(await draftJobs(t.tenantId, id)).toBe(2);
   });
 
-  it('a withdrawal replaced by a new assignment stays frozen; a plain withdrawal unfreezes', async () => {
+  it('a reassignment keeps the brief frozen for the new AE; a plain withdrawal unfreezes', async () => {
     const t = await routingTenant();
+    const [s1, s2] = [await member(t, 'seller'), await member(t, 'seller')];
     const id = await scoredAccount(t, 'watch');
-    await publishTestEvent(t.tenantId, assignmentCreated, created(id, 'asg_one'));
-    await publishTestEvent(t.tenantId, assignmentWithdrawn, { assignmentId: 'asg_one', accountId: id, by: 'usr_leader', replacedBy: 'asg_two' });
+    const a = await asPerson(t, (ctx) => assign(ctx, id, { sellerUserId: s1 }));
     await runPlaybooks(t.tenantId);
-    expect((await briefRow(id))!.frozenAt).not.toBeNull();
-    await publishTestEvent(t.tenantId, assignmentWithdrawn, { assignmentId: 'asg_two', accountId: id, by: 'usr_leader', replacedBy: null });
+    const b = await asPerson(t, (ctx) => assign(ctx, id, { sellerUserId: s2 }));
+    await runPlaybooks(t.tenantId);
+    expect(await briefRow(id)).toMatchObject({ frozenByAssignmentId: b.id });
+    expect(b.id).not.toBe(a.id);
+    await asPerson(t, (ctx) => withdraw(ctx, b.id));
     await runPlaybooks(t.tenantId);
     expect((await briefRow(id))!.frozenAt).toBeNull();
     expect(await draftJobs(t.tenantId, id)).toBe(2);
@@ -101,9 +91,12 @@ describe('draft triggers', () => {
 
   it('an account assigned before its first draft still gets one', async () => {
     const t = await routingTenant();
+    const seller = await member(t, 'seller');
     const { accountId } = await t.run((ctx) => upsertFromArrival(ctx, arrival({ account: { name: 'Early', domain: domain() } })));
-    await publishTestEvent(t.tenantId, assignmentCreated, created(accountId));
+    await t.run((ctx) => ensureReview(ctx, accountId, 'unvetted'));
+    await asPerson(t, (ctx) => assign(ctx, accountId, { sellerUserId: seller }));
     await runPlaybooks(t.tenantId);
+    expect((await briefRow(accountId))!.frozenAt).not.toBeNull();
     await t.run((ctx) => scoreAccount(ctx, accountId, 'manual_rescore'));
     await runPlaybooks(t.tenantId);
     expect(await briefRow(accountId)).toMatchObject({ draftState: 'ready', mode: 'rules' });

@@ -1,6 +1,8 @@
 // Public interface of the playbooks module. Other modules import only this file or `contracts/*`.
 export { briefUpdated } from './contracts/events';
-export { briefDraftJob } from './contracts/jobs';
+export { briefDraftJob, briefSweepJob, DRAFT_MAX_ATTEMPTS } from './contracts/jobs';
+export { SWEEP_CRON, seedPlaybooksDefaults } from './defaults';
+export { sweepBriefs } from './services/sweep';
 export { BRIEF_KEYS, PAGE_SECTIONS, SECTION_MAX, type BriefKey, type BriefMode, type BriefOrigin, type DraftState, type PageSectionKey } from './contracts/types';
 export {
   briefFreeze,
@@ -14,8 +16,9 @@ export {
   briefUnfreezeOnDeclined,
   briefUnfreezeOnWithdrawn,
   playbooksConsumers,
+  playbooksTenantDefaults,
 } from './consumers';
-export { briefDraftHandler, playbooksJobHandlers } from './jobs';
+export { briefDraftHandler, briefSweepHandler, playbooksJobHandlers } from './jobs';
 export { accountBriefTask } from './tasks/account-brief';
 export { labelFor, writtenBy, type WrittenBy } from './domain/labels';
 export { isBuyerSafe } from './domain/buyer-safe';
@@ -23,7 +26,7 @@ export { rulesBrief } from './domain/rules-brief';
 export type { BriefInput, BriefOutput } from './domain/brief-io';
 export { buildBriefInput, type BuiltInput } from './services/inputs';
 export { requestDraft, type DraftRequest } from './services/brief';
-export { runDraft } from './services/draft';
+export { runDraft, type DraftJob, type DraftMeta } from './services/draft';
 export { EMPTY_SECTION, NO_SUCH_SECTION, SECTION_CHANGED, SECTION_TOO_LONG, editSection } from './services/edit';
 export { getBrief, type BriefView, type SectionView } from './services/read';
 export { backfillBriefs } from './services/backfill';

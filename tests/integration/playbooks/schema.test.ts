@@ -50,7 +50,7 @@ describe('playbooks contracts', () => {
 
   it('the job and event schemas parse a valid sample and reject a missing accountId', () => {
     expect(briefDraftJob.name).toBe('playbooks.brief.draft');
-    expect(briefDraftJob.opts).toMatchObject({ maxDeliver: 3, timeoutMs: 90_000 });
+    expect(briefDraftJob.opts).toMatchObject({ maxDeliver: 3, timeoutMs: 240_000 });
     expect(briefDraftJob.data.safeParse({ accountId: 'acc_1', manual: false, includeEdited: [] }).success).toBe(true);
     expect(briefDraftJob.data.safeParse({ manual: false, includeEdited: [] }).success).toBe(false);
     expect(briefUpdated.type).toBe('playbooks.brief.updated');

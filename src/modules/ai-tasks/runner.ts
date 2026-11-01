@@ -48,6 +48,8 @@ export type RunOpts = {
   fresh?: boolean;
   /** Skips mock and live and runs the rules, or says there is no key for a task without rules. Recorded as `mode: 'rules'`. */
   rulesOnly?: boolean;
+  /** Like `fresh`, but a run made at or after this time is reused: a job retried after a timeout finds the run it paid for. */
+  reuseAfter?: Date;
 };
 export type RunResult<O> = { output: O; runId: string; mode: AiMode };
 
@@ -131,6 +133,7 @@ async function findReusable(
   hash: string,
   mode: AiMode,
   model: string | null,
+  after?: Date,
 ) {
   const [row] = await ctx.tx
     .select()
@@ -145,6 +148,7 @@ async function findReusable(
         eq(aiRun.mode, mode),
         model === null ? isNull(aiRun.model) : eq(aiRun.model, model),
         gte(aiRun.createdAt, new Date(Date.now() - REUSE_WINDOW_MS)),
+        after ? gte(aiRun.createdAt, after) : undefined,
       ),
     )
     .orderBy(desc(aiRun.createdAt))
@@ -225,7 +229,7 @@ export async function runTask<I, O>(
     .where(and(eq(aiSetting.tenantId, ctx.tenantId), eq(aiSetting.task, task.name)));
   const model = setting?.model ?? task.model;
   const reusable = (mode: AiMode) =>
-    opts.fresh ? undefined : findReusable(ctx, task.name, task.promptVersion, hash, mode, mode === 'rules' ? null : model);
+    opts.fresh && !opts.reuseAfter ? undefined : findReusable(ctx, task.name, task.promptVersion, hash, mode, mode === 'rules' ? null : model, opts.reuseAfter);
   const reuse = (row: AiRunRow): RunResult<O> => ({ output: row.output as O, runId: row.id, mode: row.mode as AiMode });
   const costCap = setting?.maxCostCentsPerRun ?? task.maxCostCents;
   const user = task.buildUser(input);
@@ -318,7 +322,8 @@ export async function runTask<I, O>(
           ...attempt.usage,
           costCents: cost,
           durationMs,
-        });
+          // A paid run is kept even if the caller then rolls back (a job that times out), so its retry reuses it.
+        }, mode === 'live');
         return { output: attempt.output as O, runId, mode };
       }
       await record(

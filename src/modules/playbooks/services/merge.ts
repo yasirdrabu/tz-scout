@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { brief, briefSection, briefSectionHistory } from '../db/schema';
 import { briefWhere, readBrief, requestDraft } from './brief';
@@ -12,7 +12,7 @@ const ofAccount = <T extends typeof briefSection | typeof briefSectionHistory>(t
  * are deleted, and a redraft is requested for the survivor.
  */
 export async function briefOnMerge(ctx: ModuleContext, survivorId: string, mergedId: string): Promise<void> {
-  for (const id of [survivorId, mergedId].sort()) await ctx.tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`plb:brief:${ctx.tenantId}:${id}`}))`);
+  // No draft lock: a draft running for either account writes by section version and row, and finds them moved.
   const merged = await readBrief(ctx, mergedId, { lock: true });
   const survivor = await readBrief(ctx, survivorId, { lock: true });
   if (merged) {

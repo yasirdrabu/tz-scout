@@ -1,5 +1,6 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getAccount } from '@/modules/accounts';
+import { getAccountReview } from '@/modules/routing';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { enqueueJob } from '@/platform/events/outbox';
@@ -35,13 +36,28 @@ export type DraftRequest = {
   onlyExisting?: boolean;
 };
 
+
+const isStale = (row: BriefRow, now: Date) => row.draftState === 'drafting' && now.getTime() - row.updatedAt.getTime() > STALE_DRAFT_MS;
+/** Frozen once a first draft exists: automatic redrafts stop (an account assigned before its first draft still gets one). */
+export const isFrozen = (row: Pick<BriefRow, 'frozenAt' | 'draftedAt'>) => !!row.frozenAt && !!row.draftedAt;
+
+/** Ends a stuck "drafting" with nothing left to draft: every request so far counts as drafted. */
+export async function settleStuck(ctx: ModuleContext, row: BriefRow, now: Date): Promise<DraftState> {
+  const state: DraftState = row.draftedAt ? 'ready' : 'not_drafted';
+  await ctx.tx.update(brief).set({ draftState: state, draftedSeq: row.requestedSeq, updatedAt: now }).where(briefWhere(ctx, row.accountId));
+  return state;
+}
+
 /**
  * Asks for a draft (Rulings 2 and 3): bumps `requested_seq` and queues `playbooks.brief.draft` unless one is already
- * drafting, which then sees the bump and runs again. Automatic requests do nothing while the brief is frozen.
- * A manual request always queues its own job, so its flags are not lost; the advisory lock serializes the runs.
+ * drafting, which then sees the bump and runs again. Automatic requests do nothing while the brief is frozen. A manual
+ * request marks `manual_seq`, so the draft that takes it runs as manual; one made while a manual draft is still pending
+ * and asks for nothing more joins it (a double click spends once). A draft stuck past STALE_DRAFT_MS is queued again.
  */
 export async function requestDraft(ctx: ModuleContext, accountId: string, req: DraftRequest = {}): Promise<{ state: DraftState; queued: boolean }> {
   const manual = req.manual ?? false;
+  const keys = [...new Set(req.includeEdited ?? [])];
+  const now = new Date();
   let id = accountId;
   if (manual) {
     const account = await getAccount(ctx, accountId);
@@ -50,28 +66,58 @@ export async function requestDraft(ctx: ModuleContext, accountId: string, req: D
   }
   if (req.onlyExisting && !(await readBrief(ctx, id))) return { state: 'not_drafted', queued: false };
   const row = await ensureBrief(ctx, id);
-  // A frozen brief stays as the AE got it; an account assigned before its first draft still gets one.
-  if (!manual && row.frozenAt && row.draftedAt) return { state: row.draftState as DraftState, queued: false };
-  const stale = row.draftState === 'drafting' && Date.now() - row.updatedAt.getTime() > STALE_DRAFT_MS;
-  const queue = manual || row.draftState !== 'drafting' || stale;
+  const stale = isStale(row, now);
+  if (!manual && isFrozen(row)) {
+    return { state: stale ? await settleStuck(ctx, row, now) : (row.draftState as DraftState), queued: false };
+  }
+  const manualPending = row.draftState === 'drafting' && row.manualSeq > row.draftedSeq;
+  if (manual && manualPending && !stale && keys.every((k) => row.pendingIncludeEdited.includes(k))) return { state: 'drafting', queued: false };
+  const queue = row.draftState !== 'drafting' || stale;
+  const seq = row.requestedSeq + 1;
   await ctx.tx
     .update(brief)
-    .set({ requestedSeq: sql`${brief.requestedSeq} + 1`, draftState: 'drafting', ...(queue ? { updatedAt: new Date() } : {}) })
+    .set({
+      requestedSeq: seq,
+      draftState: 'drafting',
+      ...(manual ? { manualSeq: seq, pendingIncludeEdited: [...new Set([...row.pendingIncludeEdited, ...keys])] } : {}),
+      ...(queue ? { updatedAt: now } : {}),
+    })
     .where(briefWhere(ctx, id));
-  if (queue) await enqueueJob(ctx, briefDraftJob, { accountId: id, manual, includeEdited: req.includeEdited ?? [] });
+  if (queue) await enqueueJob(ctx, briefDraftJob, { accountId: id, manual, includeEdited: keys, seq });
   return { state: 'drafting', queued: queue };
 }
 
-/** `routing.assignment.created`: the brief the AE and HubSpot got stays put. */
-export async function freezeBrief(ctx: ModuleContext, accountId: string, at: Date): Promise<void> {
+/**
+ * `routing.assignment.created`: the brief the AE and HubSpot got stays put. Consumers are not ordered against each
+ * other, so a freeze for an assignment that is no longer the account's open one (declined or replaced first) is ignored.
+ */
+export async function freezeBrief(ctx: ModuleContext, accountId: string, assignmentId: string, at: Date): Promise<void> {
+  const open = await openAssignmentId(ctx, accountId);
+  if (open !== assignmentId) return;
   await ensureBrief(ctx, accountId);
-  await ctx.tx.update(brief).set({ frozenAt: at }).where(briefWhere(ctx, accountId));
+  await ctx.tx.update(brief).set({ frozenAt: at, frozenByAssignmentId: assignmentId }).where(briefWhere(ctx, accountId));
 }
 
-/** `routing.assignment.declined` or `.withdrawn`: automatic redrafts start again, beginning with one now. */
-export async function unfreezeBrief(ctx: ModuleContext, accountId: string): Promise<void> {
+/**
+ * `routing.assignment.declined` or `.withdrawn`: only the assignment that froze the brief unfreezes it. A withdrawal
+ * replaced by a new assignment hands the freeze on to it. Otherwise automatic redrafts start again, with one now.
+ */
+export async function unfreezeBrief(ctx: ModuleContext, accountId: string, assignmentId: string, replacedBy: string | null = null): Promise<void> {
   const row = await readBrief(ctx, accountId, { lock: true });
-  if (!row) return;
-  if (row.frozenAt) await ctx.tx.update(brief).set({ frozenAt: null }).where(briefWhere(ctx, accountId));
+  if (!row || !row.frozenAt || row.frozenByAssignmentId !== assignmentId) return;
+  if (replacedBy) {
+    await ctx.tx.update(brief).set({ frozenByAssignmentId: replacedBy }).where(briefWhere(ctx, accountId));
+    return;
+  }
+  await ctx.tx.update(brief).set({ frozenAt: null, frozenByAssignmentId: null }).where(briefWhere(ctx, accountId));
   await requestDraft(ctx, accountId);
+}
+
+async function openAssignmentId(ctx: ModuleContext, accountId: string): Promise<string | null> {
+  try {
+    return (await getAccountReview(ctx, accountId)).currentAssignment?.id ?? null;
+  } catch (e) {
+    if (e instanceof ScoutError && e.status === 404) return null;
+    throw e;
+  }
 }

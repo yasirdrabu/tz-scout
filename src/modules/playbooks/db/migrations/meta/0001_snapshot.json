@@ -1,0 +1,452 @@
+{
+  "id": "cfb98a55-a628-4e2c-b6bf-c94471ba59f4",
+  "prevId": "e7777d3a-b9be-4fe6-b892-8ad85f27ef27",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "playbooks.brief": {
+      "name": "brief",
+      "schema": "playbooks",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "offer_id": {
+          "name": "offer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ai_run_id": {
+          "name": "ai_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recommendation_headline": {
+          "name": "recommendation_headline",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recommendation_detail": {
+          "name": "recommendation_detail",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recommendation_origin": {
+          "name": "recommendation_origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "opener_subject": {
+          "name": "opener_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "opener_body": {
+          "name": "opener_body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "opener_origin": {
+          "name": "opener_origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "who_first_person_id": {
+          "name": "who_first_person_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "who_first_title": {
+          "name": "who_first_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "who_first_reason": {
+          "name": "who_first_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "draft_state": {
+          "name": "draft_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_drafted'"
+        },
+        "requested_seq": {
+          "name": "requested_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "drafted_seq": {
+          "name": "drafted_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "frozen_at": {
+          "name": "frozen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "frozen_by_assignment_id": {
+          "name": "frozen_by_assignment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "manual_seq": {
+          "name": "manual_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "pending_include_edited": {
+          "name": "pending_include_edited",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "draft_job_id": {
+          "name": "draft_job_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "draft_attempts": {
+          "name": "draft_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "drafted_at": {
+          "name": "drafted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "brief_tenant_id_account_id_pk": {
+          "name": "brief_tenant_id_account_id_pk",
+          "columns": [
+            "tenant_id",
+            "account_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "brief_draft_state_valid": {
+          "name": "brief_draft_state_valid",
+          "value": "\"playbooks\".\"brief\".\"draft_state\" in ('not_drafted', 'drafting', 'ready')"
+        },
+        "brief_mode_valid": {
+          "name": "brief_mode_valid",
+          "value": "\"playbooks\".\"brief\".\"mode\" is null or \"playbooks\".\"brief\".\"mode\" in ('live', 'mock', 'rules')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "playbooks.brief_section": {
+      "name": "brief_section",
+      "schema": "playbooks",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "citations": {
+          "name": "citations",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ai_run_id": {
+          "name": "ai_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "offer_id": {
+          "name": "offer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "edited_by": {
+          "name": "edited_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "edited_by_name": {
+          "name": "edited_by_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "edited_at": {
+          "name": "edited_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "brief_section_tenant_id_account_id_key_pk": {
+          "name": "brief_section_tenant_id_account_id_key_pk",
+          "columns": [
+            "tenant_id",
+            "account_id",
+            "key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "brief_section_origin_valid": {
+          "name": "brief_section_origin_valid",
+          "value": "\"playbooks\".\"brief_section\".\"origin\" in ('ai', 'rules', 'human')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "playbooks.brief_section_history": {
+      "name": "brief_section_history",
+      "schema": "playbooks",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "citations": {
+          "name": "citations",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ai_run_id": {
+          "name": "ai_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "offer_id": {
+          "name": "offer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "edited_by": {
+          "name": "edited_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "edited_by_name": {
+          "name": "edited_by_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "edited_at": {
+          "name": "edited_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "brief_section_history_tenant_id_account_id_key_version_pk": {
+          "name": "brief_section_history_tenant_id_account_id_key_version_pk",
+          "columns": [
+            "tenant_id",
+            "account_id",
+            "key",
+            "version"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {
+    "playbooks": "playbooks"
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

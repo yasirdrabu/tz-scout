@@ -247,6 +247,28 @@ describe('runTask', () => {
   });
 });
 
+describe('runTask paid runs survive a rollback', () => {
+  it('keeps a live ok run when the caller rolls back, and reuseAfter finds it even for a fresh run', async () => {
+    const t = await freshTenant();
+    const complete = fakeLive([{ echoed: 'paid' }]);
+    await goLive(t);
+    const since = new Date(Date.now() - 1000);
+    await expect(
+      t.run(async (ctx) => {
+        await runTask(ctx, echo, { text: 'hi' }, { subject, fresh: true, reuseAfter: since });
+        throw new Error('the job timed out');
+      }),
+    ).rejects.toThrow('the job timed out');
+    expect((await runsOf(t.tenantId)).map((r) => `${r.status}:${r.mode}`)).toEqual(['ok:live']);
+    const again = await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject, fresh: true, reuseAfter: since }));
+    expect(again.output).toEqual({ echoed: 'paid' });
+    expect(complete).toHaveBeenCalledTimes(1);
+    // A later reuseAfter does not take the older run.
+    await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject, fresh: true, reuseAfter: new Date(Date.now() + 1000) }));
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('runTask cost cap for the whole run', () => {
   it('skips the second attempt when spend so far plus its worst case would pass the cap', async () => {
     const t = await freshTenant();
