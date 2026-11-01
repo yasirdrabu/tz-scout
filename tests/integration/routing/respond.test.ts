@@ -273,7 +273,7 @@ describe('autoAccept (Ruling 6, REV-E2-S2-AC3)', () => {
     const bad = await at.run(async (ctx) => {
       const accountId = 'acc_aaaa_bad'; // sorts first, so it is tried first
       const id = newId('asg');
-      await ctx.tx.insert(accountReview).values({ tenantId: ctx.tenantId, accountId, statusKey: 'reviewed', stage: 'bogus', currentAssignmentId: id });
+      await ctx.tx.insert(accountReview).values({ tenantId: ctx.tenantId, accountId, statusKey: 'reviewed', stage: '', currentAssignmentId: id });
       await ctx.tx.insert(assignment).values({ id, tenantId: ctx.tenantId, accountId, sellerUserId: aSeller, assignedBy: at.actor.id, assignedAt: new Date('2026-01-05T09:00:00Z') });
       return id;
     });

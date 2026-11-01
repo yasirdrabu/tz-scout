@@ -2,7 +2,8 @@ import type { ModuleContext } from '@/platform/context';
 import { newId } from '@/platform/ids';
 import { upsertSchedule } from '@/platform/scheduler';
 import { autoAcceptJob } from './contracts/jobs';
-import { declineReasonDef, reviewStatusDef, routingSetting } from './db/schema';
+import { declineReasonDef, pipelineStage, reviewStatusDef, routingSetting } from './db/schema';
+import { DEFAULT_STAGES } from './domain/pipeline';
 
 /** The review statuses every tenant starts with, in the mockup's words (REV-E1, Decision 2, Open question 1). */
 export const DEFAULT_STATUSES = [
@@ -107,6 +108,10 @@ export async function seedRoutingDefaults(ctx: ModuleContext): Promise<void> {
   await ctx.tx
     .insert(declineReasonDef)
     .values(DEFAULT_REASONS.map((r) => ({ id: newId('drd'), tenantId, ...r })))
+    .onConflictDoNothing();
+  await ctx.tx
+    .insert(pipelineStage)
+    .values(DEFAULT_STAGES.map((s) => ({ id: newId('pst'), tenantId, ...s })))
     .onConflictDoNothing();
   await ctx.tx.insert(routingSetting).values({ tenantId, autoAcceptWorkingDays: DEFAULT_AUTO_ACCEPT_WORKING_DAYS }).onConflictDoNothing();
   // Auto-acceptance is checked every hour, on the hour.

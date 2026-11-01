@@ -8,7 +8,7 @@ import { onCrmActivity, onCrmDeal, onHandoffCancelled, onHandoffCompleted, onHan
 import { reviewOnArrival, reviewOnMerge } from './services/review';
 import { withdrawForRemovedMember } from './services/respond';
 
-/** Gives a new tenant its review statuses, decline reasons, auto-accept setting and hourly schedule. */
+/** Gives a new tenant its review statuses, decline reasons, pipeline stages, auto-accept setting and hourly schedule. */
 export const routingTenantDefaults = defineConsumer({
   name: 'routing.tenant_defaults',
   event: tenantCreated,

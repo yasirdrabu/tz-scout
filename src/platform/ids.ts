@@ -39,6 +39,7 @@ export type IdPrefix =
   | 'rsd'
   | 'rsc'
   | 'stc'
+  | 'pst'
   | 'drd'
   | 'fb'
   | 'blob'
