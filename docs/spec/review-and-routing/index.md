@@ -50,6 +50,7 @@ with plans (spec's call, D27).
 | REV-E2 Assignment, acceptance and decline | [assignment-and-decline.md](assignment-and-decline.md) | R1 |
 | REV-E3 Ownership and handoff trigger | [ownership-and-handoff-trigger.md](ownership-and-handoff-trigger.md) | R1 |
 | REV-E4 Stage tracking and account status | [stage-tracking-and-status.md](stage-tracking-and-status.md) | R1 |
+| REV-E5 Configurable pipeline stages (replaces the fixed stage set and `nextStage` of REV-E4) | [configurable-stages.md](configurable-stages.md) | Pipeline stages redesign (Decision 6) |
 
 ## Events published
 
