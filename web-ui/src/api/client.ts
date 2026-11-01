@@ -1,7 +1,7 @@
 import { errorFrom, networkError } from './errors';
 
-/** Where the API lives. Moves to '/api/v1' with spec C1. */
-export const API_BASE = '/v1';
+/** Where the API lives (spec C1). */
+export const API_BASE = '/api/v1';
 
 export type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 

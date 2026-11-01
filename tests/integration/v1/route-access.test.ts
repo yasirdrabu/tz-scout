@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { v1Route } from '@/app/v1/_lib/v1-route';
+import { v1Route } from '@/http/routes/v1/_lib/v1-route';
 import { SYSTEM_GRANTOR, createApiKey, createTenant, handleDevSignIn, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
 import type { ModuleContext } from '@/platform/context';
@@ -47,11 +47,11 @@ const apiKey = async () =>
       createApiKey(ctx, { name: 'k', environment: 'live', scopes: [] }, SYSTEM_GRANTOR),
     )
   ).secret;
-const withKey = (secret: string) => new Request('http://x/v1/y', { headers: { authorization: `Bearer ${secret}` } });
+const withKey = (secret: string) => new Request('http://x/api/v1/y', { headers: { authorization: `Bearer ${secret}` } });
 const withCookie = (cookies: Headers) => {
   const h = new Headers(cookies);
   h.set('x-scout-tenant', slug);
-  return new Request('http://localhost:4240/v1/y', { headers: h });
+  return new Request('http://localhost:4240/api/v1/y', { headers: h });
 };
 
 // The owner's person source is created the first time they act.

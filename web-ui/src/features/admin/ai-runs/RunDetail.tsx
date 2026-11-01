@@ -8,7 +8,7 @@ const shown = (output: unknown) => (typeof output === 'string' ? output : JSON.s
 
 /**
  * A run expanded: what Scout sent (the subject and a fingerprint), what came back, and the error.
- * With `tenant`, one of that workspace's runs (`/v1/ai-runs/{id}`), else any tenant's (admin).
+ * With `tenant`, one of that workspace's runs (`/api/v1/ai-runs/{id}`), else any tenant's (admin).
  */
 export function RunDetail({ id, tenant }: { id: string; tenant?: string }) {
   const run = useQuery(runQuery(id, tenant));

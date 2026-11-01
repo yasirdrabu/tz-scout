@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeCursor, encodeCursor, page, pageLimit } from '@/app/v1/_lib/pagination';
+import { decodeCursor, encodeCursor, page, pageLimit } from '@/http/routes/v1/_lib/pagination';
 
 const url = (q: string) => new URL(`http://x/v1/y${q}`);
 

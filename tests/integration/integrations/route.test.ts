@@ -13,7 +13,7 @@ vi.mock('@/platform/config', async (orig) => {
   };
 });
 
-import { v1Route } from '@/app/v1/_lib/v1-route';
+import { v1Route } from '@/http/routes/v1/_lib/v1-route';
 import {
   gateway,
   saveCredential,
@@ -46,7 +46,7 @@ describe('v1 route with the gateway', () => {
     const key = (environment: 'live' | 'test') =>
       t.run((ctx) => createApiKey(ctx, { name: 'k', environment, scopes: ['members:read'] as never }, SYSTEM_GRANTOR));
     const call = async (secret: string) =>
-      (await who(new Request('http://x/v1/x', { headers: { authorization: `Bearer ${secret}` } }))).json();
+      (await who(new Request('http://x/api/v1/x', { headers: { authorization: `Bearer ${secret}` } }))).json();
 
     expect(await call((await key('test')).secret)).toEqual({ message: 'Sample data is working.' });
     expect(await call((await key('live')).secret)).toEqual({ message: 'Connected to the demo service.' });

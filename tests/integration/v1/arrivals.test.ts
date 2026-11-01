@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GET as listArrivalsRoute, POST as postArrival } from '@/app/v1/arrivals/route';
-import { GET as getArrivalRoute } from '@/app/v1/arrivals/[id]/route';
-import { GET as listSourcesRoute, POST as postSource } from '@/app/v1/sources/route';
+import { GET as listArrivalsRoute, POST as postArrival } from '@/http/routes/v1/arrivals/route';
+import { GET as getArrivalRoute } from '@/http/routes/v1/arrivals/[id]/route';
+import { GET as listSourcesRoute, POST as postSource } from '@/http/routes/v1/sources/route';
 import { registerSource, updateSource } from '@/modules/intake';
 import { arrival } from '@/modules/intake/db/schema';
 import { closeDbs } from '@/platform/db/client';
@@ -27,13 +27,13 @@ const count = () => t.run(async (ctx) => (await ctx.tx.select({ id: arrival.id }
 const post = (key: string, body: unknown, headers: Record<string, string> = {}) =>
   call(postArrival, key, 'arrivals', { body, headers });
 
-describe('POST /v1/arrivals', () => {
+describe('POST /api/v1/arrivals', () => {
   it('SRC-E2-S1-AC1: answers 202 with arrival_id and status_url', async () => {
     const res = await post(ashKey, validArrival());
     expect(res.status).toBe(202);
     const body = await res.json();
     expect(body.arrival_id).toMatch(/^arr_/);
-    expect(body.status_url).toMatch(new RegExp(`/v1/arrivals/${body.arrival_id}$`));
+    expect(body.status_url).toMatch(new RegExp(`/api/v1/arrivals/${body.arrival_id}$`));
     expect(body.duplicate_of_request).toBeUndefined();
   });
 
@@ -89,7 +89,7 @@ describe('POST /v1/arrivals', () => {
   });
 });
 
-describe('GET /v1/arrivals', () => {
+describe('GET /api/v1/arrivals', () => {
   it('returns { data, next_cursor }, filters by status and pages', async () => {
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) ids.push((await (await post(boKey, validArrival())).json()).arrival_id);
@@ -106,7 +106,7 @@ describe('GET /v1/arrivals', () => {
   });
 });
 
-describe('GET /v1/arrivals/{id}', () => {
+describe('GET /api/v1/arrivals/{id}', () => {
   it('shows an arrival to its own source and hides it from another with a 404', async () => {
     const { arrival_id } = await (await post(ashKey, validArrival())).json();
     const mine = await call(getArrivalRoute, ashKey, `arrivals/${arrival_id}`);
@@ -133,7 +133,7 @@ describe('GET /v1/arrivals/{id}', () => {
   });
 });
 
-describe('/v1/sources', () => {
+describe('/api/v1/sources', () => {
   it('lists visible sources as { data, next_cursor } and creates one with sources:manage', async () => {
     const list = await (await call(listSourcesRoute, ashKey, 'sources')).json();
     const seen = list.data.map((s: { id: string }) => s.id);

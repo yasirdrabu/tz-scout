@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiFetch } from '../../../api/client';
 
-// System health (src/app/v1/admin/health, jobs, schedules, test-event). Platform admins only.
+// System health (src/http/routes/v1/admin/health, jobs, schedules, test-event). Platform admins only.
 
 export type Queue = { name: string; pending: number; ack_pending: number; oldest_age_ms: number | null };
 

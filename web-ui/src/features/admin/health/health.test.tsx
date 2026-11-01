@@ -65,7 +65,7 @@ function serve(health: Health = HEALTH) {
   calls = 0;
   serveNoTenantMe();
   server.use(
-    http.get('/v1/admin/health', () => {
+    http.get('/api/v1/admin/health', () => {
       calls++;
       return HttpResponse.json(health);
     }),
@@ -120,7 +120,7 @@ describe('System health', () => {
   it('shows loading and error states', async () => {
     serveNoTenantMe();
     server.use(
-      http.get('/v1/admin/health', async () => {
+      http.get('/api/v1/admin/health', async () => {
         await delay('infinite');
         return HttpResponse.json(HEALTH);
       }),
@@ -129,7 +129,7 @@ describe('System health', () => {
     expect(await screen.findByText('Loading system health')).toBeInTheDocument();
     first.unmount();
 
-    server.use(http.get('/v1/admin/health', () => problem(500, 'Something went wrong', { detail: 'The database is down.', ref: 'cor_h1' })));
+    server.use(http.get('/api/v1/admin/health', () => problem(500, 'Something went wrong', { detail: 'The database is down.', ref: 'cor_h1' })));
     renderApp('/admin/health');
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("System health didn't load");
@@ -161,13 +161,13 @@ describe('System health', () => {
 describe('test event', () => {
   it('shows the round trip, and the API words when nothing answers', async () => {
     serve();
-    server.use(http.post('/v1/admin/test-event', () => problem(504, 'No answer after 10 seconds. Check the worker and relay.', { slug: 'no-answer' })));
+    server.use(http.post('/api/v1/admin/test-event', () => problem(504, 'No answer after 10 seconds. Check the worker and relay.', { slug: 'no-answer' })));
     renderApp('/admin/health');
     await screen.findByText('1.8 s');
     await userEvent.click(screen.getByRole('button', { name: 'Send test event' }));
     expect(await screen.findByText('No answer after 10 seconds. Check the worker and relay.')).toBeInTheDocument();
 
-    server.use(http.post('/v1/admin/test-event', () => HttpResponse.json({ round_trip_ms: 412 })));
+    server.use(http.post('/api/v1/admin/test-event', () => HttpResponse.json({ round_trip_ms: 412 })));
     await userEvent.click(screen.getByRole('button', { name: 'Send test event' }));
     expect(await screen.findByText('Round trip 412 ms. Relay, queue and worker all answered.')).toBeInTheDocument();
   });
@@ -176,12 +176,12 @@ describe('test event', () => {
 describe('dead jobs', () => {
   it('retries a job, and shows the failure', async () => {
     serve();
-    server.use(http.post(exactly('/v1/admin/jobs/job_7f3a19:retry'), () => problem(404, 'Dead job not found', { detail: 'No dead job job_7f3a19' })));
+    server.use(http.post(exactly('/api/v1/admin/jobs/job_7f3a19:retry'), () => problem(404, 'Dead job not found', { detail: 'No dead job job_7f3a19' })));
     renderApp('/admin/health');
     await userEvent.click(await screen.findByRole('button', { name: 'Retry job_7f3a19' }));
     expect(await screen.findByText('No dead job job_7f3a19')).toBeInTheDocument();
 
-    server.use(http.post(exactly('/v1/admin/jobs/job_7f3a19:retry'), () => HttpResponse.json({ sent_id: 'evt_1' })));
+    server.use(http.post(exactly('/api/v1/admin/jobs/job_7f3a19:retry'), () => HttpResponse.json({ sent_id: 'evt_1' })));
     await userEvent.click(screen.getByRole('button', { name: 'Retry job_7f3a19' }));
     expect(await screen.findByText('job_7f3a19 sent back to hubspot-push')).toBeInTheDocument();
     await waitFor(() => expect(calls).toBeGreaterThan(1));
@@ -189,7 +189,7 @@ describe('dead jobs', () => {
 
   it('discards a job after the confirm, and shows the failure', async () => {
     serve();
-    server.use(http.post(exactly('/v1/admin/jobs/job_7f2c04:discard'), () => problem(404, 'Dead job not found', { detail: 'No dead job job_7f2c04' })));
+    server.use(http.post(exactly('/api/v1/admin/jobs/job_7f2c04:discard'), () => problem(404, 'Dead job not found', { detail: 'No dead job job_7f2c04' })));
     renderApp('/admin/health');
     await userEvent.click(await screen.findByRole('button', { name: 'Discard job_7f2c04' }));
     const confirm = await screen.findByRole('dialog', { name: 'Discard job_7f2c04?' });
@@ -197,7 +197,7 @@ describe('dead jobs', () => {
     await userEvent.click(within(confirm).getByRole('button', { name: 'Discard' }));
     expect(await screen.findByText('No dead job job_7f2c04')).toBeInTheDocument();
 
-    server.use(http.post(exactly('/v1/admin/jobs/job_7f2c04:discard'), () => new HttpResponse(null, { status: 204 })));
+    server.use(http.post(exactly('/api/v1/admin/jobs/job_7f2c04:discard'), () => new HttpResponse(null, { status: 204 })));
     await userEvent.click(within(confirm).getByRole('button', { name: 'Discard' }));
     expect(await screen.findByText('job_7f2c04 discarded')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -212,7 +212,7 @@ describe('dead jobs', () => {
 
     // The next refresh: job_7f3a19 is gone, job_7f2c04 failed again, job_80aa01 is new.
     server.use(
-      http.get('/v1/admin/health', () =>
+      http.get('/api/v1/admin/health', () =>
         HttpResponse.json({ ...HEALTH, dead_job_count: 2, dead_jobs: [NEW, { ...HEALTH.dead_jobs[1]!, attempts: 7 }] }),
       ),
     );
@@ -232,11 +232,11 @@ describe('dead jobs', () => {
     serve();
     let retried = false;
     server.use(
-      http.post(exactly('/v1/admin/jobs/job_7f3a19:retry'), () => {
+      http.post(exactly('/api/v1/admin/jobs/job_7f3a19:retry'), () => {
         retried = true;
         return HttpResponse.json({ sent_id: 'evt_1' });
       }),
-      http.get('/v1/admin/health', () =>
+      http.get('/api/v1/admin/health', () =>
         HttpResponse.json(retried ? { ...HEALTH, dead_job_count: 1, dead_jobs: [HEALTH.dead_jobs[1]] } : HEALTH),
       ),
     );
@@ -263,9 +263,9 @@ describe('schedules', () => {
   it('pauses, resumes and runs now, and shows the failures', async () => {
     serve();
     server.use(
-      http.post(exactly('/v1/admin/schedules/sch_rfp:pause'), () => problem(404, 'Not found', { detail: 'That schedule was not found.' })),
-      http.post(exactly('/v1/admin/schedules/sch_apollo:resume'), () => problem(500, 'Something went wrong', { detail: 'Resume failed.' })),
-      http.post(exactly('/v1/admin/schedules/sch_rfp:run-now'), () => problem(500, 'Something went wrong', { detail: 'Run failed.' })),
+      http.post(exactly('/api/v1/admin/schedules/sch_rfp:pause'), () => problem(404, 'Not found', { detail: 'That schedule was not found.' })),
+      http.post(exactly('/api/v1/admin/schedules/sch_apollo:resume'), () => problem(500, 'Something went wrong', { detail: 'Resume failed.' })),
+      http.post(exactly('/api/v1/admin/schedules/sch_rfp:run-now'), () => problem(500, 'Something went wrong', { detail: 'Run failed.' })),
     );
     renderApp('/admin/health');
     await userEvent.click(await screen.findByRole('button', { name: 'Pause rfp-watch-nightly for Taazaa' }));
@@ -276,9 +276,9 @@ describe('schedules', () => {
     expect(await screen.findByText('Run failed.')).toBeInTheDocument();
 
     server.use(
-      http.post(exactly('/v1/admin/schedules/sch_rfp:pause'), () => new HttpResponse(null, { status: 204 })),
-      http.post(exactly('/v1/admin/schedules/sch_apollo:resume'), () => new HttpResponse(null, { status: 204 })),
-      http.post(exactly('/v1/admin/schedules/sch_rfp:run-now'), () => HttpResponse.json({ job_id: 'job_1' })),
+      http.post(exactly('/api/v1/admin/schedules/sch_rfp:pause'), () => new HttpResponse(null, { status: 204 })),
+      http.post(exactly('/api/v1/admin/schedules/sch_apollo:resume'), () => new HttpResponse(null, { status: 204 })),
+      http.post(exactly('/api/v1/admin/schedules/sch_rfp:run-now'), () => HttpResponse.json({ job_id: 'job_1' })),
     );
     await userEvent.click(screen.getByRole('button', { name: 'Pause rfp-watch-nightly for Taazaa' }));
     expect(await screen.findByText('rfp-watch-nightly paused')).toBeInTheDocument();

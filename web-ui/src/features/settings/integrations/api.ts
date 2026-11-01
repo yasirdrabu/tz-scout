@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiFetch } from '../../../api/client';
 
-// The Integrations screen (src/app/v1/integrations). Every write answers with the service's row.
+// The Integrations screen (src/http/routes/v1/integrations). Every write answers with the service's row.
 
 export type IntegrationStatus = 'not_set_up' | 'connected' | 'failing' | 'disabled';
 

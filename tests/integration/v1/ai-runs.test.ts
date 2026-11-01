@@ -1,9 +1,9 @@
 import { sql } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { GET as adminRuns } from '@/app/v1/admin/ai-runs/route';
-import { GET as adminRun } from '@/app/v1/admin/ai-runs/[id]/route';
-import { GET as tenantRuns } from '@/app/v1/ai-runs/route';
-import { GET as tenantRun } from '@/app/v1/ai-runs/[id]/route';
+import { GET as adminRuns } from '@/http/routes/v1/admin/ai-runs/route';
+import { GET as adminRun } from '@/http/routes/v1/admin/ai-runs/[id]/route';
+import { GET as tenantRuns } from '@/http/routes/v1/ai-runs/route';
+import { GET as tenantRun } from '@/http/routes/v1/ai-runs/[id]/route';
 import { aiRun } from '@/modules/ai-tasks/db/schema';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { adminDb } from '@/platform/db/client';
@@ -78,7 +78,7 @@ async function refusesNonAdmins(call: (opts: Opts) => Promise<Response>) {
   expect((await call({})).status).toBe(401);
 }
 
-describe('GET /v1/admin/ai-runs', () => {
+describe('GET /api/v1/admin/ai-runs', () => {
   it('lists every tenant\'s runs newest first, with tenant names, screen statuses, tokens, cost and time', async () => {
     const res = await adminRuns(v1Req(`/admin/ai-runs?task=${task}`, as(admin)));
     expect(res.status).toBe(200);
@@ -150,7 +150,7 @@ describe('GET /v1/admin/ai-runs', () => {
   });
 });
 
-describe('GET /v1/admin/ai-runs/{id}', () => {
+describe('GET /api/v1/admin/ai-runs/{id}', () => {
   it('gives the run with fingerprint, output and the error with personal details masked', async () => {
     const res = await adminRun(v1Req(`/admin/ai-runs/${ids.a_invalid}`, as(admin)));
     expect(res.status).toBe(200);
@@ -169,7 +169,7 @@ describe('GET /v1/admin/ai-runs/{id}', () => {
   });
 });
 
-describe('GET /v1/ai-runs (tenant owners)', () => {
+describe('GET /api/v1/ai-runs (tenant owners)', () => {
   it('lists only this workspace\'s runs, with this month\'s totals', async () => {
     const res = await tenantRuns(v1Req(`/ai-runs?task=${task}`, { ...as(owner), tenant: alpha.slug }));
     expect(res.status).toBe(200);

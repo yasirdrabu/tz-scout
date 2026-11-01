@@ -39,7 +39,7 @@ Stored as `account_score.explanation` (json) at scoring time, so it always match
 - Each intent line carries the signal `kind` used by the API and MCP: `research`, `trigger` or
   `pain`. Finer signal types (leadership, funding, hiring and so on) stay in Accounts.
 
-### Mapping to the `explain_score` tool and `GET /v1/accounts/{id}/score`
+### Mapping to the `explain_score` tool and `GET /api/v1/accounts/{id}/score`
 
 | Tool field | From |
 |---|---|
@@ -70,7 +70,7 @@ or improve what I send.
   re-solicitation 30 days ago, and a warm intro from Zach Wiant."
 - SCO-E4-S2-AC4 With `offer_id` for an offer that is not the best, the tool explains that offer's
   match and says which offer is best.
-- SCO-E4-S2-AC3 `GET /v1/accounts/{id}/score` returns the same object.
+- SCO-E4-S2-AC3 `GET /api/v1/accounts/{id}/score` returns the same object.
 
 ### SCO-E4-S3 Why did it move
 - SCO-E4-S3-AC1 The account page shows the last 10 `score_change` rows: from and to, cause in words,

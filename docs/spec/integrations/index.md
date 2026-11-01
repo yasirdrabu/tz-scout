@@ -64,9 +64,9 @@ from the call log with `replay: true` (events-and-async.md).
 
 | Method and path | Scope |
 |---|---|
-| `GET /v1/integrations` | `integrations:manage` |
-| `GET /v1/integrations/{provider}/calls?from&to&outcome&apiKeyId` | `integrations:manage` |
-| `GET /v1/usage?period=month` | `integrations:manage` or `keys:manage` |
+| `GET /api/v1/integrations` | `integrations:manage` |
+| `GET /api/v1/integrations/{provider}/calls?from&to&outcome&apiKeyId` | `integrations:manage` |
+| `GET /api/v1/usage?period=month` | `integrations:manage` or `keys:manage` |
 
 Credentials are set only in the web app, never through the API.
 

@@ -1,11 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import '@/entry/compose';
-import { GET as getHistory } from '@/app/v1/accounts/[id]/score/history/route';
-import { GET as getMatches } from '@/app/v1/accounts/[id]/matches/route';
-import { GET as getScore } from '@/app/v1/accounts/[id]/score/route';
-import { POST as rescore } from '@/app/v1/rescore/route';
-import { POST as resetProfile } from '@/app/v1/scoring/profile/reset/route';
-import { GET as getProfile, PUT as putProfile } from '@/app/v1/scoring/profile/route';
+import { GET as getHistory } from '@/http/routes/v1/accounts/[id]/score/history/route';
+import { GET as getMatches } from '@/http/routes/v1/accounts/[id]/matches/route';
+import { GET as getScore } from '@/http/routes/v1/accounts/[id]/score/route';
+import { POST as rescore } from '@/http/routes/v1/rescore/route';
+import { POST as resetProfile } from '@/http/routes/v1/scoring/profile/reset/route';
+import { GET as getProfile, PUT as putProfile } from '@/http/routes/v1/scoring/profile/route';
 import { upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { approveOffer, createOffer, createPractice, replaceSignalRules } from '@/modules/offers';
 import { scoreAccount } from '@/modules/scoring';
@@ -69,7 +69,7 @@ const READS = [
   [getHistory, 'score/history'],
 ] as const;
 
-describe('GET /v1/accounts/{id}/score', () => {
+describe('GET /api/v1/accounts/{id}/score', () => {
   it('SCO-E4-S2-AC3: the explanation in snake_case, with would_raise and a summary', async () => {
     const w = await world();
     const key = await keyFor(w.t, READ, ALL);
@@ -274,7 +274,7 @@ describe('scoring profile', () => {
   });
 });
 
-describe('POST /v1/rescore', () => {
+describe('POST /api/v1/rescore', () => {
   it('returns 202 with a job id, for the tenant, a practice or a source', async () => {
     const w = await world();
     const key = await keyFor(w.t, MANAGE, ALL);

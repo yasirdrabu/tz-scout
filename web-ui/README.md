@@ -12,7 +12,8 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
-The dev server proxies `/v1`, `/api` and `/healthz` to the backend at `http://localhost:4240`
+The dev server proxies `/api` (the API at `/api/v1` and sign-in at `/api/auth`), `/healthz` and
+`/readyz` to the backend at `http://localhost:4240`
 (start it with `npm run dev` at the repo root). Set `SCOUT_BACKEND_URL` to use another backend.
 
 | Script | What it does |
@@ -28,7 +29,7 @@ The dev server proxies `/v1`, `/api` and `/healthz` to the backend at `http://lo
 ## Local dev and the backend's same-site check
 
 The backend refuses cookie-authenticated writes whose `Origin` header is not the origin of
-`APP_PUBLIC_URL` (`assertSameSite` in `src/app/v1/_lib/v1-route.ts`). Locally that is
+`APP_PUBLIC_URL` (`assertSameSite` in `src/http/routes/v1/_lib/v1-route.ts`). Locally that is
 `http://localhost:4240`, but the browser sends `Origin: http://localhost:5173`. So the proxy in
 `vite.config.ts` uses `changeOrigin: true` and rewrites the `Origin` header to the backend origin,
 but only when it is the dev server's own origin; any other `Origin` is passed on unchanged.
@@ -36,9 +37,9 @@ Do not copy this to production: there the app and the API share one origin (spec
 is needed.
 
 Sign in locally with developer sign-in (`AUTH_DEV_SIGNIN=true` on the backend). Microsoft sign-in
-returns to `APP_PUBLIC_URL`, which is the backend's origin, not the Vite one. The backend has no pages
-any more, so locally that return lands on a 404 until the backend learns the app's return paths. In
-production the app and the API share one origin, so it lands in the app.
+returns to `APP_PUBLIC_URL`, which is the backend's origin, not the Vite one, so locally it lands on the
+backend's copy of the app: the last `npm run build` at the repo root, or a "not built" page without one.
+In production the app and the API share one origin, so it lands in the app.
 
 ## Dependencies
 

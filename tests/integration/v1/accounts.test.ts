@@ -1,13 +1,13 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import '@/entry/compose';
-import { GET as listAccounts } from '@/app/v1/accounts/route';
-import { GET as getAccountRoute, PATCH as patchAccount } from '@/app/v1/accounts/[id]/route';
-import { GET as listPeopleRoute, POST as addPerson } from '@/app/v1/accounts/[id]/people/route';
-import { POST as addSignal } from '@/app/v1/accounts/[id]/signals/route';
-import { GET as getFacts } from '@/app/v1/accounts/[id]/facts/route';
-import { GET as accountArrivals } from '@/app/v1/accounts/[id]/arrivals/route';
-import { PATCH as patchPerson } from '@/app/v1/people/[id]/route';
+import { GET as listAccounts } from '@/http/routes/v1/accounts/route';
+import { GET as getAccountRoute, PATCH as patchAccount } from '@/http/routes/v1/accounts/[id]/route';
+import { GET as listPeopleRoute, POST as addPerson } from '@/http/routes/v1/accounts/[id]/people/route';
+import { POST as addSignal } from '@/http/routes/v1/accounts/[id]/signals/route';
+import { GET as getFacts } from '@/http/routes/v1/accounts/[id]/facts/route';
+import { GET as accountArrivals } from '@/http/routes/v1/accounts/[id]/arrivals/route';
+import { PATCH as patchPerson } from '@/http/routes/v1/people/[id]/route';
 import { mergeAccounts, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { accountAlias, fact, person } from '@/modules/accounts/db/schema';
 import { SYSTEM_GRANTOR, createApiKey, createTenant, handleDevSignIn, setPrincipalCacheTtl, type Permission } from '@/modules/tenancy';
@@ -60,7 +60,7 @@ const asOwner = (
   body?: unknown,
 ) =>
   handler(
-    new Request(`http://localhost:4240/v1/${path}`, {
+    new Request(`http://localhost:4240/api/v1/${path}`, {
       method,
       headers: {
         cookie: ownerCookie,
@@ -106,7 +106,7 @@ const factsOf = (accountId: string, key: string, personId?: string) =>
     ),
   );
 
-describe('POST /v1/accounts/{id}/people', () => {
+describe('POST /api/v1/accounts/{id}/people', () => {
   it('ACC-E1-S4-AC1: returns the person_id in the same response, with 201', async () => {
     const acc = await seed(ash.agentId);
     const res = await call(addPerson, writeKey, `accounts/${acc.accountId}/people`, {
@@ -152,7 +152,7 @@ describe('POST /v1/accounts/{id}/people', () => {
   });
 });
 
-describe('POST /v1/accounts/{id}/signals', () => {
+describe('POST /api/v1/accounts/{id}/signals', () => {
   const signal = { type: 'trigger', title: 'Hired a new CIO', occurred_at: '2026-10-01', url: 'https://news.example.com/cio' };
 
   it('ACC-E4-S3-AC1: returns a signal id, and a repeat returns the existing id', async () => {

@@ -85,7 +85,7 @@ function allowedTenants(list: string | undefined, home: string): string[] {
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
-  // dotenv and Next load `KEY=` as an empty string; treat that as unset.
+  // .env loaders (Node's --env-file, dotenv) give `KEY=` as an empty string; treat that as unset.
   const cleaned: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(env)) cleaned[k] = v === '' ? undefined : v;
   const parsed = schema.safeParse(cleaned);
@@ -95,7 +95,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
   const e = parsed.data;
 
-  // SCOUT_ENV wins over NODE_ENV: Next's standalone server forces NODE_ENV=production.
+  // SCOUT_ENV wins over NODE_ENV: the image sets NODE_ENV=production.
   const effectiveEnv = e.SCOUT_ENV ?? e.NODE_ENV;
   const isProduction = effectiveEnv === 'production';
   if (isProduction) {

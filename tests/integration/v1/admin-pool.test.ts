@@ -1,11 +1,11 @@
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GET as health } from '@/app/v1/admin/health/route';
-import { GET as aiRuns } from '@/app/v1/admin/ai-runs/route';
-import { GET as listAdmins } from '@/app/v1/admin/platform-admins/route';
-import { GET as listTenants } from '@/app/v1/admin/tenants/route';
-import { POST as tenantAction } from '@/app/v1/admin/tenants/[id]/route';
-import { POST as testEvent } from '@/app/v1/admin/test-event/route';
+import { GET as health } from '@/http/routes/v1/admin/health/route';
+import { GET as aiRuns } from '@/http/routes/v1/admin/ai-runs/route';
+import { GET as listAdmins } from '@/http/routes/v1/admin/platform-admins/route';
+import { GET as listTenants } from '@/http/routes/v1/admin/tenants/route';
+import { POST as tenantAction } from '@/http/routes/v1/admin/tenants/[id]/route';
+import { POST as testEvent } from '@/http/routes/v1/admin/test-event/route';
 import { config } from '@/platform/config';
 import '@/platform/diagnostics';
 import { seedUser } from '../tenancy/helpers';

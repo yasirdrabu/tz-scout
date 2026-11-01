@@ -33,7 +33,7 @@ const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 function serve(tenants: AdminTenant[] = TENANTS, admins: PlatformAdmin[] = ADMINS, total = tenants.length) {
   serveNoTenantMe();
   server.use(
-    http.get('/v1/admin/tenants', () =>
+    http.get('/api/v1/admin/tenants', () =>
       HttpResponse.json({
         data: tenants,
         summary: {
@@ -43,7 +43,7 @@ function serve(tenants: AdminTenant[] = TENANTS, admins: PlatformAdmin[] = ADMIN
         },
       }),
     ),
-    http.get('/v1/admin/platform-admins', () => HttpResponse.json({ data: admins })),
+    http.get('/api/v1/admin/platform-admins', () => HttpResponse.json({ data: admins })),
   );
 }
 
@@ -76,7 +76,7 @@ describe('Tenants list', () => {
   it('shows loading, error and empty states', async () => {
     serve();
     server.use(
-      http.get('/v1/admin/tenants', async () => {
+      http.get('/api/v1/admin/tenants', async () => {
         await delay('infinite');
         return HttpResponse.json({});
       }),
@@ -85,7 +85,7 @@ describe('Tenants list', () => {
     expect(await screen.findByText('Loading tenants')).toBeInTheDocument();
     first.unmount();
 
-    server.use(http.get('/v1/admin/tenants', () => problem(500, 'Something went wrong', { detail: 'The database is down.', ref: 'cor_t1' })));
+    server.use(http.get('/api/v1/admin/tenants', () => problem(500, 'Something went wrong', { detail: 'The database is down.', ref: 'cor_t1' })));
     const second = renderApp('/admin/tenants');
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Tenants didn't load");
@@ -121,7 +121,7 @@ describe('tenant drawer', () => {
 
   it('suspends after the confirm, and shows the failure', async () => {
     serve();
-    server.use(http.post(exactly('/v1/admin/tenants/t_taazaa:suspend'), () => problem(409, 'That tenant is already suspended.', { slug: 'not-active' })));
+    server.use(http.post(exactly('/api/v1/admin/tenants/t_taazaa:suspend'), () => problem(409, 'That tenant is already suspended.', { slug: 'not-active' })));
     renderApp('/admin/tenants?open=t_taazaa');
     const drawer = await screen.findByRole('dialog', { name: 'Taazaa' });
     expect(drawer).toHaveTextContent('Priya Raman · priya.raman@taazaa.com');
@@ -133,7 +133,7 @@ describe('tenant drawer', () => {
 
     let called = 0;
     server.use(
-      http.post(exactly('/v1/admin/tenants/t_taazaa:suspend'), () => {
+      http.post(exactly('/api/v1/admin/tenants/t_taazaa:suspend'), () => {
         called++;
         return HttpResponse.json({ ...TENANTS[0], status: 'suspended' });
       }),
@@ -146,13 +146,13 @@ describe('tenant drawer', () => {
 
   it('resumes a suspended tenant, and shows the failure', async () => {
     serve();
-    server.use(http.post(exactly('/v1/admin/tenants/t_meridian:resume'), () => problem(409, 'That tenant is not suspended.', { slug: 'not-suspended' })));
+    server.use(http.post(exactly('/api/v1/admin/tenants/t_meridian:resume'), () => problem(409, 'That tenant is not suspended.', { slug: 'not-suspended' })));
     renderApp('/admin/tenants?open=t_meridian');
     const drawer = await screen.findByRole('dialog', { name: 'Meridian Public Sector' });
     await userEvent.click(within(drawer).getByRole('button', { name: 'Resume tenant' }));
     expect(await screen.findByText('That tenant is not suspended.')).toBeInTheDocument();
 
-    server.use(http.post(exactly('/v1/admin/tenants/t_meridian:resume'), () => HttpResponse.json({ ...TENANTS[2], status: 'active' })));
+    server.use(http.post(exactly('/api/v1/admin/tenants/t_meridian:resume'), () => HttpResponse.json({ ...TENANTS[2], status: 'active' })));
     await userEvent.click(within(drawer).getByRole('button', { name: 'Resume tenant' }));
     expect(await screen.findByText('Meridian Public Sector resumed.')).toBeInTheDocument();
   });
@@ -184,7 +184,7 @@ describe('new tenant', () => {
     serve();
     let body: unknown;
     server.use(
-      http.post('/v1/admin/tenants', async ({ request }) => {
+      http.post('/api/v1/admin/tenants', async ({ request }) => {
         body = await request.json();
         return HttpResponse.json(tenant({ id: 't_north', slug: 'northwind-advisory', name: 'Northwind Advisory', owner: { name: 'dana@northwind.com', email: 'dana@northwind.com' } }), { status: 201 });
       }),
@@ -207,7 +207,7 @@ describe('new tenant', () => {
   it('opens the new tenant', async () => {
     serve();
     serveNoTenantMe(undefined, [], { 'northwind-advisory': { scopes: ['accounts:read'] } });
-    server.use(http.post('/v1/admin/tenants', () => HttpResponse.json(tenant({ id: 't_north', slug: 'northwind-advisory', name: 'Northwind Advisory' }), { status: 201 })));
+    server.use(http.post('/api/v1/admin/tenants', () => HttpResponse.json(tenant({ id: 't_north', slug: 'northwind-advisory', name: 'Northwind Advisory' }), { status: 201 })));
     const panel = await openPanel();
     await userEvent.type(within(panel).getByRole('textbox', { name: 'Company name' }), 'Northwind Advisory');
     await userEvent.type(within(panel).getByRole('textbox', { name: 'Owner email' }), 'dana@northwind.com');
@@ -219,7 +219,7 @@ describe('new tenant', () => {
 
   it('shows a taken slug and other refusals under their field', async () => {
     serve();
-    server.use(http.post('/v1/admin/tenants', () => problem(409, 'That short name is taken.', { slug: 'slug-taken' })));
+    server.use(http.post('/api/v1/admin/tenants', () => problem(409, 'That short name is taken.', { slug: 'slug-taken' })));
     const panel = await openPanel();
     await userEvent.type(within(panel).getByRole('textbox', { name: 'Company name' }), 'Taazaa');
     await userEvent.type(within(panel).getByRole('textbox', { name: 'Owner email' }), 'priya@taazaa.com');
@@ -227,7 +227,7 @@ describe('new tenant', () => {
     expect(await within(panel).findByText('That slug is taken. Pick another.')).toBeInTheDocument();
 
     server.use(
-      http.post('/v1/admin/tenants', () =>
+      http.post('/api/v1/admin/tenants', () =>
         HttpResponse.json(
           { type: 'https://scout.taazaa.ai/problems/validation', title: 'Check the request.', status: 400, errors: [{ path: 'currency', message: 'Use a three-letter currency code.' }] },
           { status: 400, headers: { 'content-type': 'application/problem+json' } },
@@ -237,7 +237,7 @@ describe('new tenant', () => {
     await userEvent.click(within(panel).getByRole('button', { name: 'Create tenant' }));
     expect(await within(panel).findByText('Use a three-letter currency code.')).toBeInTheDocument();
 
-    server.use(http.post('/v1/admin/tenants', () => problem(500, 'Something went wrong', { detail: 'The database is down.' })));
+    server.use(http.post('/api/v1/admin/tenants', () => problem(500, 'Something went wrong', { detail: 'The database is down.' })));
     await userEvent.click(within(panel).getByRole('button', { name: 'Create tenant' }));
     expect(await screen.findByText('The database is down.')).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: 'New tenant' })).toBeInTheDocument();
@@ -261,7 +261,7 @@ describe('platform admins', () => {
   it('shows loading, error and empty states', async () => {
     serve();
     server.use(
-      http.get('/v1/admin/platform-admins', async () => {
+      http.get('/api/v1/admin/platform-admins', async () => {
         await delay('infinite');
         return HttpResponse.json({ data: [] });
       }),
@@ -270,7 +270,7 @@ describe('platform admins', () => {
     expect(await screen.findByText('Loading platform admins')).toBeInTheDocument();
     first.unmount();
 
-    server.use(http.get('/v1/admin/platform-admins', () => problem(500, 'Something went wrong', { ref: 'cor_p1' })));
+    server.use(http.get('/api/v1/admin/platform-admins', () => problem(500, 'Something went wrong', { ref: 'cor_p1' })));
     const second = renderApp('/admin/tenants');
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Platform admins didn't load");
@@ -284,14 +284,14 @@ describe('platform admins', () => {
 
   it('removes after the confirm, and shows the failure', async () => {
     serve();
-    server.use(http.delete('/v1/admin/platform-admins/usr_lena', () => problem(409, 'Scout needs at least one platform admin.', { slug: 'last-admin' })));
+    server.use(http.delete('/api/v1/admin/platform-admins/usr_lena', () => problem(409, 'Scout needs at least one platform admin.', { slug: 'last-admin' })));
     renderApp('/admin/tenants');
     await userEvent.click(await screen.findByRole('button', { name: 'Remove Lena Ortiz' }));
     const confirm = await screen.findByRole('dialog', { name: 'Remove Lena Ortiz?' });
     await userEvent.click(within(confirm).getByRole('button', { name: 'Remove' }));
     expect(await screen.findByText('Scout needs at least one platform admin.')).toBeInTheDocument();
 
-    server.use(http.delete('/v1/admin/platform-admins/usr_lena', () => new HttpResponse(null, { status: 204 })));
+    server.use(http.delete('/api/v1/admin/platform-admins/usr_lena', () => new HttpResponse(null, { status: 204 })));
     await userEvent.click(within(confirm).getByRole('button', { name: 'Remove' }));
     expect(await screen.findByText('Lena Ortiz is no longer a platform admin.')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -300,7 +300,7 @@ describe('platform admins', () => {
   it('adds an admin by email, with refusals under the field', async () => {
     serve();
     let body: unknown;
-    server.use(http.post('/v1/admin/platform-admins', () => problem(400, 'Use an @taazaa.com email.', { slug: 'not-staff-email' })));
+    server.use(http.post('/api/v1/admin/platform-admins', () => problem(400, 'Use an @taazaa.com email.', { slug: 'not-staff-email' })));
     renderApp('/admin/tenants');
     await userEvent.click(await screen.findByRole('button', { name: 'Add platform admin' }));
     const dialog = await screen.findByRole('dialog', { name: 'Add platform admin' });
@@ -311,7 +311,7 @@ describe('platform admins', () => {
     expect(await within(dialog).findByText('Use an @taazaa.com email.')).toBeInTheDocument();
 
     server.use(
-      http.post('/v1/admin/platform-admins', async ({ request }) => {
+      http.post('/api/v1/admin/platform-admins', async ({ request }) => {
         body = await request.json();
         return HttpResponse.json({ user_id: 'usr_ravi', name: 'Ravi Menon', email: 'ravi@taazaa.com', last_sign_in_at: null }, { status: 201 });
       }),

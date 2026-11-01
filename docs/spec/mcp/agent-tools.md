@@ -134,7 +134,7 @@ Output:
 ```
 `declined_reason` and `declined_note` are set only while the account holds a declined status, and `send_back_note` only
 while it holds a status that returns it to its source; otherwise they are null. A seller's decline is not shown here:
-it reaches the sending source as feedback (`GET /v1/feedback`), and the account is back with a leader.
+it reaches the sending source as feedback (`GET /api/v1/feedback`), and the account is back with a leader.
 
 With an `arrival_id` that has not resolved to an account yet, only `summary` and `stage` carry meaning (`account_id`
 and `name` are null): "Received. Matching it to an account." while it waits, or "Not accepted: <reason>." when it was
@@ -234,7 +234,7 @@ Input: `source_id` (optional; defaults to the caller's own source; another sourc
 `analytics:read` and a data limit that includes it), `from`, `to` (optional dates; default last 90
 days).
 Output: `{ "source_id", "name", "trust": 0.66, "trust_trend": [{ "week", "trust" }], "funnel": [{ "stage", "count", "rate_from_previous" }], "decline_reasons": [{ "reason", "count" }], "summary": "Of 120 accounts, 41 were reviewed and 3 became opportunities. Most declines: wrong company size." }`.
-Scopes: own source always; others `analytics:read`. Backed by `GET /v1/analytics/sources/{id}/performance` (ANL).
+Scopes: own source always; others `analytics:read`. Backed by `GET /api/v1/analytics/sources/{id}/performance` (ANL).
 
 ## Stories
 

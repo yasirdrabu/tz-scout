@@ -1,7 +1,7 @@
 import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 import { apiFetch } from '../../../api/client';
 
-// Every tenant's AI runs (src/app/v1/admin/ai-runs, Decision 24). Platform admins only.
+// Every tenant's AI runs (src/http/routes/v1/admin/ai-runs, Decision 24). Platform admins only.
 
 export type RunStatus = 'succeeded' | 'failed' | 'stopped_by_limit';
 

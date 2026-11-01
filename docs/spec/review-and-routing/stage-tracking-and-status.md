@@ -40,7 +40,7 @@ Stages and what moves them (from `architecture/event-catalog.md`):
 ### REV-E4-S2 Account status for agents and people
 As an agent that sent an account, I want to ask its status, so that I can tell my person what
 happened.
-- REV-E4-S2-AC1 `get_account_status` and `GET /v1/accounts/{id}/status` return the shape fixed in
+- REV-E4-S2-AC1 `get_account_status` and `GET /api/v1/accounts/{id}/status` return the shape fixed in
   `mcp/agent-tools.md`: account id, name, stage, review status, tier, owner name, last activity
   date, declined reason and a one-sentence summary. People with `crm:push` also get the handoff
   status and CRM link in the web app and API.

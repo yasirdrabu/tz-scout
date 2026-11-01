@@ -94,7 +94,7 @@ Field rules:
 `name` (required), `run_at` (when the run happened; defaults to now), `notes`, `criteria` (free JSON:
 what the agent was asked to find, filters used), `metadata` (free JSON; Scout reads
 `metadata.reported_cost` `{ credits, cost_cents, currency }` for vendor runs it can't meter), up to
-10 files (25 MB each), and 1 to 1,000 items sent in the one `POST /v1/batches` call. A batch is
+10 files (25 MB each), and 1 to 1,000 items sent in the one `POST /api/v1/batches` call. A batch is
 `completed` when every item is resolved or rejected.
 
 ## Arrival status (what callers see)
@@ -110,7 +110,7 @@ what the agent was asked to find, filters used), `metadata` (free JSON; Scout re
     marked "Ruled out", and a person can override; `account_id` is set.
   - `duplicate_in_batch`: a later item in the same batch with the same `external_ref` or the same
     normalised domain as an earlier item.
-- After `resolved`, `GET /v1/arrivals/{id}` also shows the account's stage, review status and owner
+- After `resolved`, `GET /api/v1/arrivals/{id}` also shows the account's stage, review status and owner
   name as far as the principal's scopes allow (from REV), plus any feedback (SRC-E1-S4).
 
 ## Stories
@@ -118,7 +118,7 @@ what the agent was asked to find, filters used), `metadata` (free JSON; Scout re
 ### SRC-E2-S1 Send one account
 As an agent, I want to send one account and get an id straight away, so that I can move on and check
 back later.
-- SRC-E2-S1-AC1 `POST /v1/arrivals` with a valid body returns `202` with `arrival_id` and
+- SRC-E2-S1-AC1 `POST /api/v1/arrivals` with a valid body returns `202` with `arrival_id` and
   `status_url` within 300 ms p95; the arrival row and `intake.arrival.received` are committed in one
   transaction.
 - SRC-E2-S1-AC2 The stored `payload.raw` is exactly what was sent; nobody can edit an arrival.
@@ -133,9 +133,9 @@ back later.
 ### SRC-E2-S2 Send a batch
 As an agent or vendor, I want to send a run of accounts as one batch with notes and files, so that the
 run can be tracked and judged as a whole.
-- SRC-E2-S2-AC1 `POST /v1/batches` creates the batch with its fields and 1 to 1,000 items; the
+- SRC-E2-S2-AC1 `POST /api/v1/batches` creates the batch with its fields and 1 to 1,000 items; the
   response lists an `arr_` id per item in the order sent.
-- SRC-E2-S2-AC2 `POST /v1/batches/{id}/files` attaches files (25 MB each, 10 per batch); each is stored
+- SRC-E2-S2-AC2 `POST /api/v1/batches/{id}/files` attaches files (25 MB each, 10 per batch); each is stored
   with its SHA-256 and listed on the batch page.
 - SRC-E2-S2-AC3 Items past the source's daily cap are stored and rejected `daily_cap_reached`; items
   repeating an earlier item are rejected `duplicate_in_batch`.
@@ -147,9 +147,9 @@ run can be tracked and judged as a whole.
 ### SRC-E2-S3 Track what I sent
 As an agent, I want to ask about my batch or my recent submissions, so that I can report back to the
 person who runs me.
-- SRC-E2-S3-AC1 `GET /v1/batches/{id}` and `get_batch_status` return counts (`resolved`, `rejected`,
+- SRC-E2-S3-AC1 `GET /api/v1/batches/{id}` and `get_batch_status` return counts (`resolved`, `rejected`,
   `new_accounts`, `already_known`), counts by stage, and rejections with `external_ref`, reason and
-  detail; `GET /v1/batches/{id}/items` pages through every item.
+  detail; `GET /api/v1/batches/{id}/items` pages through every item.
 - SRC-E2-S3-AC2 `list_my_submissions(since, stage)` returns the principal's own arrivals only, with
   account name, stage, review status, owner name and last activity.
 - SRC-E2-S3-AC3 A principal with data limit `own_source` gets `404` for an arrival or batch from
@@ -169,6 +169,6 @@ Defined in [mcp/agent-tools.md](../mcp/agent-tools.md); this module implements t
 | Tool | Notes for this module |
 |---|---|
 | `submit_account` | Builds an `arrival.v1` from `account`, `people`, `signals`, `facts`, `warm_intro` and submits it |
-| `submit_batch` | `POST /v1/batches` semantics, up to 1,000 items in one call |
+| `submit_batch` | `POST /api/v1/batches` semantics, up to 1,000 items in one call |
 | `get_batch_status` | Counts, stages and rejections as in SRC-E2-S3 |
 | `list_my_submissions` | Own source's arrivals with stage |

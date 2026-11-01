@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiFetch } from '../../../api/client';
 
-// API keys (src/app/v1/api-keys, Decision 14). The secret comes back once, from create.
+// API keys (src/http/routes/v1/api-keys, Decision 14). The secret comes back once, from create.
 
 export type ApiKey = {
   id: string;

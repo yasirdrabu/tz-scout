@@ -219,4 +219,20 @@ describe('scout CLI', () => {
     expect(r.code, r.stderr).toBe(0);
     expect(Date.now() - t0).toBeLessThan(10_000);
   }, 60_000);
+
+  it('web serves the API and health checks on PORT and exits 0 within 10 seconds of a stop request', async () => {
+    const p = scout(['web'], { PORT: '0', SCOUT_BIND_HOST: '127.0.0.1' });
+    await waitFor(() => /listening on http:\/\/127\.0\.0\.1:\d+/.test(p.output()), 30_000);
+    const base = /listening on (http:\/\/127\.0\.0\.1:\d+)/.exec(p.output())![1]!;
+    expect(await (await fetch(`${base}/healthz`)).json()).toEqual({ ok: true });
+    expect((await fetch(`${base}/readyz`)).status).toBe(200);
+    const me = await fetch(`${base}/api/v1/me`);
+    expect(me.status).toBe(401);
+    expect(me.headers.get('content-type')).toBe('application/problem+json');
+    const t0 = Date.now();
+    stop(p.child);
+    const r = await p.done;
+    expect(r.code, r.stderr).toBe(0);
+    expect(Date.now() - t0).toBeLessThan(10_000);
+  }, 60_000);
 });

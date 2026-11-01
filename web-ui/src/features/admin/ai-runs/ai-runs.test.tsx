@@ -42,14 +42,14 @@ function serve(summary: RunsSummary = SUMMARY) {
   seen = [];
   serveNoTenantMe();
   server.use(
-    http.get('/v1/admin/ai-runs', ({ request }) => {
+    http.get('/api/v1/admin/ai-runs', ({ request }) => {
       const p = new URL(request.url).searchParams;
       seen.push(p);
       if (p.get('q') === 'nothing') return HttpResponse.json({ data: [], next_cursor: null, summary });
       if (p.get('cursor') === 'opaque-c2') return HttpResponse.json({ data: PAGE_2, next_cursor: null, summary });
       return HttpResponse.json({ data: PAGE_1, next_cursor: 'opaque-c2', summary });
     }),
-    http.get('/v1/admin/tenants', () =>
+    http.get('/api/v1/admin/tenants', () =>
       HttpResponse.json({
         data: [
           { id: 't_taazaa', slug: 'taazaa', name: 'Taazaa', currency: 'USD', timezone: 'America/New_York', status: 'active', created_at: '2026-01-01T00:00:00Z', member_count: 14, owner: null },
@@ -122,7 +122,7 @@ describe('AI runs', () => {
 
   it('keeps the search, filters and expanded run in the URL', async () => {
     serve();
-    server.use(http.get('/v1/admin/ai-runs/run_8f1c', () => HttpResponse.json({ ...PAGE_1[1], input_hash: null, output: null, error: null })));
+    server.use(http.get('/api/v1/admin/ai-runs/run_8f1c', () => HttpResponse.json({ ...PAGE_1[1], input_hash: null, output: null, error: null })));
     const app = renderApp('/admin/ai-runs');
     await screen.findByRole('button', { name: 'run_8f21' });
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'Failed');
@@ -141,7 +141,7 @@ describe('AI runs', () => {
 
   it('opens with the search, filters and expanded run from the URL', async () => {
     serve();
-    server.use(http.get('/v1/admin/ai-runs/run_8f1c', () => HttpResponse.json({ ...PAGE_1[1], input_hash: null, output: null, error: null })));
+    server.use(http.get('/api/v1/admin/ai-runs/run_8f1c', () => HttpResponse.json({ ...PAGE_1[1], input_hash: null, output: null, error: null })));
     renderApp('/admin/ai-runs?q=harbor&status=failed&task=csv_column_mapping&tenant=t_harbor&open=run_8f1c');
     expect(await screen.findByRole('button', { name: 'run_8f1c' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('searchbox', { name: 'Find by run, account or task' })).toHaveValue('harbor');
@@ -173,8 +173,8 @@ describe('AI runs', () => {
   it('shows loading and error states', async () => {
     serveNoTenantMe();
     server.use(
-      http.get('/v1/admin/tenants', () => HttpResponse.json({ data: [], summary: { active: 0, suspended: 0 } })),
-      http.get('/v1/admin/ai-runs', async () => {
+      http.get('/api/v1/admin/tenants', () => HttpResponse.json({ data: [], summary: { active: 0, suspended: 0 } })),
+      http.get('/api/v1/admin/ai-runs', async () => {
         await delay('infinite');
         return HttpResponse.json({});
       }),
@@ -183,7 +183,7 @@ describe('AI runs', () => {
     expect(await screen.findByText('Loading AI runs')).toBeInTheDocument();
     first.unmount();
 
-    server.use(http.get('/v1/admin/ai-runs', () => problem(400, 'Check the request.', { detail: 'That cursor is not valid.', ref: 'cor_a1' })));
+    server.use(http.get('/api/v1/admin/ai-runs', () => problem(400, 'Check the request.', { detail: 'That cursor is not valid.', ref: 'cor_a1' })));
     renderApp('/admin/ai-runs');
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("AI runs didn't load");
@@ -204,7 +204,7 @@ describe('expanded run', () => {
 
   it('opens with the keyboard and shows what was sent, what came back and the error', async () => {
     serve();
-    server.use(http.get('/v1/admin/ai-runs/run_8f1c', () => HttpResponse.json(DETAIL)));
+    server.use(http.get('/api/v1/admin/ai-runs/run_8f1c', () => HttpResponse.json(DETAIL)));
     renderApp('/admin/ai-runs');
     const toggle = await screen.findByRole('button', { name: 'run_8f1c' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -225,8 +225,8 @@ describe('expanded run', () => {
 
   it('says when nothing came back, and shows a failed load', async () => {
     serve();
-    server.use(http.get('/v1/admin/ai-runs/run_8f21', () => HttpResponse.json({ ...PAGE_1[0], input_hash: null, output: null, error: null })));
-    server.use(http.get('/v1/admin/ai-runs/run_8f1c', () => problem(404, 'Not found', { detail: 'That run was not found.', ref: 'cor_a2' })));
+    server.use(http.get('/api/v1/admin/ai-runs/run_8f21', () => HttpResponse.json({ ...PAGE_1[0], input_hash: null, output: null, error: null })));
+    server.use(http.get('/api/v1/admin/ai-runs/run_8f1c', () => problem(404, 'Not found', { detail: 'That run was not found.', ref: 'cor_a2' })));
     renderApp('/admin/ai-runs');
     await userEvent.click(await screen.findByRole('button', { name: 'run_8f21' }));
     expect(await screen.findByText('Nothing came back.')).toBeInTheDocument();
@@ -241,7 +241,7 @@ describe('expanded run', () => {
   it('shows a loading line while the run loads', async () => {
     serve();
     server.use(
-      http.get('/v1/admin/ai-runs/run_8f21', async () => {
+      http.get('/api/v1/admin/ai-runs/run_8f21', async () => {
         await delay('infinite');
         return HttpResponse.json({});
       }),

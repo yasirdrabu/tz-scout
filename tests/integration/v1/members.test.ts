@@ -1,9 +1,9 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { GET as listMembers, POST as invite } from '@/app/v1/members/route';
-import { DELETE as remove, PATCH as patch, POST as act } from '@/app/v1/members/[id]/route';
-import { GET as roles } from '@/app/v1/roles/route';
-import { GET as me } from '@/app/v1/me/route';
+import { GET as listMembers, POST as invite } from '@/http/routes/v1/members/route';
+import { DELETE as remove, PATCH as patch, POST as act } from '@/http/routes/v1/members/[id]/route';
+import { GET as roles } from '@/http/routes/v1/roles/route';
+import { GET as me } from '@/http/routes/v1/me/route';
 import { ACCOUNT_TURNED_OFF, ROLE_PERMISSIONS, addMember, checkSignIn, completeSignIn, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { assignment } from '@/modules/routing/db/schema';
 import { membership, session, user } from '@/modules/tenancy/db/schema';
@@ -47,7 +47,7 @@ async function freshSeller() {
   return { ...p, membershipId: id };
 }
 
-describe('GET /v1/members', () => {
+describe('GET /api/v1/members', () => {
   it('lists members with role, status, sign-in facts, practice access and open accounts', async () => {
     await adminDb.insert(assignment).values({
       id: newId('asg'),
@@ -162,7 +162,7 @@ describe('GET /v1/members', () => {
   });
 });
 
-describe('POST /v1/members', () => {
+describe('POST /api/v1/members', () => {
   it('invites each address with the role and practice access, and reports per address', async () => {
     const fresh = `new-${newId('usr')}@example.com`.toLowerCase();
     const res = await invite(
@@ -192,7 +192,7 @@ describe('POST /v1/members', () => {
   });
 });
 
-describe('PATCH /v1/members/{id}', () => {
+describe('PATCH /api/v1/members/{id}', () => {
   it('changes role, practice access and the CRM user id, and audits it', async () => {
     const p = await freshSeller();
     const res = await patch(
@@ -273,7 +273,7 @@ describe('suspend and reactivate', () => {
   });
 });
 
-describe('POST /v1/members/{id}:sign-out-everywhere', () => {
+describe('POST /api/v1/members/{id}:sign-out-everywhere', () => {
   it('ends every session of that person', async () => {
     const p = await freshSeller();
     await signedIn(p.id); // a second device
@@ -313,7 +313,7 @@ describe('POST /v1/members/{id}:sign-out-everywhere', () => {
   });
 });
 
-describe('DELETE /v1/members/{id}', () => {
+describe('DELETE /api/v1/members/{id}', () => {
   it('removes the member and announces it, so their open accounts go back to the queue', async () => {
     const p = await freshSeller();
     const res = await remove(as(owner, `/members/${p.membershipId}`, { method: 'DELETE' }));
@@ -335,7 +335,7 @@ describe('DELETE /v1/members/{id}', () => {
   });
 });
 
-describe('GET /v1/roles', () => {
+describe('GET /api/v1/roles', () => {
   it('lists each role with its permissions, and the permissions with labels and groups', async () => {
     const res = await roles(as(leader, '/roles'));
     expect(res.status).toBe(200);

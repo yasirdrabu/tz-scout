@@ -127,14 +127,14 @@ tenant's credentials, rate limits, usage caps and call log.
 
 | Method and path | Scope | Does |
 |---|---|---|
-| `POST /v1/accounts/{id}:push` | `crm:push` | Async. Push or re-push now; body `{ "keep_current_owner": true }` for "push anyway". Retrying a failed handoff is the same call. |
-| `GET /v1/accounts/{id}/handoffs` | `accounts:read` | CRM ids and links, handoffs with status and ownership action, follow-through counts, cached deals |
+| `POST /api/v1/accounts/{id}:push` | `crm:push` | Async. Push or re-push now; body `{ "keep_current_owner": true }` for "push anyway". Retrying a failed handoff is the same call. |
+| `GET /api/v1/accounts/{id}/handoffs` | `accounts:read` | CRM ids and links, handoffs with status and ownership action, follow-through counts, cached deals |
 
-Handoff lists, batches and messages are web-app screens (Sent) in R1, not `/v1` endpoints.
+Handoff lists, batches and messages are web-app screens (Sent) in R1, not `/api/v1` endpoints.
 
 Inbound CRM webhooks are optional; polling is the primary path in R1 (D28, see CRM-E6). When an admin
 sets up subscriptions by hand in HubSpot, HubSpot sends every subscription to one URL per connection,
-`POST /v1/inbound/hubspot/{connectionId}`. In R1c the route sits outside `v1Route` (it has no principal) and Integrations
+`POST /api/v1/inbound/hubspot/{connectionId}`. In R1c the route sits outside `v1Route` (it has no principal) and Integrations
 checks it: `connectionTenant(connectionId)` finds the tenant, and the v3 signature is verified against the
 connection's `client_secret` (a second credential kept beside the token, never the connection's own
 credential). It answers 401 when the connection, the secret or the signature is wrong or the timestamp is

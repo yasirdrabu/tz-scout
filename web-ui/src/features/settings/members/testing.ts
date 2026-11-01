@@ -73,9 +73,9 @@ export function countsOf(members: Member[]): MemberCounts {
 export function serve(members: Member[] = MEMBERS, scopes = OWNER, counts: MemberCounts = countsOf(members)) {
   serveMe({ taazaa: { scopes, user: PRIYA } });
   server.use(
-    http.get('/v1/members', () => HttpResponse.json({ data: members, counts })),
-    http.get('/v1/roles', () => HttpResponse.json(ROLES)),
-    http.get('/v1/practices', () => HttpResponse.json({ data: [{ id: 'p1', name: 'Public sector' }, { id: 'p2', name: 'Health' }], next_cursor: null })),
+    http.get('/api/v1/members', () => HttpResponse.json({ data: members, counts })),
+    http.get('/api/v1/roles', () => HttpResponse.json(ROLES)),
+    http.get('/api/v1/practices', () => HttpResponse.json({ data: [{ id: 'p1', name: 'Public sector' }, { id: 'p2', name: 'Health' }], next_cursor: null })),
   );
 }
 

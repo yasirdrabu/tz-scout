@@ -52,7 +52,7 @@ ANL turns `costCents` into automatic cost lines (agent compute). Consumes nothin
 ## API endpoints
 
 None. AI output reaches the API through the owning module's resources (a brief is part of
-`GET /v1/accounts/{id}/brief`).
+`GET /api/v1/accounts/{id}/brief`).
 
 ## MCP tools
 

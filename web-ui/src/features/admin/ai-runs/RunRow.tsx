@@ -17,7 +17,7 @@ type Props = {
   run: Omit<AiRun, 'tenant_name'> & { tenant_name?: string | null };
   expanded: boolean;
   onToggle: () => void;
-  /** A workspace's own runs (Settings > AI runs): no tenant column, and the detail comes from `/v1/ai-runs`. */
+  /** A workspace's own runs (Settings > AI runs): no tenant column, and the detail comes from `/api/v1/ai-runs`. */
   tenant?: string;
 };
 

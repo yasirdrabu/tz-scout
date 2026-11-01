@@ -49,7 +49,7 @@ worth it.
 As an agent, I want to ask for enrichment and say why, so that a person can decide quickly.
 - ENR-E1-S2-AC1 `flag_for_enrichment` creates a `flagged` request and returns its id and status
   "waiting for a person to approve"; it never runs on its own.
-- ENR-E1-S2-AC2 `POST /v1/enrichment-requests/{id}:approve` from an API key or OAuth grant is refused
+- ENR-E1-S2-AC2 `POST /api/v1/enrichment-requests/{id}:approve` from an API key or OAuth grant is refused
   with `403` and the message "Only a person can approve spend."
 
 ### ENR-E1-S3 Approval queue

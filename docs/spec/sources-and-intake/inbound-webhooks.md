@@ -19,7 +19,7 @@ shared-secret form webhook.
 - **In R1 the 15-minute poll (below) is the primary path** (spec's call, D28). Scout does not register
   HubSpot webhook subscriptions; an admin may set them up by hand in HubSpot, or a later public app
   does it.
-- `POST /v1/inbound/hubspot/{connectionId}` receives hand-configured HubSpot webhook subscriptions.
+- `POST /api/v1/inbound/hubspot/{connectionId}` receives hand-configured HubSpot webhook subscriptions.
   Requests are checked with HubSpot's v3 signature against the connection's optional
   `webhook_client_secret` credential, and the timestamp (reject if older than 5 minutes). With no
   secret set, every request is refused with `401`.
@@ -36,7 +36,7 @@ shared-secret form webhook.
 ### Web forms
 
 - Each web form is a source of kind `web_form` with its own token (`scout_form_…`) and an optional
-  allowed-origins list. `POST /v1/inbound/forms/{sourceId}` with header `Scout-Form-Token`.
+  allowed-origins list. `POST /api/v1/inbound/forms/{sourceId}` with header `Scout-Form-Token`.
 - Body: today's form shape is accepted unchanged (`email`, `firstName`, `lastName`, `title`,
   `company`, `phone`, `smsConsent`, `timeline`, `offering`, `answers`), mapped to `arrival.v1`
   (`offering` → `offer_hint`, `timeline` and `answers` → facts of kind `form_answer`). Native

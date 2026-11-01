@@ -48,4 +48,4 @@ As an owner, I want to tune how fit and intent weigh, so that the ranking matche
 
 ### SCO-E5-S4 Manual rescore
 - SCO-E5-S4-AC1 An owner can rescore the whole tenant or a filter (practice, source) from Settings or
-  `POST /v1/rescore` (scope `scoring:manage`); progress is visible.
+  `POST /api/v1/rescore` (scope `scoring:manage`); progress is visible.

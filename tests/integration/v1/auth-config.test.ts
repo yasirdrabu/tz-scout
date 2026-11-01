@@ -11,16 +11,16 @@ vi.mock('@/platform/config', async (orig) => {
   };
 });
 
-const { GET: authConfig } = await import('@/app/v1/auth/config/route');
-const { GET: devUsers } = await import('@/app/v1/dev/users/route');
+const { GET: authConfig } = await import('@/http/routes/v1/auth/config/route');
+const { GET: devUsers } = await import('@/http/routes/v1/dev/users/route');
 const { seedUser } = await import('../tenancy/helpers');
 const { adminDb } = await import('@/platform/db/client');
 const { user } = await import('@/modules/tenancy/db/schema');
 const { eq } = await import('drizzle-orm');
 
-const get = (h: (r: Request) => Promise<Response>, path: string) => h(new Request(`http://localhost:4240/v1${path}`));
+const get = (h: (r: Request) => Promise<Response>, path: string) => h(new Request(`http://localhost:4240/api/v1${path}`));
 
-describe('GET /v1/auth/config', () => {
+describe('GET /api/v1/auth/config', () => {
   it('needs no sign-in and names the sign-in methods and the dev sign-in flag', async () => {
     over.azureAd = undefined;
     over.authDevSignin = false;
@@ -35,7 +35,7 @@ describe('GET /v1/auth/config', () => {
   });
 });
 
-describe('GET /v1/dev/users', () => {
+describe('GET /api/v1/dev/users', () => {
   let active: Awaited<ReturnType<typeof seedUser>>;
   let off: Awaited<ReturnType<typeof seedUser>>;
   beforeAll(async () => {

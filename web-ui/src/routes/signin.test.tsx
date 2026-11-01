@@ -8,7 +8,7 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-const devOn = () => http.get('/v1/auth/config', () => HttpResponse.json({ methods: ['microsoft'], dev_sign_in: true }));
+const devOn = () => http.get('/api/v1/auth/config', () => HttpResponse.json({ methods: ['microsoft'], dev_sign_in: true }));
 
 describe('sign-in', () => {
   it('offers Microsoft sign-in', async () => {
@@ -29,8 +29,8 @@ describe('sign-in', () => {
 
   it('offers only the methods the API reports', async () => {
     server.use(
-      http.get('/v1/auth/config', () => HttpResponse.json({ methods: [], dev_sign_in: false })),
-      http.get('/v1/dev/users', () => HttpResponse.json([{ id: 'u1', email: 'dana@taazaa.com', name: 'Dana Whitfield', platform_admin: false }])),
+      http.get('/api/v1/auth/config', () => HttpResponse.json({ methods: [], dev_sign_in: false })),
+      http.get('/api/v1/dev/users', () => HttpResponse.json([{ id: 'u1', email: 'dana@taazaa.com', name: 'Dana Whitfield', platform_admin: false }])),
     );
     renderApp('/signin');
     expect(await screen.findByRole('heading', { name: 'Sign in to Scout' })).toBeInTheDocument();
@@ -39,7 +39,7 @@ describe('sign-in', () => {
   });
 
   it('offers Microsoft when the sign-in config does not load', async () => {
-    server.use(http.get('/v1/auth/config', () => new HttpResponse(null, { status: 500 })));
+    server.use(http.get('/api/v1/auth/config', () => new HttpResponse(null, { status: 500 })));
     renderApp('/signin');
     expect(await screen.findByRole('button', { name: 'Continue with Microsoft' })).toBeInTheDocument();
   });
@@ -47,7 +47,7 @@ describe('sign-in', () => {
   it('lists dev users when the API reports dev sign-in on', async () => {
     server.use(
       devOn(),
-      http.get('/v1/dev/users', () => HttpResponse.json([{ id: 'u1', email: 'dana@taazaa.com', name: 'Dana Whitfield', platform_admin: true }])),
+      http.get('/api/v1/dev/users', () => HttpResponse.json([{ id: 'u1', email: 'dana@taazaa.com', name: 'Dana Whitfield', platform_admin: true }])),
     );
     renderApp('/signin');
     expect(await screen.findByRole('heading', { name: 'Sign in as' })).toBeInTheDocument();
@@ -73,7 +73,7 @@ describe('sign-in', () => {
   it('signs in as a dev user and goes back to the return path', async () => {
     server.use(
       devOn(),
-      http.get('/v1/dev/users', () =>
+      http.get('/api/v1/dev/users', () =>
         HttpResponse.json([{ id: 'u1', email: 'dana@taazaa.com', name: 'Dana Whitfield', platform_admin: false }]),
       ),
     );
@@ -95,7 +95,7 @@ describe('sign-in', () => {
   it('shows the API detail when dev sign-in is refused', async () => {
     server.use(
       devOn(),
-      http.get('/v1/dev/users', () => HttpResponse.json([{ id: 'u9', email: 'gone@taazaa.com', name: 'Gone', platform_admin: false }])),
+      http.get('/api/v1/dev/users', () => HttpResponse.json([{ id: 'u9', email: 'gone@taazaa.com', name: 'Gone', platform_admin: false }])),
       http.post('/api/dev/sign-in', () =>
         HttpResponse.json(
           { type: 'https://scout.taazaa.ai/problems/forbidden', title: "Your account isn't set up in Scout yet.", status: 403 },

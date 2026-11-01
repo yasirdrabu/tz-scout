@@ -141,5 +141,5 @@ overruled, so that it sends better accounts next time.
 - SRC-E1-S4-AC1 On a conflict lost, a review decline or a seller decline, a `source_feedback` row is
   written for every source in the arrival's chain, with the reason and any note, and
   `intake.feedback.recorded` is published.
-- SRC-E1-S4-AC2 `GET /v1/feedback` and `list_my_submissions` return feedback for the principal's
+- SRC-E1-S4-AC2 `GET /api/v1/feedback` and `list_my_submissions` return feedback for the principal's
   source only.

@@ -1,13 +1,13 @@
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import '@/entry/compose';
-import { POST as accountAction } from '@/app/v1/accounts/[id]/route';
-import { GET as getHandoffs } from '@/app/v1/accounts/[id]/handoffs/route';
-import { GET as listBatches } from '@/app/v1/handoff-batches/route';
-import { GET as getBatch } from '@/app/v1/handoff-batches/[id]/route';
-import { POST as messageAction } from '@/app/v1/handoff-messages/[id]/route';
-import { GET as crmGet, POST as crmPost } from '@/app/v1/crm/[resource]/route';
-import { GET as getSettings, PUT as putSettings } from '@/app/v1/settings/crm/route';
+import { POST as accountAction } from '@/http/routes/v1/accounts/[id]/route';
+import { GET as getHandoffs } from '@/http/routes/v1/accounts/[id]/handoffs/route';
+import { GET as listBatches } from '@/http/routes/v1/handoff-batches/route';
+import { GET as getBatch } from '@/http/routes/v1/handoff-batches/[id]/route';
+import { POST as messageAction } from '@/http/routes/v1/handoff-messages/[id]/route';
+import { GET as crmGet, POST as crmPost } from '@/http/routes/v1/crm/[resource]/route';
+import { GET as getSettings, PUT as putSettings } from '@/http/routes/v1/settings/crm/route';
 import { seedMockCrm } from '@/modules/crm';
 import { handoff } from '@/modules/crm/db/schema';
 import { membership } from '@/modules/tenancy/db/schema';
@@ -39,7 +39,7 @@ async function signIn(userId: string): Promise<string> {
 
 const as = (who: Who, handler: (r: Request) => Promise<Response>, path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}) =>
   handler(
-    new Request(`http://localhost:4240/v1/${path}`, {
+    new Request(`http://localhost:4240/api/v1/${path}`, {
       method,
       headers: { cookie: cookies[who], 'x-scout-tenant': slug, origin: 'http://localhost:4240', 'content-type': 'application/json', ...headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -74,7 +74,7 @@ afterAll(closeDbs);
 const keyIn = async (scopes: Permission[]) => (await run((ctx) => createApiKey(ctx, { name: 'k', environment: 'live', scopes, dataLimit: { kind: 'all' } }, SYSTEM_GRANTOR))).secret;
 const viaKey = (key: string, handler: (r: Request) => Promise<Response>, path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}) =>
   handler(
-    new Request(`http://x/v1/${path}`, {
+    new Request(`http://x/api/v1/${path}`, {
       method,
       headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', ...headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),

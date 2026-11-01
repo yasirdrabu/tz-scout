@@ -83,7 +83,7 @@ const importAdminDb = 'import { adminDb } from "@/platform/db/client";\nexport c
 
 test("adminDb may not be imported outside the allowed files", async () => {
   for (const file of [
-    "src/app/v1/members/route.ts",
+    "src/http/routes/v1/members/route.ts",
     "src/modules/ai-tasks/runner.ts",
     "src/modules/integrations/gateway.ts",
     "src/modules/tenancy/domain/permissions.ts",
@@ -109,7 +109,7 @@ test("adminDb may be imported by the platform, tenancy services, auth, the clean
 
 test("other exports of the db client stay importable everywhere", async () => {
   const code = 'import { appDb } from "@/platform/db/client";\nexport const d = appDb;\n';
-  expect(await adminDbErrors("src/app/x.ts", code)).toHaveLength(0);
+  expect(await adminDbErrors("src/http/x.ts", code)).toHaveLength(0);
 });
 
 test("the adminDb rule does not switch off the provider SDK rule in allowed files", async () => {

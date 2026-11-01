@@ -30,13 +30,13 @@ describe('one path (SRC-E3-S1-AC1)', () => {
     const [single, batchSender, file, targeted] = sources;
     const company = { name: 'One Path Co', domain, employees: 2400 };
 
-    // 1. A single /v1 arrival.
+    // 1. A single /api/v1 arrival.
     const first = await asSource(t, single, (ctx) =>
       submitArrival(ctx, { account: company, people: [jane] }, { channel: 'api', canDeclareWarmIntro: false }),
     );
     await runOutbox(t.tenantId);
 
-    // 2. A /v1 batch item.
+    // 2. A /api/v1 batch item.
     await asSource(t, batchSender, (ctx) =>
       submitBatch(ctx, { name: 'One path batch', items: [{ external_ref: 'row-1', account: company, people: [jane] }] }, { channel: 'api' }),
     );
@@ -76,7 +76,7 @@ describe('one path (SRC-E3-S1-AC1)', () => {
     expect(r.facts.filter((f) => f.key === 'employees').map((f) => f.value)).toEqual([2400]);
   }, 60_000);
 
-  it('the Miami-Dade example from the spec is accepted as a strict /v1 arrival', async () => {
+  it('the Miami-Dade example from the spec is accepted as a strict /api/v1 arrival', async () => {
     const body = JSON.parse(fixture('miami-dade-arrival.json').toString());
     const source = await t.run(async (ctx) => (await registerSource(ctx, { kind: 'person', name: 'Miami sender' })).id);
     const r = await asSource(t, source, (ctx) => submitArrival(ctx, body, { channel: 'api' }));

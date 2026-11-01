@@ -75,4 +75,4 @@ As an operator, I want a clear result for every row, so that I know what came in
   for a website (with a box per company to type it), skipped rows with row number and reason.
 - SRC-E4-S4-AC2 The same counts are on the batch; `intake.batch.completed` fires when the waiting
   companies are resolved, or when the person chooses "Skip the rest", which rejects them `invalid`.
-- SRC-E4-S4-AC3 `POST /v1/imports` and `:confirm` give agents the same flow over the API.
+- SRC-E4-S4-AC3 `POST /api/v1/imports` and `:confirm` give agents the same flow over the API.

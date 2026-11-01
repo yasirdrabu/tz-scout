@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { POST as postSource } from '@/app/v1/sources/route';
+import { POST as postSource } from '@/http/routes/v1/sources/route';
 import { personSourceFor } from '@/modules/intake';
 import { addMember } from '@/modules/tenancy';
 import { closeDbs } from '@/platform/db/client';
@@ -15,7 +15,7 @@ beforeAll(async () => {
 });
 afterAll(closeDbs);
 
-describe('POST /v1/sources with user_id (SRC-E1-S1-AC2)', () => {
+describe('POST /api/v1/sources with user_id (SRC-E1-S1-AC2)', () => {
   it('links a person source to a member', async () => {
     const seller = await seedUser();
     await t.run((ctx) => addMember(ctx, { email: seller.email, role: 'seller' }));

@@ -41,7 +41,7 @@ test('Integrations: save a HubSpot credential and test it on the mock', async ({
   await panel.getByRole('button', { name: 'Save and test' }).click();
   await expect(panel.getByText('Saved. Ends in 1234.')).toBeVisible();
 
-  const tested = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith('/v1/integrations/hubspot:test'));
+  const tested = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith('/api/v1/integrations/hubspot:test'));
   await panel.getByRole('button', { name: 'Test connection' }).click();
   expect((await tested).status()).toBe(200);
   await expect(panel.getByRole('region', { name: 'Connection test' }).locator('p').first()).not.toBeEmpty();
@@ -59,7 +59,7 @@ test('API keys: the key shows once, works, and stops working once revoked', asyn
   await expect(created.getByText("Copy this now. You won't see it again.")).toBeVisible();
   const secret = (await created.getByLabel('New API key').textContent())!.trim();
   expect(secret.length).toBeGreaterThan(20);
-  const me = () => request.get('/v1/me', { headers: { authorization: `Bearer ${secret}` } });
+  const me = () => request.get('/api/v1/me', { headers: { authorization: `Bearer ${secret}` } });
   expect((await me()).status()).toBe(200);
 
   await created.getByRole('button', { name: 'Done' }).click();

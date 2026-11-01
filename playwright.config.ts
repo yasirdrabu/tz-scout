@@ -7,7 +7,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  // next dev compiles each route on first visit, which can take well over 30 seconds on a cold CI runner.
+  // The Vite dev server compiles each module on first visit, which can be slow on a cold CI runner.
   timeout: 90_000,
   expect: { timeout: 15_000 },
   reporter: [['list']],
@@ -17,11 +17,11 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      command: `npx next dev -p ${E2E_PORT}`,
+      command: 'npx tsx src/entry/cli.ts web',
       url: `http://localhost:${E2E_PORT}/healthz`,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: e2eEnv,
+      env: { ...e2eEnv, PORT: String(E2E_PORT) },
     },
     {
       command: `npm --prefix web-ui run dev -- --port ${E2E_APP_PORT}`,

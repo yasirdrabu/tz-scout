@@ -19,7 +19,7 @@ on the staging VM; dead jobs show in Admin; restoring a nightly backup works.
 
 R0 exit status (updated 2026-10-26):
 
-- [x] Tenant, users and an API key exist on a laptop; `/v1/me` returns the tenant (2026-10-26).
+- [x] Tenant, users and an API key exist on a laptop; `/api/v1/me` returns the tenant (2026-10-26).
 - [x] Test event round trip outbox → NATS → worker on the laptop through the same function the System page calls (the page click itself is covered by the admin browser test), about 140 ms (2026-10-26).
 - [x] A forced dead job shows in the dead jobs list (`listDeadJobs`; the System page itself is covered by the admin browser test) on the laptop (2026-10-26).
 - [x] Typecheck, lint, unit and integration tests, and end to end tests pass (2026-10-26).
@@ -42,17 +42,17 @@ R0 exit status (updated 2026-10-26):
 | Review and routing (stages) | Implied acceptance from CRM activity; stages engaged, opportunity, won and lost recorded from R1, so funnel history exists before Analytics ships in R3 |
 | Enrichment | Apollo and Vibe saved searches and scheduled pulls with credit estimates and caps, results recorded through SRC arrivals (ENR-E2, E3 caps, E4; D33, D34). Migrated v1 pulls start paused until the provider's key is entered. Person-requested enrichment with approval stays R2; Vibe exports can still be imported as files |
 | Playbooks (minimum) | `HandoffPackageProvider` assembling the note content, opener and follow-up sequence for the push; the account page **review view** in layout A (header, score strip, why now, account facts, people, Approve and assign) without the conflicts box and the Enrich button (spec's call, D27). Plans, the full page and the playbook section follow in R2 |
-| Public API and MCP | `/v1` for arrivals, batches, status; hosted and local MCP with the intake and status tools |
+| Public API and MCP | `/api/v1` for arrivals, batches, status; hosted and local MCP with the intake and status tools |
 | Migration | MIG-E1 (R1 modules migrated; later-release rows parked in `legacy_v1`, seed data skipped, D26), then cutover (below) |
 
-Exit: an agent sends an account through MCP, or a batch through `/v1`, or a CSV is imported; it is
+Exit: an agent sends an account through MCP, or a batch through `/api/v1`, or a CSV is imported; it is
 de-duplicated, scored and matched; a leader reviews and assigns it; it lands in HubSpot within seconds
 with note and tasks; the agent sees its status. A reply or meeting the rep logs in HubSpot moves the
 account to Engaged within 15 minutes, and a new deal moves it to Opportunity within an hour. A
 scheduled Apollo pull runs and its accounts reach the review queue. v1 data migrated and verified. The
 team works in Scout.
 
-R1a status (Accounts and intake, updated 2026-10-27). The `/v1` API only; screens come from the front end.
+R1a status (Accounts and intake, updated 2026-10-27). The `/api/v1` API only; screens come from the front end.
 
 - [x] Offers and practices, Accounts and Sources and intake modules with their schemas, events and jobs.
 - [x] One intake path: single arrivals, batches (with item-level `external_ref` and `notes`), CSV, Excel and Markdown imports with automatic column mapping, the resolve pipeline with duplicate checks and waiting arrivals, and inline targeted arrivals.
@@ -62,7 +62,7 @@ R1a status (Accounts and intake, updated 2026-10-27). The `/v1` API only; screen
 - [x] One-path test: the same company from a single arrival, a batch item, a CSV row and an inline arrival is one account with four sources.
 - [ ] CI `images` job builds and its migrate step creates the `offers`, `accounts` and `intake` tables. Pending: needs a push.
 
-R1b status (Scoring and review, updated 2026-10-27). The `/v1` API only; screens come from the front end.
+R1b status (Scoring and review, updated 2026-10-27). The `/api/v1` API only; screens come from the front end.
 
 - [x] Scoring: profile, fit and intent, priority, tiers, best offer, explanations, score history, signal rules, rescore jobs and the nightly ageing job (new score cause `ageing`).
 - [x] Review and routing: review statuses and decline reasons with their validation, the review queue, insights, status changes, assignments with the ownership preflight, accept, decline and withdraw, auto-acceptance, stage tracking and account status for agents.
@@ -70,10 +70,10 @@ R1b status (Scoring and review, updated 2026-10-27). The `/v1` API only; screens
 - [x] Backfill and seed: `scout backfill-r1b <tenant-slug>` adds the scoring and routing defaults and schedules, default signal rules for each offer that has none, a review row and snapshot for each account with a resolved arrival and no review, and a rescore; seed runs it for its tenants.
 - [x] Limit: the review queue's batch filter takes batches of up to 1,000 accounts; a larger batch answers 400 and the queue is filtered another way (by source, for example).
 - [x] R1b exit test: send, score, queue as Unvetted, approve and assign, accept, status as assigned with the owner's name, stage history arrived, reviewed, assigned.
-- [ ] Rescore progress (SCO-E5-S4-AC1 "progress is visible") moved to R2 with the weights screen. In R1b `POST /v1/rescore` returns 202 with a job id.
+- [ ] Rescore progress (SCO-E5-S4-AC1 "progress is visible") moved to R2 with the weights screen. In R1b `POST /api/v1/rescore` returns 202 with a job id.
 - [ ] CI `images` job's migrate step creates the `scoring` and `routing` tables. Pending: needs a push.
 
-R1c status (CRM sync, updated 2026-10-30). The `/v1` API only; screens come from the front end.
+R1c status (CRM sync, updated 2026-10-30). The `/api/v1` API only; screens come from the front end.
 
 - [x] CRM module and schema: adapter contract, the HubSpot mock (Postgres-backed, with failure injection) and the live connector, links, the owner roster, the CRM check before review, field mapping with "Set up HubSpot fields".
 - [x] Handoff push with the ownership preflight (a port that CRM implements), retries (6 attempts in 7 deliveries), undo on decline or withdrawal (including a decline during the push), re-push, batches and per-seller messages.

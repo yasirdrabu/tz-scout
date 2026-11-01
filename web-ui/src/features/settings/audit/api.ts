@@ -1,7 +1,7 @@
 import { infiniteQueryOptions } from '@tanstack/react-query';
 import { apiFetch } from '../../../api/client';
 
-// The audit log (src/app/v1/audit): newest first, cursor paged.
+// The audit log (src/http/routes/v1/audit): newest first, cursor paged.
 
 export type AuditEntry = {
   id: string;

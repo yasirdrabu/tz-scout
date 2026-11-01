@@ -39,14 +39,14 @@ export type ReqOpts = {
   headers?: Record<string, string>;
 };
 
-/** A request to `/v1{path}`. Writes carry our Origin, so the CSRF check passes. */
+/** A request to `/api/v1{path}`. Writes carry our Origin, so the CSRF check passes. */
 export function v1Req(path: string, opts: ReqOpts = {}): Request {
   const h = new Headers(opts.cookies);
   if (opts.tenant) h.set('x-scout-tenant', opts.tenant);
   if (opts.method && opts.method !== 'GET') h.set('origin', ORIGIN);
   if (opts.body !== undefined) h.set('content-type', 'application/json');
   for (const [k, v] of Object.entries(opts.headers ?? {})) h.set(k, v);
-  return new Request(`${ORIGIN}/v1${path}`, {
+  return new Request(`${ORIGIN}/api/v1${path}`, {
     method: opts.method ?? 'GET',
     headers: h,
     ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),

@@ -87,7 +87,7 @@ describe('Members tab', () => {
 
   it('shows the loading line while members load', async () => {
     serve();
-    server.use(http.get('/v1/members', async () => {
+    server.use(http.get('/api/v1/members', async () => {
       await delay('infinite');
       return HttpResponse.json({ data: [], counts: countsOf([]) });
     }));
@@ -97,7 +97,7 @@ describe('Members tab', () => {
 
   it('says what failed, with Try again and the error ref', async () => {
     serve();
-    server.use(http.get('/v1/members', () => problem(500, 'Something went wrong', { detail: 'The database is down.', ref: 'cor_m1' })));
+    server.use(http.get('/api/v1/members', () => problem(500, 'Something went wrong', { detail: 'The database is down.', ref: 'cor_m1' })));
     renderApp('/t/taazaa/settings/members');
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Members didn't load");
@@ -147,7 +147,7 @@ describe('member drawer', () => {
   it('changes the role and says when it applies', async () => {
     serve();
     let body: unknown;
-    server.use(http.patch('/v1/members/mbr_dana', async ({ request }) => {
+    server.use(http.patch('/api/v1/members/mbr_dana', async ({ request }) => {
       body = await request.json();
       return HttpResponse.json(MEMBERS[1]);
     }));
@@ -159,7 +159,7 @@ describe('member drawer', () => {
 
   it('shows the API words when the role change fails', async () => {
     serve();
-    server.use(http.patch('/v1/members/mbr_dana', fail));
+    server.use(http.patch('/api/v1/members/mbr_dana', fail));
     const drawer = await openMember('Dana Whitfield');
     await userEvent.selectOptions(within(drawer).getByRole('combobox', { name: 'Role' }), 'operator');
     expect(await screen.findByText('The API refused this change.')).toBeInTheDocument();
@@ -212,7 +212,7 @@ describe('member drawer', () => {
   it('saves practice access', async () => {
     serve();
     let body: unknown;
-    server.use(http.patch('/v1/members/mbr_ash', async ({ request }) => {
+    server.use(http.patch('/api/v1/members/mbr_ash', async ({ request }) => {
       body = await request.json();
       return HttpResponse.json(MEMBERS[0]);
     }));
@@ -228,7 +228,7 @@ describe('member drawer', () => {
   it('saves the HubSpot user, and shows the failure', async () => {
     serve();
     let body: unknown;
-    server.use(http.patch('/v1/members/mbr_ash', async ({ request }) => {
+    server.use(http.patch('/api/v1/members/mbr_ash', async ({ request }) => {
       body = await request.json();
       return HttpResponse.json(MEMBERS[0]);
     }));
@@ -238,38 +238,38 @@ describe('member drawer', () => {
     expect(await screen.findByText('HubSpot user saved for Ash Patel.')).toBeInTheDocument();
     expect(body).toEqual({ crm_owner_ids: { hubspot: '9001' } });
 
-    server.use(http.patch('/v1/members/mbr_ash', fail));
+    server.use(http.patch('/api/v1/members/mbr_ash', fail));
     await userEvent.click(within(drawer).getByRole('button', { name: 'Save HubSpot user' }));
     expect(await screen.findByText('The API refused this change.')).toBeInTheDocument();
   });
 
   it('suspends, and shows the failure', async () => {
     serve();
-    server.use(http.post(exactly('/v1/members/mbr_dana:suspend'), () => HttpResponse.json({ ...MEMBERS[1], status: 'suspended' })));
+    server.use(http.post(exactly('/api/v1/members/mbr_dana:suspend'), () => HttpResponse.json({ ...MEMBERS[1], status: 'suspended' })));
     const drawer = await openMember('Dana Whitfield');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Suspend' }));
     expect(await screen.findByText("Dana Whitfield suspended. They can't use this workspace until you reactivate them.")).toBeInTheDocument();
 
-    server.use(http.post(exactly('/v1/members/mbr_dana:suspend'), fail));
+    server.use(http.post(exactly('/api/v1/members/mbr_dana:suspend'), fail));
     await userEvent.click(within(drawer).getByRole('button', { name: 'Suspend' }));
     expect(await screen.findByText('The API refused this change.')).toBeInTheDocument();
   });
 
   it('reactivates, and shows the failure', async () => {
     serve();
-    server.use(http.post(exactly('/v1/members/mbr_lena:reactivate'), () => HttpResponse.json(MEMBERS[2])));
+    server.use(http.post(exactly('/api/v1/members/mbr_lena:reactivate'), () => HttpResponse.json(MEMBERS[2])));
     const drawer = await openMember('Lena Brooks');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Reactivate' }));
     expect(await screen.findByText('Lena Brooks reactivated.')).toBeInTheDocument();
 
-    server.use(http.post(exactly('/v1/members/mbr_lena:reactivate'), fail));
+    server.use(http.post(exactly('/api/v1/members/mbr_lena:reactivate'), fail));
     await userEvent.click(within(drawer).getByRole('button', { name: 'Reactivate' }));
     expect(await screen.findByText('The API refused this change.')).toBeInTheDocument();
   });
 
   it('removes after the confirm, and shows the failure', async () => {
     serve();
-    server.use(http.delete('/v1/members/mbr_ash', fail));
+    server.use(http.delete('/api/v1/members/mbr_ash', fail));
     const drawer = await openMember('Ash Patel');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Remove from workspace' }));
     const confirm = await screen.findByRole('dialog', { name: 'Remove Ash Patel?' });
@@ -279,7 +279,7 @@ describe('member drawer', () => {
     await userEvent.click(within(confirm).getByRole('button', { name: 'Remove' }));
     expect(await screen.findByText('The API refused this change.')).toBeInTheDocument();
 
-    server.use(http.delete('/v1/members/mbr_ash', () => new HttpResponse(null, { status: 204 })));
+    server.use(http.delete('/api/v1/members/mbr_ash', () => new HttpResponse(null, { status: 204 })));
     await userEvent.click(within(confirm).getByRole('button', { name: 'Remove' }));
     expect(await screen.findByText('Ash Patel removed from the workspace.')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -287,7 +287,7 @@ describe('member drawer', () => {
 
   it('signs a member out everywhere after the confirm, and shows the failure', async () => {
     serve();
-    server.use(http.post(exactly('/v1/members/mbr_dana:sign-out-everywhere'), fail));
+    server.use(http.post(exactly('/api/v1/members/mbr_dana:sign-out-everywhere'), fail));
     const drawer = await openMember('Dana Whitfield');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Sign out of every device' }));
     const confirm = await screen.findByRole('dialog', { name: 'Sign Dana Whitfield out everywhere?' });
@@ -295,7 +295,7 @@ describe('member drawer', () => {
     await userEvent.click(within(confirm).getByRole('button', { name: 'Sign out everywhere' }));
     expect(await screen.findByText('The API refused this change.')).toBeInTheDocument();
 
-    server.use(http.post(exactly('/v1/members/mbr_dana:sign-out-everywhere'), () => new HttpResponse(null, { status: 204 })));
+    server.use(http.post(exactly('/api/v1/members/mbr_dana:sign-out-everywhere'), () => new HttpResponse(null, { status: 204 })));
     await userEvent.click(within(confirm).getByRole('button', { name: 'Sign out everywhere' }));
     expect(await screen.findByText('Dana Whitfield is signed out of every device.')).toBeInTheDocument();
   });
@@ -303,7 +303,7 @@ describe('member drawer', () => {
   it('copies the sign-in link and revokes an invite', async () => {
     const user = userEvent.setup();
     serve();
-    server.use(http.delete('/v1/members/mbr_ravi', () => new HttpResponse(null, { status: 204 })));
+    server.use(http.delete('/api/v1/members/mbr_ravi', () => new HttpResponse(null, { status: 204 })));
     const drawer = await openMember('ravi.menon@taazaa.com', user);
     await user.click(within(drawer).getByRole('button', { name: 'Copy sign-in link' }));
     expect(await screen.findByText('Sign-in link copied.')).toBeInTheDocument();
@@ -324,7 +324,7 @@ describe('member drawer', () => {
 describe('revoke invite', () => {
   it('shows the API words when revoking fails', async () => {
     serve();
-    server.use(http.delete('/v1/members/mbr_ravi', fail));
+    server.use(http.delete('/api/v1/members/mbr_ravi', fail));
     const drawer = await openMember('ravi.menon@taazaa.com');
     await userEvent.click(within(drawer).getByRole('button', { name: 'Revoke invite' }));
     expect(await screen.findByText('The API refused this change.')).toBeInTheDocument();

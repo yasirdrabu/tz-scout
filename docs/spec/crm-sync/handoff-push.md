@@ -111,7 +111,7 @@ outside the CRM.
 
 ### CRM-E3-S6 Re-push and push anyway
 As a leader, I want to push again after new facts or a reassignment, so that the CRM stays current.
-- CRM-E3-S6-AC1 `POST /v1/accounts/{id}:push` (202) and the account page's "Push again" create a new
+- CRM-E3-S6-AC1 `POST /api/v1/accounts/{id}:push` (202) and the account page's "Push again" create a new
   handoff that updates the same company, note and tasks. The same call retries a failed handoff. The push uses the latest handoff's assignment and seller; when there is none, or that assignment was declined or withdrawn, it answers 409 "Assign it before pushing."
 - CRM-E3-S6-AC2 "Push and keep their owner" pushes the context without changing the owner and records
   `ownership_action = keep`.

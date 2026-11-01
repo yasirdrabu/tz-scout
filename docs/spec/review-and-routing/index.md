@@ -90,17 +90,17 @@ JSON field names are snake_case.
 
 | Method and path | Scope | Does |
 |---|---|---|
-| `GET /v1/review-queue?status&practice_id&offer_id&source_id&tier&flag&cursor` | `review:act` | The queue, data-scoped |
-| `PATCH /v1/accounts/{id}/review-status` | `review:act` | Change review status with note or reason (send back, decline, reopen) |
-| `PUT /v1/accounts/{id}/insights` | `review:act` | Leader insights |
-| `POST /v1/accounts/{id}:assign` | `assign:act` | Create an assignment; 202 |
-| `POST /v1/assignments/{id}:accept` | `assignments:respond` | Seller accepts own assignment (checked by ownership of the assignment, not account visibility; another seller gets 404) |
-| `POST /v1/assignments/{id}:decline` | `assignments:respond` | Seller declines own assignment, pending or already accepted; reason key required. The stage returns to `reviewed` |
-| `POST /v1/assignments/{id}:withdraw` | `assign:act` | Withdraw or reassign. Only the person who assigned it or an owner-role member may; anyone who can assign can still end it by assigning the account to someone else |
-| `POST /v1/accounts/{id}:seen` | `assignments:respond` | The assigned seller clears "New from" |
-| `GET /v1/accounts/{id}/status` | `status:read` | Stage, review status, owner name, last activity date (the agent follow-up call); also `declined_note` and `send_back_note`. An `arr_` id may stand in for the account id |
-| `GET /v1/review-queue/count`, `POST /v1/review-queue/bulk` | `review:act` | Count for the same filters; bulk status or assign for at most 50 accounts |
-| `GET /v1/settings/review`, `PUT /v1/settings/review` | `settings:manage` | Statuses, initial status rules, decline reasons |
+| `GET /api/v1/review-queue?status&practice_id&offer_id&source_id&tier&flag&cursor` | `review:act` | The queue, data-scoped |
+| `PATCH /api/v1/accounts/{id}/review-status` | `review:act` | Change review status with note or reason (send back, decline, reopen) |
+| `PUT /api/v1/accounts/{id}/insights` | `review:act` | Leader insights |
+| `POST /api/v1/accounts/{id}:assign` | `assign:act` | Create an assignment; 202 |
+| `POST /api/v1/assignments/{id}:accept` | `assignments:respond` | Seller accepts own assignment (checked by ownership of the assignment, not account visibility; another seller gets 404) |
+| `POST /api/v1/assignments/{id}:decline` | `assignments:respond` | Seller declines own assignment, pending or already accepted; reason key required. The stage returns to `reviewed` |
+| `POST /api/v1/assignments/{id}:withdraw` | `assign:act` | Withdraw or reassign. Only the person who assigned it or an owner-role member may; anyone who can assign can still end it by assigning the account to someone else |
+| `POST /api/v1/accounts/{id}:seen` | `assignments:respond` | The assigned seller clears "New from" |
+| `GET /api/v1/accounts/{id}/status` | `status:read` | Stage, review status, owner name, last activity date (the agent follow-up call); also `declined_note` and `send_back_note`. An `arr_` id may stand in for the account id |
+| `GET /api/v1/review-queue/count`, `POST /api/v1/review-queue/bulk` | `review:act` | Count for the same filters; bulk status or assign for at most 50 accounts |
+| `GET /api/v1/settings/review`, `PUT /api/v1/settings/review` | `settings:manage` | Statuses, initial status rules, decline reasons |
 
 ## MCP tools
 

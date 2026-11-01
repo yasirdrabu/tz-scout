@@ -9,6 +9,16 @@ with no hand-made servers.
 - Entry command selects the role: `web`, `worker`, `scheduler`, `relay`, `migrate`,
   `all-background`.
 - Config only from environment variables; `.env.example` lists every one.
+- The `web` role is one Node HTTP server (Hono, spec web-ui W4) on `PORT` (4240), bound to
+  `SCOUT_BIND_HOST` (default `0.0.0.0`). It serves everything on one origin (W2): the built web-ui app
+  at `/` from `WEB_UI_DIST` (the image sets `/app/web-ui/dist`), with `index.html` (`no-cache`) for
+  every other GET or HEAD outside the API and hashed `/assets/*` cached for a year; the API at
+  `/api/v1`; sign-in at `/api/auth`; health at `/healthz` and `/readyz`. Unknown `/api/*` paths get the
+  API's problem+json 404.
+- On SIGTERM or SIGINT the web role stops accepting connections, lets in-flight requests finish (up
+  to 10 seconds), closes its database pools and NATS connection and exits 0.
+- The CI smoke test runs the image's `web` role and checks `/`, a deep link, a hashed asset,
+  `/healthz`, `/readyz` and `GET /api/v1/me` (401 problem+json).
 
 ## Laptop
 

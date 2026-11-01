@@ -72,7 +72,7 @@ describe('.env.example', () => {
 });
 
 describe('SCOUT_ENV', () => {
-  it('lets a production NODE_ENV run as development (Next standalone forces NODE_ENV=production)', () => {
+  it('lets a production NODE_ENV run as development (the image sets NODE_ENV=production)', () => {
     const c = loadConfig({ NODE_ENV: 'production', SCOUT_ENV: 'development', AUTH_DEV_SIGNIN: 'true' });
     expect(c.isProduction).toBe(false);
     expect(c.authDevSignin).toBe(true);

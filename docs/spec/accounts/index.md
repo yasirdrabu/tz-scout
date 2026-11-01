@@ -106,16 +106,16 @@ As fixed in [public-api/index.md](../public-api/index.md):
 
 | Method and path | Scope | Notes |
 |---|---|---|
-| `GET /v1/accounts?q=&domain=&tier=&practice_id=&offer_id=&stage=&source_id=&cursor=` | `accounts:read` | Search (ACC-E8), within data limit |
-| `GET /v1/accounts/{id}` | `accounts:read` | Current values, signals, aliases, exclusion, scores summary, stage |
-| `PATCH /v1/accounts/{id}` | `accounts:write` | Field edits become pinned facts with the caller as source |
-| `GET /v1/accounts/{id}/people` | `accounts:read` | Contact fields (email, phone) need `people:read` |
-| `POST /v1/accounts/{id}/people` | `people:write` | Inline targeted arrival through SRC; returns `person_id` |
-| `PATCH /v1/people/{id}` | `people:write` | Roles, title, contact fields, decision note |
-| `POST /v1/accounts/{id}/signals` | `signals:write` | Inline targeted arrival through SRC; returns `signal_id` |
-| `GET /v1/accounts/{id}/facts?field=` | `accounts:read` | All values with provenance |
-| `GET /v1/accounts/{id}/conflicts` | `accounts:read` | |
-| `POST /v1/conflicts/{id}:resolve` | `review:act` (people only) | `kept_fact_id`, `note` |
+| `GET /api/v1/accounts?q=&domain=&tier=&practice_id=&offer_id=&stage=&source_id=&cursor=` | `accounts:read` | Search (ACC-E8), within data limit |
+| `GET /api/v1/accounts/{id}` | `accounts:read` | Current values, signals, aliases, exclusion, scores summary, stage |
+| `PATCH /api/v1/accounts/{id}` | `accounts:write` | Field edits become pinned facts with the caller as source |
+| `GET /api/v1/accounts/{id}/people` | `accounts:read` | Contact fields (email, phone) need `people:read` |
+| `POST /api/v1/accounts/{id}/people` | `people:write` | Inline targeted arrival through SRC; returns `person_id` |
+| `PATCH /api/v1/people/{id}` | `people:write` | Roles, title, contact fields, decision note |
+| `POST /api/v1/accounts/{id}/signals` | `signals:write` | Inline targeted arrival through SRC; returns `signal_id` |
+| `GET /api/v1/accounts/{id}/facts?field=` | `accounts:read` | All values with provenance |
+| `GET /api/v1/accounts/{id}/conflicts` | `accounts:read` | |
+| `POST /api/v1/conflicts/{id}:resolve` | `review:act` (people only) | `kept_fact_id`, `note` |
 
 Committee coverage reaches agents through `get_account_brief` (PLB) and is not a separate endpoint.
 Merging is web-app only.

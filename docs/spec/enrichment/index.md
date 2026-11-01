@@ -62,10 +62,10 @@ As fixed in [public-api/index.md](../public-api/index.md):
 
 | Method and path | Scope | Notes |
 |---|---|---|
-| `POST /v1/accounts/{id}/enrichment-requests` | `enrichment:request` | Always creates a `flagged` request from a key; a person approves |
-| `GET /v1/enrichment-requests?status=&cursor=` | `enrichment:request` | Within data limits; each item has status, estimate and result |
-| `POST /v1/enrichment-requests/{id}:approve` | `enrichment:approve` (people only) | Async; starts the run |
-| `POST /v1/enrichment-requests/{id}:decline` | `enrichment:approve` (people only) | `reason` required |
+| `POST /api/v1/accounts/{id}/enrichment-requests` | `enrichment:request` | Always creates a `flagged` request from a key; a person approves |
+| `GET /api/v1/enrichment-requests?status=&cursor=` | `enrichment:request` | Within data limits; each item has status, estimate and result |
+| `POST /api/v1/enrichment-requests/{id}:approve` | `enrichment:approve` (people only) | Async; starts the run |
+| `POST /api/v1/enrichment-requests/{id}:decline` | `enrichment:approve` (people only) | `reason` required |
 
 Saved searches are managed in the web app only in this version.
 

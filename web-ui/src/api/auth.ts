@@ -27,7 +27,7 @@ export async function startMicrosoftSignIn(returnPath: string, go: (url: string)
   go(res.url);
 }
 
-/** `GET /v1/auth/config` (public): the sign-in methods this Scout offers and whether developer sign-in is on. */
+/** `GET /api/v1/auth/config` (public): the sign-in methods this Scout offers and whether developer sign-in is on. */
 export type AuthConfig = { methods: string[]; dev_sign_in: boolean };
 
 export function authConfig(): Promise<AuthConfig> {
@@ -37,7 +37,7 @@ export function authConfig(): Promise<AuthConfig> {
 export type DevUser = { id: string; email: string; name: string; platform_admin: boolean };
 
 /**
- * People developer sign-in offers, or null when the API has no list (`GET /v1/dev/users` is 404
+ * People developer sign-in offers, or null when the API has no list (`GET /api/v1/dev/users` is 404
  * unless developer sign-in is on).
  */
 export async function devUsers(): Promise<DevUser[] | null> {

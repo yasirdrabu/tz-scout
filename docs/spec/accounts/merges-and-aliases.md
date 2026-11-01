@@ -33,6 +33,6 @@ As a leader, I want to merge duplicate accounts, so that the team sees one compa
 - ACC-E5-S1-AC1 The merge dialog shows both accounts side by side (name, domain, people count, owner,
   stage) and which will survive; confirming merges as in Rules.
 - ACC-E5-S1-AC2 After a merge, an arrival for the merged domain attaches to the survivor.
-- ACC-E5-S1-AC3 `GET /v1/accounts/{mergedId}` returns the survivor with `merged_into`.
+- ACC-E5-S1-AC3 `GET /api/v1/accounts/{mergedId}` returns the survivor with `merged_into`.
 - ACC-E5-S1-AC4 An integration test merges two accounts with plans, assignments and handoffs and
   checks every module repointed its rows.

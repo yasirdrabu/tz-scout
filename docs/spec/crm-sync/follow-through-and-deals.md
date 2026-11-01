@@ -69,7 +69,7 @@ win rate by source are real.
 ### CRM-E5-S4 Webhook intake
 As a developer, I want CRM webhooks verified and handled asynchronously, so that a slow consumer never
 makes the CRM retry.
-- CRM-E5-S4-AC1 HubSpot deal and engagement events arrive at `POST /v1/inbound/hubspot/{connectionId}`
+- CRM-E5-S4-AC1 HubSpot deal and engagement events arrive at `POST /api/v1/inbound/hubspot/{connectionId}`
   (owned by SRC, which verifies the signature and answers within 1 second); they are passed to
   `handleCrmWebhook`, which stores the raw body and publishes `jobs.crm.sync` for each affected company.
 - CRM-E5-S4-AC2 Without webhooks (the R1 default), the 15-minute activity poll and hourly deal poll

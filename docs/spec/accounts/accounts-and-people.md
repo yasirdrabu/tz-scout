@@ -62,7 +62,7 @@ that I start with the right person.
 
 ### ACC-E1-S4 Agents add people
 As an agent, I want to add a person I found to an account, so that the committee fills out.
-- ACC-E1-S4-AC1 `add_person(account_id, person)` and `POST /v1/accounts/{id}/people` submit an inline
+- ACC-E1-S4-AC1 `add_person(account_id, person)` and `POST /api/v1/accounts/{id}/people` submit an inline
   targeted arrival through SRC and return `person_id` in the same call, with the agent as source.
 - ACC-E1-S4-AC2 A person matching an existing one (same email, or same name at the account) returns
   the existing `person_id` with `already_known: true`; any new values are recorded as facts.

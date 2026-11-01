@@ -1,11 +1,10 @@
 import './registry';
-import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { bootstrapDatabase, migrateAll } from '@/platform/db/migrate';
 import { closeDbs } from '@/platform/db/client';
+import { closeHealthConnections } from '@/platform/health';
 import { log } from '@/platform/log';
 import { connectNats } from '@/platform/nats/connection';
 import { ensureStreams } from '@/platform/nats/streams';
@@ -17,7 +16,8 @@ import { consumers, jobs } from './worker';
 const USAGE = `Usage: scout <command>
 
 Long-running roles (stop with SIGTERM or SIGINT)
-  web                 Next.js standalone server (PORT, default 4240). In development use "npm run dev".
+  web                 HTTP server: API, sign-in, health checks and the web app (PORT, default 4240;
+                      SCOUT_BIND_HOST, default 0.0.0.0). In development use "npm run dev".
   worker              All NATS consumers and job handlers
   scheduler           Publishes due scheduled jobs (run exactly one)
   relay               Moves outbox rows to NATS (run exactly one active)
@@ -69,18 +69,19 @@ async function runRoles(roles: Array<'worker' | 'scheduler' | 'relay'>): Promise
   log.info('stopped');
 }
 
-function web(): Promise<number> {
-  const server = path.resolve('.next/standalone/server.js');
-  if (!existsSync(server)) {
-    console.error('No web build found. Run "npm run build" first, or use "npm run dev" in development.');
-    return Promise.resolve(1);
-  }
-  const child = spawn(process.execPath, [server], {
-    stdio: 'inherit',
-    env: { ...process.env, PORT: process.env.PORT ?? '4240', HOSTNAME: process.env.SCOUT_BIND_HOST ?? '0.0.0.0' },
-  });
-  for (const s of ['SIGINT', 'SIGTERM'] as const) process.on(s, () => child.kill(s));
-  return new Promise((resolve) => child.on('exit', (code) => resolve(code ?? 0)));
+/** The HTTP server (API, sign-in, health checks and the web app) until a stop signal; then a graceful close. */
+async function web(): Promise<number> {
+  const signal = stopSignal();
+  const { startServer } = await import('@/http/server');
+  const host = process.env.SCOUT_BIND_HOST ?? '0.0.0.0';
+  const server = await startServer({ port: Number(process.env.PORT ?? 4240), host });
+  log.info(`web: listening on http://${host}:${server.port}`);
+  await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+  log.info('web: stopping');
+  await server.close();
+  await closeHealthConnections();
+  log.info('stopped');
+  return 0;
 }
 
 async function migrate(): Promise<void> {

@@ -26,12 +26,12 @@ reading the contact and company from the CRM through the adapter contract.
   qualified leads are polled every 15 minutes (`listQualifiedLeads`); CRM activity is polled every 15
   minutes and deals hourly (whenever those reads ship). Webhooks are optional: a tenant admin may set up
   subscriptions by hand in HubSpot's own screens, pointing at
-  `POST /v1/inbound/hubspot/{connectionId}`, or they arrive automatically with a HubSpot public app in a
+  `POST /api/v1/inbound/hubspot/{connectionId}`, or they arrive automatically with a HubSpot public app in a
   later release.
 - The HubSpot connection has an optional credential `webhook_client_secret` (encrypted like other
   credentials, INT). When it is set, SRC's inbound route verifies the v3 signature with it; when it is
   not set, the inbound route refuses every request with `401` and only polling runs.
-- SRC's `POST /v1/inbound/hubspot/{connectionId}` verifies the HubSpot signature once, then hands deal
+- SRC's `POST /api/v1/inbound/hubspot/{connectionId}` verifies the HubSpot signature once, then hands deal
   and engagement events to this module's `handleCrmWebhook(ctx, connectionId, events)`. Webhook and
   poll results go through the same idempotent handling, so receiving both never double-counts.
 - Calls go through `gateway.call`, so they count against the connection's caps and appear in its call

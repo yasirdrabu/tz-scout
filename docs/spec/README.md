@@ -44,7 +44,7 @@ how the flywheel (sources → wins → learnings → better playbooks and trust)
    traceable to the source that said it.
 2. Many sources, one intake path: API, MCP, CSV with automatic column mapping, webhooks, scheduled
    pulls. Batches tracked as first-class records.
-3. Open, scoped access for agents and partners: REST API (`/v1`, OpenAPI) and an MCP server (hosted
+3. Open, scoped access for agents and partners: REST API (`/api/v1`, OpenAPI) and an MCP server (hosted
    and local) with agent-friendly tools, API keys and OAuth, data scopes and permissions.
 4. Human review and assignment before anything reaches a CRM; decline with a tracked reason.
 5. ABM playbooks per practice and offer, customisable per account, with outcomes and learnings.
@@ -124,7 +124,7 @@ Codes are used in story IDs and event names.
 | Analytics | ANL | `analytics` | account funnel by source, cost ledger, scorecard, flywheel | [analytics/](analytics/index.md) |
 | Integrations | INT | `integrations` | connections, encrypted credentials, call log, usage caps | [integrations/](integrations/index.md) |
 | AI tasks | AI | `ai` | prompts, AI runs | [ai-tasks/](ai-tasks/index.md) |
-| Public API | API | (none) | `/v1` REST surface, outgoing webhooks | [public-api/](public-api/index.md) |
+| Public API | API | (none) | `/api/v1` REST surface, outgoing webhooks | [public-api/](public-api/index.md) |
 | MCP server | MCP | (none) | agent tools, hosted and local | [mcp/](mcp/index.md) |
 | Platform | PLT | `platform` | outbox, processed events, jobs, audit log | [architecture/](architecture/index.md) |
 
@@ -170,7 +170,7 @@ Also: [migration-and-rollout/](migration-and-rollout/index.md) (moving today's d
 | D11 | Replay means rescoring from stored facts, not full event sourcing. | Yasir |
 | D12 | Containers everywhere, defined as code; no Lambda. Compose for laptop and VM, Helm for Kubernetes, OpenTofu for cloud resources. | Yasir (tools: spec's call) |
 | D13 | Arrivals stored exactly as received, kept until a tenant deletes its data. | Spec's call |
-| D14 | Stack: Next.js (UI, `/v1`, MCP) plus Node worker and scheduler from one codebase; TypeScript; Drizzle; better-auth. | Spec's call, approved |
+| D14 | Stack: Next.js (UI, `/api/v1`, MCP) plus Node worker and scheduler from one codebase; TypeScript; Drizzle; better-auth. | Spec's call, approved |
 | D15 | Account funnel: arrived, reviewed, assigned, engaged, opportunity, won; exits lost and declined. | Spec's call, approved |
 | D16 | Costs automatic where possible; people add line items. Usage caps per integration and per key: warn at 80%, block at 100%. | Spec's call, approved |
 | D17 | Rebuild in this repo on a branch; today's code is the reference. Migrate today's data. | Spec's call, approved |

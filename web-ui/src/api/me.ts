@@ -12,7 +12,7 @@ export type DataLimit =
   | { kind: 'own_source' }
   | { kind: 'any_of'; limits: DataLimit[] };
 
-/** The `GET /v1/me` fields the app types (src/app/v1/me/route.ts); the person fields are read below. */
+/** The `GET /api/v1/me` fields the app types (src/http/routes/v1/me/route.ts); the person fields are read below. */
 export type Me = {
   /**
    * `currency` (ISO 4217) and `timezone` (IANA) feed lib/format; read as optional. Null for a person

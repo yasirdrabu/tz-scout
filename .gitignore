@@ -1,5 +1,4 @@
 node_modules/
-.next/
 .env
 .env.local
 .pgdata/
@@ -9,8 +8,6 @@ coverage/
 test-results/
 playwright-report/
 dist/
-.next/
 reference/v1/node_modules/
 tsconfig.tsbuildinfo
-next-env.d.ts
 .tools/
