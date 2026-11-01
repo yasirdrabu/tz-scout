@@ -186,7 +186,7 @@ export async function seed(): Promise<{ devApiKey: string }> {
       for (const email of emails) {
         const userId = await userIdForEmail(email);
         if (!userId) continue;
-        const id = (await personSourceFor(c, userId)) ?? (await registerSource(c, { kind: 'person', name: NAMES[email]!, userId })).id;
+        const id = (await personSourceFor(c, userId)) ?? (await registerSource(c, { kind: 'person', name: NAMES[email]!, userId }, { namedAfterPerson: true })).id;
         if (email === ADMIN_EMAIL) adminSourceId = id;
       }
       const have = (await listSources(c)).find((s) => s.kind === 'agent' && s.name === DEV_AGENT_NAME);

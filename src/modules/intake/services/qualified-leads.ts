@@ -12,7 +12,9 @@ import {
 import { SAMPLE_ONLY, connectionStatus, ensureConnectionId } from '@/modules/integrations';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
+import { enqueueJob } from '@/platform/events/outbox';
 import { log } from '@/platform/log';
+import { qualifiedLeadsPollJob } from '../contracts/jobs';
 import { crmLeadPoll, source } from '../db/schema';
 import { isFreeEmailDomain } from '../domain/free-email';
 import { domainFromEmail } from '../domain/normalise';
@@ -20,6 +22,8 @@ import { submitArrival, type SubmitResult } from './submit';
 
 const SYSTEM = 'hubspot';
 const SOURCE_KEY = 'hubspot_qualified';
+/** The advisory lock key prefix (with the tenant id) that keeps one poll per tenant running. */
+const POLL_LOCK = 'intake.qualified_leads.poll:';
 
 /** The sample contact `seedMockCrm` qualifies, which "Simulate a qualified lead" sends. */
 export const SAMPLE_LEAD_EMAIL = 'pat.lee@qualified.example';
@@ -108,9 +112,13 @@ export async function takeQualifiedLead(ctx: ModuleContext, connection: string, 
  * that failed for a transient reason (CRM `classifyPushError`: 429, 5xx, network, transient Postgres); any other
  * failure is logged and counts as handled. A full page still inside the overlap is followed by a read from
  * `polled_until`. Stops at the source's daily cap or when the source is paused meanwhile, so the rest are read next
- * time. Skips a paused source and a connection that is off or not set up.
+ * time. Skips a paused source and a connection that is off or not set up, and returns `skipped` while another poll of
+ * the tenant holds the lock.
  */
-export async function pollQualifiedLeads(ctx: ModuleContext): Promise<{ submitted: number }> {
+export async function pollQualifiedLeads(ctx: ModuleContext): Promise<{ submitted: number; skipped?: true }> {
+  // One poll per tenant at a time: a Sync now during the scheduled poll (or two) would read and submit the same leads.
+  const [lock] = (await ctx.tx.execute(sql`select pg_try_advisory_xact_lock(hashtext(${POLL_LOCK + ctx.tenantId})) as ok`)) as unknown as { ok: boolean }[];
+  if (!lock?.ok) return { submitted: 0, skipped: true };
   const sender = await leadSource(ctx);
   if (sender?.status !== 'active') return { submitted: 0 };
   const status = await connectionStatus(ctx, SYSTEM);
@@ -161,8 +169,8 @@ export async function pollQualifiedLeads(ctx: ModuleContext): Promise<{ submitte
   }
   await ctx.tx
     .insert(crmLeadPoll)
-    .values({ tenantId: ctx.tenantId, connectionId: conn, polledUntil: until })
-    .onConflictDoUpdate({ target: [crmLeadPoll.tenantId, crmLeadPoll.connectionId], set: { polledUntil: until } });
+    .values({ tenantId: ctx.tenantId, connectionId: conn, polledUntil: until, polledAt: new Date() })
+    .onConflictDoUpdate({ target: [crmLeadPoll.tenantId, crmLeadPoll.connectionId], set: { polledUntil: until, polledAt: new Date() } });
   return { submitted };
 }
 
@@ -177,4 +185,34 @@ export async function simulateQualifiedLead(ctx: ModuleContext): Promise<SubmitR
   const lead = sample && (await fetchQualifiedLead(ctx, conn, sample.contact.externalId));
   if (!lead) throw new ScoutError({ slug: 'not-found', status: 404, title: 'The sample qualified contact was not found.' });
   return submitQualifiedLead(ctx, lead);
+}
+
+/** The HubSpot source's sync, for its Source page: when the poll last ran, the connection's last error, and whether it is connected. */
+export type SyncStatus = { lastPolledAt: Date | null; lastError: string | null; connected: boolean };
+
+/** Whether the poll would read from HubSpot: the connection is not off and, when live, is set up. */
+async function connected(ctx: ModuleContext): Promise<boolean> {
+  const status = await connectionStatus(ctx, SYSTEM);
+  return !(status.status === 'disabled' || (status.mode === 'live' && status.status === 'not_set_up'));
+}
+
+export async function syncStatus(ctx: ModuleContext): Promise<SyncStatus> {
+  const status = await connectionStatus(ctx, SYSTEM);
+  const [row] = await ctx.tx
+    .select({ polledAt: crmLeadPoll.polledAt })
+    .from(crmLeadPoll)
+    .where(eq(crmLeadPoll.tenantId, ctx.tenantId))
+    .orderBy(sql`${crmLeadPoll.polledAt} desc nulls last`)
+    .limit(1);
+  return { lastPolledAt: row?.polledAt ?? null, lastError: status.lastError ?? null, connected: await connected(ctx) };
+}
+
+/**
+ * "Sync now" on the HubSpot source: queues the qualified-leads poll. Another kind of source is a 400 and a HubSpot
+ * that is not connected a 409. The caller has checked the source exists and is visible.
+ */
+export async function requestSync(ctx: ModuleContext, sourceKind: string): Promise<void> {
+  if (sourceKind !== 'crm') throw new ScoutError({ slug: 'validation', status: 400, title: 'Only the HubSpot source syncs.' });
+  if (!(await connected(ctx))) throw new ScoutError({ slug: 'conflict', status: 409, title: 'Connect HubSpot first' });
+  await enqueueJob(ctx, qualifiedLeadsPollJob, {});
 }

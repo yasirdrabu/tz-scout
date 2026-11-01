@@ -123,7 +123,7 @@ export function assertSameSite(req: Request): void {
 export type V1Options = {
   permission?: Permission;
   /** A POST with an `Idempotency-Key` header runs once per principal and key; repeats get the stored response. On for every POST unless set to false. */
-  idempotent?: boolean;
+  idempotent?: boolean | Idempotence;
   /** Refuse API keys and OAuth grants with 403. A string replaces the default copy. */
   peopleOnly?: boolean | string;
   /** Refuse anyone who is not a platform admin. `can()` passes admins on every permission, so it cannot say this. A string replaces the default copy. */
@@ -162,6 +162,18 @@ function guarded(fn: (req: Request, correlationId: string) => Promise<Response>)
 
 type Handled = Promise<Response | StatusResult | object>;
 
+/** Decides from the JSON body whether a POST is idempotent, for a route that sometimes returns a secret. */
+export type Idempotence = (body: unknown) => boolean;
+
+async function isIdempotent(req: Request, rule: boolean | Idempotence | undefined): Promise<boolean> {
+  if (typeof rule !== 'function') return rule ?? true;
+  try {
+    return rule(await req.clone().json());
+  } catch {
+    return true;
+  }
+}
+
 /**
  * The part every signed-in wrapper shares: bounds the body, takes the `Idempotency-Key` for
  * (`claim.tenantId`, `claim.principalId`), runs `run` in the transaction `inTx` opens and writes the
@@ -169,7 +181,7 @@ type Handled = Promise<Response | StatusResult | object>;
  */
 async function execute(
   original: Request,
-  opts: { idempotent?: boolean; maxBytes?: number },
+  opts: { idempotent?: boolean | Idempotence; maxBytes?: number },
   claim: { tenantId: string; principalId: string },
   inTx: (fn: (tx: Tx) => Promise<Response>) => Promise<Response>,
   correlationId: string,
@@ -180,7 +192,7 @@ async function execute(
     req = await boundedRequest(req, opts.maxBytes ?? JSON_MAX_BYTES);
   }
   let key: string | undefined;
-  if ((opts.idempotent ?? true) && req.method === 'POST') {
+  if (req.method === 'POST' && (await isIdempotent(req, opts.idempotent))) {
     key = req.headers.get(IDEMPOTENCY_KEY)?.trim() || undefined;
     if (key && key.length > MAX_KEY_LENGTH) {
       throw new ScoutError({ slug: 'validation', status: 400, title: 'The Idempotency-Key header is too long.' });

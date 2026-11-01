@@ -114,7 +114,7 @@ async function importFile(slug: string, file: string): Promise<number> {
   const result = await withTenant(tenant.id, async (tx) => {
     const base = { tenantId: tenant.id, actor: { kind: 'user' as const, id: adminId }, correlationId: newId('cor'), tx };
     const sourceId =
-      (await personSourceFor(base, adminId)) ?? (await registerSource(base, { kind: 'person', name: ADMIN_EMAIL.split('@')[0]!, userId: adminId })).id;
+      (await personSourceFor(base, adminId)) ?? (await registerSource(base, { kind: 'person', name: ADMIN_EMAIL.split('@')[0]!, userId: adminId }, { namedAfterPerson: true })).id;
     return createImport(
       { ...base, access: { sourceId, dataLimit: { kind: 'all' } } },
       { fileName: path.basename(file), contentType: 'application/octet-stream', bytes },

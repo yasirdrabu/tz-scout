@@ -56,15 +56,47 @@ export const overviewRoute = createRoute({
   component: () => <Placeholder screen={SCREENS.overview} />,
 });
 
+/** Sources' Type filter (`kind` comma separated) and search, so the URL keeps them (C10). */
+export type SourcesSearch = { kind?: string; q?: string };
+
 export const sourcesRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'sources',
-  component: () => <Placeholder screen={SCREENS.sources} />,
+  validateSearch: (search: Record<string, unknown>): SourcesSearch => pickStrings(search, ['kind', 'q']),
+  component: lazyRouteComponent(() => import('../features/sources/SourcesScreen'), 'SourcesScreen'),
+});
+
+/** The Source page's Accounts tab search and filters (C10). */
+export type SourcePageSearch = { q?: string; stage?: string; tier?: string };
+const sourcePageSearch = (search: Record<string, unknown>): SourcePageSearch => pickStrings(search, ['q', 'stage', 'tier']);
+
+/** The Source page, on its Overview tab. */
+export const sourceRoute = createRoute({
+  getParentRoute: () => tenantRoute,
+  path: 'sources/$id',
+  validateSearch: sourcePageSearch,
+  component: lazyRouteComponent(() => import('../features/sources/SourcePage'), 'SourcePage'),
+});
+
+/** The Source page on one tab: overview, accounts, batches, runs or pulls-from, settings. */
+export const sourceTabRoute = createRoute({
+  getParentRoute: () => tenantRoute,
+  path: 'sources/$id/$tab',
+  validateSearch: sourcePageSearch,
+  component: lazyRouteComponent(() => import('../features/sources/SourcePage'), 'SourcePage'),
 });
 
 export const batchesRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'batches',
+  component: () => <Placeholder screen={SCREENS.batches} />,
+});
+
+/** Import a list, preselecting the source it credits (`source`). The import screen replaces this placeholder (§15). */
+export const batchesImportRoute = createRoute({
+  getParentRoute: () => tenantRoute,
+  path: 'batches/import',
+  validateSearch: (search: Record<string, unknown>): { source?: string } => pickStrings(search, ['source']),
   component: () => <Placeholder screen={SCREENS.batches} />,
 });
 

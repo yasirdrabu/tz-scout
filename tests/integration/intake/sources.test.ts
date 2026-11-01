@@ -46,12 +46,13 @@ describe('registerSource (SRC-E1-S1-AC1)', () => {
         person,
         await registerSource(ctx, { kind: 'agent', name: 'Mike agent', parentId: person.id }),
         await registerSource(ctx, { kind: 'partner', name: 'Partner firm' }),
-        await registerSource(ctx, { kind: 'crm', name: 'HubSpot forms' }),
+        // The tenant already has its HubSpot source, so a list takes the crm slot here (Ruling 5).
+        await registerSource(ctx, { kind: 'list', name: 'Mike list', parentId: person.id }),
         await registerSource(ctx, { kind: 'web_form', name: 'Contact form' }),
         await registerSource(ctx, { kind: 'scheduled_pull', name: 'Logistics weekly', parentId: vendor.id }),
       ];
     });
-    expect(out.map((s) => s.kind)).toEqual(['vendor', 'person', 'agent', 'partner', 'crm', 'web_form', 'scheduled_pull']);
+    expect(out.map((s) => s.kind)).toEqual(['vendor', 'person', 'agent', 'partner', 'list', 'web_form', 'scheduled_pull']);
     expect(out.every((s) => s.dailyArrivalCap === 500 && s.trust === 0.6 && s.status === 'active')).toBe(true);
     expect(out[2]!.parentId).toBe(out[1]!.id);
     expect(out[6]!.parentId).toBe(out[0]!.id);
@@ -99,26 +100,26 @@ describe('registerSource (SRC-E1-S1-AC1)', () => {
 describe('starting review status (SRC-E1-S2-AC3)', () => {
   it('defaults by kind and can be changed', async () => {
     const keys = await t.run(async (ctx) => {
-      const person = await registerSource(ctx, { kind: 'person', name: 'P' });
-      const vendor = await registerSource(ctx, { kind: 'vendor', name: 'V' });
+      const person = await registerSource(ctx, { kind: 'person', name: 'Status P' });
+      const vendor = await registerSource(ctx, { kind: 'vendor', name: 'Status V' });
       const kinds = [
         person,
-        await registerSource(ctx, { kind: 'agent', name: 'A', parentId: person.id }),
+        await registerSource(ctx, { kind: 'agent', name: 'Status A', parentId: person.id }),
+        await registerSource(ctx, { kind: 'list', name: 'Status L', parentId: person.id }),
         vendor,
-        await registerSource(ctx, { kind: 'partner', name: 'Pa' }),
-        await registerSource(ctx, { kind: 'scheduled_pull', name: 'S', parentId: vendor.id }),
-        await registerSource(ctx, { kind: 'crm', name: 'C' }),
-        await registerSource(ctx, { kind: 'web_form', name: 'W' }),
+        await registerSource(ctx, { kind: 'partner', name: 'Status Pa' }),
+        await registerSource(ctx, { kind: 'scheduled_pull', name: 'Status S', parentId: vendor.id }),
+        await registerSource(ctx, { kind: 'web_form', name: 'Status W' }),
       ];
       return Object.fromEntries(kinds.map((s) => [s.kind, s.initialReviewStatusKey]));
     });
     expect(keys).toEqual({
       person: 'needs_review',
       agent: 'unvetted',
+      list: 'needs_review',
       vendor: 'unvetted',
       partner: 'unvetted',
       scheduled_pull: 'unvetted',
-      crm: 'needs_review',
       web_form: 'needs_review',
     });
     const changed = await t.run(async (ctx) => {

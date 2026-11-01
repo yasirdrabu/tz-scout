@@ -28,15 +28,22 @@ export {
   SAMPLE_LEAD_EMAIL,
   leadRef,
   pollQualifiedLeads,
+  requestSync,
   simulateQualifiedLead,
   submitQualifiedLead,
   takeQualifiedLead,
+  type SyncStatus,
 } from './services/qualified-leads';
 export { DEFAULT_VENDOR_SOURCES, RELATIONSHIP_DEFAULTS, seedIntakeDefaults } from './defaults';
 export { listRelationshipDefaults, setRelationshipDefault, type RelationshipDefaultView } from './services/settings';
 export { checkArrivalCap, type CapCheck } from './services/caps';
 export {
+  LIST_HAS_NO_KEYS,
+  ONE_CRM_SOURCE,
   SOURCE_KINDS,
+  hasCrmSource,
+  readSource,
+  removeSource,
   accountIdsForSource,
   bestTrustForAccounts,
   chainsForAccount,
@@ -55,11 +62,27 @@ export {
   type AccountSource,
   type RegisterSourceInput,
   type SourceKind,
+  type SourceListFilter,
   type SourceListRow,
   type SourcePatch,
   type SourceStatus,
   type SourceView,
 } from './services/sources';
+export {
+  KIND_LABELS,
+  TRUST_LABEL,
+  firstArrivals,
+  newSourceDetail,
+  sourceDetail,
+  sourceFunnel,
+  sourceStats,
+  sourceViews,
+  type FirstArrival,
+  type SendMethod,
+  type SourceApiView,
+  type SourceDetail,
+  type SourceFunnel,
+} from './services/source-read';
 export {
   rejectArrival,
   resolveArrival,
@@ -81,6 +104,7 @@ export {
 export {
   accountForArrival,
   batchAccountIds,
+  countBatches,
   getArrival,
   getArrivalWithStatus,
   getBatch,

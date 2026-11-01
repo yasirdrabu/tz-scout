@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds, getSummaries, isKnownFactKey } from '@/modules/accounts';
 import { members } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
@@ -237,7 +237,7 @@ async function visibleBatches(ctx: ModuleContext, rows: BatchCandidate[]): Promi
   return out;
 }
 
-async function pageBatches(ctx: ModuleContext, o: { id?: string; cursor?: string; limit?: number }): Promise<Page<BatchCandidate>> {
+async function pageBatches(ctx: ModuleContext, o: { id?: string; cursor?: string; limit?: number; sourceIds?: string[] }): Promise<Page<BatchCandidate>> {
   const scope = await visibleArrivals(ctx);
   const chain = chainInScope(scope, { person: batch.personSourceId, agent: batch.agentSourceId, vendor: batch.vendorSourceId });
   const page = await keysetPage<BatchCandidate>({
@@ -251,6 +251,7 @@ async function pageBatches(ctx: ModuleContext, o: { id?: string; cursor?: string
           and(
             eq(batch.tenantId, ctx.tenantId),
             o.id ? eq(batch.id, o.id) : undefined,
+            o.sourceIds ? or(inArray(batch.personSourceId, o.sourceIds), inArray(batch.agentSourceId, o.sourceIds), inArray(batch.vendorSourceId, o.sourceIds)) : undefined,
             scope.viaAccounts ? undefined : chain,
             after ? sql`(${batch.runAt}, ${batch.id}) < (${after[0]}::timestamptz, ${after[1]})` : undefined,
           ),
@@ -300,11 +301,24 @@ function narrowed(b: BatchRow, rows: ArrivalRow[]): BatchView {
   };
 }
 
-export async function listBatches(ctx: ModuleContext, f: { cursor?: string; limit?: number } = {}): Promise<Page<BatchView>> {
+/** Batches newest first; with `sourceIds`, only those whose chain names one of them. */
+export async function listBatches(ctx: ModuleContext, f: { cursor?: string; limit?: number; sourceIds?: string[] } = {}): Promise<Page<BatchView>> {
   const page = await pageBatches(ctx, f);
   const data: BatchView[] = [];
   for (const c of page.data) data.push(c.chainOk ? batchView(c.row) : narrowed(c.row, await visibleItems(ctx, c.row.id)));
   return { data, nextCursor: page.nextCursor };
+}
+
+/** How many batches `listBatches` would list for these sources, with the same visibility (the Source page's Batches tab count, C8). */
+export async function countBatches(ctx: ModuleContext, sourceIds: string[]): Promise<number> {
+  let n = 0;
+  let cursor: string | undefined;
+  do {
+    const page = await pageBatches(ctx, { sourceIds, cursor, limit: 200 });
+    n += page.data.length;
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return n;
 }
 
 const rejectionOf = (r: { id: string; externalRef: string | null; payload: unknown; rejectReason: string | null; rejectDetail: string | null }) => ({
