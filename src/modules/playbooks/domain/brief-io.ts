@@ -15,7 +15,9 @@ export const INSIGHTS_MAX = 2000;
 export const NO_LINKS_MESSAGE = 'Leave links and email addresses out of the opener.';
 
 /** A URL (with a scheme or www) or an email address: never in the opener a seller sends as their own. */
-export const hasLinkOrEmail = (s: string) => /\bhttps?:\/\/|\bwww\.|[\w.+-]+@[\w-]+(\.[\w-]+)+/i.test(s);
+export const hasLinkOrEmail = (s: string) =>
+  // A scheme, www, an email address, or any word.tld token (a bare domain, with or without a path).
+  /\bhttps?:\/\/|\bwww\.|[\w.+-]+@[\w-]+(\.[\w-]+)+|\b[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)*\.[a-z]{2,}\b(\/\S*)?/i.test(s);
 
 /** Task input caps (Global Constraints). */
 export const INPUT_CAPS = { signals: 20, facts: 40, people: 15, notes: 10, caseStudies: 3 } as const;

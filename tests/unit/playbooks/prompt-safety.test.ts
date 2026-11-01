@@ -47,7 +47,12 @@ describe('prompt safety', () => {
       expect(r.success, body).toBe(false);
       expect(r.error!.issues[0]!.message).toBe(NO_LINKS_MESSAGE);
     }
-    expect(briefOutputSchema.safeParse({ ...ok, opener: { ...ok.opener, subject: 'Visit evil.example/now' } }).success).toBe(true);
+    for (const subject of ['Visit evil.example/now', 'See acme.com/pricing', 'Our page at acme.co.uk']) {
+      expect(briefOutputSchema.safeParse({ ...ok, opener: { ...ok.opener, subject } }).success, subject).toBe(false);
+    }
+    for (const subject of ['A quick idea for Metro Valley Transit', 'Your 2.5 million riders', 'Saw the news. Congrats']) {
+      expect(briefOutputSchema.safeParse({ ...ok, opener: { ...ok.opener, subject } }).success, subject).toBe(true);
+    }
     expect(briefOutputSchema.safeParse({ ...ok, opener: { ...ok.opener, subject: 'See http://evil.example' } }).success).toBe(false);
   });
 
