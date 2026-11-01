@@ -177,6 +177,8 @@ async function completeValidated<O>(
   let user = base.user;
   let errors = '';
   for (let attempt = 0; attempt < 2; attempt++) {
+    // The caller gave up (time limit): no second, paid try.
+    if (attempt > 0 && base.signal?.aborted) return { ok: false, errors: `The caller stopped waiting.\n${errors}`, usage };
     if (attempt > 0 && capCents !== undefined) {
       const next = worstCaseCents(base.model, Math.ceil((base.system.length + user.length) / 4), base.maxTokens);
       if (costCents(base.model, usage) + next > capCents) return { ok: false, errors: `${SECOND_TRY_OVER_CAP}\n${errors}`, usage };
@@ -301,6 +303,7 @@ export async function runTask<I, O>(
               maxTokens: task.maxTokens,
               jsonSchema: z.toJSONSchema(task.output, { io: 'output' }),
               cacheSystem: true,
+              ...(ctx.signal ? { signal: ctx.signal } : {}),
               ...(mockOutput !== undefined ? { mockOutput } : {}),
             },
             task.output,

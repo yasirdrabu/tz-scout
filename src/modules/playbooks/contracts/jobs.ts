@@ -12,7 +12,9 @@ export const DRAFT_MAX_ATTEMPTS = 3;
 export const briefDraftJob = defineJob(
   'playbooks.brief.draft',
   z.object({ accountId: z.string(), manual: z.boolean(), includeEdited: z.array(z.string()), seq: z.number().int().optional() }),
-  { maxDeliver: DRAFT_MAX_ATTEMPTS, timeoutMs: 240_000 },
+  // A retry waits longer than the time limit, so a Claude call that outlived its run has finished and been recorded,
+  // and the retry reuses it instead of paying again.
+  { maxDeliver: DRAFT_MAX_ATTEMPTS, timeoutMs: 240_000, backoffMs: [300_000, 600_000] },
 );
 
 /** Every 15 minutes, one schedule per tenant: settles or queues again drafts stuck in `drafting`. */

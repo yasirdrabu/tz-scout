@@ -245,6 +245,8 @@ async function runInTx(
   await tx.execute(setLocal('lock_timeout', '0'));
   await tx.execute(setLocal('statement_timeout', `${s.timeoutMs}ms`));
   const guarded = guardTx(tx);
+  // Aborted at the time limit, so a slow outside call (Claude, HubSpot) can stop instead of finishing unseen.
+  const abort = new AbortController();
   try {
     await withTimeout(
       s.handle(typed, {
@@ -254,6 +256,7 @@ async function runInTx(
         causationId: envelope.id,
         ...(envelope.environment ? { environment: envelope.environment } : {}),
         tx: guarded.tx,
+        signal: abort.signal,
       }),
       s.timeoutMs,
     );
@@ -264,7 +267,10 @@ async function runInTx(
     // We do not terminate the backend: postgres.js then hangs in end() or crashes on a
     // null socket (reproduced with postgres 3.4.9).
     guarded.close('The transaction ended: the handler ran past its time limit or failed');
-    if (e instanceof TimedOut) hooks.timedOut?.(e);
+    if (e instanceof TimedOut) {
+      abort.abort(e);
+      hooks.timedOut?.(e);
+    }
     throw e;
   }
   guarded.close('The transaction has ended');

@@ -18,7 +18,7 @@ vi.mock('@/platform/config', async (orig) => {
 import type { AnthropicAdapter } from '@/modules/ai-tasks';
 import { anthropicMock } from '@/modules/ai-tasks/adapters/anthropic/mock';
 import { registerAdapter, saveCredential, setMode, testConnection } from '@/modules/integrations';
-import { briefFreeze, briefUnfreezeOnDeclined, briefUnfreezeOnWithdrawn, requestDraft, runDraft, sweepBriefs, type BriefOutput } from '@/modules/playbooks';
+import { briefDraftHandler, briefFreeze, briefUnfreezeOnDeclined, briefUnfreezeOnWithdrawn, requestDraft, runDraft, sweepBriefs, type BriefOutput } from '@/modules/playbooks';
 import { brief } from '@/modules/playbooks/db/schema';
 import { assign, decline } from '@/modules/routing';
 import { adminDb } from '@/platform/db/client';
@@ -29,7 +29,7 @@ import { runOutbox } from '../helpers/run-outbox';
 import { cfg } from '../integrations/cfg';
 import { newKey } from '../integrations/helpers';
 import { member } from '../routing/helpers';
-import { asPerson, briefRow, deferred, draftJobs, routingTenant, scoredAccount, sectionRows, type Tenant } from './helpers';
+import { asPerson, briefRow, briefRuns, deferred, draftJobs, routingTenant, scoredAccount, sectionRows, type Tenant } from './helpers';
 
 beforeAll(() => {
   cfg.masterKey = newKey();
@@ -107,6 +107,38 @@ describe('draft retries and the last attempt (fix 1)', () => {
     await runOutbox(t.tenantId);
     expect(live.complete).not.toHaveBeenCalled();
     expect(await briefRow(id)).toMatchObject({ draftState: 'ready', mode: 'rules', draftAttempts: 3 });
+  });
+});
+
+describe('a timed-out Claude call (fix round 2, item 1)', () => {
+  it('aborts the call, and when it completes anyway the retry reuses it instead of paying again', async () => {
+    const t = await routingTenant();
+    const id = await scoredAccount(t, 'act_now');
+    const gate = deferred();
+    let seen: AbortSignal | undefined;
+    const complete = vi.fn(async (req: { signal?: AbortSignal }) => {
+      seen = req.signal;
+      await gate.promise; // a slow call that ignores the abort
+      return { json: claudeBrief, inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0 };
+    });
+    const adapter: AnthropicAdapter = { test: async () => ({ ok: true, message: 'ok' }), complete: complete as unknown as AnthropicAdapter['complete'] };
+    registerAdapter('anthropic', { mock: () => anthropicMock, live: () => adapter });
+    await goLive(t);
+    await t.run((ctx) => requestDraft(ctx, id, { manual: true }));
+    const [job] = await pending(t.tenantId, 'jobs.playbooks.brief.draft');
+    const short = { ...briefDraftHandler, job: { ...briefDraftHandler.job, opts: { ...briefDraftHandler.job.opts, timeoutMs: 300 } } };
+    await expect(deliverOnce(short, job!)).rejects.toThrow(/did not finish within/);
+    expect(seen?.aborted).toBe(true);
+    gate.resolve();
+    // The late answer is recorded in its own transaction.
+    for (let i = 0; i < 50 && (await briefRuns(t.tenantId)).filter((r) => r.mode === 'live' && r.status === 'ok').length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+    await deliverOnce(briefDraftHandler, job!);
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(await briefRow(id)).toMatchObject({ draftState: 'ready', mode: 'live' });
+  });
+
+  it('retries a draft only after the worst Claude call is over', () => {
+    expect(briefDraftHandler.job.opts.backoffMs![0]).toBeGreaterThan(briefDraftHandler.job.opts.timeoutMs!);
   });
 });
 

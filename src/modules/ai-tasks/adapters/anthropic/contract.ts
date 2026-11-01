@@ -11,6 +11,8 @@ export type CompleteRequest = {
   cacheSystem?: boolean;
   /** Mock adapter only: the output the task's `mock` function produced. Live adapters ignore it. */
   mockOutput?: unknown;
+  /** Aborted when the caller (a worker job) runs past its time limit. Live adapters pass it to the request. */
+  signal?: AbortSignal;
 };
 
 export type CompleteResult = {
