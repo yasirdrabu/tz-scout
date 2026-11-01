@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
+import { settleRenderedApps, stopRenderedApps } from './apps';
 import { server } from './server';
 
 // The first screen of a file loads its route chunk, which can take over a second with every file
@@ -46,8 +47,10 @@ beforeAll(() => {
   mswFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => mswFetch(input, init && { ...(await multipart(init)), signal: null });
 });
-afterEach(() => {
+afterEach(async () => {
+  await settleRenderedApps();
   cleanup();
+  await stopRenderedApps();
   server.resetHandlers();
 });
 afterAll(() => {
