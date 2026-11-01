@@ -434,7 +434,7 @@ describe('owner backfill (intake 0004)', () => {
     await adminDb.update(source).set({ ownerUserId: null }).where(eq(source.tenantId, t.tenantId));
     const { readFileSync } = await import('node:fs');
     const sqlText = readFileSync('src/modules/intake/db/migrations/0004_source_owner.sql', 'utf8');
-    for (const stmt of sqlText.split('--> statement-breakpoint').filter((s) => /^\s*(--.*\n)*\s*UPDATE/i.test(s))) await adminDb.execute(sql.raw(stmt));
+    for (const stmt of sqlText.split('--> statement-breakpoint').filter((s) => /^\s*(--.*\r?\n)*\s*UPDATE/i.test(s))) await adminDb.execute(sql.raw(stmt));
     const rows = await adminDb.select({ id: source.id, owner: source.ownerUserId }).from(source).where(eq(source.tenantId, t.tenantId));
     const owner = new Map(rows.map((r) => [r.id, r.owner]));
     expect(owner.get(ids.p)).toBe(u.id);
