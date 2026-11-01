@@ -32,6 +32,17 @@ export function formatDate(when: When, timeZone: string): string {
   return new Intl.DateTimeFormat(LOCALE, { timeZone, month: 'short', day: 'numeric', year: 'numeric' }).format(toDate(when));
 }
 
+/** A calendar date is a moment at exactly midnight UTC: how a plain "2026-10-14" parses, and how the API stores dates sent without a time. */
+const isCalendarDate = (when: When) => toDate(when).getTime() % 86_400_000 === 0;
+
+/**
+ * "Oct 14, 2026" for a value that may be a calendar date (a signal's or fact's date): a calendar date stays on its day
+ * whatever the timezone; a real moment is shown in the given IANA timezone.
+ */
+export function formatDay(when: When, timeZone: string): string {
+  return formatDate(when, isCalendarDate(when) ? 'UTC' : timeZone);
+}
+
 /** "Aug 2" in the given IANA timezone. */
 export function formatMonthDay(when: When, timeZone: string): string {
   return new Intl.DateTimeFormat(LOCALE, { timeZone, month: 'short', day: 'numeric' }).format(toDate(when));

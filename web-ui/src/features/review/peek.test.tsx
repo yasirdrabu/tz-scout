@@ -2,9 +2,9 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { problem } from '../../test/http';
-import { renderApp } from '../../test/renderApp';
+import { renderApp, serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
-import { serveQueue } from './testing';
+import { LEADER, serveQueue } from './testing';
 
 const params = (href: string) => new URL(href, 'http://app').searchParams;
 const drawer = () => screen.getByRole('dialog', { name: /Miami-Dade County DTPW|Coastline Credit Union|Pinegate University/ });
@@ -85,6 +85,19 @@ describe('Queue peek drawer', () => {
     expect(await within(peek).findByText(/Best offer changed from Scout's pick to AI Opportunity Map/)).toHaveTextContent('Dana Whitfield');
     expect(within(peek).getByText(/Scored 79 and placed in Act now/)).toHaveTextContent('Scout');
     expect(within(peek).getByText(/Arrived from RFP Watch/)).toBeInTheDocument();
+  });
+
+  it('shows a date-only signal on its own day in a US workspace', async () => {
+    serveQueue();
+    serveMe({ taazaa: { scopes: LEADER, tenant: { id: 't1', slug: 'taazaa', name: 'Taazaa', currency: 'USD', timezone: 'America/New_York' } } });
+    server.use(
+      http.get('/api/v1/accounts/acc_mdc', () =>
+        HttpResponse.json({ id: 'acc_mdc', signals: [{ id: 's1', title: 'RFP posted', detail: null, url: null, occurred_at: '2026-10-14T00:00:00.000Z' }] }),
+      ),
+    );
+    renderApp('/t/taazaa/queue?peek=acc_mdc');
+    const peek = await screen.findByRole('dialog', { name: 'Miami-Dade County DTPW' });
+    expect(await within(peek).findByText('Oct 14, 2026')).toBeInTheDocument();
   });
 
   it('adds a note, and says to write it first when empty', async () => {

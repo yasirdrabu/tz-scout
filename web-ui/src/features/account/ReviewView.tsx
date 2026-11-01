@@ -63,7 +63,7 @@ export function WhyNow({ account }: { account: AccountDetail }) {
         <ul className={styles.rows}>
           {dated.map((s) => (
             <li key={s.id}>
-              <span className={styles.when}>{f.date(s.occurred_at!)}</span>
+              <span className={styles.when}>{f.day(s.occurred_at!)}</span>
               <span className={styles.stack}>
                 <span>{s.title}</span>
                 {s.detail && <span className={styles.muted}>{s.detail}</span>}
@@ -115,7 +115,7 @@ export function AccountFacts({ tenant, id }: { tenant: string; id: string }) {
               <dt className={styles.factLabel}>{x.label}</dt>
               <dd className={styles.stack}>
                 <span>{value(x.value)}</span>
-                <span className={cx(styles.muted, styles.small)}>{[sourceOf(x), f.date(x.observed_at)].filter(Boolean).join(' · ')}</span>
+                <span className={cx(styles.muted, styles.small)}>{[sourceOf(x), f.day(x.observed_at)].filter(Boolean).join(' · ')}</span>
               </dd>
             </div>
           ))}

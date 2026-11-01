@@ -358,7 +358,7 @@ function WhyNow({ tenant, id }: { tenant: string; id: string }) {
       ) : (
         dated.map((s) => (
           <div key={s.id} className={styles.signal}>
-            <span className={styles.when}>{f.date(s.occurred_at!)}</span>
+            <span className={styles.when}>{f.day(s.occurred_at!)}</span>
             <span>{s.title}</span>
           </div>
         ))
