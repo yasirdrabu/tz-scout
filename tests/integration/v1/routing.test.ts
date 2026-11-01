@@ -474,6 +474,13 @@ describe('review settings', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.auto_accept_working_days).toBe(2);
+    expect(body.colors).toEqual([
+      { value: 'plum', label: 'Plum' },
+      { value: 'amber', label: 'Amber' },
+      { value: 'green', label: 'Green' },
+      { value: 'red', label: 'Red' },
+      { value: 'gray', label: 'Gray' },
+    ]);
     expect(body.statuses.map((s: { key: string }) => s.key)).toEqual(['unvetted', 'needs_review', 'reviewed', 'declined', 'sent_back']);
     expect(body.statuses[3]).toMatchObject({ key: 'declined', label: 'Not pursued', counts_as_reviewed: true, is_declined: true, is_initial: false, returns_to_source: false, archived: false });
     expect(body.decline_reasons.map((r: { key: string }) => r.key)).toEqual(expect.arrayContaining(['not_a_fit', 'other', 'not_my_territory']));
@@ -482,8 +489,9 @@ describe('review settings', () => {
     expect((await viaKey(await keyIn(['accounts:read']), getSettings, 'settings/review')).status).toBe(403);
   });
 
-  it('PUT changes only auto_accept_working_days (1 to 10, or null), audits it, and refuses the rest', async () => {
-    const put = (body: unknown, who: Who = 'owner') => as(who, putSettings, 'settings/review', 'PUT', body);
+  it('PUT sets auto_accept_working_days (1 to 10, or null), audits it, and refuses bad values and an empty save', async () => {
+    const version = async () => (await (await as('owner', getSettings, 'settings/review')).json()).version as number;
+    const put = async (body: Record<string, unknown>, who: Who = 'owner') => as(who, putSettings, 'settings/review', 'PUT', { ...body, version: await version() });
     const ok = await put({ auto_accept_working_days: 5 });
     expect(ok.status).toBe(200);
     expect((await ok.json()).auto_accept_working_days).toBe(5);
@@ -504,7 +512,7 @@ describe('review settings', () => {
     expect((await put({})).status).toBe(400);
     expect((await put({ auto_accept_working_days: 3, statuses: [] })).status).toBe(400);
     expect((await put({ auto_accept_working_days: 3 }, 'leader')).status).toBe(403);
-    expect((await viaKey(await keyIn(['settings:manage']), putSettings, 'settings/review', 'PUT', { auto_accept_working_days: 3 })).status).toBe(403);
+    expect((await viaKey(await keyIn(['settings:manage']), putSettings, 'settings/review', 'PUT', { auto_accept_working_days: 3, version: await version() })).status).toBe(403);
     expect((await (await as('owner', getSettings, 'settings/review')).json()).auto_accept_working_days).toBeNull();
   });
 });

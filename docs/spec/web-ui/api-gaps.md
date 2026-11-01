@@ -22,7 +22,7 @@ All v1 responses are snake_case JSON (`v1Route` runs `snakeCase`); field names b
 | scoring | 12 | 4 | 0 | 2 | 3 | 21 |
 | intake | 27 | 10 | 0 | 4 | 6 | 47 |
 | crm | 8 | 2 | 0 | 1 | 1 | 12 |
-| offers | 15 | 7 | 0 | 3 | 3 | 28 |
+| offers | 25 | 0 | 0 | 0 | 3 | 28 |
 | integrations | 1 | 5 | 5 | 1 | 3 | 15 |
 | ai-tasks | 0 | 2 | 1 | 5 | 1 | 9 |
 | platform | 1 | 8 | 11 | 1 | 2 | 23 |
@@ -524,7 +524,7 @@ Files: `src/http/routes/v1/review-queue/**`, `src/http/routes/v1/accounts/[id]/{
 | 5 | Reason chips (required) and note | SMALL GAP | `PATCH review-status`, bulk | Decision 1: seed the status, add send-back reasons, accept `reason_key`. |
 | 5 | Title "Send back to {source} ({owner})" | SMALL GAP | `sources[]` in `GET /api/v1/accounts/{id}/review` | `GET /api/v1/accounts/{id}/arrivals` and `GET /api/v1/sources` need `arrivals:read`; owner name needs a member lookup. |
 | 5 | Toast, next account opens | READY | client | |
-| 5, 21d | Send-back reasons editable | LATER (R2) | `PUT /api/v1/settings/review/reasons` | Decision 2. |
+| 5, 21d | Send-back reasons editable | READY | `PUT /api/v1/settings/review` `{reasons}` (the editor), `PUT /api/v1/settings/review/reasons` | Decision 2, Ruling 19. Each reason has `note_required`; at least one live per list. |
 | 6 | Assign (account page, peek, bulk) | READY | `POST /api/v1/accounts/{id}:assign` -> 202 `{seller_user_id, notes, lead_offer_id, ownership_decision}` (`assign:act`) | Approves in the same step (first non-declined counts-as-reviewed status) and starts the CRM handoff. Declined account: 409 "Reopen it before assigning." `notes` max 4,000. |
 | 6 | Assign preview, CRM owner warning | READY | `POST /api/v1/accounts/{id}:assign-preview` `{seller_user_id}` (`assign:act`) | `{preflight{result:new\|assign\|stop\|blocked, message}, approves_to, replaces}`. `blocked` = AE has no HubSpot owner (no spec state). 503 `crm_unavailable` is a dialog state. |
 | 6 | Warning detail: deal name, amount, last activity, current owner | READY | `:assign-preview` | `preflight{result, message, reason:open_deal|customer|owned_elsewhere|no_owner|null, current_owner_name, deal{name, amount_cents, currency, last_activity_at}|null}`; `deal` only for `open_deal`, from the stored top open deal. |
@@ -541,15 +541,15 @@ Files: `src/http/routes/v1/review-queue/**`, `src/http/routes/v1/accounts/[id]/{
 | 9 | Funnel bands: entered this period, "{x}% of {previous}" | NEW ENDPOINT | `GET /api/v1/stages/summary?from=&to=` | From `routing.stage_change` plus `account_review.created_at` for arrived (no `stage_change` row at arrival). `moveStage` writes only the destination: a jump must count skipped stages as passed. |
 | 10, 11 | Reviewed, Assigned, Won per source | READY | `GET /api/v1/sources/stats` (see intake) | Cumulative by `FUNNEL` rank; declined and lost count in Sent and Reviewed only (Ruling 4). |
 | 14, 15 | Batch's accounts waiting in the queue ("Go to review queue") | READY | `GET /api/v1/review-queue/count?batch_id=` (`review:act`) | `batch_id` filter capped at 1,000 accounts (larger is 400). Operators lack `review:act` by default; for them serve the count from the batch read. |
-| 21d | List statuses (tone, name, order) | SMALL GAP | `GET /api/v1/settings/review` | `statuses[]{key, label, order, counts_as_reviewed, is_declined, is_initial, returns_to_source, tone, archived}`. No "What it means" (`description`), no "Set by" (no status is set automatically today). |
-| 21d | "In it now" count per status | SMALL GAP | `GET /api/v1/settings/review` `in_status_count` | Tenant-wide from `account_review`. |
+| 21d | List statuses (color, name, order) | READY | `GET /api/v1/settings/review` | `statuses[]{key, label, order, color, description, set_by, flag_after_hours, counts_as_reviewed, is_declined, is_initial, returns_to_source, is_final, required, archived, in_status_count, late_count}`, plus `colors[{value,label}]` for the picker. |
+| 21d | "In it now" count per status | READY | `GET /api/v1/settings/review` `in_status_count`, `late_count` | Tenant-wide from `account_review`, for `settings:manage` only. |
 | 21d | Review decline reasons (read) | READY | `GET /api/v1/settings/review` `decline_reasons[]{key, label, applies_to, note_required, archived}` | 10 seeded (`routing/defaults.ts`). |
-| 21d | "{n} this quarter" per reason | NEW ENDPOINT | `used_this_quarter` in the reasons read | From `routing.status_change.reason_key` and `routing.assignment.decline_reason_key`. |
-| 21d | Add, rename, recolour, reorder, delete statuses | LATER (R2) | `PUT /api/v1/settings/review/statuses` | `review_status_def` and constraints exist (at least one counts-as-reviewed and one declined); the service writes only `auto_accept_working_days`; REV-E1-S4 is R2. Archive, never delete. Decision 2. |
-| 21d | Decline reasons for AEs (edit) | LATER (R2) | `PUT /api/v1/settings/review/reasons` | Same table, `applies_to='assignment'`. |
-| 21d | Restore defaults, Discard, Save | LATER (R2) | `POST /api/v1/settings/review/reset` | `DEFAULT_STATUSES`, `DEFAULT_REASONS` exist. Save atomic across statuses and reasons; audit. |
-| 21d | "Flag after" hours and "{n} late" | LATER (unscheduled) | `sla_hours` on `review_status_def` | Not modelled anywhere. Late = `status_changed_at` older than `sla_hours`. |
-| 21d | Auto-accept days (existing, not on the screen) | READY | `PUT /api/v1/settings/review` `{auto_accept_working_days}` | The screen has no control for it: add one. |
+| 21d | "{n} this quarter" per reason | READY | `used_this_quarter` in the reasons read | From `routing.status_change.reason_key` and `routing.assignment.decline_reason_key`, tenant timezone. |
+| 21d | Add, rename, recolour, reorder, archive statuses | READY | `PUT /api/v1/settings/review` `{statuses}` (the editor), `PUT /api/v1/settings/review/statuses` | Archive, never delete; the statuses Scout needs are not archivable; archiving moves accounts to the first status. Decision 2, Ruling 19. |
+| 21d | Decline reasons for AEs (edit) | READY | `PUT /api/v1/settings/review` `{reasons}` | Same table, `applies_to='assignment'`. |
+| 21d | Restore defaults, Discard, Save | READY | `POST /api/v1/settings/review:reset`, `PUT /api/v1/settings/review` `{statuses?, reasons?, auto_accept_working_days?}` | One transaction; every part is checked first, so a bad part saves nothing; errors at `statuses.{i}.*`, `reasons.{i}.*`, `auto_accept_working_days`; audited per part (Ruling 19). Discard is client side. |
+| 21d | "Flag after" hours and "{n} late" | READY | `flag_after_hours` on `review_status_def`, `late_count` in the read | 1 to 720 hours or never; final statuses are never flagged. Late = `status_changed_at` older than `flag_after_hours`. |
+| 21d | Auto-accept days | READY | `PUT /api/v1/settings/review` `{auto_accept_working_days}` | 1 to 10 working days or off; on the screen. |
 | 21e | List stages: name, meaning, moves-here-when, order, exits | SMALL GAP | `GET /api/v1/stages` (`analytics:read`) | Constants (`STAGES`); rule text from `docs/spec/review-and-routing/stage-tracking-and-status.md`; `kind: funnel\|exit`. |
 | 21e | Rename stages | NEW ENDPOINT | `PUT /api/v1/settings/stages` (`settings:manage`) | Labels and descriptions over fixed keys, `routing.stage_def`. Decision 6. |
 | 21e | Add, reorder, delete stages | LATER (unscheduled) | none | Keys are wired into `nextStage()`, events and CRM. Decision 6. |
@@ -831,26 +831,26 @@ services `src/modules/offers/services/{offers,practices}.ts`; schema `src/module
 | 3 | Best offer select options | READY | `GET /api/v1/offers?status=approved` | `lead_offer_id` rejects non-approved offers (400). |
 | 6, 7 | "{offer} · {practice}" sub-line | READY | `GET /api/v1/offers/{id}` | Has `practice_id`; join `/practices`. |
 | 19 | Practice tree: name, status | READY | `GET /api/v1/practices` | |
-| 19 | Offer count per practice | SMALL GAP | `GET /api/v1/practices` `offer_count` | Non-archived offers (C8). |
+| 19 | Offer count per practice | READY | `GET /api/v1/practices` `offer_count` | Non-archived offers (C8), on the list, the read, create and patch. |
 | 19 | Positioning | READY | `practice.description` | Label only. |
-| 19 | "Led by {lead}", practice lead picker | SMALL GAP | `POST/PATCH /api/v1/practices` `lead_user_id`; read `lead_name` | No lead column on `offers.practice`; must be a member. |
-| 19 | Read one practice (deep link) | SMALL GAP | `GET /api/v1/practices/{id}` | Only POST and PATCH today. |
+| 19 | "Led by {lead}", practice lead picker | READY | `POST/PATCH /api/v1/practices` `lead_user_id`; read `lead_name` | `offers.practice.lead_user_id` (offers 0002). A member, else 400 at `lead_user_id` "That person is not a member of this workspace."; null clears it. Picker from `GET /api/v1/members/directory`. |
+| 19 | Read one practice (deep link) | READY | `GET /api/v1/practices/{id}` (`offers:read`) | With `lead_name` and `offer_count`; an archived practice opens; another tenant's is a 404. |
 | 19 | Offers per practice with status | READY | `GET /api/v1/offers?practice_id=&status=` | `draft`, `approved`, `archived` map to Draft, Active, Retired. |
-| 19 | Card: title, status, summary, price | SMALL GAP | `GET /api/v1/offers` | Has name, promise, description, `price_min_cents`, `price_max_cents`. Missing `price_model` (fixed, starting_at, per_month, custom) and `length_weeks`. Decision 16. |
-| 19 | "{n} accounts matched · {n} won"; Accounts matched, Won, Win rate | NEW ENDPOINT | `GET /api/v1/offers/stats` (`offers:read`, data-limited) | Matched = `scoring.offer_match` with tier not `not_fit`; won = `account_summary.stage='won'` by `best_offer_id`. Cross-module: compose in the route or a scoring read. Attributed win rate is analytics (R3): label these "current". |
+| 19 | Card: title, status, summary, price | READY | `GET /api/v1/offers` | Every offer response adds `price_model`, `length_weeks`, `price_label` (Ruling 13, in the workspace currency) and `status_label` (Active, Draft, Retired). |
+| 19 | "{n} accounts matched · {n} won"; Accounts matched, Won, Win rate | READY | `GET /api/v1/offers/stats?practice_id=` (`offers:read`, data-limited) | `{data:[{offer_id, practice_id, matched, won, win_rate}]}`. Matched = current `scoring.offer_match` not `not_fit`; won = stage `won` with the offer as lead offer (the pick, else best); `win_rate` a whole percent, null at 0 matched. Answered by scoring through the `OfferUsage` port. Approved offers only without `offers:manage`. Attributed win rate is analytics (R3): label these "current". |
 | 19 | Offer view: breadcrumb, title, status, "Updated {date}" | READY | `GET /api/v1/offers/{id}` | `updated_at`, `status`, `practice_id`, `case_studies`. A draft is 404 without `offers:manage`. |
 | 19 | `See accounts for this offer` | READY | `GET /api/v1/accounts?offer_id=` | Filters on best offer. |
-| 19 | Sections Summary, Ideal customer, Key offer, Why us, Why now | SMALL GAP | `GET/PATCH /api/v1/offers/{id}` | Only `promise`, `description` and structured buyer fields. Decision 16. |
+| 19 | Sections Summary, Ideal customer, Key offer, Why us, Why now | READY | `GET/PATCH /api/v1/offers/{id}` | Summary `promise`, Ideal customer `description`, plus `key_offer`, `why_us`, `why_now` (up to 4,000 characters). Content edits keep an approved offer approved. |
 | 19 | Proof points | READY | `proof_points` (text[]) | |
 | 19 | Create offer | READY | `POST /api/v1/offers` (`offers:manage`) | Requires `name`, `practice_id`, `promise`; slug auto; 201. |
 | 19 | Edit offer | READY | `PATCH /api/v1/offers/{id}` (`offers:manage`) | Editing a buyer field on an approved offer drops it to draft with `warning` (show it). Archived: 409 `offer-archived`. |
-| 19 | Status Active | SMALL GAP | `POST /api/v1/offers/{id}:approve` | Owner only; needs `typical_deal_cents`, `sales_cycle_days`, a target title or role, industries or size, else 400 `offer-incomplete` with `errors[]`. Decision 15. |
-| 19 | Status back to Draft | NEW ENDPOINT | `POST /api/v1/offers/{id}:unapprove` (`offers:manage`) | Draft today only as a side effect of a buyer edit. |
+| 19 | Status Active | READY | `POST /api/v1/offers/{id}:approve` (`offers:manage`, people only) | Needs `typical_deal_cents`, `sales_cycle_days`, a target title or role, industries or size, else 400 `offer-incomplete` with `errors[]`. Decision 15. |
+| 19 | Status back to Draft | READY | `POST /api/v1/offers/{id}:unapprove` (`offers:manage`, people only) | Approved to draft, approver cleared, publishes `offers.offer.changed` (`affectsMatching`), so scoring rescores. A draft stays; retired is 409. |
 | 19 | `Retire` | READY | `POST /api/v1/offers/{id}:archive` (`offers:manage`) | Idempotent; no un-retire. |
-| 19 | `Delete offer` (never matched); Retire vs Delete choice | NEW ENDPOINT | `DELETE /api/v1/offers/{id}` (`offers:manage`) -> 204 or 409 `offer-has-history`; choice from `GET /api/v1/offers/stats` `matched` | Allowed only when no `offer_match` ever existed and nothing references it; cascade signal rules and case-study links; audit. |
+| 19 | `Delete offer` (never matched); Retire vs Delete choice | READY | `DELETE /api/v1/offers/{id}` (`offers:manage`, people only) -> 204 or 409 `offer-has-history`; choice from `can_delete` on `GET /api/v1/offers/{id}` | Never matched = no `offer_match`, no `score_change` naming it, no lead offer pick now or in `lead_offer_change` (the `OfferUsage` port, scoring and routing). Removes its signal rules and case-study links; audited `offers.offer.deleted`; an approved one also publishes `offers.offer.archived`. |
 | 19 | `Duplicate` | READY | `GET` then `POST /api/v1/offers` | Client copies fields into a draft. |
 | 19 | Create, edit practice | READY | `POST /api/v1/practices`, `PATCH /api/v1/practices/{id}` (`offers:manage`) | name, description, keywords, default playbook, brief template, sort. Lead missing (row above). |
-| 19 | `Delete practice` ("Move or delete its offers first") | SMALL GAP | `POST /api/v1/practices/{id}:archive` | Archive only; blocks only while approved offers exist (409 `practice-has-offers`). Decision 15. |
+| 19 | `Delete practice` ("Move or delete its offers first") | READY | `POST /api/v1/practices/{id}:archive` | Archive only; blocks only while approved offers exist: 409 `practice-has-offers` "Retire or move its active offers first.". Decision 15. |
 | 19 | Initial message with Copy | LATER (R2) | none | Better owned by playbook templates. |
 | 19 | Seller guide: talking points, objections, avoid | LATER (R2) | none | Tagged R2 in screens.md. |
 | 19 | Playbook by tier, "{n} steps over {d} days", "{x}% book a meeting" | LATER (R2) | none | No offer-to-playbook-by-tier mapping; practice has `default_playbook_id` only. Rates R3. Decision 25. |

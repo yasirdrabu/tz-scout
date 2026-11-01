@@ -3,6 +3,7 @@ import { render } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import type { Me } from '../api/me';
 import { AppRoot, createApp } from '../router';
+import { renderedApps } from './apps';
 import { server } from './server';
 
 export const ME: Me = {
@@ -34,6 +35,7 @@ export function serveMe(byTenant: Record<string, Partial<Me> & Record<string, un
 
 export function renderApp(path: string) {
   const app = createApp({ history: createMemoryHistory({ initialEntries: [path] }), retry: false });
+  renderedApps.add(app);
   const view = render(<AppRoot app={app} />);
   return { ...view, ...app, path: () => app.router.state.location.href };
 }

@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -36,6 +37,7 @@ export const practice = offers.table(
     defaultPlaybookId: text('default_playbook_id'),
     briefTemplateKey: text('brief_template_key'),
     sort: integer('sort').notNull().default(0), // tie-break when two practices match a hint
+    leadUserId: text('lead_user_id'), // a member; display only
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -73,6 +75,11 @@ export const offer = offers.table(
     excludedDomains: textArray('excluded_domains'),
     excludedCategories: textArray('excluded_categories'),
     proofPoints: textArray('proof_points'),
+    priceModel: text('price_model'), // fixed | starting_at | per_month | custom
+    lengthWeeks: integer('length_weeks'),
+    keyOffer: text('key_offer'),
+    whyUs: text('why_us'),
+    whyNow: text('why_now'),
     approvedBy: text('approved_by'),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     origin: text('origin').notNull().default('manual'), // manual | ai_draft
@@ -83,6 +90,8 @@ export const offer = offers.table(
   (t) => [
     uniqueIndex('offer_tenant_slug_uq').on(t.tenantId, t.slug),
     index('offer_tenant_practice_idx').on(t.tenantId, t.practiceId),
+    check('offer_price_model_valid', sql`${t.priceModel} is null or ${t.priceModel} in ('fixed', 'starting_at', 'per_month', 'custom')`),
+    check('offer_length_weeks_range', sql`${t.lengthWeeks} is null or ${t.lengthWeeks} between 1 and 260`),
   ],
 );
 

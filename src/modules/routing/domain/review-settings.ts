@@ -4,6 +4,14 @@ import { inList, REASON_LISTS, type ReasonList } from './status-rules';
 
 export const STATUS_COLORS = ['plum', 'amber', 'green', 'red', 'gray'] as const;
 export type StatusColor = (typeof STATUS_COLORS)[number];
+/** The editor's color picker, in order, with the words it shows. */
+export const STATUS_COLOR_OPTIONS: { value: StatusColor; label: string }[] = [
+  { value: 'plum', label: 'Plum' },
+  { value: 'amber', label: 'Amber' },
+  { value: 'green', label: 'Green' },
+  { value: 'red', label: 'Red' },
+  { value: 'gray', label: 'Gray' },
+];
 /** Who moves an account into the status: Scout on its own, or a reviewer. */
 export const STATUS_SET_BY = ['scout', 'reviewer'] as const;
 export type StatusSetBy = (typeof STATUS_SET_BY)[number];

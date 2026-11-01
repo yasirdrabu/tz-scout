@@ -1,0 +1,172 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.intro {
+  max-width: 720px;
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.5;
+}
+
+.buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.select {
+  width: auto;
+}
+
+.name {
+  width: 100%;
+  min-width: 160px;
+}
+
+.meaning {
+  width: 100%;
+  min-width: 200px;
+}
+
+.hours {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hoursInput {
+  width: 84px;
+}
+
+.late {
+  color: var(--bad);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.error {
+  margin: 4px 0 0;
+  color: var(--bad);
+  font-size: var(--text-xs);
+}
+
+.failure {
+  padding: 10px 14px;
+  border: 1px solid var(--bad);
+  border-radius: var(--radius-lg);
+  color: var(--bad);
+  font-size: var(--text-sm);
+}
+
+.failure p {
+  margin: 0;
+}
+
+.reasons {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  list-style: none;
+}
+
+.reason {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.reason:last-child {
+  border-bottom: 0;
+}
+
+.reasonMain {
+  flex: 1;
+  min-width: 200px;
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.used {
+  min-width: 90px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-align: right;
+}
+
+.addRow {
+  display: flex;
+  gap: 8px;
+  max-width: 480px;
+}
+
+.auto {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

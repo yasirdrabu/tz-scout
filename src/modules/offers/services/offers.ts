@@ -4,10 +4,11 @@ import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
-import { memberRole } from '@/modules/tenancy';
+import { tenantSummary } from '@/modules/tenancy';
 import { offerApproved, offerArchived, offerChanged } from '../contracts/events';
 import { offer, offerCaseStudy, practice } from '../db/schema';
 import { BUYER_DEFINITION_WARNING, affectsMatching, approvalProblems } from '../domain/approval';
+import { offerStatusLabel, priceLabel } from '../domain/price';
 import { slugify } from '../domain/slug';
 import { rethrowTaken, slugTaken } from './practices';
 import { seedSignalRules } from './signal-rules';
@@ -23,12 +24,12 @@ const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: '
 const invalid = (path: string, message: string) =>
   new ScoutError({ slug: 'validation', status: 400, title: 'Check the offer.', errors: [{ path, message }] });
 
-async function load(ctx: ModuleContext, id: string, lock = false): Promise<Offer> {
+async function load(ctx: ModuleContext, id: string, lock: boolean | 'share' = false): Promise<Offer> {
   const q = ctx.tx
     .select()
     .from(offer)
     .where(and(eq(offer.id, id), eq(offer.tenantId, ctx.tenantId)));
-  const [row] = await (lock ? q.for('update') : q);
+  const [row] = await (lock === 'share' ? q.for('share') : lock ? q.for('update') : q);
   if (!row) throw notFound();
   return row;
 }
@@ -142,12 +143,13 @@ export async function updateOffer(
   return backToDraft ? { offer: row!, warning: BUYER_DEFINITION_WARNING } : { offer: row! };
 }
 
-/** Approves a draft offer. Needs a person with the owner role; API keys cannot approve. */
+const personOnly = (ctx: ModuleContext, what: string) => {
+  if (ctx.actor.kind !== 'user') throw new ScoutError({ slug: 'forbidden', status: 403, title: `Only a person can ${what} an offer.` });
+};
+
+/** Approves a draft offer (Ruling 12). The route checks `offers:manage`; API keys cannot approve. */
 export async function approveOffer(ctx: ModuleContext, id: string): Promise<Offer> {
-  const role = ctx.actor.kind === 'user' ? await memberRole(ctx, ctx.actor.id) : null;
-  if (role !== 'owner') {
-    throw new ScoutError({ slug: 'forbidden', status: 403, title: 'Only an owner can approve an offer.' });
-  }
+  personOnly(ctx, 'approve');
   const before = await load(ctx, id, true);
   if (before.status === 'approved') return before;
   if (before.status === 'archived') {
@@ -175,6 +177,28 @@ export async function approveOffer(ctx: ModuleContext, id: string): Promise<Offe
   return row!;
 }
 
+/**
+ * Moves an approved offer back to draft and clears the approver (Ruling 12). Publishes `offers.offer.changed`
+ * with `affectsMatching`, so Scoring rescores the accounts that held a match for it. A draft stays as it is.
+ */
+export async function unapproveOffer(ctx: ModuleContext, id: string): Promise<Offer> {
+  personOnly(ctx, 'unapprove');
+  const before = await load(ctx, id, true);
+  if (before.status === 'archived') {
+    throw new ScoutError({ slug: 'offer-archived', status: 409, title: 'A retired offer cannot go back to draft.' });
+  }
+  if (before.status === 'draft') return before;
+  const [row] = await ctx.tx
+    .update(offer)
+    .set({ status: 'draft', approvedBy: null, approvedAt: null, updatedAt: new Date() })
+    .where(and(eq(offer.id, id), eq(offer.tenantId, ctx.tenantId)))
+    .returning();
+  const subject = { type: 'offer', id };
+  await publish(ctx, offerChanged, { offerId: id, practiceId: row!.practiceId, changed: ['status'], affectsMatching: true }, subject);
+  await audit(ctx, { action: 'offers.offer.unapproved', subject, before: { status: before.status }, after: { status: 'draft' } });
+  return row!;
+}
+
 export async function archiveOffer(ctx: ModuleContext, id: string): Promise<Offer> {
   const before = await load(ctx, id, true);
   if (before.status === 'archived') return before;
@@ -191,6 +215,14 @@ export async function archiveOffer(ctx: ModuleContext, id: string): Promise<Offe
 
 export function getOffer(ctx: ModuleContext, id: string): Promise<Offer> {
   return load(ctx, id);
+}
+
+/**
+ * Reads an offer FOR SHARE, for a module that is about to record a reference to it (a lead offer pick):
+ * a concurrent `deleteOffer` (FOR UPDATE) then either waits and sees the reference, or ran first and this is a 404.
+ */
+export function getOfferForShare(ctx: ModuleContext, id: string): Promise<Offer> {
+  return load(ctx, id, 'share');
 }
 
 export async function listOffers(
@@ -217,4 +249,17 @@ export async function listOffers(
       ),
     )
     .orderBy(asc(offer.name), asc(offer.id));
+}
+
+export type OfferView = Offer & { priceLabel: string | null; statusLabel: string };
+
+/** Adds the API's words: the price line in the workspace currency and the status label. */
+export async function withLabels(ctx: ModuleContext, rows: Offer[]): Promise<OfferView[]> {
+  if (rows.length === 0) return [];
+  const { currency } = await tenantSummary(ctx);
+  return rows.map((o) => ({ ...o, priceLabel: priceLabel(o, currency), statusLabel: offerStatusLabel(o.status) }));
+}
+
+export async function withLabel(ctx: ModuleContext, row: Offer): Promise<OfferView> {
+  return (await withLabels(ctx, [row]))[0]!;
 }

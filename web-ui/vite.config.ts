@@ -36,6 +36,10 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // At most four forked workers: with one per core, a worker could exit while messages were still
+    // in flight and fail the run with "Channel closed" (ERR_IPC_CHANNEL_CLOSED) after every test passed.
+    pool: 'forks',
+    poolOptions: { forks: { maxForks: 4, minForks: 1 } },
     globals: true,
     setupFiles: ['src/test/setup.ts'],
     css: { modules: { classNameStrategy: 'non-scoped' } },

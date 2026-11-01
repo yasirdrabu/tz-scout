@@ -12,7 +12,7 @@ export const BUYER_DEFINITION_FIELDS = [
   'excludedCategories',
 ] as const;
 
-export const BUYER_DEFINITION_WARNING = 'This sends the offer back to draft until an owner approves it.';
+export const BUYER_DEFINITION_WARNING = 'This sends the offer back to draft until someone who manages offers approves it.';
 
 export type ApprovalFields = {
   promise: string;

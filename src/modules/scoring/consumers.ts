@@ -114,7 +114,11 @@ export const rescoreOnOfferArchived = defineConsumer({
   },
 });
 
-/** Accounts holding a match are rescored; when the offer is still approved, so are those it may newly fit. */
+/**
+ * Accounts holding a match are rescored; when the offer is still approved, so are those it may newly fit. When its
+ * status changed (unapproved, or a buyer edit sent it back to draft) the practice is rescored too, as on an archive:
+ * a rescore that loaded the offer while it was approved and commits later is covered by the practice pass.
+ */
 export const rescoreOnOfferChanged = defineConsumer({
   name: 'scoring.rescore_offer_changed',
   event: offerChanged,
@@ -129,7 +133,7 @@ export const rescoreOnOfferChanged = defineConsumer({
         throw err;
       },
     );
-    if (stillApproved) await startRescore(ctx, practiceAndUnassigned(e.data.practiceId), 'offer_changed');
+    if (stillApproved || e.data.changed.includes('status')) await startRescore(ctx, practiceAndUnassigned(e.data.practiceId), 'offer_changed');
   },
 });
 

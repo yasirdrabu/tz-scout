@@ -91,6 +91,7 @@ import * as v1OffersIdCaseStudies from './routes/v1/offers/[id]/case-studies/rou
 import * as v1OffersId from './routes/v1/offers/[id]/route';
 import * as v1OffersIdSignalRules from './routes/v1/offers/[id]/signal-rules/route';
 import * as v1Offers from './routes/v1/offers/route';
+import * as v1OffersStats from './routes/v1/offers/stats/route';
 import * as v1PeopleId from './routes/v1/people/[id]/route';
 import * as v1PracticesId from './routes/v1/practices/[id]/route';
 import * as v1Practices from './routes/v1/practices/route';
@@ -221,6 +222,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/members/directory`, module: v1MembersDirectory },
   { path: `${V1}/members/:id`, module: v1MembersId },
   { path: `${V1}/members`, module: v1Members },
+  { path: `${V1}/offers/stats`, module: v1OffersStats },
   { path: `${V1}/offers/:id/case-studies`, module: v1OffersIdCaseStudies },
   { path: `${V1}/offers/:id`, module: v1OffersId },
   { path: `${V1}/offers/:id/signal-rules`, module: v1OffersIdSignalRules },

@@ -8,6 +8,7 @@ const editable = {
   default_playbook_id: z.string().nullable(),
   brief_template_key: z.string().nullable(),
   sort: z.number().int(),
+  lead_user_id: z.string().nullable(),
 };
 
 export const createPracticeBody = z.strictObject(editable).partial().required({ name: true });
