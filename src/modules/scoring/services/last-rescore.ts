@@ -1,4 +1,5 @@
 import { and, eq, gte, sql } from 'drizzle-orm';
+import { filterVisibleAccountIds } from '@/modules/accounts';
 import { members } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { scoreChange, scoringProfile } from '../db/schema';
@@ -12,7 +13,7 @@ export type LastRescoreView = {
   changedByName: string | null;
   summary: string;
   weightsText: string;
-  /** Accounts the rescore since the change moved to another tier. */
+  /** Accounts the caller can see that the rescore since the change moved to another tier. */
   tierChangedCount: number;
 };
 
@@ -20,7 +21,7 @@ const pct = (w: number) => `${Math.round(w * 100)}%`;
 
 /**
  * The review queue's rescore banner (Ruling 16): the last change to the scoring settings, when a person made it in
- * the last 7 days, with the accounts whose `rules_changed` rescore since then moved them to another tier. Null when
+ * the last 7 days, with the accounts (within the caller's data limit) whose `rules_changed` rescore since then moved them to another tier. Null when
  * the profile was never changed by a person or the change is older. A manual rescore changes no settings, so it
  * shows nothing here.
  */
@@ -30,8 +31,8 @@ export async function lastRescore(ctx: ModuleContext, now: Date = new Date()): P
     .from(scoringProfile)
     .where(eq(scoringProfile.tenantId, ctx.tenantId));
   if (!p?.by || now.getTime() - p.at.getTime() > RECENT_MS) return null;
-  const [moved] = await ctx.tx
-    .select({ n: sql<number>`count(distinct ${scoreChange.accountId})::int` })
+  const moved = await ctx.tx
+    .selectDistinct({ accountId: scoreChange.accountId })
     .from(scoreChange)
     .where(
       and(
@@ -48,6 +49,6 @@ export async function lastRescore(ctx: ModuleContext, now: Date = new Date()): P
     changedByName: name,
     summary: 'Scoring settings changed',
     weightsText: `Fit ${pct(p.fit)}, buying intent ${pct(p.intent)}`,
-    tierChangedCount: moved?.n ?? 0,
+    tierChangedCount: (await filterVisibleAccountIds(ctx, moved.map((r) => r.accountId))).length,
   };
 }

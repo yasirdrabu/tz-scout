@@ -16,6 +16,7 @@ import { newId } from '@/platform/ids';
 import { runOutbox } from '../helpers/run-outbox';
 import { completeOffer } from '../offers/helpers';
 import { call, freshTenant, keyFor, personAndAgent } from './intake-helpers';
+import { setSummary } from '../routing/helpers';
 import { workspace } from './review-helpers';
 
 afterAll(closeDbs);
@@ -331,6 +332,14 @@ describe('GET /api/v1/scoring/last-rescore (Ruling 16)', () => {
       weights_text: 'Fit 60%, buying intent 40%',
       tier_changed_count: moved,
     });
+
+    // A reviewer limited to one practice counts only the accounts they can see (the queue's visibility).
+    const limited = await w.person('leader', { name: 'Pat Practice', dataLimit: { kind: 'practices', ids: [practice.id] } });
+    await setSummary(w.tenant, accounts[0]!, { practiceId: practice.id, practiceIds: [practice.id] });
+    await setSummary(w.tenant, accounts[1]!, { practiceId: 'prc_elsewhere', practiceIds: ['prc_elsewhere'] });
+    const seen = (await json(await w.as(limited, getLastRescore, 'scoring/last-rescore'))).data;
+    expect(seen.tier_changed_count).toBe(after[0] !== before[0] ? 1 : 0);
+    expect(seen.tier_changed_count).toBeLessThan(moved);
 
     const later = new Date(Date.now() + 8 * 86_400_000);
     expect(await w.run((ctx) => lastRescore(ctx, later))).toBeNull();
