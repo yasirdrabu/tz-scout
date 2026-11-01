@@ -117,8 +117,8 @@ async function countAttempt(ctx: ModuleContext, accountId: string, jobId: string
 
 /**
  * The `playbooks.brief.draft` job (Rulings 2 to 6).
- * - Takes the account's advisory lock without waiting: when another draft holds it, that draft covers this request
- *   (it reads `requested_seq` again when it settles), so this run ends.
+ * - Takes the account's advisory lock without waiting: when another draft holds it, the delivery fails and the worker
+ *   retries it after the backoff (the holder may roll back), and the retry finds its request drafted or drafts it.
  * - Ends at once when a newer draft already reached the request it was queued for (`seq`).
  * - Reads the request number S, drafts with no row lock, then locks the brief row and writes the sections that are
  *   still as read, unless the brief was frozen meanwhile (an assignment landed during the draft).
@@ -126,7 +126,9 @@ async function countAttempt(ctx: ModuleContext, accountId: string, jobId: string
  */
 export async function runDraft(ctx: ModuleContext, job: DraftJob, meta: DraftMeta, now: Date): Promise<void> {
   const [lock] = (await ctx.tx.execute(sql`select pg_try_advisory_xact_lock(hashtext(${lockKey(ctx, job.accountId)})) as got`)) as unknown as { got: boolean }[];
-  if (!lock?.got) return;
+  // Another draft holds the account. Fail this delivery so the worker tries it again after the backoff: if the holder
+  // rolls back (a timeout), this request is still drafted; if it commits, the retry finds the request covered.
+  if (!lock?.got) throw new ScoutError({ slug: 'draft_busy', status: 409, title: 'Another draft of this brief is running. This one will try again.' });
   const row = await readBrief(ctx, job.accountId);
   if (!row) return;
   if (job.seq !== undefined && row.draftedSeq >= job.seq) return;

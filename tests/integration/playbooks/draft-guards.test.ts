@@ -142,6 +142,36 @@ describe('a timed-out Claude call (fix round 2, item 1)', () => {
   });
 });
 
+describe('a busy account lock (fix round 2, item 3)', () => {
+  it('fails the delivery so the worker retries it, and the retry drafts once the holder has gone', async () => {
+    const t = await routingTenant();
+    const id = await scoredAccount(t, 'watch');
+    await t.run((ctx) => requestDraft(ctx, id, { manual: true }));
+    const [job] = await pending(t.tenantId, 'jobs.playbooks.brief.draft');
+    const held = deferred();
+    const release = deferred();
+    // Another draft holds the lock, then rolls back (as a timed-out run does).
+    const holder = adminDb
+      .transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`plb:brief:${t.tenantId}:${id}`}))`);
+        held.resolve();
+        await release.promise;
+        throw new Error('rolled back');
+      })
+      .catch(() => undefined);
+    await held.promise;
+    await expect(deliverOnce(briefDraftHandler, job!)).rejects.toMatchObject({ slug: 'draft_busy' });
+    release.resolve();
+    await holder;
+    const before = (await briefRow(id))!;
+    expect(before.draftedSeq).toBeLessThan(before.requestedSeq);
+    await deliverOnce(briefDraftHandler, job!);
+    const after = (await briefRow(id))!;
+    expect(after).toMatchObject({ draftState: 'ready' });
+    expect(after.draftedSeq).toBe(after.requestedSeq);
+  });
+});
+
 describe('freezing (fixes 3 and 4)', () => {
   it('an assignment made while a draft runs keeps the draft from writing', async () => {
     const t = await routingTenant();
