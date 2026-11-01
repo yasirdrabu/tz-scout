@@ -1,12 +1,12 @@
-import { PERMISSIONS, ROLES, ROLE_PERMISSIONS, permissionGroup, permissionLabel } from '@/modules/tenancy';
+import { PERMISSIONS, listRoles, permissionGroup, permissionLabel } from '@/modules/tenancy';
 import { requireMembersRead } from '../_lib/members';
 import { v1Route } from '../_lib/v1-route';
 
-// The roles and permissions matrix, read only until the roles plan (Decision 17).
-export const GET = v1Route({}, async (_req, principal) => {
+/** Each role's current and default permissions for this workspace, and the permissions with labels and groups. */
+export const GET = v1Route({}, async (_req, principal, ctx) => {
   requireMembersRead(principal);
   return {
-    roles: ROLES.map((role) => ({ role, permissions: ROLE_PERMISSIONS[role] })),
+    roles: await listRoles(ctx),
     permissions: PERMISSIONS.map((key) => ({ key, label: permissionLabel(key), group: permissionGroup(key) })),
   };
 });
