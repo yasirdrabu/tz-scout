@@ -179,6 +179,7 @@ describe('getSummaries', () => {
       priority: 72,
       tier: 'act_now',
       bestOfferId: 'off_x',
+      leadOfferOverrideId: null,
     });
     const seller = await t.run((ctx) => getSummaries({ ...ctx, access: { userId: 'usr_editor', dataLimit: { kind: 'own_accounts' } } }, ids));
     expect(seller.map((s) => s.accountId)).toEqual([mine.accountId]);
