@@ -6,7 +6,7 @@ import { getAccountReview, type AccountReviewView } from '@/modules/routing';
 import { explainScore, getScore, TIER_NAMES, type ScoreExplanation, type Tier } from '@/modules/scoring';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
-import { INPUT_CAPS, type BriefInput } from '../domain/brief-io';
+import { DESCRIPTION_MAX, INPUT_CAPS, INSIGHTS_MAX, SIGNAL_TITLE_MAX, type BriefInput } from '../domain/brief-io';
 
 export type BuiltInput = { input: BriefInput; accountId: string; offerId: string | null; offerName: string | null; tier: Tier; explanation: ScoreExplanation };
 
@@ -73,7 +73,7 @@ export async function buildBriefInput(ctx: ModuleContext, accountId: string): Pr
       industry: account.industry,
       employees: account.employees,
       location: [account.hqCity, account.hqState, account.hqCountry].filter(Boolean).join(', ') || null,
-      description: account.description,
+      description: account.description?.slice(0, DESCRIPTION_MAX) ?? null,
       technologies: account.technologies.slice(0, 20),
     },
     offer: offer
@@ -95,7 +95,7 @@ export async function buildBriefInput(ctx: ModuleContext, accountId: string): Pr
       id: s.id,
       type: s.type,
       kind: s.kind,
-      title: s.title,
+      title: s.title.slice(0, SIGNAL_TITLE_MAX),
       occurredAt: s.occurredAt?.toISOString() ?? null,
       sourceName: names.get(closestSource(s.sourceChain) ?? '') ?? null,
     })),
@@ -122,7 +122,7 @@ export async function buildBriefInput(ctx: ModuleContext, accountId: string): Pr
     crm: check ? { exists: check.exists, ownerName: check.ownerName, lifecycle: check.lifecycle, openDeals: check.openDeals } : null,
     warmIntro: warm ? { introducerName: warm.label === 'Warm intro' ? 'your contact' : warm.label.slice('Warm intro from '.length) } : null,
     notes: notes.map((n) => ({ text: n.body.slice(0, 1000), at: n.at.toISOString() })),
-    insights: review?.insights?.text ?? null,
+    insights: review?.insights?.text.slice(0, INSIGHTS_MAX) ?? null,
   };
   return { input, accountId: id, offerId: offer?.id ?? null, offerName: offer?.name ?? null, tier, explanation };
 }

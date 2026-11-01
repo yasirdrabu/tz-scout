@@ -1,6 +1,6 @@
 // The brief assembled from rules, with no Claude (Task 2). Every number it states carries a citation.
 import type { BriefInput, BriefOutput, SectionOutput } from './brief-io';
-import { OPENER_MAX, SUBJECT_MAX } from './brief-io';
+import { hasLinkOrEmail, OPENER_MAX, SUBJECT_MAX } from './brief-io';
 import { isBuyerSafe } from './buyer-safe';
 import { clip, datedSignals, hasRecentSignal, recommendation, signalLine } from './recommendation';
 
@@ -113,15 +113,17 @@ function whyNow(input: BriefInput): SectionOutput {
 function opener(input: BriefInput, who: ReturnType<typeof whoFirst>): BriefOutput['opener'] {
   const name = input.account.name;
   const first = who.person?.name.split(' ')[0] ?? 'there';
-  const pub = HOOK_ORDER.map((t) =>
-    input.signals.find((s) => s.type === t && s.kind !== 'research' && s.title.length <= 90 && isBuyerSafe(s.title, input.signals)),
-  ).find(Boolean);
+  const usable = (s: string) => isBuyerSafe(s, input.signals) && !hasLinkOrEmail(s);
+  const pub = HOOK_ORDER.map((t) => input.signals.find((s) => s.type === t && s.kind !== 'research' && s.title.length <= 90 && usable(s.title))).find(Boolean);
   const industry = input.account.industry?.toLowerCase().replace(/:.*$/, '');
-  const hook = pub ? `I noticed ${name} ${signalPhrase(name, pub)}.` : `I work with ${industry ?? 'companies'} teams a lot like yours.`;
-  const value = input.offer ? ensureStop(input.offer.promise) : 'We help teams like yours get one hard workflow working in weeks.';
-  let body = `Hi ${first}, ${hook} ${value}`;
-  if (!isBuyerSafe(body, input.signals)) body = `Hi ${first}, I work with ${industry ?? 'companies'} teams a lot like yours. ${value}`;
-  return { subject: clip(`A quick idea for ${name}`, SUBJECT_MAX), body: clip(body, OPENER_MAX) };
+  const plainHook = `I work with ${industry ?? 'companies'} teams a lot like yours.`;
+  const hook = pub ? `I noticed ${name} ${signalPhrase(name, pub)}.` : plainHook;
+  const generic = 'We help teams like yours get one hard workflow working in weeks.';
+  const value = input.offer && usable(input.offer.promise) ? ensureStop(input.offer.promise) : generic;
+  // The first body that is buyer safe and has no link or address; the last always is.
+  const body = [`Hi ${first}, ${hook} ${value}`, `Hi ${first}, ${plainHook} ${value}`, `Hi ${first}, ${plainHook} ${generic}`, `Hi there, ${generic}`].find(usable)!;
+  const subject = [`A quick idea for ${name}`, 'A quick idea for your team'].find(usable)!;
+  return { subject: clip(subject, SUBJECT_MAX), body: clip(body, OPENER_MAX) };
 }
 
 /**

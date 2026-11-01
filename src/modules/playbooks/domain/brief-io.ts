@@ -7,6 +7,15 @@ export const HEADLINE_MAX = 120;
 export const DETAIL_MAX = 600;
 export const SUBJECT_MAX = 90;
 export const OPENER_MAX = 700;
+export const DESCRIPTION_MAX = 1000;
+export const SIGNAL_TITLE_MAX = 200;
+export const FACT_VALUE_MAX = 500;
+export const NOTE_MAX = 1000;
+export const INSIGHTS_MAX = 2000;
+export const NO_LINKS_MESSAGE = 'Leave links and email addresses out of the opener.';
+
+/** A URL (with a scheme or www) or an email address: never in the opener a seller sends as their own. */
+export const hasLinkOrEmail = (s: string) => /\bhttps?:\/\/|\bwww\.|[\w.+-]+@[\w-]+(\.[\w-]+)+/i.test(s);
 
 /** Task input caps (Global Constraints). */
 export const INPUT_CAPS = { signals: 20, facts: 40, people: 15, notes: 10, caseStudies: 3 } as const;
@@ -19,7 +28,7 @@ export const briefInputSchema = z.object({
     industry: z.string().nullable(),
     employees: z.number().nullable(),
     location: z.string().nullable(),
-    description: z.string().nullable(),
+    description: z.string().max(DESCRIPTION_MAX).nullable(),
     technologies: z.array(z.string()),
   }),
   offer: z
@@ -44,13 +53,13 @@ export const briefInputSchema = z.object({
         id: z.string(),
         type: z.string().nullable(),
         kind: z.enum(['research', 'trigger', 'pain']),
-        title: z.string(),
+        title: z.string().max(SIGNAL_TITLE_MAX),
         occurredAt: z.string().nullable(),
         sourceName: z.string().nullable(),
       }),
     )
     .max(INPUT_CAPS.signals),
-  facts: z.array(z.object({ id: z.string(), key: z.string(), value: z.string() })).max(INPUT_CAPS.facts),
+  facts: z.array(z.object({ id: z.string(), key: z.string(), value: z.string().max(FACT_VALUE_MAX) })).max(INPUT_CAPS.facts),
   /** No contact details. */
   people: z
     .array(
@@ -82,8 +91,8 @@ export const briefInputSchema = z.object({
     })
     .nullable(),
   warmIntro: z.object({ introducerName: z.string() }).nullable(),
-  notes: z.array(z.object({ text: z.string(), at: z.string() })).max(INPUT_CAPS.notes),
-  insights: z.string().nullable(),
+  notes: z.array(z.object({ text: z.string().max(NOTE_MAX), at: z.string() })).max(INPUT_CAPS.notes),
+  insights: z.string().max(INSIGHTS_MAX).nullable(),
 });
 export type BriefInput = z.infer<typeof briefInputSchema>;
 
@@ -103,7 +112,9 @@ export const briefOutputSchema = z.object({
     risks: sectionOutputSchema,
     whyNow: sectionOutputSchema,
   }),
-  opener: z.object({ subject: z.string().min(1).max(SUBJECT_MAX), body: z.string().min(1).max(OPENER_MAX) }),
+  opener: z
+    .object({ subject: z.string().min(1).max(SUBJECT_MAX), body: z.string().min(1).max(OPENER_MAX) })
+    .refine((o) => !hasLinkOrEmail(o.subject) && !hasLinkOrEmail(o.body), { message: NO_LINKS_MESSAGE, path: ['body'] }),
   whoFirst: z.object({ personId: z.string().nullable(), title: z.string().min(1).max(200), reason: z.string().min(1).max(300) }),
 });
 export type BriefOutput = z.infer<typeof briefOutputSchema>;
