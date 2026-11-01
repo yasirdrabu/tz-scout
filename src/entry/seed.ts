@@ -21,6 +21,7 @@ import { backfillCrm, seedCrmDefaults, seedMockCrm } from '@/modules/crm';
 import { listConnections } from '@/modules/integrations';
 import { listSources, personSourceFor, registerSource, seedIntakeDefaults } from '@/modules/intake';
 import { seedMissingSignalRules, seedOffers } from '@/modules/offers';
+import { backfillBriefs } from '@/modules/playbooks';
 import { backfillLeadOffers, backfillReviews, seedRoutingDefaults } from '@/modules/routing';
 import { requestRescore, seedScoringDefaults } from '@/modules/scoring';
 
@@ -144,6 +145,8 @@ export async function seed(): Promise<{ devApiKey: string }> {
       await backfillR1b(ctx(tx));
       await backfillR1c(ctx(tx));
       await backfillReviewFlow(ctx(tx));
+      // Every scored account gets a brief, as the first score would have given it.
+      await backfillBriefs(ctx(tx));
     });
     // Sources come after the first transaction commits, so the sellers' users exist.
     const emails = [ADMIN_EMAIL, t.ownerEmail, ...t.sellers.map((s) => s.email)];
