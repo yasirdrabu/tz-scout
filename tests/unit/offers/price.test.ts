@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TAAZAA_OFFERS } from '@/modules/offers/defaults';
 import { offerStatusLabel, priceLabel } from '@/modules/offers/domain/price';
 
 const none = { priceModel: null, priceMinCents: null, priceMaxCents: null, lengthWeeks: null };
@@ -14,6 +15,8 @@ describe('priceLabel (Ruling 13)', () => {
     [{ priceModel: 'custom' }, 'Custom quote'],
     [{ priceModel: 'custom', lengthWeeks: 8 }, 'Custom quote · 8 weeks'],
     [{ priceMinCents: 1_000_000, priceMaxCents: 9_000_000 }, '$10,000 to $90,000'],
+    [{ priceMaxCents: 1_000_000 }, 'Up to $10,000'],
+    [{ priceMinCents: 0, priceMaxCents: 1_000_000 }, 'Up to $10,000'],
     [{ lengthWeeks: 4 }, '4 weeks'],
     [{ priceModel: 'starting_at' }, 'Starting price not set'],
     [{ priceModel: 'per_month' }, 'Monthly price not set'],
@@ -23,6 +26,10 @@ describe('priceLabel (Ruling 13)', () => {
 
   it('is null with nothing set', () => {
     expect(priceLabel(none, 'USD')).toBeNull();
+  });
+
+  it('no seeded offer has a minimum of 0', () => {
+    expect(TAAZAA_OFFERS.filter((o) => o.priceMinCents === 0).map((o) => o.name)).toEqual([]);
   });
 
   it('uses the workspace currency', () => {

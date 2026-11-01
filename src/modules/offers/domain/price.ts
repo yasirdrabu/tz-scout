@@ -21,7 +21,8 @@ const money = (cents: number, currency: string) =>
 
 /**
  * The price line (Ruling 13): "Fixed fee · 6 weeks", "Starting at $40,000", "$8,000 per month", "Custom quote".
- * The amount is `price_min_cents` (the form sends it as both min and max); a range shows only without a model.
+ * The amount is `price_min_cents` (the form sends it as both min and max); a range, or "Up to" a maximum with no
+ * minimum, shows only without a model.
  * Null when nothing about the price is set.
  */
 export function priceLabel(o: PriceFields, currency: string): string | null {
@@ -44,7 +45,9 @@ export function priceLabel(o: PriceFields, currency: string): string | null {
       break;
     default: {
       const max = o.priceMaxCents;
-      price = amount && max !== null && max !== min ? `${amount} to ${money(max, currency)}` : amount;
+      // No minimum (or a minimum of 0) under a maximum is a ceiling, not a range from $0.
+      if (!o.priceMinCents && max) price = `Up to ${money(max, currency)}`;
+      else price = amount && max !== null && max !== min ? `${amount} to ${money(max, currency)}` : amount;
     }
   }
   const parts = [price, length].filter((p): p is string => !!p);
