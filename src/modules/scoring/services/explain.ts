@@ -3,7 +3,8 @@ import { listApprovedOffers } from '@/modules/offers';
 import type { ModuleContext } from '@/platform/context';
 import type { FitPart, RuleHit, ScoringProfile, ScoringSignal } from '../contracts/types';
 import { matchScore } from '../domain/combine';
-import { HARD_MISS_CAP, intentText, missingInputs, scoreLines, summarySentence, wouldRaise, type Explanation, type ExplanationLine } from '../domain/explain';
+import { HARD_MISS_CAP, intentText, missingInputs, revenueReason, scoreLines, summarySentence, wouldRaise, type Explanation, type ExplanationLine } from '../domain/explain';
+import { revenuePotential } from '../domain/revenue';
 import { scoreTiles, warmIntro, type ScoreTile } from '../domain/tiles';
 import { getMatches, getScore } from './read';
 import { getProfile } from './profile';
@@ -39,6 +40,7 @@ function matchLines(
   m: { fit: number; intent: number; revenueScore: number | null; trustScore: number | null; matchTotal: number; fitParts: unknown; ruleHits: unknown; disqualifiedReason: string | null; computedAt: Date },
   signals: ScoringSignal[],
   profile: ScoringProfile,
+  reasons: { revenue: string; trust: string | undefined },
 ): ExplanationLine[] {
   const lines: ExplanationLine[] = [];
   const parts = m.fitParts as FitPart[];
@@ -63,7 +65,8 @@ function matchLines(
     lines.push({ group: 'combine', label: 'Hard miss', points: m.fit, text: `Hard miss: fit capped at ${HARD_MISS_CAP}.` });
   }
   const scores = { fit: m.fit, intent: m.intent, revenue: m.revenueScore ?? 50, trust: m.trustScore ?? Math.round(profile.trustNeutral * 100) };
-  lines.push(...scoreLines(scores, profile.weights));
+  // A match written before the four-weight model has no revenue or trust score: no score lines, so the tiles say "Not scored yet."
+  if (m.revenueScore !== null && m.trustScore !== null) lines.push(...scoreLines(scores, profile.weights, { revenue: reasons.revenue, ...(reasons.trust === undefined ? {} : { trust: reasons.trust }) }));
   if (matchScore(scores, profile).cappedAtFit) {
     lines.push({ group: 'combine', label: 'Low fit', points: m.fit, text: `Fit below 50: score capped at fit (${m.fit}).` });
   }
@@ -105,7 +108,22 @@ export async function explainScore(ctx: ModuleContext, accountId: string, opts: 
       tier: m.tier as Explanation['tier'],
       tierReason: 'computed',
       bestOffer: offer,
-      lines: matchLines(m, toScoringSignals(view), profile),
+      lines: matchLines(m, toScoringSignals(view), profile, {
+        revenue: revenueReason(
+          revenuePotential({
+            typicalDealCents: named.typicalDealCents,
+            priceMinCents: named.priceMinCents,
+            expansionRate: named.expansionRate,
+            sizeMin: named.companySizeMin,
+            sizeMax: named.companySizeMax,
+            employees: account.employees,
+            referenceCents: null,
+          }),
+          named.name,
+        ),
+        // The account's trust is the same for every offer, so its reason is the one the stored explanation already wrote.
+        trust: stored.lines.find((l) => l.label === 'Source trust')?.reason,
+      }),
       otherOffers: matches
         .filter((x) => x !== m)
         .flatMap((x) => {
