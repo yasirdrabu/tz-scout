@@ -93,7 +93,8 @@ JSON field names are snake_case.
 | Method and path | Scope | Does |
 |---|---|---|
 | `GET /api/v1/accounts/{id}/brief` | `playbooks:read` | Brief sections with citations, custom fields, committee and gaps, plan summary |
-| `PATCH /api/v1/accounts/{id}/brief/sections/{key}` | `playbooks:write` | Edit a section (people and agents with the scope) |
+| `PUT /api/v1/accounts/{id}/brief/sections/{key}` | `playbooks:write` | Replace a section's body, optional `if_version` (people and agents with the scope) |
+| `POST /api/v1/accounts/{id}:draft-brief` | `playbooks:write` | Redraft the brief now, optional `include_edited` (page section keys); 202 |
 | `GET /api/v1/accounts/{id}/plan` | `playbooks:read` | The account plan and steps |
 | `PATCH /api/v1/plans/{id}/steps/{step_id}` | `playbooks:write` | Update a step (status, owner, due, note) |
 | `POST /api/v1/accounts/{id}/outcomes` | `playbooks:write` | Record a reply, meeting, opportunity, won or lost |

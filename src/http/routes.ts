@@ -9,6 +9,8 @@ import * as readyz from './routes/readyz/route';
 import * as v1Resource from './routes/v1/[resource]/route';
 import * as v1AccountsIdArrivals from './routes/v1/accounts/[id]/arrivals/route';
 import * as v1AccountsIdAssignments from './routes/v1/accounts/[id]/assignments/route';
+import * as v1AccountsIdBriefSectionsKey from './routes/v1/accounts/[id]/brief/sections/[key]/route';
+import * as v1AccountsIdBrief from './routes/v1/accounts/[id]/brief/route';
 import * as v1AccountsIdChanges from './routes/v1/accounts/[id]/changes/route';
 import * as v1AccountsIdExclusionOverride from './routes/v1/accounts/[id]/exclusion-override/route';
 import * as v1AccountsIdFacts from './routes/v1/accounts/[id]/facts/route';
@@ -131,6 +133,8 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/:resource`, module: v1Resource },
   { path: `${V1}/accounts/:id/arrivals`, module: v1AccountsIdArrivals },
   { path: `${V1}/accounts/:id/assignments`, module: v1AccountsIdAssignments },
+  { path: `${V1}/accounts/:id/brief/sections/:key`, module: v1AccountsIdBriefSectionsKey },
+  { path: `${V1}/accounts/:id/brief`, module: v1AccountsIdBrief },
   { path: `${V1}/accounts/:id/changes`, module: v1AccountsIdChanges },
   { path: `${V1}/accounts/:id/exclusion-override`, module: v1AccountsIdExclusionOverride },
   { path: `${V1}/accounts/:id/facts`, module: v1AccountsIdFacts },

@@ -26,9 +26,9 @@ All v1 responses are snake_case JSON (`v1Route` runs `snakeCase`); field names b
 | integrations | 1 | 5 | 5 | 1 | 3 | 15 |
 | ai-tasks | 0 | 2 | 1 | 5 | 1 | 9 |
 | platform | 1 | 8 | 11 | 1 | 2 | 23 |
-| playbooks (not built) | 0 | 0 | 0 | 0 | 12 | 12 |
+| playbooks | 1 | 0 | 0 | 0 | 11 | 12 |
 | analytics (not built) | 1 | 0 | 0 | 0 | 14 | 15 |
-| **Total** | **76** | **103** | **25** | **60** | **70** | **334** |
+| **Total** | **77** | **103** | **25** | **60** | **69** | **334** |
 
 Rows are de-duplicated across the four source passes; a need that spans modules is counted once, in
 the module that owns the data.
@@ -990,18 +990,18 @@ Files: `src/platform/{dead-jobs,scheduler,health,relay,diagnostics,audit}.ts`;
 
 R1: items 1 to 5. Later: audit retention and sign-ins (Decision 20).
 
-## playbooks (not built)
+## playbooks
 
-No module code, no routes. Spec `docs/spec/playbooks/index.md` (PLB), `playbook-templates.md`
+R1 module: the account brief and the handoff package (Playbooks minimum). Spec `docs/spec/playbooks/index.md` (PLB), `playbook-templates.md`
 (PLB-E1, R2), `outcomes-and-what-worked.md` (PLB-E6, R3). Planned API: `GET /api/v1/playbooks`,
 `GET /api/v1/playbooks/{id}` (`playbooks:read`), `POST /api/v1/playbooks`, `PATCH /api/v1/playbooks/{id}`
-(`playbooks:manage`). The only R1 item is `HandoffPackageProvider` (Playbooks minimum), not built.
+(`playbooks:manage`). The R1 items are built: the brief endpoints below and `HandoffPackageProvider` (registered in `src/entry/compose.ts`).
 Permissions `playbooks:read`, `playbooks:write`, `playbooks:manage` exist (leader, operator and owner
 hold manage; sellers hold read and write).
 
 | Screen § | Need | Status | Endpoint / proposed | Notes |
 |---|---|---|---|---|
-| 4a | Scout's recommendation, Brief (Overview, Approach, Value angle, Risks, Edit); review record brief (§4b) | LATER (R1, not built) | `HandoffPackageProvider` / account brief | No generator. `/score` `summary` and `would_raise` are a stand-in. Decision 7. |
+| 4a | Scout's recommendation, Brief (Overview, Approach, Value angle, Risks, Edit); review record brief (§4b) | READY | `GET /api/v1/accounts/{id}/brief` (`playbooks:read`), `PUT /api/v1/accounts/{id}/brief/sections/{key}`, `POST /api/v1/accounts/{id}:draft-brief` (`playbooks:write`) | Each piece has `written_by` and `label`; sections `version` for `if_version`. Decision 7. |
 | 6 | Playbook cards in the assign dialog | LATER (R2) | none | `assignment.template_id` null in R1. |
 | 7 | Playbook name, next step, due | LATER (R2) | none | |
 | 20 | List: name, description, status | LATER (R2) | `GET /api/v1/playbooks` | `playbook_template`: name, description, status `draft\|active\|archived`, scope practice or offer, motion. |
