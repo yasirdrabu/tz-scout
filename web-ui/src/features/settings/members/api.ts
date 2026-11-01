@@ -42,8 +42,11 @@ export type MemberCounts = {
 
 export type MembersList = { data: Member[]; counts: MemberCounts };
 
+/** One role as the workspace has it now, with its built-in defaults; Owner is locked. */
+export type RoleView = { role: string; permissions: string[]; default_permissions: string[]; customised: boolean; locked: boolean };
+
 export type Roles = {
-  roles: { role: string; permissions: string[] }[];
+  roles: RoleView[];
   permissions: { key: string; label: string; group: string }[];
 };
 
@@ -57,6 +60,9 @@ export const membersQuery = (tenant: string) =>
 
 export const rolesQuery = (tenant: string) =>
   queryOptions({ queryKey: ['roles', tenant], queryFn: () => apiFetch<Roles>('/roles', { tenant }), staleTime: 5 * 60_000 });
+
+export const saveRole = (tenant: string, role: string, permissions: string[]) =>
+  apiFetch<RoleView>(`/roles/${encodeURIComponent(role)}`, { tenant, method: 'PUT', body: { permissions } });
 
 export const practicesQuery = (tenant: string) =>
   queryOptions({

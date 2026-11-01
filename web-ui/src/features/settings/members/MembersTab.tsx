@@ -20,7 +20,7 @@ export function MembersTab(props: TabProps) {
   return (
     <Tabs label="Members" tabs={tabs} value={view} onChange={setView}>
       {view === 'members' && <MembersList {...props} />}
-      {view === 'roles' && <RolesMatrix tenant={props.tenant} />}
+      {view === 'roles' && <RolesMatrix me={props.me} tenant={props.tenant} />}
       {view === 'logins' && <LoginHistory />}
     </Tabs>
   );
