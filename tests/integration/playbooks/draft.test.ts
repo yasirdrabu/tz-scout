@@ -74,6 +74,16 @@ describe('drafting', () => {
     expect((await briefRuns(t.tenantId)).map((r) => r.mode)).toEqual(['rules']);
   });
 
+  it('a nurture account gets a rules brief like watch, never a Claude draft', async () => {
+    registerAnthropicAdapter();
+    const t = await routingTenant();
+    const id = await scoredAccount(t, 'nurture');
+    expect(await briefRow(id)).toMatchObject({ draftState: 'ready', mode: 'rules' });
+    expect((await briefRuns(t.tenantId)).map((r) => r.mode)).toEqual(['rules']);
+    const b = (await t.run((ctx) => getBrief(ctx, id)))!;
+    expect(b.recommendation).toMatchObject({ headline: 'Keep it in review until a stronger signal arrives.', writtenBy: 'rules' });
+  });
+
   it('the first score at act now drafts with the mock: Sample output and the run id (PLB-E3-S1-AC2)', async () => {
     registerAnthropicAdapter();
     const t = await routingTenant();

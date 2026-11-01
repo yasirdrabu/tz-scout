@@ -14,12 +14,12 @@ export type PropertyDef = {
   options?: string[];
 };
 
-export const TIER_OPTIONS = ['Act now', 'Good fit', 'Watch', 'Not a fit'];
+export const TIER_OPTIONS = ['Act now', 'Good fit', 'Watch', 'Nurture', 'Not a fit'];
 
 export const SCOUT_PROPERTIES: PropertyDef[] = [
   { name: 'taazaa_bucket', label: 'Taazaa practice', type: 'string', fieldType: 'text', description: 'The practice line(s) this company was researched for: AI Transformation, AI Operating Platforms, Data & Engineering, AI Marketing Studio.' },
   { name: 'taazaa_best_offer', label: 'Best Taazaa offer', type: 'string', fieldType: 'text', description: 'The offer this company is most likely to buy, from Scout.' },
-  { name: 'taazaa_tier', label: 'Buying tier', type: 'enumeration', fieldType: 'select', description: 'Act now: strong fit and a reason to buy now. Good fit: fits, no trigger yet.', options: TIER_OPTIONS },
+  { name: 'taazaa_tier', label: 'Buying tier', type: 'enumeration', fieldType: 'select', description: 'Act now: strong fit and a reason to buy now. Good fit: fits, no trigger yet. Nurture: worth keeping warm, not yet a fit to chase.', options: TIER_OPTIONS },
   { name: 'taazaa_fit_score', label: 'Fit score', type: 'number', fieldType: 'number', description: '0 to 100: how much this company looks like the offer\'s buyer.' },
   { name: 'taazaa_signal_score', label: 'Buying signal score', type: 'number', fieldType: 'number', description: '0 to 100: research, trigger events and visible pain that say they\'re buying now.' },
   { name: 'taazaa_total_score', label: 'Overall match score', type: 'number', fieldType: 'number', description: 'Fit and signals combined.' },

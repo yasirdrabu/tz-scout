@@ -484,6 +484,7 @@ describe('the Source page reads: batches of a source, and tier names for the Acc
       ['act_now', 'Act now'],
       ['good_fit', 'Good fit'],
       ['watch', 'Watch'],
+      ['nurture', 'Nurture'],
       ['not_fit', 'Not a fit'],
     ]);
     const rows = await json(w.as(operator, accountsRoute, `accounts?source_id=${w.source.personId}`));

@@ -30,6 +30,12 @@ describe('recommendation', () => {
     });
   });
 
+  it('nurture is treated like watch', () => {
+    const i = fixture('intent only');
+    i.score = { ...i.score, tier: 'nurture', tierLabel: 'Nurture' };
+    expect(recommendation(i)).toEqual(recommendation(fixture('intent only')));
+  });
+
   it('watch turns a would-raise phrase into a whole sentence', () => {
     const i = fixture('intent only');
     i.score = { ...i.score, fit: 45, intent: 0, wouldRaise: ['Revenue on file', 'A signal for RFP'] };

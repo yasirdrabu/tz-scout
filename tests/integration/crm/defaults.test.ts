@@ -47,7 +47,7 @@ describe('crm.tenant_defaults', () => {
     expect(m.find((r) => r.scoutField === 'tier')).toMatchObject({
       crmProperty: 'taazaa_tier',
       transform: 'enum_map',
-      transformConfig: { act_now: 'Act now', good_fit: 'Good fit', watch: 'Watch', not_fit: 'Not a fit' },
+      transformConfig: { act_now: 'Act now', good_fit: 'Good fit', watch: 'Watch', nurture: 'Nurture', not_fit: 'Not a fit' },
     });
     expect(m.find((r) => r.scoutField === 'last_handoff')).toMatchObject({ crmProperty: 'taazaa_last_pushed', transform: 'date' });
     expect(m.find((r) => r.scoutField === 'scout_link')).toMatchObject({ crmProperty: 'scout_link' });
