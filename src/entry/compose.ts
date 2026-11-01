@@ -4,7 +4,8 @@
 import { registerMergeGuard, registerSourceAccessProvider, registerSourceInfoProvider } from '@/modules/accounts';
 import { intakeSourceAccess, intakeSourceInfo, intakeSourceValidator, registerReviewStatusValidator } from '@/modules/intake';
 import { registerOwnershipPreflight, routingReviewStatusValidator } from '@/modules/routing';
-import { crmMergeGuard, crmOwnershipPreflight, registerHubspotAdapter } from '@/modules/crm';
+import { crmMergeGuard, crmOwnershipPreflight, registerHandoffPackageProvider, registerHubspotAdapter } from '@/modules/crm';
+import { playbooksHandoffPackage } from '@/modules/playbooks';
 import { registerSourceValidator } from '@/modules/tenancy';
 
 registerSourceValidator(intakeSourceValidator);
@@ -14,3 +15,4 @@ registerReviewStatusValidator(routingReviewStatusValidator);
 registerHubspotAdapter();
 registerOwnershipPreflight(crmOwnershipPreflight);
 registerMergeGuard(crmMergeGuard);
+registerHandoffPackageProvider(playbooksHandoffPackage);

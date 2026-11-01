@@ -27,3 +27,6 @@ export { runDraft } from './services/draft';
 export { EMPTY_SECTION, NO_SUCH_SECTION, SECTION_CHANGED, SECTION_TOO_LONG, editSection } from './services/edit';
 export { getBrief, type BriefView, type SectionView } from './services/read';
 export { backfillBriefs } from './services/backfill';
+export { handoffPackage, playbooksHandoffPackage } from './services/package';
+export { buildPackage, type PackageBrief, type PackageInput, type PackageSignal } from './domain/package';
+export { followUps } from './domain/follow-ups';

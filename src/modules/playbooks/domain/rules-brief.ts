@@ -35,7 +35,7 @@ export function signalPhrase(company: string, s: { type: string | null; title: s
 }
 
 /** Best public hooks first: a new leader, a deal or expansion, the stack. Research and risk signals are never hooks. */
-const HOOK_ORDER = ['leadership', 'funding', 'news', 'tech', 'growth'];
+export const HOOK_ORDER = ['leadership', 'funding', 'news', 'tech', 'growth'];
 
 type Person = BriefInput['people'][number];
 
