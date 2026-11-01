@@ -15,6 +15,8 @@ const bulkBody = z.discriminatedUnion('action', [
     notes: optional,
     lead_offer_id: optional,
     ownership_decision: z.enum(['assign', 'keep']).optional(),
+    /** Per account: `keep` leaves the HubSpot owner as is for an account whose preflight stops; others take the takeover rule. */
+    ownership_decisions: z.record(z.string(), z.enum(['assign', 'keep'])).optional(),
   }),
 ]);
 

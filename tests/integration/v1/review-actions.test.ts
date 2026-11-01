@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as changesRoute } from '@/http/routes/v1/accounts/[id]/changes/route';
 import { PUT as putLeadOffer } from '@/http/routes/v1/accounts/[id]/lead-offer/route';
@@ -15,9 +15,9 @@ import { GET as queueRoute } from '@/http/routes/v1/review-queue/route';
 import { backfillReviewFlow } from '@/entry/seed';
 import { accountSummary } from '@/modules/accounts/db/schema';
 import { sourceFeedback } from '@/modules/intake/db/schema';
-import { statusChange } from '@/modules/routing/db/schema';
+import { assignment, statusChange } from '@/modules/routing/db/schema';
 import { seedMockCrm, syncOwners } from '@/modules/crm';
-import { activity } from '@/modules/crm/db/schema';
+import { activity, mockCompany } from '@/modules/crm/db/schema';
 import { callLog } from '@/modules/integrations/db/schema';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
 import { scoreAccount } from '@/modules/scoring';
@@ -349,6 +349,32 @@ describe('assign previews: ownership details and the bulk preview', () => {
     expect(data[0]).toMatchObject({ preflight: { result: 'new' }, approves_to: { key: 'reviewed' }, replaces: null });
     expect(data[1]).toEqual({ account_id: otherAccount, ok: false, status: 404, message: expect.any(String) });
     expect(await hubspotCalls()).toBe(before);
+  });
+
+  it('bulk assign: a per-account keep leaves the stopped account with its owner and the others move to the seller', async () => {
+    const a = await w.sent({ name: 'Bulk Keep Open Deal', domain: 'open-deal.example' });
+    const b = await w.sent({ name: 'Bulk Move Owned', domain: 'owned-elsewhere.example' });
+    const res = await w.as(leader, bulkRoute, 'review-queue/bulk', 'POST', { account_ids: [a, b], action: 'assign', seller_user_id: seller, ownership_decisions: { [a]: 'keep' } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).results).toEqual([
+      { account_id: a, ok: true },
+      { account_id: b, ok: true },
+    ]);
+    const decisions = await w.run((ctx) => ctx.tx.select({ accountId: assignment.accountId, d: assignment.ownershipDecision }).from(assignment).where(inArray(assignment.accountId, [a, b])));
+    expect(Object.fromEntries(decisions.map((r) => [r.accountId, r.d]))).toEqual({ [a]: 'keep', [b]: 'assign' });
+    await w.deliver();
+    const owner = async (domain: string) => (await w.run((ctx) => ctx.tx.select({ owner: mockCompany.ownerExternalId }).from(mockCompany).where(eq(mockCompany.domain, domain))))[0]!.owner;
+    expect(await owner('owned-elsewhere.example')).toBe(`mock-${seller}`);
+    expect(await owner('open-deal.example')).not.toBe(`mock-${seller}`);
+    // Without a keep, the stopped account is refused on its own and the other still goes.
+    const c = await w.sent({ name: 'Bulk No Keep', domain: 'customer.example' });
+    const d = await w.sent({ name: 'Bulk Plain' });
+    const plain = (await json(w.as(leader, bulkRoute, 'review-queue/bulk', 'POST', { account_ids: [c, d], action: 'assign', seller_user_id: seller }))).results;
+    expect(plain).toEqual([
+      { account_id: c, ok: false, status: 409, message: expect.stringContaining('will not change owner') },
+      { account_id: d, ok: true },
+    ]);
+    expect((await w.as(leader, bulkRoute, 'review-queue/bulk', 'POST', { account_ids: [d], action: 'assign', seller_user_id: seller, ownership_decisions: { [d]: 'maybe' } })).status).toBe(400);
   });
 
   it('bulk: refuses 51 ids, a bad body, a seller and an API key', async () => {

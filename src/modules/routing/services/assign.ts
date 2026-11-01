@@ -201,7 +201,8 @@ export async function assign(ctx: ModuleContext, accountId: string, input: Assig
   return { id, accountId, sellerUserId: input.sellerUserId, assignedBy: by, status: 'pending', notes, offerId, ownershipDecision, previousAssignmentId: values.previousAssignmentId };
 }
 
-export type BulkAction = ({ kind: 'status' } & StatusChangeInput) | ({ kind: 'assign' } & AssignInput);
+/** A bulk assign may give each account its own ownership decision; one it leaves out takes `ownershipDecision` (the takeover rule by default). */
+export type BulkAction = ({ kind: 'status' } & StatusChangeInput) | ({ kind: 'assign' } & AssignInput & { ownershipDecisions?: Record<string, 'assign' | 'keep'> });
 export type BulkResult = { accountId: string; ok: true } | { accountId: string; ok: false; status: number; message: string };
 
 /**
@@ -219,10 +220,15 @@ export async function bulk(ctx: ModuleContext, accountIds: string[], action: Bul
     try {
       await ctx.tx.transaction(async (tx) => {
         const sp = { ...ctx, tx };
-        const { kind, ...input } = action;
         // The push asks the CRM about ownership again (CRM-E3-S1-AC5), so a bulk's preflight may use a check under a day old.
-        if (kind === 'assign') await assign(sp, accountId, input as AssignInput, { bulkId, fresh: false });
-        else await changeStatus(sp, accountId, input as StatusChangeInput);
+        if (action.kind === 'assign') {
+          const { kind: _kind, ownershipDecisions, ...input } = action;
+          const ownershipDecision = ownershipDecisions?.[accountId] ?? input.ownershipDecision;
+          await assign(sp, accountId, { ...input, ...(ownershipDecision ? { ownershipDecision } : {}) }, { bulkId, fresh: false });
+        } else {
+          const { kind: _kind, ...input } = action;
+          await changeStatus(sp, accountId, input);
+        }
       });
       results.set(accountId, { accountId, ok: true });
     } catch (e) {
