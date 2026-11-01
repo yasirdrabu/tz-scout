@@ -1,0 +1,1 @@
+ALTER TABLE "intake"."arrival" ADD COLUMN "superseded_by" text;

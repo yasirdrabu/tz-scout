@@ -77,6 +77,16 @@ describe('Source page tabs', () => {
     expect(await screen.findByRole('tab', { name: 'Batches 7' })).toBeInTheDocument();
   });
 
+  it('lists the batches in the shared Batches table, with the API status and progress', async () => {
+    serveSources();
+    renderApp('/t/taazaa/sources/src_marcus/batches');
+    const link = await screen.findByRole('link', { name: 'bat_1042' });
+    expect(link.getAttribute('href')).toBe('/t/taazaa/batches/bat_1042');
+    const row = link.closest('tr')!;
+    expect(within(row).getByText('Complete')).toBeInTheDocument();
+    expect(within(row).getByText('0 resolved, 0 rejected, 0 waiting')).toBeInTheDocument();
+  });
+
   it('Overview shows where the accounts went from by_stage and the recent activity', async () => {
     serveSources();
     renderApp('/t/taazaa/sources/src_rfp');

@@ -154,6 +154,10 @@ describe('the sources routes and their permissions', () => {
     ['POST', 'sources/src_1/keys/key_1:rotate', 'sources:manage', () => import('@/http/routes/v1/sources/[id]/keys/[keyId]/route')],
     ['DELETE', 'sources/src_1/keys/key_1', 'sources:manage', () => import('@/http/routes/v1/sources/[id]/keys/[keyId]/route')],
     ['GET', 'members/directory', 'members:read', () => import('@/http/routes/v1/members/directory/route')],
+    ['GET', 'batches/bat_1/files/fil_1', 'arrivals:read', () => import('@/http/routes/v1/batches/[id]/files/[fileId]/route')],
+    ['GET', 'batches/bat_1/rejections?format=csv', 'arrivals:read', () => import('@/http/routes/v1/batches/[id]/rejections/route')],
+    ['POST', 'batches/bat_1:retry', 'imports:run', () => import('@/http/routes/v1/batches/[id]/route')],
+    ['DELETE', 'imports/imp_1', 'imports:run', () => import('@/http/routes/v1/imports/[id]/route')],
   ] as const)('%s %s needs %s', async (method, path, scope, load) => {
     const mod = (await load()) as Record<string, (r: Request) => Promise<Response>>;
     const res = await mod[method]!(await asKey(path, method, method === 'POST' ? {} : undefined));

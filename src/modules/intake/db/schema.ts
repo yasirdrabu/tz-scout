@@ -106,6 +106,7 @@ export const arrival = intake.table(
     canDeclareWarmIntro: boolean('can_declare_warm_intro').notNull().default(false), // the sender held warm_intro:declare
     externalIds: jsonb('external_ids'), // outside ids sent beside the body, not part of arrival.v1 (Ruling 13)
     resolvedAt: at('resolved_at'),
+    supersededBy: text('superseded_by'), // a retried rejection: the arrival that took its place (Ruling 8)
   },
   (t) => [
     uniqueIndex('arrival_tenant_source_ref_uq')

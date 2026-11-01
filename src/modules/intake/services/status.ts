@@ -1,8 +1,8 @@
-import { and, desc, eq, gte, inArray, isNotNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { filterVisibleAccountIds, getSummaries, isKnownFactKey } from '@/modules/accounts';
 import { members } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
-import { arrival, batch, source } from '../db/schema';
+import { arrival, batch, batchFile, fileImport, source } from '../db/schema';
 import { feedbackForArrival, type ArrivalFeedback } from './feedback';
 import { DEFAULT_REVIEW_STATUS, type SourceKind } from './sources';
 import { chainInScope, keysetPage, pageArrivals, visibleArrivals } from './visibility';
@@ -206,7 +206,7 @@ export type BatchDetail = BatchView & {
   rejections: { arrivalId: string; externalRef: string | null; reason: string | null; detail: string | null }[];
 };
 
-function batchView(b: BatchRow): BatchView {
+export function batchView(b: BatchRow): BatchView {
   const c = b.counts as Partial<BatchView['counts']>;
   return {
     id: b.id,
@@ -224,20 +224,102 @@ function batchView(b: BatchRow): BatchView {
   };
 }
 
-type BatchCandidate = { row: BatchRow; chainOk: boolean };
+export type BatchCandidate = { row: BatchRow; chainOk: boolean };
+
+/** Rows a retry replaced stay in the batch for history, but no longer count as its items. */
+export const notSuperseded = isNull(arrival.supersededBy);
+
+export type BatchFilters = {
+  id?: string;
+  cursor?: string;
+  limit?: number;
+  /** Batches whose chain names one of these sources. */
+  sourceIds?: string[];
+  /** Over the batch name, its notes and its file names. */
+  q?: string;
+  since?: Date;
+  /** `batch.principal`, as `user:usr_x` or `agent:key_x`. */
+  principal?: string;
+  /** A batch whose only import was discarded is left out unless this is set. */
+  includeCancelled?: boolean;
+};
+
+const likeText = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+export function batchWhere(ctx: ModuleContext, o: BatchFilters): (SQL | undefined)[] {
+  const like = o.q ? likeText(o.q.trim()) : undefined;
+  return [
+    o.id ? eq(batch.id, o.id) : undefined,
+    o.sourceIds ? or(inArray(batch.personSourceId, o.sourceIds), inArray(batch.agentSourceId, o.sourceIds), inArray(batch.vendorSourceId, o.sourceIds)) : undefined,
+    like
+      ? sql`(${batch.name} ilike ${like} or ${batch.notes} ilike ${like} or exists (select 1 from ${batchFile} f where f.tenant_id = ${ctx.tenantId} and f.batch_id = ${batch.id} and f.file_name ilike ${like}))`
+      : undefined,
+    o.since ? gte(batch.runAt, o.since) : undefined,
+    o.principal ? eq(batch.principal, o.principal) : undefined,
+    o.includeCancelled
+      ? undefined
+      : sql`not exists (select 1 from ${fileImport} i where i.tenant_id = ${ctx.tenantId} and i.batch_id = ${batch.id} and i.status = 'cancelled')`,
+  ];
+}
+
+/** The columns of an arrival the batch reads need: its stage, rejection and resolution. */
+export type BatchArrival = Pick<ArrivalRow, 'id' | 'batchId' | 'status' | 'waitingOn' | 'rejectReason' | 'resolution' | 'resolvedAt' | 'accountId' | 'receivedAt'>;
+
+/**
+ * The rows of these batches the principal may see (by their chain, or resolved on an account Accounts lets them see),
+ * newest first, rows a retry replaced left out. One read of the rows and one visibility check, however many batches.
+ */
+export async function visibleRowsOfBatches(ctx: ModuleContext, batchIds: string[]): Promise<Map<string, BatchArrival[]>> {
+  const out = new Map<string, BatchArrival[]>(batchIds.map((id) => [id, []]));
+  if (batchIds.length === 0) return out;
+  const scope = await visibleArrivals(ctx);
+  const chain = chainInScope(scope, { person: arrival.personSourceId, agent: arrival.agentSourceId, vendor: arrival.vendorSourceId });
+  const candidate = scope.viaAccounts ? sql`(${chain} or (${arrival.status} = 'resolved' and ${arrival.accountId} is not null))` : chain;
+  const rows: (BatchArrival & { chainOk: boolean })[] = [];
+  for (let i = 0; i < batchIds.length; i += 1000) {
+    rows.push(
+      ...(await ctx.tx
+        .select({
+          id: arrival.id,
+          batchId: arrival.batchId,
+          status: arrival.status,
+          waitingOn: arrival.waitingOn,
+          rejectReason: arrival.rejectReason,
+          resolution: arrival.resolution,
+          resolvedAt: arrival.resolvedAt,
+          accountId: arrival.accountId,
+          receivedAt: arrival.receivedAt,
+          chainOk: sql<boolean>`${chain}`,
+        })
+        .from(arrival)
+        .where(and(eq(arrival.tenantId, ctx.tenantId), inArray(arrival.batchId, batchIds.slice(i, i + 1000)), notSuperseded, candidate))
+        .orderBy(desc(arrival.receivedAt), desc(arrival.id))),
+    );
+  }
+  const viaAccount = [...new Set(rows.filter((r) => !r.chainOk && r.accountId).map((r) => r.accountId!))];
+  const seen = new Set<string>();
+  for (let i = 0; i < viaAccount.length; i += 1000) for (const id of await filterVisibleAccountIds(ctx, viaAccount.slice(i, i + 1000))) seen.add(id);
+  for (const { chainOk, ...r } of rows) if (chainOk || (r.accountId && seen.has(r.accountId))) out.get(r.batchId!)!.push(r);
+  return out;
+}
 
 /** Batches whose chain the principal may see, or which hold an arrival whose account they may see. */
 async function visibleBatches(ctx: ModuleContext, rows: BatchCandidate[]): Promise<BatchCandidate[]> {
   const scope = await visibleArrivals(ctx);
-  const out: BatchCandidate[] = [];
-  for (const r of rows) {
-    if (r.chainOk) out.push(r);
-    else if (scope.viaAccounts && (await pageArrivals(ctx, { where: [eq(arrival.batchId, r.row.id)], limit: 1 })).data.length > 0) out.push(r);
-  }
-  return out;
+  const others = scope.viaAccounts ? rows.filter((r) => !r.chainOk) : [];
+  const seen = await visibleRowsOfBatches(ctx, others.map((r) => r.row.id));
+  return rows.filter((r) => r.chainOk || (seen.get(r.row.id)?.length ?? 0) > 0);
 }
 
-async function pageBatches(ctx: ModuleContext, o: { id?: string; cursor?: string; limit?: number; sourceIds?: string[] }): Promise<Page<BatchCandidate>> {
+/**
+ * Batches the principal may see, newest first, narrowed by the filters. `keep` may narrow the visible ones further
+ * (the derived status filter), and paging stays right however few pass.
+ */
+export async function pageBatches(
+  ctx: ModuleContext,
+  o: BatchFilters,
+  keep?: (rows: BatchCandidate[]) => Promise<BatchCandidate[]>,
+): Promise<Page<BatchCandidate>> {
   const scope = await visibleArrivals(ctx);
   const chain = chainInScope(scope, { person: batch.personSourceId, agent: batch.agentSourceId, vendor: batch.vendorSourceId });
   const page = await keysetPage<BatchCandidate>({
@@ -250,8 +332,7 @@ async function pageBatches(ctx: ModuleContext, o: { id?: string; cursor?: string
         .where(
           and(
             eq(batch.tenantId, ctx.tenantId),
-            o.id ? eq(batch.id, o.id) : undefined,
-            o.sourceIds ? or(inArray(batch.personSourceId, o.sourceIds), inArray(batch.agentSourceId, o.sourceIds), inArray(batch.vendorSourceId, o.sourceIds)) : undefined,
+            ...batchWhere(ctx, o),
             scope.viaAccounts ? undefined : chain,
             after ? sql`(${batch.runAt}, ${batch.id}) < (${after[0]}::timestamptz, ${after[1]})` : undefined,
           ),
@@ -260,7 +341,10 @@ async function pageBatches(ctx: ModuleContext, o: { id?: string; cursor?: string
         .limit(size);
       return rows.map((r) => ({ item: { row: r.row, chainOk: r.chainOk }, key: [r.atText, r.row.id] as [string, string] }));
     },
-    keep: (items) => visibleBatches(ctx, items),
+    keep: async (items) => {
+      const visible = await visibleBatches(ctx, items);
+      return keep ? keep(visible) : visible;
+    },
   });
   return page;
 }
@@ -269,18 +353,18 @@ async function pageBatches(ctx: ModuleContext, o: { id?: string; cursor?: string
  * A batch seen only through account visibility shows just the items the principal may see: its item
  * count, counts and stages are rebuilt from those rows, so nothing reveals the hidden ones.
  */
-async function visibleItems(ctx: ModuleContext, batchId: string): Promise<ArrivalRow[]> {
+export async function visibleItems(ctx: ModuleContext, batchId: string): Promise<ArrivalRow[]> {
   const rows: ArrivalRow[] = [];
   let cursor: string | undefined;
   do {
-    const page = await pageArrivals(ctx, { where: [eq(arrival.batchId, batchId)], cursor, limit: 200 });
+    const page = await pageArrivals(ctx, { where: [eq(arrival.batchId, batchId), notSuperseded], cursor, limit: 200 });
     rows.push(...page.data);
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
   return rows;
 }
 
-function narrowed(b: BatchRow, rows: ArrivalRow[]): BatchView {
+export function narrowed(b: BatchRow, rows: Pick<ArrivalRow, 'status' | 'resolution' | 'resolvedAt'>[]): BatchView {
   const counts = { resolved: 0, rejected: 0, newAccounts: 0, alreadyKnown: 0 };
   for (const r of rows) {
     if (r.status === 'rejected') counts.rejected++;
@@ -344,8 +428,8 @@ async function stageCounts(ctx: ModuleContext, items: Map<string, number>): Prom
  * SRC-E2-S3-AC1: counts, counts by stage and the rejections. Null when the batch is hidden (SRC-E2-S3-AC3).
  * Seen only through account visibility, everything (item count included) covers just the visible items.
  */
-export async function getBatch(ctx: ModuleContext, id: string): Promise<BatchDetail | null> {
-  const found = (await pageBatches(ctx, { id, limit: 1 })).data[0];
+export async function getBatch(ctx: ModuleContext, id: string, opts: { includeCancelled?: boolean } = {}): Promise<BatchDetail | null> {
+  const found = (await pageBatches(ctx, { id, limit: 1, ...opts })).data[0];
   if (!found) return null;
   const stages = { received: 0, resolving: 0, waiting: 0, resolved: 0, rejected: 0 };
   if (!found.chainOk) {
@@ -365,7 +449,7 @@ export async function getBatch(ctx: ModuleContext, id: string): Promise<BatchDet
   const grouped = await ctx.tx
     .select({ status: arrival.status, waiting: sql<boolean>`${arrival.waitingOn} is not null`, n: sql<number>`count(*)::int` })
     .from(arrival)
-    .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.batchId, id)))
+    .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.batchId, id), notSuperseded))
     .groupBy(arrival.status, sql`${arrival.waitingOn} is not null`);
   for (const g of grouped) stages[g.status === 'resolving' && g.waiting ? 'waiting' : (g.status as keyof typeof stages)] += g.n;
   const resolved = await ctx.tx
@@ -377,7 +461,7 @@ export async function getBatch(ctx: ModuleContext, id: string): Promise<BatchDet
   const rejected = await ctx.tx
     .select({ id: arrival.id, externalRef: arrival.externalRef, payload: arrival.payload, rejectReason: arrival.rejectReason, rejectDetail: arrival.rejectDetail })
     .from(arrival)
-    .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.batchId, id), eq(arrival.status, 'rejected')))
+    .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.batchId, id), eq(arrival.status, 'rejected'), notSuperseded))
     .orderBy(arrival.receivedAt, arrival.id);
   return { ...batchView(found.row), stages, countsByStage, rejections: rejected.map(rejectionOf) };
 }

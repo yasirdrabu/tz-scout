@@ -309,7 +309,7 @@ export async function storeItems(
   sender: Sender,
   batchId: string,
   items: StoreItem[],
-  opts: { channel: Channel; canDeclareWarmIntro?: boolean; vendorSourceId?: string; before?: StoreItem[] },
+  opts: { channel: Channel; canDeclareWarmIntro?: boolean; vendorSourceId?: string; before?: StoreItem[]; now?: Date },
 ): Promise<StoreItemsResult> {
   const strict = isStrictChannel(opts.channel);
   const schema = ArrivalV1Schema({ strict });
@@ -328,7 +328,7 @@ export async function storeItems(
     if (p.success) note(p.data);
   }
 
-  const cap = isCapped(opts.channel, sender.kind) ? await checkArrivalCap(ctx, sender.id) : null;
+  const cap = isCapped(opts.channel, sender.kind) ? await checkArrivalCap(ctx, sender.id, opts.now) : null;
   let remaining = cap ? cap.remaining : Infinity;
   let capCopy: string | undefined;
   const out: BatchItemResult[] = [];

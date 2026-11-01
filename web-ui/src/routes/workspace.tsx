@@ -86,18 +86,32 @@ export const sourceTabRoute = createRoute({
   component: lazyRouteComponent(() => import('../features/sources/SourcePage'), 'SourcePage'),
 });
 
+/** Batches' filters (`status` keys comma separated, `runDate` 7, 14 or 30 days) and search, so the URL keeps them (C10). */
+export type BatchesSearch = { status?: string; source?: string; sentBy?: string; runDate?: string; q?: string };
+
 export const batchesRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'batches',
-  component: () => <Placeholder screen={SCREENS.batches} />,
+  validateSearch: (search: Record<string, unknown>): BatchesSearch => pickStrings(search, ['status', 'source', 'sentBy', 'runDate', 'q']),
+  component: lazyRouteComponent(() => import('../features/batches/BatchesScreen'), 'BatchesScreen'),
 });
 
-/** Import a list, preselecting the source it credits (`source`). The import screen replaces this placeholder (§15). */
+/** Import a list (§15): the step, the import and the source it credits (`source`), so a reload keeps the place (C10). */
+export type ImportSearch = { step?: string; import?: string; source?: string };
+
 export const batchesImportRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'batches/import',
-  validateSearch: (search: Record<string, unknown>): { source?: string } => pickStrings(search, ['source']),
-  component: () => <Placeholder screen={SCREENS.batches} />,
+  validateSearch: (search: Record<string, unknown>): ImportSearch => pickStrings(search, ['step', 'import', 'source']),
+  component: lazyRouteComponent(() => import('../features/batches/import/ImportScreen'), 'ImportScreen'),
+});
+
+/** Batch detail (§14) on one tab: all, waiting, resolved or rejected (C10). */
+export const batchRoute = createRoute({
+  getParentRoute: () => tenantRoute,
+  path: 'batches/$id',
+  validateSearch: (search: Record<string, unknown>): { tab?: string } => pickStrings(search, ['tab']),
+  component: lazyRouteComponent(() => import('../features/batches/BatchDetail'), 'BatchDetail'),
 });
 
 export const offersRoute = createRoute({

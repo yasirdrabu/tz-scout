@@ -114,3 +114,52 @@ export function cleanMapping(out: MappingOutput): MappingOutput {
     ),
   };
 }
+
+/**
+ * The Scout fields a column can map to, in the order the Match step lists them (§15): the common ones first, then
+ * "Don't import" (`key: null`), then the rest. The API owns the words (C8).
+ */
+export const IMPORT_TARGETS: { key: string | null; label: string }[] = [
+  { key: 'account.name', label: 'Company name' },
+  { key: 'account.website', label: 'Website' },
+  { key: 'account.city', label: 'Location' },
+  { key: 'people[0].name', label: 'Person name' },
+  { key: 'people[0].title', label: 'Job title' },
+  { key: 'people[0].email', label: 'Email' },
+  { key: 'people[0].phone', label: 'Phone' },
+  { key: 'account.notes', label: 'Notes' },
+  { key: null, label: "Don't import" },
+  { key: 'account.domain', label: 'Domain' },
+  { key: 'account.linkedin_url', label: 'Company LinkedIn page' },
+  { key: 'account.region', label: 'State or region' },
+  { key: 'account.country', label: 'Country' },
+  { key: 'account.industry', label: 'Industry' },
+  { key: 'account.employees', label: 'Employees' },
+  { key: 'account.practice_hint', label: 'Practice' },
+  { key: 'account.external_ref', label: 'Your reference' },
+  { key: 'people[0].first_name', label: 'First name' },
+  { key: 'people[0].last_name', label: 'Last name' },
+  { key: 'people[0].linkedin_url', label: 'Person LinkedIn page' },
+  { key: 'signals[].title', label: 'Signal' },
+  { key: 'signals[].occurred_at', label: 'Signal date' },
+  { key: 'signals[].url', label: 'Signal link' },
+  { key: 'signals[].type', label: 'Signal type' },
+];
+
+const sentence = (s: string) => {
+  const t = s.replace(/_/g, ' ').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+/** The label for a mapping target, including ones outside the list (a custom field, a research field, a second person). */
+export function targetLabel(key: string): string {
+  const known = IMPORT_TARGETS.find((t) => t.key === key);
+  if (known) return known.label;
+  const custom = key.match(/^account\.custom_fields\.(.+)$/);
+  if (custom) return `Custom field: ${sentence(custom[1]!)}`;
+  const research = key.match(/^research\.(.+)$/);
+  if (research) return `Research: ${sentence(research[1]!)}`;
+  const person = key.match(/^people\[(\d+)\]\.(\w+)$/);
+  if (person) return `Person ${Number(person[1]) + 1}: ${sentence(person[2]!).toLowerCase()}`;
+  return sentence(key.replace(/^account\./, ''));
+}
