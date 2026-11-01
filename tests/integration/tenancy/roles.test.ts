@@ -4,8 +4,12 @@ import {
   PERMISSIONS,
   ROLE_PERMISSIONS,
   addMember,
+  assignableMembers,
   createTenant,
   listRoles,
+  members,
+  resolvePrincipal,
+  setPrincipalCacheTtl,
   setRolePermissions,
   type Permission,
   type Principal,
@@ -13,6 +17,7 @@ import {
 import { membership } from '@/modules/tenancy/db/schema';
 import { adminDb } from '@/platform/db/client';
 import { auditLog } from '@/platform/db/schema';
+import { signedIn, v1Req } from '../v1/session-helpers';
 import { inTenant, seedUser, uniqueSlug } from './helpers';
 
 type Seeded = Awaited<ReturnType<typeof seedUser>>;
@@ -133,5 +138,47 @@ describe('role permissions per workspace', () => {
     const v = await roleView(b, 'viewer');
     expect(v.permissions).toEqual(['accounts:read']);
     expect(v.customised).toBe(true);
+  });
+});
+
+describe('effective permissions read the workspace sets', () => {
+  it('the principal (real cache TTL), members() and assignableMembers() use the saved set', async () => {
+    setPrincipalCacheTtl(60_000);
+    try {
+      const t = await newTenant();
+      const seller = await seedUser({ signedIn: true });
+      await inTenant(t.tenantId, t.owner.actor, (ctx) => addMember(ctx, { email: seller.email, role: 'seller' }));
+      const cookies = await signedIn(seller.id);
+      const perms = async () => (await resolvePrincipal(v1Req('/me', { cookies, tenant: t.slug }), t.slug))!.permissions;
+      const assignable = async () =>
+        (await inTenant(t.tenantId, t.owner.actor, (ctx) => assignableMembers(ctx))).map((m) => m.userId);
+      expect(await perms()).toContain('accounts:read');
+      expect(await assignable()).toContain(seller.id);
+
+      await save(t, t.owner, t.principal, 'seller', ROLE_PERMISSIONS.seller.filter((p) => p !== 'accounts:read' && p !== 'assignments:respond'));
+      expect(await perms()).not.toContain('accounts:read');
+      const [row] = await inTenant(t.tenantId, t.owner.actor, (ctx) => members(ctx, { roles: ['seller'] }));
+      expect(row!.permissions).not.toContain('accounts:read');
+      expect(await assignable()).not.toContain(seller.id);
+
+      await save(t, t.owner, t.principal, 'seller', ['assignments:respond']);
+      expect(await assignable()).toContain(seller.id);
+    } finally {
+      setPrincipalCacheTtl(0);
+    }
+  });
+
+  it('a leader can give the Viewer role only while they hold the viewer set', async () => {
+    const t = await newTenant();
+    const leader = await seedUser({ signedIn: true });
+    await inTenant(t.tenantId, t.owner.actor, (ctx) => addMember(ctx, { email: leader.email, role: 'leader' }));
+    await save(t, t.owner, t.principal, 'viewer', ['accounts:read', 'keys:manage']);
+    await expect(
+      inTenant(t.tenantId, leader.actor, (ctx) => addMember(ctx, { email: 'v1@example.com', role: 'viewer' })),
+    ).rejects.toMatchObject({ slug: 'permission-not-yours' });
+    await save(t, t.owner, t.principal, 'viewer', ROLE_PERMISSIONS.viewer);
+    await expect(
+      inTenant(t.tenantId, leader.actor, (ctx) => addMember(ctx, { email: 'v2@example.com', role: 'viewer' })),
+    ).resolves.toBeTruthy();
   });
 });

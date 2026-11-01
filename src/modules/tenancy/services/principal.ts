@@ -8,7 +8,7 @@ import type { Role } from '../contracts/members';
 import { forwardedClientIp } from '../domain/client-ip';
 import { DataLimitSchema, defaultDataLimit, type DataLimit } from '../domain/data-limit';
 import { PERMISSIONS, isPermission, permissionsFor } from '../domain/permissions';
-import { membership, session, tenant, user } from '../db/schema';
+import { membership, rolePermission, session, tenant, user } from '../db/schema';
 import { landingPathFor } from './sign-in';
 import { authenticateKey, forgetTenantKeys, setKeyCacheTtl } from './api-keys';
 
@@ -23,6 +23,8 @@ type Access = {
   role: string | null;
   status: string | null;
   extra: string[] | null;
+  /** The workspace's saved list for the member's role, null when the role uses its default. */
+  roleSet: string[] | null;
   dataLimit: unknown;
 };
 
@@ -59,11 +61,13 @@ async function loadAccess(userId: string, tenantSlug: string): Promise<Access | 
       role: membership.role,
       status: membership.status,
       extra: membership.extraPermissions,
+      roleSet: rolePermission.permissions,
       dataLimit: membership.dataLimit,
     })
     .from(user)
     .leftJoin(tenant, eq(tenant.slug, tenantSlug))
     .leftJoin(membership, and(eq(membership.tenantId, tenant.id), eq(membership.userId, user.id)))
+    .leftJoin(rolePermission, and(eq(rolePermission.tenantId, membership.tenantId), eq(rolePermission.role, membership.role)))
     .where(eq(user.id, userId));
   if (!row) return null;
   return {
@@ -74,6 +78,7 @@ async function loadAccess(userId: string, tenantSlug: string): Promise<Access | 
     role: row.role,
     status: row.status,
     extra: row.extra,
+    roleSet: row.roleSet,
     dataLimit: row.dataLimit,
   };
 }
@@ -142,7 +147,7 @@ export async function sessionPrincipal(headers: Headers, tenantSlug: string): Pr
       kind: 'user',
       id: userId,
       userId,
-      permissions: permissionsFor(role, (a.extra ?? []).filter(isPermission), false),
+      permissions: permissionsFor(role, (a.extra ?? []).filter(isPermission), false, a.roleSet ? { [role]: a.roleSet.filter(isPermission) } : {}),
       dataLimit,
       platformAdmin: false,
       supportAccess: false,

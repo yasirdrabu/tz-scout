@@ -183,6 +183,16 @@ describe('POST /api/v1/members', () => {
     expect(m).toMatchObject({ role: 'seller', status: 'invited', dataLimit: { kind: 'practices', ids: ['prc_1'] } });
   });
 
+  it('invites a Viewer, who then holds only the four read permissions', async () => {
+    const viewer = await seedUser({ signedIn: true });
+    const res = await invite(as(owner, '/members', { method: 'POST', body: { emails: [viewer.email], role: 'viewer' } }));
+    expect((await res.json()).results[0]).toMatchObject({ ok: true, status: 'active' });
+    cookies[viewer.id] = await signedIn(viewer.id);
+    const body = await (await me(as(viewer, '/me'))).json();
+    expect(body.scopes).toEqual(ROLE_PERMISSIONS.viewer);
+    expect(body.role).toBe('viewer');
+  });
+
   it('refuses a leader (no members:manage), a bad role and an empty list', async () => {
     expect((await invite(as(leader, '/members', { method: 'POST', body: { emails: ['a@example.com'], role: 'seller' } }))).status).toBe(403);
     const bad = await invite(as(owner, '/members', { method: 'POST', body: { emails: ['a@example.com'], role: 'boss' } }));
@@ -341,7 +351,7 @@ describe('GET /api/v1/roles', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.roles).toContainEqual({ role: 'seller', permissions: ROLE_PERMISSIONS.seller });
-    expect(body.roles.map((r: { role: string }) => r.role)).toEqual(['owner', 'leader', 'seller', 'operator']);
+    expect(body.roles.map((r: { role: string }) => r.role)).toEqual(['owner', 'leader', 'seller', 'operator', 'viewer']);
     expect(body.permissions).toContainEqual({ key: 'members:read', label: 'See members', group: 'Workspace' });
     expect((await roles(as(seller, '/roles'))).status).toBe(403);
   });
