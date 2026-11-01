@@ -26,8 +26,22 @@ describe('recommendation', () => {
   it('watch keeps it in review with fit, intent and the first would-raise line', () => {
     expect(recommendation(fixture('intent only'))).toEqual({
       headline: 'Keep it in review until a stronger signal arrives.',
-      detail: 'Fit is 55 and buying intent is 30. A dated trigger such as a new leader would raise buying intent.',
+      detail: 'Fit is 55 and buying intent is 30. A signal for New leader would raise the score.',
     });
+  });
+
+  it('watch turns a would-raise phrase into a whole sentence', () => {
+    const i = fixture('intent only');
+    i.score = { ...i.score, fit: 45, intent: 0, wouldRaise: ['Revenue on file', 'A signal for RFP'] };
+    expect(recommendation(i).detail).toBe('Fit is 45 and buying intent is 0. Revenue on file would raise the score.');
+  });
+
+  it('a detail over the cap ends at a sentence, not mid-word', () => {
+    const i = fixture('open deal');
+    i.crm = { ...i.crm!, ownerName: `Sam ${'Patel'.repeat(100)}` };
+    const { detail } = recommendation(i);
+    expect(detail.length).toBeLessThanOrEqual(600);
+    expect(detail).toMatch(/HubSpot\.$/);
   });
 
   it('not a fit names the lowest fit part', () => {

@@ -11,7 +11,7 @@
   "people": [
     { "id": "per_ann", "name": "Ann Cole", "title": "Director of IT", "roleKeys": ["technical_buyer"], "roleLabels": ["Technical buyer"], "isPrimary": false }
   ],
-  "score": { "tier": "watch", "tierLabel": "Watch", "priority": 44, "fit": 55, "intent": 30, "fitParts": [{ "label": "Industry", "points": 20, "max": 25, "note": "Healthcare is on the offer's list." }], "wouldRaise": ["A dated trigger such as a new leader would raise buying intent."] },
+  "score": { "tier": "watch", "tierLabel": "Watch", "priority": 44, "fit": 55, "intent": 30, "fitParts": [{ "label": "Industry", "points": 20, "max": 25, "note": "Healthcare is on the offer's list." }], "wouldRaise": ["A signal for New leader"] },
   "crm": { "exists": false, "ownerName": null, "lifecycle": "none", "openDeals": 0 },
   "warmIntro": null,
   "notes": [],
