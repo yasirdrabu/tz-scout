@@ -40,7 +40,7 @@ export function AllAccountsScreen() {
   const toast = useToast();
   const searchId = useId();
   const [exporting, setExporting] = useState(false);
-  const filters: AccountsFilters = { stage: search.stage, q: search.q, owner: search.owner, practice: search.practice, source: search.source };
+  const filters: AccountsFilters = { stage: search.stage, q: search.q, owner: search.owner, practice: search.practice, source: search.source, offer: search.offer };
   const update = (patch: Partial<AccountsFilters>, replace = false) => void navigate({ search: (prev) => ({ ...prev, ...patch }), replace });
   const [text, setText] = useSearchText(filters.q ?? '', (q) => update({ q: q || undefined }, true));
 
@@ -56,8 +56,8 @@ export function AllAccountsScreen() {
     { key: 'source', label: 'Source', pick: 'one', options: fx?.sources ?? [] },
   ];
   const value = { owner: search.owner ? [search.owner] : [], practice: search.practice ? [search.practice] : [], source: search.source ? [search.source] : [] };
-  const clearFilters = () => update({ stage: undefined, q: undefined, owner: undefined, practice: undefined, source: undefined });
-  const filtered = !!(search.stage || search.q || search.owner || search.practice || search.source);
+  const clearFilters = () => update({ stage: undefined, q: undefined, owner: undefined, practice: undefined, source: undefined, offer: undefined });
+  const filtered = !!(search.stage || search.q || search.owner || search.practice || search.source || search.offer);
 
   async function exportCsv() {
     setExporting(true);

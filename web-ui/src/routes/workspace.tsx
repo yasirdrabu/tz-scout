@@ -26,12 +26,12 @@ export const myRoute = createRoute({
 });
 
 /** All accounts' stage tab, search and filters (`owner` is a user id or `unassigned`), so the URL keeps them (C10). */
-export type AccountsSearch = { stage?: string; q?: string; owner?: string; practice?: string; source?: string };
+export type AccountsSearch = { stage?: string; q?: string; owner?: string; practice?: string; source?: string; offer?: string };
 
 export const accountsRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'accounts',
-  validateSearch: (search: Record<string, unknown>): AccountsSearch => pickStrings(search, ['stage', 'q', 'owner', 'practice', 'source']),
+  validateSearch: (search: Record<string, unknown>): AccountsSearch => pickStrings(search, ['stage', 'q', 'owner', 'practice', 'source', 'offer']),
   component: lazyRouteComponent(() => import('../features/accounts/AllAccountsScreen'), 'AllAccountsScreen'),
 });
 
@@ -114,10 +114,34 @@ export const batchRoute = createRoute({
   component: lazyRouteComponent(() => import('../features/batches/BatchDetail'), 'BatchDetail'),
 });
 
+/**
+ * Offers and practices (§19): the practice and offer in the path, and the open form in `edit`
+ * (`offer`, `practice`, `new-offer` or `new-practice`), with the section to start at (`field`) and the
+ * offer a new one copies (`copy`, Duplicate), so a link or a reload keeps the place (C10).
+ */
+export type OffersSearch = { edit?: string; field?: string; copy?: string };
+const offersSearch = (search: Record<string, unknown>): OffersSearch => pickStrings(search, ['edit', 'field', 'copy']);
+const OffersScreen = lazyRouteComponent(() => import('../features/offers/OffersScreen'), 'OffersScreen');
+
 export const offersRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'offers',
-  component: () => <Placeholder screen={SCREENS.offers} />,
+  validateSearch: offersSearch,
+  component: OffersScreen,
+});
+
+export const practiceRoute = createRoute({
+  getParentRoute: () => tenantRoute,
+  path: 'offers/$practiceId',
+  validateSearch: offersSearch,
+  component: OffersScreen,
+});
+
+export const offerRoute = createRoute({
+  getParentRoute: () => tenantRoute,
+  path: 'offers/$practiceId/$offerId',
+  validateSearch: offersSearch,
+  component: OffersScreen,
 });
 
 export const playbooksRoute = createRoute({

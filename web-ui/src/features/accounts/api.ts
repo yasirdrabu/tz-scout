@@ -91,7 +91,7 @@ export type AccountFacets = {
 };
 
 /** All accounts' URL search params (C10). `owner` is a user id or `unassigned`. */
-export type AccountsFilters = { stage?: string; q?: string; owner?: string; practice?: string; source?: string };
+export type AccountsFilters = { stage?: string; q?: string; owner?: string; practice?: string; source?: string; offer?: string };
 
 export function accountsParams(f: AccountsFilters): URLSearchParams {
   const p = new URLSearchParams({ sort: 'stage_priority' });
@@ -101,6 +101,7 @@ export function accountsParams(f: AccountsFilters): URLSearchParams {
   else if (f.owner) p.set('owner_user_id', f.owner);
   if (f.practice) p.set('practice_id', f.practice);
   if (f.source) p.set('source_id', f.source);
+  if (f.offer) p.set('offer_id', f.offer);
   return p;
 }
 
