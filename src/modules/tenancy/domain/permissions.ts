@@ -87,15 +87,27 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'costs:write',
     ...COMMON,
   ],
+  // Read-only pipeline and scorecard (web-ui Decision 17).
+  viewer: ['accounts:read', 'offers:read', 'analytics:read', 'status:read'],
 };
 
 export function isPermission(v: unknown): v is Permission {
   return typeof v === 'string' && (PERMISSIONS as readonly string[]).includes(v);
 }
 
-/** Effective permissions: the role set plus extras. Platform admins get everything. */
-export function permissionsFor(role: Role, extra: Permission[], platformAdmin: boolean): Permission[] {
+/** A workspace's saved permission list per role; a role with no entry uses its default. */
+export type RoleSets = Partial<Record<Role, readonly Permission[]>>;
+
+/** What a role holds in a workspace: Owner always everything, else the saved list (unknown strings dropped) or the default. */
+export function roleSet(role: Role, sets: RoleSets): Permission[] {
+  if (role === 'owner') return [...PERMISSIONS];
+  const saved = sets[role];
+  return saved ? saved.filter(isPermission) : ROLE_PERMISSIONS[role];
+}
+
+/** Effective permissions: the workspace's role set plus extras. Platform admins get everything. */
+export function permissionsFor(role: Role, extra: Permission[], platformAdmin: boolean, sets: RoleSets = {}): Permission[] {
   if (platformAdmin) return [...PERMISSIONS];
-  const set = new Set<Permission>([...ROLE_PERMISSIONS[role], ...extra]);
+  const set = new Set<Permission>([...roleSet(role, sets), ...extra]);
   return PERMISSIONS.filter((p) => set.has(p));
 }
