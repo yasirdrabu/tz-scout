@@ -10,6 +10,7 @@ import { ApiKeysTab } from './keys/ApiKeysTab';
 import { AuditTab } from './audit/AuditTab';
 import { IntegrationsTab } from './integrations/IntegrationsTab';
 import { MembersTab } from './members/MembersTab';
+import { ScoringWeights } from './scoring/ScoringWeights';
 import { ReviewStatusesTab } from './review-statuses/ReviewStatusesTab';
 import styles from './Settings.module.css';
 
@@ -20,6 +21,7 @@ const SCREENS: Record<string, (props: TabProps) => ReactNode> = {
   members: (p) => <MembersTab {...p} />,
   integrations: (p) => <IntegrationsTab {...p} />,
   'review-statuses': (p) => <ReviewStatusesTab {...p} />,
+  'scoring-weights': (p) => <ScoringWeights {...p} />,
   'api-keys': (p) => <ApiKeysTab {...p} />,
   'audit-log': (p) => <AuditTab {...p} />,
   'ai-runs': (p) => <AiRunsTab {...p} />,

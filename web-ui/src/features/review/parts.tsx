@@ -37,9 +37,9 @@ export function StatusDot({ color, children }: { color: Color | null | undefined
   );
 }
 
-const TIER_LOOK: Record<string, string | undefined> = { act_now: styles.tier_act, good_fit: styles.tier_good, watch: styles.tier_watch };
+const TIER_LOOK: Record<string, string | undefined> = { act_now: styles.tier_act, good_fit: styles.tier_good, watch: styles.tier_watch, nurture: styles.tier_nurture };
 
-/** A tier chip: Act now plum, Good fit light plum, Watch gray, the lowest tier white. The name is the API's. */
+/** A tier chip: Act now plum, Good fit light plum, Watch gray, Nurture a quiet dashed outline, Not a fit white. The name is the API's. */
 export function TierChip({ tier, label }: { tier: string | null; label: string }) {
   return <span className={cx(styles.tier, (tier && TIER_LOOK[tier]) || styles.tier_low)}>{label}</span>;
 }

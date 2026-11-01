@@ -34,6 +34,8 @@ type FilterKey = (typeof FILTER_KEYS)[number];
 
 type Refused = { account_id: string; name: string; message: string };
 
+const LOW_TIERS = ['nurture', 'not_fit'];
+
 /** §2 Review queue. Filters, tier and the peek live in the URL (C10); rows refresh every 30 s behind the updates bar (C14). */
 export function QueueScreen() {
   const { tenant } = route.useParams();
@@ -131,12 +133,12 @@ function Queue({ tenant, me }: { tenant: string; me: Me }) {
   const clearFilters = () => update({ practice: undefined, offer: undefined, source: undefined, status: undefined, tier: undefined, peek: undefined });
   const filtered = !!(search.tier || search.practice || search.offer || search.source || search.status);
 
-  // Tier tabs: All, every tier, and the lowest only when it has accounts (screens.md §2).
+  // Tier tabs: All, every tier, and Nurture and Not a fit only when they have accounts or are selected (screens.md §2).
   const tiers = fx?.tiers ?? [];
   const tierTabs = [
     // "All" counts every tier: the API's total without the tier filter.
     { id: '', label: 'All', ...(fx ? { count: fx.total_all_tiers } : {}) },
-    ...tiers.filter((t, i) => i < tiers.length - 1 || t.count > 0 || t.value === search.tier).map((t) => ({ id: t.value, label: t.label, count: t.count })),
+    ...tiers.filter((t) => !LOW_TIERS.includes(t.value) || t.count > 0 || t.value === search.tier).map((t) => ({ id: t.value, label: t.label, count: t.count })),
   ];
 
   const total = fx?.total_all_tiers;
