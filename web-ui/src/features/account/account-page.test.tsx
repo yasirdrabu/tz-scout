@@ -135,12 +135,15 @@ describe('Review view sections', () => {
     const why = screen.getByRole('region', { name: 'Why now' });
     expect(why).toHaveTextContent('2 signals · newest first');
     expect(why).toHaveTextContent('Oct 14, 2026RFP re-issue expected in December');
-    expect(within(why).getByRole('link', { name: 'miamidade.gov' })).toHaveAttribute('href', 'https://www.miamidade.gov/procurement/notice');
+    // The link says which source found it; with no source name, the site's host.
+    expect(within(why).getByRole('link', { name: 'RFP Watch' })).toHaveAttribute('href', 'https://www.miamidade.gov/procurement/notice');
+    expect(within(why).getByRole('link', { name: 'govspend.com' })).toHaveAttribute('href', 'https://www.govspend.com/budget');
     expect(why).not.toHaveTextContent('Undated research');
 
     const facts = screen.getByRole('region', { name: 'Account facts' });
     expect(await within(facts).findByText('3,800')).toBeInTheDocument();
-    expect(facts).toHaveTextContent('Employees3,800GovSpend · Sep 1, 2026');
+    // Labels come from the API.
+    expect(facts).toHaveTextContent('Staff3,800GovSpend · Sep 1, 2026');
     expect(facts).toHaveTextContent('Buying processFormal RFP with Board approvalRFP Watch · Oct 1, 2026');
     expect(facts).not.toHaveTextContent('jr@miamidade.gov');
   });

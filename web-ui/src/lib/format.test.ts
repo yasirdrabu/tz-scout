@@ -1,4 +1,4 @@
-import { formatCompact, formatDate, formatDateTime, formatDuration, formatMoney, formatNumber, formatPercent, formatRelative, formatTime } from './format';
+import { formatCompact, formatDate, formatDateTime, formatDuration, formatMoney, formatMonthDay, formatNumber, formatPercent, formatRelative, formatTime } from './format';
 
 describe('formatMoney', () => {
   it('formats integer cents in the tenant currency', () => {
@@ -40,6 +40,11 @@ describe('dates in the tenant timezone', () => {
     expect(formatDate(at, 'America/New_York')).toBe('Oct 26, 2026');
     expect(formatDate('2026-10-27T02:00:00Z', 'America/Los_Angeles')).toBe('Oct 26, 2026');
     expect(formatDate('2026-10-27T02:00:00Z', 'Asia/Kolkata')).toBe('Oct 27, 2026');
+  });
+
+  it('formats a month and day', () => {
+    expect(formatMonthDay('2026-08-02T14:00:00Z', 'America/New_York')).toBe('Aug 2');
+    expect(formatMonthDay('2026-10-27T02:00:00Z', 'America/Los_Angeles')).toBe('Oct 26');
   });
 
   it('formats a date and time like the mockup', () => {

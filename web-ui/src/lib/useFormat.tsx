@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import { formatCompact, formatDate, formatDateTime, formatDuration, formatMoney, formatNumber, formatPercent, formatRelative, formatTime } from './format';
+import { formatCompact, formatDate, formatDateTime, formatDuration, formatMoney, formatMonthDay, formatNumber, formatPercent, formatRelative, formatTime } from './format';
 
 type TenantFormat = { currency: string; timeZone: string };
 
@@ -24,6 +24,7 @@ export function useFormat() {
     () => ({
       money: (minor: number) => formatMoney(minor, currency),
       date: (when: string | number | Date) => formatDate(when, timeZone),
+      monthDay: (when: string | number | Date) => formatMonthDay(when, timeZone),
       dateTime: (when: string | number | Date) => formatDateTime(when, timeZone),
       time: (when: string | number | Date) => formatTime(when, timeZone),
       relative: (when: string | number | Date) => formatRelative(when),

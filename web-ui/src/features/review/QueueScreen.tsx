@@ -19,6 +19,7 @@ import { AssignDialog } from './AssignDialog';
 import { ColumnsPopover } from './ColumnsPopover';
 import { PeekDrawer } from './PeekDrawer';
 import { QueueTable } from './QueueTable';
+import { RescoreBanner } from './RescoreBanner';
 import styles from './Review.module.css';
 import { SendBackDialog } from './SendBackDialog';
 
@@ -51,9 +52,6 @@ function Queue({ tenant, me }: { tenant: string; me: Me }) {
 
   const rowsQ = useInfiniteQuery(queueQuery(tenant, filters));
   const facets = useQuery(facetsQuery(tenant, filters));
-  // "All" counts every tier: with a tier picked, the same filters without it.
-  const anyTier = useQuery({ ...facetsQuery(tenant, { ...filters, tier: undefined }), enabled: !!filters.tier });
-  const allFacets = filters.tier ? anyTier.data : facets.data;
   const columns = useQuery(columnsQuery(tenant));
   const statuses = useQuery(statusesQuery(tenant));
 
@@ -136,17 +134,20 @@ function Queue({ tenant, me }: { tenant: string; me: Me }) {
   // Tier tabs: All, every tier, and the lowest only when it has accounts (screens.md §2).
   const tiers = fx?.tiers ?? [];
   const tierTabs = [
-    { id: '', label: 'All', ...(allFacets ? { count: allFacets.total } : {}) },
+    // "All" counts every tier: the API's total without the tier filter.
+    { id: '', label: 'All', ...(fx ? { count: fx.total_all_tiers } : {}) },
     ...tiers.filter((t, i) => i < tiers.length - 1 || t.count > 0 || t.value === search.tier).map((t) => ({ id: t.value, label: t.label, count: t.count })),
   ];
 
-  const total = allFacets?.total;
+  const total = fx?.total_all_tiers;
+  const sources = fx?.source_count ?? 0;
+  const loadingLine = sources === 0 ? 'Loading accounts' : `Loading accounts from ${sources === 1 ? '1 source' : `${f.number(sources)} sources`}`;
   const subtitle =
     total === undefined
       ? 'Loading accounts'
       : total === 0
         ? 'Nothing waiting for a decision.'
-        : `${total === 1 ? '1 account' : `${f.number(total)} accounts`} waiting for a decision.${allFacets?.oldest_arrived_at ? ` Oldest arrived ${f.relative(allFacets.oldest_arrived_at)}.` : ''}`;
+        : `${total === 1 ? '1 account' : `${f.number(total)} accounts`} waiting for a decision.${fx?.oldest_arrived_at ? ` Oldest arrived ${f.relative(fx.oldest_arrived_at)}.` : ''}`;
 
   const peekIndex = search.peek ? rows.findIndex((r) => r.account_id === search.peek) : -1;
   const peekRow = peekIndex >= 0 ? rows[peekIndex]! : null;
@@ -173,6 +174,8 @@ function Queue({ tenant, me }: { tenant: string; me: Me }) {
         <span className={styles.grow} />
         {columns.data && <ColumnsPopover tenant={tenant} columns={columns.data} />}
       </div>
+
+      <RescoreBanner tenant={tenant} />
 
       {held.updates > 0 && (
         <div className={styles.updates} role="status">
@@ -219,7 +222,7 @@ function Queue({ tenant, me }: { tenant: string; me: Me }) {
             {Array.from({ length: 6 }, (_, i) => (
               <Skeleton key={i} height={14} soft={i % 2 === 1} />
             ))}
-            <LoadingLine>Loading accounts</LoadingLine>
+            <LoadingLine>{loadingLine}</LoadingLine>
           </div>
         ) : rows.length === 0 ? (
           filtered ? (

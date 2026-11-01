@@ -23,7 +23,17 @@ export type Person = {
   roles: { key: string; origin: string; label: string }[];
 };
 
-export type AccountSignal = { id: string; type: string | null; kind: string; title: string; detail: string | null; url: string | null; occurred_at: string | null };
+export type AccountSignal = {
+  id: string;
+  type: string | null;
+  kind: string;
+  title: string;
+  detail: string | null;
+  url: string | null;
+  occurred_at: string | null;
+  /** The source that found it (the nearest of vendor, agent and person), or null. */
+  source_name: string | null;
+};
 
 export type AccountDetail = {
   id: string;
@@ -58,6 +68,8 @@ export type Fact = {
   id: string;
   person_id: string | null;
   key: string;
+  /** The fact's name, from the API (C6). */
+  label: string;
   value: unknown;
   observed_at: string;
   source_names: { person: string | null; agent: string | null; vendor: string | null };

@@ -1,10 +1,10 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { problem } from '../../test/http';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
-import { COASTLINE, COLUMNS, FACETS, MIAMI, PINEGATE, row, serveQueue } from './testing';
+import { COASTLINE, COLUMNS, FACETS, MIAMI, PINEGATE, RESCORE, row, serveQueue } from './testing';
 
 const params = (href: string) => new URL(href, 'http://app').searchParams;
 const rowOf = (name: string) => screen.getByRole('button', { name }).closest('tr')!;
@@ -54,8 +54,6 @@ describe('Review queue', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Act now 2' }));
     await waitFor(() => expect(params(app.path()).get('tier')).toBe('act_now'));
     await waitFor(() => expect(seen['/api/v1/review-queue']!.at(-1)!.searchParams.get('tier')).toBe('act_now'));
-    // "All" still counts every tier: the facets without the tier.
-    await waitFor(() => expect(seen['/api/v1/review-queue/facets']!.some((u) => !u.searchParams.has('tier'))).toBe(true));
 
     await userEvent.click(screen.getByRole('button', { name: 'Filter' }));
     const panel = screen.getByRole('dialog', { name: 'Filters' });
@@ -75,8 +73,74 @@ describe('Review queue', () => {
     expect(screen.getByRole('button', { name: 'Remove Source RFP Watch' })).toBeInTheDocument();
   });
 
+  it('the All tab counts every tier from total_all_tiers, with one facets request per render', async () => {
+    const seen = serveQueue({ facets: { ...FACETS, total: 2, total_all_tiers: 3 } });
+    renderApp('/t/taazaa/queue?tier=act_now');
+    await screen.findByRole('button', { name: 'Miami-Dade County DTPW' });
+    const tiers = screen.getByRole('tablist', { name: 'Tier' });
+    expect(within(tiers).getByRole('tab', { name: 'All 3' })).toBeInTheDocument();
+    expect(within(tiers).getByRole('tab', { name: 'Act now 2' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText(/^3 accounts waiting for a decision\./)).toBeInTheDocument();
+    expect(seen['/api/v1/review-queue/facets']).toHaveLength(1);
+    expect(seen['/api/v1/review-queue/facets']![0]!.searchParams.get('tier')).toBe('act_now');
+  });
+
+  it.each([
+    [0, 'Loading accounts'],
+    [1, 'Loading accounts from 1 source'],
+    [3, 'Loading accounts from 3 sources'],
+  ])('the loading line names the sources from the facets (%i)', async (n, text) => {
+    serveQueue({ facets: { ...FACETS, source_count: n } });
+    server.use(
+      http.get('/api/v1/review-queue', async () => {
+        await delay('infinite');
+        return HttpResponse.json({});
+      }),
+    );
+    renderApp('/t/taazaa/queue');
+    expect(await screen.findByText(text, { selector: 'p' })).toBeInTheDocument();
+  });
+
+  it('shows the rescore banner in the words of the API; Dismiss hides it for this change, and a newer change shows again', async () => {
+    const seen = serveQueue({ rescore: RESCORE });
+    const first = renderApp('/t/taazaa/queue');
+    const banner = await screen.findByRole('region', { name: 'Scoring change' });
+    expect(banner).toHaveTextContent(/^Scoring settings changed · .+ ago by Zach Wiant/);
+    expect(banner).toHaveTextContent('Priorities were recalculated with Fit 60%, buying intent 40%. 12 accounts changed tier.');
+    expect(within(banner).queryByRole('link', { name: 'Open settings' })).toBeNull();
+    await userEvent.click(within(banner).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByRole('region', { name: 'Scoring change' })).toBeNull();
+    first.unmount();
+
+    renderApp('/t/taazaa/queue');
+    await screen.findByRole('button', { name: 'Miami-Dade County DTPW' });
+    await waitFor(() => expect(seen['/api/v1/scoring/last-rescore']).toHaveLength(2));
+    expect(screen.queryByRole('region', { name: 'Scoring change' })).toBeNull();
+    cleanup();
+
+    serveQueue({ rescore: { ...RESCORE, version: 8, tier_changed_count: 1 } });
+    renderApp('/t/taazaa/queue');
+    expect(await screen.findByRole('region', { name: 'Scoring change' })).toHaveTextContent(
+      'Priorities were recalculated with Fit 60%, buying intent 40%. 1 account changed tier.',
+    );
+  });
+
+  it('the banner leaves out the count when no account changed tier, and is not shown without a recent change', async () => {
+    serveQueue({ rescore: { ...RESCORE, tier_changed_count: 0 } });
+    const first = renderApp('/t/taazaa/queue');
+    const banner = await screen.findByRole('region', { name: 'Scoring change' });
+    expect(banner).toHaveTextContent(/Priorities were recalculated with Fit 60%, buying intent 40%\.$/);
+    first.unmount();
+
+    const seen = serveQueue({ rescore: null });
+    renderApp('/t/taazaa/queue');
+    await screen.findByRole('button', { name: 'Miami-Dade County DTPW' });
+    await waitFor(() => expect(seen['/api/v1/scoring/last-rescore']).toHaveLength(1));
+    expect(screen.queryByRole('region', { name: 'Scoring change' })).toBeNull();
+  });
+
   it('a filtered queue with no rows says so and clears the filters', async () => {
-    serveQueue({ rows: [], facets: { ...FACETS, total: 0 } });
+    serveQueue({ rows: [], facets: { ...FACETS, total: 0, total_all_tiers: 0 } });
     const app = renderApp('/t/taazaa/queue?practice=prc_data');
     expect(await screen.findByRole('heading', { name: 'No accounts match these filters' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
@@ -84,7 +148,7 @@ describe('Review queue', () => {
   });
 
   it('an empty queue says it is clear, with the last review and the actions the person may take', async () => {
-    serveQueue({ rows: [], facets: { ...FACETS, total: 0 } });
+    serveQueue({ rows: [], facets: { ...FACETS, total: 0, total_all_tiers: 0 } });
     renderApp('/t/taazaa/queue');
     expect(await screen.findByRole('heading', { name: 'The queue is clear' })).toBeInTheDocument();
     expect(screen.getByText(/New accounts land here when a source sends them/)).toBeInTheDocument();
@@ -95,7 +159,7 @@ describe('Review queue', () => {
   });
 
   it('shows skeleton rows while loading', async () => {
-    serveQueue();
+    serveQueue({ facets: { ...FACETS, source_count: 0 } });
     server.use(
       http.get('/api/v1/review-queue', async () => {
         await delay('infinite');
@@ -194,7 +258,7 @@ describe('Review queue', () => {
 
   it('select all takes the first 50 and says so', async () => {
     const many = Array.from({ length: 52 }, (_, i) => row({ account_id: `acc_${i}`, name: `Account ${i}` }));
-    serveQueue({ rows: many, facets: { ...FACETS, total: 52 } });
+    serveQueue({ rows: many, facets: { ...FACETS, total: 52, total_all_tiers: 52 } });
     renderApp('/t/taazaa/queue');
     await screen.findByRole('button', { name: 'Account 0' });
     await userEvent.click(screen.getByRole('checkbox', { name: 'Select all shown' }));
