@@ -13,7 +13,7 @@ import { memberActionRefusal, type MemberAction, type MemberActor, type MemberRe
 import { PERMISSIONS, isPermission, permissionsFor, type Permission, type RoleSets } from '../domain/permissions';
 import { membership, tenant, user } from '../db/schema';
 import { endSessions, signInFacts, type SignInMethod } from './sessions';
-import { loadRoleSets } from './roles';
+import { loadRoleSets } from './role-sets';
 
 const LAST_OWNER = 'A tenant needs at least one owner.';
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That member was not found.' });
@@ -109,6 +109,11 @@ async function actorPowers(ctx: ModuleContext): Promise<Powers> {
     dataLimit: effectiveLimit(role, m.dataLimit),
     roleSets,
   };
+}
+
+/** The actor's permissions in this tenant, read fresh (not from the up to 60 s old request principal). */
+export async function actorPermissions(ctx: ModuleContext): Promise<readonly Permission[]> {
+  return (await actorPowers(ctx)).permissions;
 }
 
 /** The limit a membership works under: its own, else the role default. null when the stored one is invalid. */

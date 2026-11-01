@@ -27,7 +27,7 @@ export const PUT = async (req: Request): Promise<Response> => {
     tenantId = principal.tenantId;
     const role = roleOf(r);
     const { permissions } = await parseBody<{ permissions: string[] }>(r, body);
-    return setRolePermissions(ctx, principal, role, permissions as Permission[]);
+    return setRolePermissions(ctx, role, permissions as Permission[]);
   })(req);
   if (res.ok && tenantId) forgetAccess({ tenantId });
   return res;

@@ -3,10 +3,13 @@ import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { ROLES, type Role } from '../contracts/members';
-import { can, type Principal } from '../contracts/principal';
 import { PERMISSIONS, ROLE_PERMISSIONS, isPermission, roleSet, type Permission, type RoleSets } from '../domain/permissions';
 import { rolePermission } from '../db/schema';
+import { actorPermissions } from './members';
 import { forgetAccess } from './principal';
+import { loadRoleSets } from './role-sets';
+
+export { loadRoleSets };
 
 /** One role as the roles matrix shows it. `permissions` is what the workspace's role holds now. */
 export type RoleView = {
@@ -16,19 +19,6 @@ export type RoleView = {
   customised: boolean;
   locked: boolean;
 };
-
-/** The workspace's saved role lists. A role with no row is absent; unknown permission strings are dropped. */
-export async function loadRoleSets(ctx: ModuleContext): Promise<RoleSets> {
-  const rows = await ctx.tx
-    .select({ role: rolePermission.role, permissions: rolePermission.permissions })
-    .from(rolePermission)
-    .where(eq(rolePermission.tenantId, ctx.tenantId));
-  const sets: RoleSets = {};
-  for (const r of rows) {
-    if ((ROLES as readonly string[]).includes(r.role)) sets[r.role as Role] = r.permissions.filter(isPermission);
-  }
-  return sets;
-}
 
 function view(role: Role, sets: RoleSets): RoleView {
   return {
@@ -55,7 +45,6 @@ export async function listRoles(ctx: ModuleContext): Promise<RoleView[]> {
  */
 export async function setRolePermissions(
   ctx: ModuleContext,
-  actor: Principal,
   role: Role,
   permissions: Permission[],
 ): Promise<RoleView> {
@@ -73,7 +62,9 @@ export async function setRolePermissions(
   const removed = PERMISSIONS.filter((p) => current.has(p) && !wanted.has(p));
   if (added.length === 0 && removed.length === 0) return view(role, sets);
 
-  const notYours = [...added, ...removed].find((p) => !can(actor, p));
+  // Read fresh: a cached principal can still hold a permission taken away in the last minute.
+  const held = new Set(await actorPermissions(ctx));
+  const notYours = [...added, ...removed].find((p) => !held.has(p));
   if (notYours) {
     throw new ScoutError({
       slug: 'permission-not-yours',
