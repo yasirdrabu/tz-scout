@@ -94,7 +94,12 @@ export function RolesMatrix({ me, tenant }: { me: Me; tenant: string }) {
               {columns.map((c) => (
                 <th key={c.role} scope="col" className={table.num}>
                   {roleLabel(c.role)}
-                  {c.customised && <Chip>Customised</Chip>}
+                  {/* Under the role name, so the chip doesn't widen its column. */}
+                  {c.customised && (
+                    <div>
+                      <Chip>Customised</Chip>
+                    </div>
+                  )}
                 </th>
               ))}
             </tr>
