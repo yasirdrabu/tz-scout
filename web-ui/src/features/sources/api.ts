@@ -153,7 +153,7 @@ export const sourceAccountFacetsQuery = (tenant: string, sourceId: string, f: So
 export const sourceBatchesQuery = (tenant: string, sourceId: string) =>
   queryOptions({
     queryKey: ['sources', tenant, 'batches', sourceId],
-    queryFn: () => apiFetch<{ data: BatchRow[]; next_cursor: string | null }>(`/batches?source_id=${encodeURIComponent(sourceId)}&limit=50`, { tenant }),
+    queryFn: () => apiFetch<{ data: BatchRow[]; next_cursor: string | null; total: number }>(`/batches?source_id=${encodeURIComponent(sourceId)}&limit=50`, { tenant }),
   });
 
 export type SourcePatch = { status?: 'active' | 'paused' | 'archived'; owner_user_id?: string | null; name?: string };

@@ -43,7 +43,7 @@ export function SourcePage() {
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'accounts', label: 'Accounts', ...(stat ? { count: stat.sent } : {}) },
-    { id: 'batches', label: 'Batches', ...(batches.data && !batches.data.next_cursor ? { count: batches.data.data.length } : {}) },
+    { id: 'batches', label: 'Batches', ...(batches.data ? { count: batches.data.total } : {}) },
     ...(kids ? [kids] : []),
     { id: 'settings', label: 'Settings' },
   ];

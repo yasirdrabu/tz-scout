@@ -5,7 +5,7 @@ import table from '../../../ui/Table.module.css';
 import { LoadFailed, LoadingRows } from '../../settings/shared';
 import type { BatchRow } from '../api';
 
-type Props = { batches: UseQueryResult<{ data: BatchRow[]; next_cursor: string | null }> };
+type Props = { batches: UseQueryResult<{ data: BatchRow[]; next_cursor: string | null; total: number }> };
 
 /** The source's batches (`GET /batches?source_id=`) in a plain table; the shared Batches table replaces it with §13. */
 export function BatchesTab({ batches }: Props) {

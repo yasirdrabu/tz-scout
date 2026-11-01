@@ -71,6 +71,12 @@ describe('Source page header and tiles (§11)', () => {
 });
 
 describe('Source page tabs', () => {
+  it('counts the Batches tab from the API total, not the rows loaded (C8)', async () => {
+    serveSources();
+    renderApp('/t/taazaa/sources/src_marcus');
+    expect(await screen.findByRole('tab', { name: 'Batches 7' })).toBeInTheDocument();
+  });
+
   it('Overview shows where the accounts went from by_stage and the recent activity', async () => {
     serveSources();
     renderApp('/t/taazaa/sources/src_rfp');

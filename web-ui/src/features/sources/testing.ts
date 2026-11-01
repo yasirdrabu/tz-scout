@@ -186,7 +186,7 @@ export function serveSources(opts: { scopes?: string[]; sources?: Source[]; meta
         tiers: [{ value: 'act_now', label: 'Act now', count: 1 }],
       }),
     ),
-    http.get('/api/v1/batches', () => HttpResponse.json({ data: [{ id: 'bat_1042', name: 'Week 44 run', run_at: '2026-10-29T12:00:00Z', status: 'completed', item_count: 18, counts: { resolved: 17, rejected: 1 } }], next_cursor: null })),
+    http.get('/api/v1/batches', () => HttpResponse.json({ data: [{ id: 'bat_1042', name: 'Week 44 run', run_at: '2026-10-29T12:00:00Z', status: 'completed', item_count: 18, counts: { resolved: 17, rejected: 1 } }], next_cursor: 'c1', total: 7 })),
     http.patch('/api/v1/sources/:id', async ({ request, params }) => {
       await log(request);
       const body = (await request.clone().json()) as Record<string, unknown>;
