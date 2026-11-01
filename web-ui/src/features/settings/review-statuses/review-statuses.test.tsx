@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { act } from 'react';
 import { exactly } from '../../../test/http';
 import { renderApp, serveMe } from '../../../test/renderApp';
 import { server } from '../../../test/server';
@@ -49,17 +50,25 @@ const SETTINGS: ReviewSettings = {
     { value: 'red', label: 'Red' },
     { value: 'gray', label: 'Gray' },
   ],
+  version: 3,
 };
 
 let puts: ReviewSettingsSave[] = [];
 let resets = 0;
+let gets = 0;
 
-function serve(opts: { put?: (body: ReviewSettingsSave) => Response | undefined } = {}) {
+/** `reads` answers the nth GET (1-based); past its end, the last one. */
+function serve(opts: { put?: (body: ReviewSettingsSave) => Response | undefined; reads?: ReviewSettings[] } = {}) {
   puts = [];
   resets = 0;
+  gets = 0;
   serveMe({ taazaa: { scopes: ['settings:manage'] } });
   server.use(
-    http.get('/api/v1/settings/review', () => HttpResponse.json(SETTINGS)),
+    http.get('/api/v1/settings/review', () => {
+      gets++;
+      const reads = opts.reads ?? [SETTINGS];
+      return HttpResponse.json(reads[Math.min(gets, reads.length) - 1]);
+    }),
     http.put('/api/v1/settings/review', async ({ request }) => {
       const body = (await request.json()) as ReviewSettingsSave;
       puts.push(body);
@@ -69,6 +78,7 @@ function serve(opts: { put?: (body: ReviewSettingsSave) => Response | undefined 
         ...SETTINGS,
         statuses: body.statuses ? body.statuses.map((s, i) => status({ ...s, key: s.key ?? `new_${i}`, order: i + 1 } as SettingsStatus)) : SETTINGS.statuses,
         auto_accept_working_days: body.auto_accept_working_days === undefined ? SETTINGS.auto_accept_working_days : body.auto_accept_working_days,
+        version: (body.version ?? 0) + 1,
       });
     }),
     http.post(exactly('/api/v1/settings/review:reset'), () => {
@@ -80,8 +90,9 @@ function serve(opts: { put?: (body: ReviewSettingsSave) => Response | undefined 
 }
 
 const open = async () => {
-  renderApp('/t/taazaa/settings/review-statuses');
-  return screen.findByRole('table');
+  const view = renderApp('/t/taazaa/settings/review-statuses');
+  await screen.findByRole('table');
+  return Object.assign(screen.getByRole('table'), { view });
 };
 const rowOf = (table: HTMLElement, name: string) => within(table).getByRole('textbox', { name: `Name of ${name}` }).closest('tr')!;
 const saveButton = () => screen.getByRole('button', { name: 'Save statuses' });
@@ -125,7 +136,8 @@ describe('Settings > Review statuses', () => {
     await user.click(saveButton());
     expect(await screen.findByText('Review statuses saved. The review queue now shows them.')).toBeInTheDocument();
     expect(puts).toHaveLength(1);
-    expect(Object.keys(puts[0]!).sort()).toEqual(['reasons', 'statuses']);
+    expect(Object.keys(puts[0]!).sort()).toEqual(['reasons', 'statuses', 'version']);
+    expect(puts[0]!.version).toBe(3);
     expect(puts[0]!.statuses![1]).toMatchObject({ key: 'needs_review', label: 'Being checked', color: 'green' });
     expect(puts[0]!.statuses!.map((s) => s.key)).toEqual(['unvetted', 'needs_review', 'reviewed', 'sent_back', 'old']);
     expect(puts[0]!.reasons!.at(-1)).toEqual({ key: null, label: 'Wrong region', applies_to: 'send_back', note_required: false, archived: false });
@@ -213,6 +225,64 @@ describe('Settings > Review statuses', () => {
     expect(within(row).getByRole('textbox', { name: 'Name of In review' })).toHaveValue('');
   });
 
+  it('a 409 says someone else changed these; Reload asks first, then drops the draft for what they saved', async () => {
+    const theirs: ReviewSettings = { ...SETTINGS, version: 4, statuses: SETTINGS.statuses.map((x) => (x.key === 'needs_review' ? { ...x, label: 'Their name' } : x)) };
+    serve({
+      reads: [SETTINGS, theirs],
+      put: () =>
+        HttpResponse.json(
+          { type: 'https://scout.taazaa.ai/problems/conflict', title: 'Someone else changed these. Reload to see their changes.', status: 409 },
+          { status: 409, headers: { 'content-type': 'application/problem+json' } },
+        ),
+    });
+    const user = userEvent.setup();
+    const table = await open();
+    await user.type(within(rowOf(table, 'In review')).getByRole('textbox', { name: 'Name of In review' }), ' mine');
+    await user.click(saveButton());
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Someone else changed these. Reload to see their changes.');
+    // Nothing is lost until the person says so.
+    expect(within(table).getByRole('textbox', { name: 'Name of In review' })).toHaveValue('In review mine');
+    await user.click(within(alert).getByRole('button', { name: 'Reload' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Reload and discard your changes?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Reload' }));
+    expect(await screen.findByRole('textbox', { name: 'Name of Their name' })).toHaveValue('Their name');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(saveButton()).toBeDisabled();
+    await user.type(screen.getByRole('textbox', { name: 'Name of Their name' }), '!');
+    await user.click(saveButton());
+    await waitFor(() => expect(puts).toHaveLength(2));
+    expect(puts[1]!.version).toBe(4);
+  });
+
+  it('a refetch brings fresh counts, but never wipes unsaved edits', async () => {
+    const later: ReviewSettings = { ...SETTINGS, statuses: SETTINGS.statuses.map((x) => (x.key === 'needs_review' ? { ...x, in_status_count: 9, late_count: 4 } : x)) };
+    serve({ reads: [SETTINGS, later] });
+    const user = userEvent.setup();
+    const table = await open();
+    expect(within(rowOf(table, 'In review')).getByText('1 late')).toBeInTheDocument();
+    await user.type(within(rowOf(table, 'In review')).getByRole('textbox', { name: 'Name of In review' }), ' now');
+    await act(() => table.view.queryClient.refetchQueries({ queryKey: ['review-settings', 'taazaa'] }));
+    expect(gets).toBe(2);
+    expect(within(table).getByRole('textbox', { name: 'Name of In review' })).toHaveValue('In review now');
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
+    // Clean again: the next read's counts show.
+    await act(() => table.view.queryClient.refetchQueries({ queryKey: ['review-settings', 'taazaa'] }));
+    expect(within(rowOf(table, 'In review')).getByText('4 late')).toBeInTheDocument();
+  });
+
+  it('reads the settings again when the tab is opened again', async () => {
+    const later: ReviewSettings = { ...SETTINGS, statuses: SETTINGS.statuses.map((x) => (x.key === 'needs_review' ? { ...x, late_count: 4 } : x)) };
+    serve({ reads: [SETTINGS, later] });
+    const user = userEvent.setup();
+    await open();
+    const nav = screen.getByRole('navigation', { name: 'Settings' });
+    await user.click(within(nav).getByRole('link', { name: 'AI runs' }));
+    await user.click(within(nav).getByRole('link', { name: 'Review statuses' }));
+    const table = await screen.findByRole('table');
+    expect(await within(rowOf(table, 'In review')).findByText('4 late')).toBeInTheDocument();
+  });
+
   it('Discard goes back to the loaded values', async () => {
     serve();
     const user = userEvent.setup();
@@ -232,13 +302,14 @@ describe('Settings > Review statuses', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: 'Working days before an assignment is accepted' }), '5');
     await user.click(saveButton());
     await waitFor(() => expect(puts).toHaveLength(1));
-    expect(puts[0]).toEqual({ auto_accept_working_days: 5 });
+    expect(puts[0]).toEqual({ auto_accept_working_days: 5, version: 3 });
     await waitFor(() => expect(saveButton()).toBeDisabled());
     await user.click(screen.getByRole('switch', { name: /Accept assignments automatically after/ }));
     expect(screen.getByRole('combobox', { name: 'Working days before an assignment is accepted' })).toBeDisabled();
     await user.click(saveButton());
     await waitFor(() => expect(puts).toHaveLength(2));
-    expect(puts[1]).toEqual({ auto_accept_working_days: null });
+    // The second save sends the version the first one answered.
+    expect(puts[1]).toEqual({ auto_accept_working_days: null, version: 4 });
   });
 
   it('Restore defaults asks first, then calls the reset', async () => {

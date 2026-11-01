@@ -20,23 +20,48 @@ export function ReviewStatusesTab({ tenant }: TabProps) {
   const settings = useQuery(reviewSettingsQuery(tenant));
   if (settings.isPending) return <LoadingRows>Loading review statuses</LoadingRows>;
   if (settings.isError) return <LoadFailed title="Review statuses didn't load" error={settings.error} onRetry={() => void settings.refetch()} />;
-  // A save or a restore brings new settings: the editor starts again from them.
-  return <Editor key={settings.dataUpdatedAt} tenant={tenant} loaded={settings.data} />;
+  return <Editor tenant={tenant} loaded={settings.data} />;
 }
 
 function Editor({ tenant, loaded }: { tenant: string; loaded: ReviewSettings }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const base = useMemo(() => toDraft(loaded), [loaded]);
+  // `from` is what the draft started from: its version goes with the save.
+  const [from, setFrom] = useState(loaded);
+  const [seen, setSeen] = useState(loaded);
+  const base = useMemo(() => toDraft(from), [from]);
   const [draft, setDraft] = useState<Draft>(base);
   const [errors, setErrors] = useState<FieldError[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [archiving, setArchiving] = useState<number | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [stale, setStale] = useState(false);
+  const [reloading, setReloading] = useState(false);
 
   const edit = changes(draft, base);
   const dirty = Object.keys(edit).length > 0;
+
+  /** Starts the editor again from these settings, dropping the draft. */
+  function startFrom(next: ReviewSettings) {
+    setSeen(next);
+    setFrom(next);
+    setDraft(toDraft(next));
+    setErrors([]);
+    setFailure(null);
+    setStale(false);
+  }
+
+  // A refetch brings fresh counts: take them unless there are unsaved edits, which it must never wipe.
+  // Never step back to an older version (the cache can lag a moment behind a save's answer).
+  const newer = loaded.version >= from.version;
+  if (loaded !== seen) {
+    setSeen(loaded);
+    if (!dirty && newer) {
+      setFrom(loaded);
+      setDraft(toDraft(loaded));
+    }
+  }
   const blocker = useBlocker({ shouldBlockFn: () => dirty && !busy, enableBeforeUnload: () => dirty, withResolver: true });
   const byRow = errorsByRow(errors);
   const live = draft.statuses.filter((s) => !s.archived);
@@ -102,20 +127,34 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: ReviewSettings }) 
     setErrors([]);
     setFailure(null);
     try {
-      afterSave(qc, tenant, await action());
+      const saved = await action();
+      startFrom(saved);
+      afterSave(qc, tenant, saved);
       if (done) toast.show(done);
     } catch (e) {
       setFailure(errorText(e));
       if (e instanceof ApiError) setErrors(e.errors);
+      if (e instanceof ApiError && e.status === 409) setStale(true);
     } finally {
       setBusy(false);
     }
   }
 
+  /** Back to the saved values, with the latest counts read. */
   function discard() {
-    setDraft(base);
-    setErrors([]);
-    setFailure(null);
+    startFrom(newer ? loaded : from);
+  }
+
+  async function reload() {
+    setReloading(false);
+    setBusy(true);
+    try {
+      startFrom(await qc.fetchQuery({ ...reviewSettingsQuery(tenant), staleTime: 0 }));
+    } catch (e) {
+      setFailure(errorText(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   const reasonsIn = (list: List) => draft.reasons.map((row, index) => ({ row, index })).filter(({ row }) => inList(row, list));
@@ -134,7 +173,7 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: ReviewSettings }) 
           <Button variant="secondary" onClick={discard} disabled={busy || !dirty}>
             Discard
           </Button>
-          <Button onClick={() => void act(() => saveReviewSettings(tenant, edit), 'Review statuses saved. The review queue now shows them.')} disabled={busy || !dirty}>
+          <Button onClick={() => void act(() => saveReviewSettings(tenant, { ...edit, version: from.version }), 'Review statuses saved. The review queue now shows them.')} disabled={busy || !dirty}>
             Save statuses
           </Button>
         </div>
@@ -143,6 +182,11 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: ReviewSettings }) 
       {failure && (
         <div role="alert" className={styles.failure}>
           <p>{failure}</p>
+          {stale && (
+            <Button variant="secondary" size="sm" onClick={() => setReloading(true)} disabled={busy}>
+              Reload
+            </Button>
+          )}
           {byRow.rest
             .filter((e) => e.path !== 'auto_accept_working_days' && e.message !== failure)
             .map((e) => (
@@ -229,6 +273,14 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: ReviewSettings }) 
           setRestoring(false);
           void act(() => restoreReviewDefaults(tenant));
         }}
+      />
+      <ConfirmDialog
+        open={reloading}
+        onOpenChange={setReloading}
+        title="Reload and discard your changes?"
+        description="You'll see what was saved since you opened this page. Your unsaved changes are lost."
+        confirmLabel="Reload"
+        onConfirm={() => void reload()}
       />
       <ConfirmDialog
         open={blocker.status === 'blocked'}

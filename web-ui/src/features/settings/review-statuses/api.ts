@@ -39,18 +39,20 @@ export type ReviewSettings = {
   decline_reasons: SettingsReason[];
   auto_accept_working_days: number | null;
   colors: { value: Color; label: string }[];
+  /** Sent back with the save; the API answers 409 when someone saved since. */
+  version: number;
 };
 
 export type StatusEdit = { key: string | null; label: string; color: string; description: string; set_by: string; flag_after_hours: number | null; archived: boolean };
 export type ReasonEdit = { key: string | null; label: string; applies_to: ReasonList; note_required: boolean; archived: boolean };
-export type ReviewSettingsSave = { statuses?: StatusEdit[]; reasons?: ReasonEdit[]; auto_accept_working_days?: number | null };
+export type ReviewSettingsSave = { version?: number; statuses?: StatusEdit[]; reasons?: ReasonEdit[]; auto_accept_working_days?: number | null };
 
 export const reviewSettingsQuery = (tenant: string) =>
   queryOptions({
     queryKey: ['review-settings', tenant],
     queryFn: () => apiFetch<ReviewSettings>('/settings/review', { tenant }),
-    // The editor starts from what it loaded; a refetch on focus would throw away unsaved changes.
-    staleTime: Infinity,
+    // Fresh counts on each visit; not on focus, and the editor keeps its draft while it has unsaved edits.
+    refetchOnWindowFocus: false,
   });
 
 export const saveReviewSettings = (tenant: string, body: ReviewSettingsSave) => apiFetch<ReviewSettings>('/settings/review', { tenant, method: 'PUT', body });
