@@ -12,6 +12,7 @@ import { tenantIndexRoute, tenantRoute } from './routes/tenant';
 import {
   accountRoute,
   accountsRoute,
+  batchesImportRoute,
   batchesRoute,
   costsRoute,
   funnelRoute,
@@ -20,7 +21,9 @@ import {
   overviewRoute,
   playbooksRoute,
   queueRoute,
+  sourceRoute,
   sourcesRoute,
+  sourceTabRoute,
 } from './routes/workspace';
 import { ToastProvider } from './ui/Toast';
 
@@ -35,7 +38,10 @@ const routeTree = rootRoute.addChildren([
     accountRoute,
     overviewRoute,
     sourcesRoute,
+    sourceRoute,
+    sourceTabRoute,
     batchesRoute,
+    batchesImportRoute,
     offersRoute,
     playbooksRoute,
     funnelRoute,
