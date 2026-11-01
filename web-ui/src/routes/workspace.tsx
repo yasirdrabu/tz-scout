@@ -35,13 +35,19 @@ export const accountsRoute = createRoute({
   component: lazyRouteComponent(() => import('../features/accounts/AllAccountsScreen'), 'AllAccountsScreen'),
 });
 
+/** Where the account page was opened from, for its breadcrumb; from the queue also the queue's filters, for `{i} of {n}` (C10). */
+export type AccountSearch = { from?: 'queue' | 'my' | 'all'; tier?: string; practice?: string; offer?: string; source?: string; status?: string };
+
+const FROM = ['queue', 'my', 'all'] as const;
+
 export const accountRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'accounts/$id',
-  component: function AccountPlaceholder() {
-    const { id } = accountRoute.useParams();
-    return <Placeholder screen={SCREENS.account} subtitle={`Account ${id}. This screen is not built yet.`} />;
+  validateSearch: (search: Record<string, unknown>): AccountSearch => {
+    const from = FROM.find((f) => f === search.from);
+    return { ...(from ? { from } : {}), ...(from === 'queue' ? pickStrings(search, ['tier', 'practice', 'offer', 'source', 'status']) : {}) };
   },
+  component: lazyRouteComponent(() => import('../features/account/AccountPage'), 'AccountPage'),
 });
 
 export const overviewRoute = createRoute({

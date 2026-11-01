@@ -64,7 +64,7 @@ describe('My accounts', () => {
     expect(await screen.findByText('1 new assignment to accept.')).toBeInTheDocument();
     const fresh = await screen.findByRole('region', { name: 'New assignments' });
     expect(fresh).toHaveTextContent('Accept to take it on. Declining returns the account to Dana Whitfield.');
-    expect(within(fresh).getByRole('link', { name: 'Miami-Dade County DTPW' })).toHaveAttribute('href', '/t/taazaa/accounts/acc_mdc');
+    expect(within(fresh).getByRole('link', { name: 'Miami-Dade County DTPW' })).toHaveAttribute('href', '/t/taazaa/accounts/acc_mdc?from=my');
     expect(fresh).toHaveTextContent('Modernization Blueprint');
     expect(fresh).toHaveTextContent(/Assigned by Dana Whitfield · /);
     expect(fresh).toHaveTextContent('"Jarice knows you from APTA."');

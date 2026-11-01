@@ -155,10 +155,12 @@ describe('All accounts', () => {
 
   it('a row opens the account page', async () => {
     serve();
+    server.use(http.get(/\/api\/v1\/accounts\/acc_hollis/,() => problem(404, 'That account was not found.')));
     const app = renderApp('/t/taazaa/accounts');
     const hollis = await screen.findByRole('link', { name: 'Hollis Freight Lines' });
+    expect(hollis).toHaveAttribute('href', '/t/taazaa/accounts/acc_hollis?from=all');
     await userEvent.click(hollis.closest('tr')!.querySelector('td:nth-child(3)')!);
-    await waitFor(() => expect(app.path()).toBe('/t/taazaa/accounts/acc_hollis'));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Account page' })).toBeInTheDocument();
+    await waitFor(() => expect(app.path()).toBe('/t/taazaa/accounts/acc_hollis?from=all'));
+    expect(await screen.findByText("This account isn't in your workspace, or you don't have access to it.")).toBeInTheDocument();
   });
 });

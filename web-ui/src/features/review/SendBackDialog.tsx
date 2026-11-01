@@ -5,14 +5,14 @@ import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { useToast } from '../../ui/Toast';
 import { errorText } from '../settings/shared';
-import { bulk, changeStatus, reasonsFor, reasonsQuery, reviewQuery, statusesQuery, type BulkResult, type QueueRow } from './api';
+import { bulk, changeStatus, reasonsFor, reasonsQuery, reviewQuery, statusesQuery, type BulkResult, type DialogAccount } from './api';
 import { ReasonPicker, reasonReady } from './ReasonPicker';
 import styles from './Review.module.css';
 
 export type SendBackProps = {
   tenant: string;
   /** One account (peek, a status pick) or up to 50 (the bulk bar). */
-  accounts: QueueRow[];
+  accounts: DialogAccount[];
   onClose: () => void;
   /** After the API answered: the accounts sent back and the ones it refused, with its words. */
   onDone: (sent: string[], refused: { account_id: string; message: string }[]) => void;

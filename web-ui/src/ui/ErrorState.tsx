@@ -10,10 +10,12 @@ export type ErrorStateProps = {
   onRetry?: () => void;
   /** From the API's correlation id, so support can find the request. */
   errorRef?: string;
+  /** Printed before the ref, for example the account id: "{subject} · Error ref {ref}". */
+  subject?: string;
   actions?: ReactNode;
 };
 
-export function ErrorState({ title, children, onRetry, errorRef, actions }: ErrorStateProps) {
+export function ErrorState({ title, children, onRetry, errorRef, subject, actions }: ErrorStateProps) {
   return (
     <div role="alert" className={styles.error}>
       <div className={styles.tile} aria-hidden="true">
@@ -31,7 +33,7 @@ export function ErrorState({ title, children, onRetry, errorRef, actions }: Erro
           {actions}
         </div>
       )}
-      {errorRef && <p className={styles.ref}>Error ref {errorRef}</p>}
+      {errorRef && <p className={styles.ref}>{subject ? `${subject} · Error ref ${errorRef}` : `Error ref ${errorRef}`}</p>}
     </div>
   );
 }
