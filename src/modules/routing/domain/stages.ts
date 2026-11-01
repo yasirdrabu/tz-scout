@@ -1,4 +1,5 @@
 import type { Stage } from '../contracts/types';
+import { DEFAULT_STAGES, moveFor, type StageSignal } from './pipeline';
 
 /** What can move a stage (REV-E4, with Ruling 16). */
 export type StageEvent =
@@ -8,41 +9,43 @@ export type StageEvent =
   | 'assigned' // assignment accepted
   | 'assignment_declined' // seller declined
   | 'withdrawn' // assignment withdrawn
-  | 'engaged'
+  | 'engaged' // a reply
+  | 'meeting' // a meeting: also fires `meeting_booked`
   | 'opportunity'
   | 'won'
   | 'lost';
 
 const FUNNEL = ['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity', 'won'] as const;
-const rank = (s: Stage): number => FUNNEL.indexOf(s as (typeof FUNNEL)[number]);
 
-/** Moves forward to `to` from any earlier funnel stage; exits (lost, declined) and later stages stay put. */
-const forwardTo = (current: Stage, to: Stage): Stage | null => {
-  const from = rank(current);
-  return from >= 0 && from < rank(to) ? to : null;
-};
-
-/** The stage after `event`, or null when nothing moves. Stages only move forward except the listed returns. */
-export function nextStage(current: Stage, event: StageEvent): Stage | null {
+/** What an event means for the workspace's stages (REV-E5 "Triggers"). */
+export function eventSignals(event: StageEvent): StageSignal[] {
   switch (event) {
     case 'reviewed':
-    case 'assigned':
-    case 'engaged':
-    case 'won':
-      return forwardTo(current, event);
-    case 'opportunity':
-      return current === 'lost' ? 'opportunity' : forwardTo(current, 'opportunity');
-    case 'lost':
-      return rank(current) >= 0 && current !== 'won' ? 'lost' : null;
+      return [{ trigger: 'reviewer_sets_tier' }];
     case 'declined':
-      return rank(current) >= 0 && current !== 'won' ? 'declined' : null;
+      return [{ trigger: 'reviewer_rejects' }];
     case 'reopened':
-      return current === 'declined' ? 'arrived' : null;
+      return [{ kind: 'reopened' }];
+    case 'assigned':
+      return [{ trigger: 'ae_accepts' }];
     case 'assignment_declined':
     case 'withdrawn':
-      return current === 'assigned' ? 'reviewed' : null;
+      return [{ kind: 'assignment_undone' }];
+    case 'engaged':
+      return [{ trigger: 'reply_or_meeting' }];
+    case 'meeting':
+      return [{ trigger: 'reply_or_meeting' }, { trigger: 'meeting_booked' }];
+    case 'opportunity':
+      return [{ trigger: 'deal_created' }];
+    case 'won':
+      return [{ trigger: 'deal_closed_won' }];
+    case 'lost':
+      return [{ trigger: 'deal_closed_lost' }];
   }
 }
+
+/** The stage after `event` with the default stages (REV-E4's rule, now `moveFor`), or null when nothing moves. */
+export const nextStage = (current: Stage, event: StageEvent): Stage | null => moveFor(current, eventSignals(event), DEFAULT_STAGES);
 
 /** The pipeline stages in order, then the exits, with the names people see (C6, until stages are configurable, Decision 6). */
 export const STAGE_LABELS: Record<Stage, string> = {
@@ -54,6 +57,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   won: 'Won',
   lost: 'Lost',
   declined: 'Not pursued',
+  back_to_nurture: 'Back to nurture',
 };
 export const PIPELINE_STAGES = FUNNEL;
 /** Exits: what All accounts' "Other" tab holds, with the accounts sent back to their source. */

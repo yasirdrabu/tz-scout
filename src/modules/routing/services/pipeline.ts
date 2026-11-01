@@ -165,7 +165,7 @@ export async function accountFacets(ctx: ModuleContext, f: AccountListFilters = 
     total: await countAccounts(ctx, anyStage),
     wonThisYear: await wonThisYear(ctx),
     stages: [
-      ...PIPELINE_STAGES.map((s) => ({ key: s, label: STAGE_LABELS[s], count: stageCounts.get(s) ?? 0 })),
+      ...PIPELINE_STAGES.map((s) => ({ key: s, label: STAGE_LABELS[s] ?? s, count: stageCounts.get(s) ?? 0 })),
       { key: OTHER, label: 'Other', count: other },
     ],
     owners: [...owners, { value: 'unassigned', label: 'Unassigned', count: ownerCounts.get(null) ?? 0 }],

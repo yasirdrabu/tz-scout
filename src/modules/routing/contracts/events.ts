@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { defineEvent } from '@/platform/events/registry';
-import { reviewSnapshotSchema, stageSchema } from './types';
+import { reviewSnapshotSchema, stageKeySchema } from './types';
 
 /** After every write to an account's review. `version` is `account_review.version`. */
 export const reviewChanged = defineEvent(
@@ -82,5 +82,5 @@ export const assignmentWithdrawn = defineEvent(
 export const stageChanged = defineEvent(
   'routing.stage.changed',
   1,
-  z.object({ accountId: z.string(), from: stageSchema, to: stageSchema, causeEventId: z.string() }),
+  z.object({ accountId: z.string(), from: stageKeySchema, to: stageKeySchema, causeEventId: z.string() }),
 );

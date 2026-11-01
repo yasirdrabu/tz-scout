@@ -84,7 +84,7 @@ export async function getAccountReview(ctx: ModuleContext, accountId: string): P
     stage: row.stage,
     stageLabel: STAGE_LABELS[stage] ?? row.stage,
     stageChangedAt: row.stageChangedAt,
-    stages: steps.map((key) => ({ key, label: STAGE_LABELS[key as Stage], at: reached.get(key) ?? null, current: key === row.stage })),
+    stages: steps.map((key) => ({ key, label: STAGE_LABELS[key] ?? key, at: reached.get(key) ?? null, current: key === row.stage })),
     insights: row.insights ? { text: row.insights, byName: names.person(row.insightsBy), at: row.insightsAt } : null,
     flags: newFrom ? { ...flags, newFrom: { ...newFrom, sourceName: newFromName } } : flags,
     currentAssignment:

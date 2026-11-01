@@ -3,7 +3,7 @@ import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { stageChanged } from '../contracts/events';
-import { stageSchema, type Stage } from '../contracts/types';
+import { stageKeySchema, type Stage } from '../contracts/types';
 import { accountReview, stageChange } from '../db/schema';
 import { nextStage, type StageEvent } from '../domain/stages';
 
@@ -29,7 +29,7 @@ export async function moveStage(
     .for('update');
   if (!review) return null;
 
-  const from = stageSchema.parse(review.stage);
+  const from = stageKeySchema.parse(review.stage);
   const to = nextStage(from, event);
   if (!to) return null;
 
