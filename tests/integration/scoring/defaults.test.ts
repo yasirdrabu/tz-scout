@@ -30,22 +30,16 @@ describe('scoring.tenant_defaults', () => {
     const [p] = await profiles(a);
     expect(p).toMatchObject({
       tenantId: a.tenantId,
-      fitWeight: 0.55,
-      intentWeight: 0.45,
       halfLifeDays: 45,
       maxSignalAgeDays: 365,
       warmIntroCap: 20,
-      trustModifierMax: 5,
       trustNeutral: 0.6,
       researchFloorDays: 180,
       version: 1,
     });
     expect(p!.fitParts).toEqual({ industry: 30, size: 25, revenue: 20, region: 10, buyer: 15 });
-    expect(p!.tierThresholds).toEqual({
-      notFitBelow: 40,
-      actNow: { fit: 60, intent: 35, total: 60 },
-      goodFit: { fit: 60 },
-    });
+    expect(p!.weights).toEqual({ fit: 40, intent: 25, revenue: 15, trust: 20 });
+    expect(p!.tierCutoffs).toEqual({ actNow: 75, goodFit: 55, watch: 35 });
     const s = await ageing(a.tenantId);
     expect(s).toHaveLength(1);
     expect(s[0]).toMatchObject({ cron: '0 2 * * *', timezone: 'UTC' });
