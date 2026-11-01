@@ -1,13 +1,16 @@
 import { readBatchFile } from '@/modules/intake';
+import { requirePermission } from '@/modules/tenancy';
 import { attachment, safeContentType } from '../../../../_lib/intake';
 import { idAndAction, notFound } from '../../../../_lib/path';
 import { v1Route } from '../../../../_lib/v1-route';
 
 /**
  * `GET /batches/{id}/files/{file_id}` (§14 Download file): the original upload, as an attachment with its stored type.
- * A file of another batch, or a batch the caller can't see, is a 404.
+ * It holds every contact cell, so it needs `people:read` too (403). A file of another batch, a batch the caller can't
+ * see, or one they see only through an account, is a 404.
  */
-export const GET = v1Route({ permission: 'arrivals:read' }, async (req, _principal, ctx) => {
+export const GET = v1Route({ permission: 'arrivals:read' }, async (req, principal, ctx) => {
+  requirePermission(principal, 'people:read');
   const batch = idAndAction(req, 'batches');
   const file = idAndAction(req, 'files');
   if (batch.action || file.action) throw notFound();

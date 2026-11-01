@@ -9,6 +9,7 @@ import { DELETE as deleteImport, GET as getImportRoute, POST as importAction } f
 import { POST as postImport } from '@/http/routes/v1/imports/route';
 import { POST as postSource } from '@/http/routes/v1/sources/route';
 import { PATCH as patchSource } from '@/http/routes/v1/sources/[id]/route';
+import { accountSummary } from '@/modules/accounts/db/schema';
 import { personSourceFor } from '@/modules/intake';
 import { arrival, columnMapping, fileBlob, fileImport, source } from '@/modules/intake/db/schema';
 import { closeDbs } from '@/platform/db/client';
@@ -260,6 +261,22 @@ describe('GET /api/v1/batches: filters, derived status, total and meta', () => {
     const stranger = await other.person('operator');
     await json(other.as(stranger, fileRoute, `batches/${fileBatch}/files/${file.id}`), 404);
     await json(w.as(seller, fileRoute, `batches/${fileBatch}/files/${file.id}`), 403);
+  });
+
+  it('refuses the original file without people:read, and to a caller who sees the batch only through an account', async () => {
+    const body = await json(w.as(operator, getBatchRoute, `batches/${fileBatch}`));
+    const file = body.files[0];
+    // The file holds every contact cell, so it needs people:read.
+    const reader = await keyFor(w.tenant, ['arrivals:read'], { sourceId: list.id });
+    const refused = await call(fileRoute, reader, `batches/${fileBatch}/files/${file.id}`);
+    expect(refused.status).toBe(403);
+    // Seen through one account in a practice: the batch shows, but with no file to download.
+    const items = await json(w.as(operator, itemsRoute, `batches/${fileBatch}/items?status=resolved`));
+    await w.run((ctx) => ctx.tx.update(accountSummary).set({ practiceIds: ['prc_files'] }).where(eq(accountSummary.accountId, items.data[0].account_id)));
+    const narrow = await w.person('operator', { dataLimit: { kind: 'practices', ids: ['prc_files'] } });
+    const seen = await json(w.as(narrow, getBatchRoute, `batches/${fileBatch}`));
+    expect(seen.files).toEqual([]);
+    await json(w.as(narrow, fileRoute, `batches/${fileBatch}/files/${file.id}`), 404);
   });
 
   it('keeps a hostile file name out of the header', async () => {

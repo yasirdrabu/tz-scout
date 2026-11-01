@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { problem } from '../../test/http';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
-import { APTA, detail, serveBatches } from './testing';
+import { APTA, detail, ITEMS, serveBatches } from './testing';
 
 const params = (href: string) => new URL(href, 'http://x').searchParams;
 
@@ -135,5 +135,51 @@ describe('Batch detail (§14)', () => {
     expect(screen.queryByText(/in the review queue/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Resolve' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Skip the waiting rows' })).toBeNull();
+  });
+});
+
+describe('Batch detail: files and answered rows', () => {
+  it('hides Download file without people:read', async () => {
+    serveBatches({ scopes: ['arrivals:read', 'imports:run'] });
+    renderApp('/t/taazaa/batches/bat_1044');
+    expect(await screen.findByRole('heading', { name: 'APTA 2026 attendee list' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download file' })).toBeNull();
+  });
+
+  it('polls every 2 s after a row is answered until it no longer waits', async () => {
+    const seen = serveBatches();
+    let resolved = false;
+    server.use(
+      http.post(/\/api\/v1\/arrivals\/arr_2:supply-website$/, () => {
+        return HttpResponse.json({ id: 'arr_2', status: 'resolving' });
+      }),
+      http.get('/api/v1/batches/:id/items', async ({ request }) => {
+        seen.push({ method: 'GET', url: new URL(request.url), body: undefined });
+        const rows = ITEMS.filter((i) => i.outcome === 'waiting').filter((i) => !(resolved && i.id === 'arr_2'));
+        return HttpResponse.json({ data: rows, next_cursor: null, total: rows.length });
+      }),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      renderApp('/t/taazaa/batches/bat_1044?tab=waiting');
+      const input = await screen.findByRole('textbox', { name: 'Website for Lakeshore Regional Transit' });
+      await user.type(input, 'lakeshore.org');
+      await user.click(within(input.closest('form')!).getByRole('button', { name: 'Resolve' }));
+      await screen.findByText('Lakeshore Regional Transit resolved.');
+      const asked = () => seen.filter((s) => s.url.pathname.endsWith('/items')).length;
+      const before = asked();
+      await vi.advanceTimersByTimeAsync(2_100);
+      await waitFor(() => expect(asked()).toBeGreaterThan(before));
+      // The worker resolves it: the row leaves the Waiting tab and the polling stops.
+      resolved = true;
+      await vi.advanceTimersByTimeAsync(2_100);
+      await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Website for Lakeshore Regional Transit' })).toBeNull());
+      const settled = asked();
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(asked()).toBe(settled);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

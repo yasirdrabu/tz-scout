@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, sql, type SQLWrapper } from 'drizzle-orm';
 import { accountNames, getSummaries } from '@/modules/accounts';
 import { apiKeyNames, userNames } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
@@ -18,8 +18,22 @@ import {
   type Stages,
 } from '../domain/batch-status';
 import { readFile, type StoredFile } from './files';
-import { batchView, getBatch, narrowed, notSuperseded, pageBatches, visibleItems, toViews, type BatchCandidate, type BatchDetail, type BatchFilters, type BatchView } from './status';
-import { countArrivals, pageArrivals } from './visibility';
+import {
+  batchView,
+  batchWhere,
+  getBatch,
+  narrowed,
+  notSuperseded,
+  pageBatches,
+  toViews,
+  visibleRowsOfBatches,
+  type BatchArrival,
+  type BatchCandidate,
+  type BatchDetail,
+  type BatchFilters,
+  type BatchView,
+} from './status';
+import { chainInScope, countArrivals, pageArrivals, visibleArrivals } from './visibility';
 
 // The batch screens' reads (§13, §14): derived status, issue and progress (Ruling 8), items with their outcome (Ruling 9),
 // the original files and the rejected rows.
@@ -64,44 +78,63 @@ function leftByPause(imp: ImportRow | null): number {
   return Math.max(0, (stats.companies ?? imp.rowCount ?? 0) - (stats.cursor ?? 0));
 }
 
-/** Stages, retryable rejections and the import of each batch: from every row for a chain-visible batch, else from the visible rows. */
-async function factsOf(ctx: ModuleContext, rows: BatchCandidate[]): Promise<Map<string, Facts>> {
-  const out = new Map<string, Facts>();
-  if (rows.length === 0) return out;
-  const ids = rows.map((r) => r.row.id);
-  for (const id of ids) out.set(id, { stages: emptyStages(), capRejected: 0, imp: null });
-  const chainIds = rows.filter((r) => r.chainOk).map((r) => r.row.id);
-  if (chainIds.length > 0) {
-    const grouped = await ctx.tx
-      .select({
-        batchId: arrival.batchId,
-        status: arrival.status,
-        waiting: sql<boolean>`${arrival.waitingOn} is not null`,
-        cap: sql<boolean>`coalesce(${arrival.rejectReason} = 'daily_cap_reached', false)`,
-        n: sql<number>`count(*)::int`,
-      })
-      .from(arrival)
-      .where(and(eq(arrival.tenantId, ctx.tenantId), inArray(arrival.batchId, chainIds), notSuperseded))
-      .groupBy(arrival.batchId, arrival.status, sql`${arrival.waitingOn} is not null`, sql`coalesce(${arrival.rejectReason} = 'daily_cap_reached', false)`);
-    for (const g of grouped) {
-      const f = out.get(g.batchId!)!;
-      f.stages[stageOf(g.status, g.waiting)] += g.n;
-      if (g.status === 'rejected' && g.cap) f.capRejected += g.n;
-    }
+type Ids = string[] | SQLWrapper;
+const none = (ids: Ids) => Array.isArray(ids) && ids.length === 0;
+const factsFor = (out: Map<string, Facts>, id: string): Facts => {
+  let f = out.get(id);
+  if (!f) out.set(id, (f = { stages: emptyStages(), capRejected: 0, imp: null }));
+  return f;
+};
+
+/** Stages and retryable rejections of chain-visible batches, from every row: one grouped read for the whole set. */
+async function chainFacts(ctx: ModuleContext, ids: Ids, out: Map<string, Facts>): Promise<void> {
+  if (none(ids)) return;
+  const waiting = sql<boolean>`${arrival.waitingOn} is not null`;
+  const cap = sql<boolean>`coalesce(${arrival.rejectReason} = 'daily_cap_reached', false)`;
+  const grouped = await ctx.tx
+    .select({ batchId: arrival.batchId, status: arrival.status, waiting, cap, n: sql<number>`count(*)::int` })
+    .from(arrival)
+    .where(and(eq(arrival.tenantId, ctx.tenantId), inArray(arrival.batchId, ids), notSuperseded))
+    .groupBy(arrival.batchId, arrival.status, waiting, cap);
+  for (const g of grouped) {
+    const f = factsFor(out, g.batchId!);
+    f.stages[stageOf(g.status, g.waiting)] += g.n;
+    if (g.status === 'rejected' && g.cap) f.capRejected += g.n;
   }
-  for (const r of rows.filter((x) => !x.chainOk)) {
-    const f = out.get(r.row.id)!;
-    for (const a of await visibleItems(ctx, r.row.id)) {
+}
+
+/** Stages and retryable rejections of batches seen through account visibility, from their visible rows only. */
+function rowFacts(rows: Map<string, BatchArrival[]>, out: Map<string, Facts>): void {
+  for (const [id, list] of rows) {
+    const f = factsFor(out, id);
+    for (const a of list) {
       f.stages[stageOf(a.status, a.waitingOn !== null)]++;
       if (a.status === 'rejected' && a.rejectReason === 'daily_cap_reached') f.capRejected++;
     }
   }
+}
+
+/** The import of each batch in the set: one read. */
+async function importFacts(ctx: ModuleContext, ids: Ids, out: Map<string, Facts>): Promise<void> {
+  if (none(ids)) return;
   const imports = await ctx.tx
     .select({ id: fileImport.id, batchId: fileImport.batchId, status: fileImport.status, stats: fileImport.stats, rowCount: fileImport.rowCount })
     .from(fileImport)
     .where(and(eq(fileImport.tenantId, ctx.tenantId), inArray(fileImport.batchId, ids)))
     .orderBy(fileImport.createdAt);
-  for (const i of imports) out.get(i.batchId!)!.imp = i;
+  for (const i of imports) factsFor(out, i.batchId!).imp = i;
+}
+
+/** The visible rows of the candidates seen only through account visibility, in one read. */
+const rowsOfOthers = (ctx: ModuleContext, rows: BatchCandidate[]) => visibleRowsOfBatches(ctx, rows.filter((r) => !r.chainOk).map((r) => r.row.id));
+
+/** Stages, retryable rejections and the import of each batch: from every row for a chain-visible batch, else from the visible rows. */
+async function factsOf(ctx: ModuleContext, rows: BatchCandidate[], others: Map<string, BatchArrival[]>): Promise<Map<string, Facts>> {
+  const out = new Map<string, Facts>();
+  for (const r of rows) factsFor(out, r.row.id);
+  await chainFacts(ctx, rows.filter((r) => r.chainOk).map((r) => r.row.id), out);
+  rowFacts(others, out);
+  await importFacts(ctx, rows.map((r) => r.row.id), out);
   return out;
 }
 
@@ -123,15 +156,20 @@ function statusOf(f: Facts, stored: string) {
   return { ...s, retryable };
 }
 
-/** The status of each candidate, without names or files: for filtering and counting. */
+/** A batch seen through account visibility has a stored status from its visible rows only. */
+const narrowedStatus = (f: Facts) => (f.stages.received + f.stages.resolving > 0 ? 'processing' : 'completed');
+
+function lightOf(id: string, f: Facts, stored: string): Light {
+  const s = statusOf(f, stored);
+  return { id, statusKey: s.key, issue: s.issue };
+}
+
+/** The status of each candidate, without names or files: for the status filter. */
 async function lightViews(ctx: ModuleContext, rows: BatchCandidate[]): Promise<Light[]> {
-  const facts = await factsOf(ctx, rows);
+  const facts = await factsOf(ctx, rows, await rowsOfOthers(ctx, rows));
   return rows.map((r) => {
     const f = facts.get(r.row.id)!;
-    // A batch seen through account visibility shows a status from its visible rows only.
-    const stored = r.chainOk ? r.row.status : f.stages.received + f.stages.resolving > 0 ? 'processing' : 'completed';
-    const s = statusOf(f, stored);
-    return { id: r.row.id, statusKey: s.key, issue: s.issue };
+    return lightOf(r.row.id, f, r.chainOk ? r.row.status : narrowedStatus(f));
   });
 }
 
@@ -143,24 +181,31 @@ function parsePrincipal(principal: string): { kind: SentBy['kind']; id: string }
   return { kind: kind === 'user' ? 'user' : kind === 'agent' ? 'api_key' : 'system', id };
 }
 
-/** The full rows: status, stages, source, sender, files and import. */
-async function fullViews(ctx: ModuleContext, rows: BatchCandidate[], base: Map<string, BatchView>): Promise<BatchRowView[]> {
+/**
+ * The full rows: status, stages, source, sender, files and import. A batch seen only through account visibility
+ * lists no files: the original upload holds every row, the hidden ones too.
+ */
+async function fullViews(ctx: ModuleContext, rows: BatchCandidate[], given?: Map<string, BatchView>): Promise<BatchRowView[]> {
   if (rows.length === 0) return [];
-  const facts = await factsOf(ctx, rows);
-  const ids = rows.map((r) => r.row.id);
-  const files = await ctx.tx
-    .select({
-      batchId: batchFile.batchId,
-      storageKey: batchFile.storageKey,
-      fileName: batchFile.fileName,
-      sizeBytes: batchFile.sizeBytes,
-      contentType: batchFile.contentType,
-      sha256: batchFile.sha256,
-      createdAt: batchFile.createdAt,
-    })
-    .from(batchFile)
-    .where(and(eq(batchFile.tenantId, ctx.tenantId), inArray(batchFile.batchId, ids)))
-    .orderBy(batchFile.createdAt, batchFile.storageKey);
+  const others = await rowsOfOthers(ctx, rows);
+  const facts = await factsOf(ctx, rows, others);
+  const base = given ?? new Map(rows.map((r) => [r.row.id, r.chainOk ? batchView(r.row) : narrowed(r.row, others.get(r.row.id) ?? [])]));
+  const chainIds = rows.filter((r) => r.chainOk).map((r) => r.row.id);
+  const files = chainIds.length
+    ? await ctx.tx
+        .select({
+          batchId: batchFile.batchId,
+          storageKey: batchFile.storageKey,
+          fileName: batchFile.fileName,
+          sizeBytes: batchFile.sizeBytes,
+          contentType: batchFile.contentType,
+          sha256: batchFile.sha256,
+          createdAt: batchFile.createdAt,
+        })
+        .from(batchFile)
+        .where(and(eq(batchFile.tenantId, ctx.tenantId), inArray(batchFile.batchId, chainIds)))
+        .orderBy(batchFile.createdAt, batchFile.storageKey)
+    : [];
   const sourceIds = [...new Set(rows.map((r) => closestOf(r.row)).filter((x): x is string => !!x))];
   const sources = sourceIds.length
     ? await ctx.tx
@@ -202,12 +247,6 @@ async function fullViews(ctx: ModuleContext, rows: BatchCandidate[], base: Map<s
   });
 }
 
-async function baseViews(ctx: ModuleContext, rows: BatchCandidate[]): Promise<Map<string, BatchView>> {
-  const out = new Map<string, BatchView>();
-  for (const r of rows) out.set(r.row.id, r.chainOk ? batchView(r.row) : narrowed(r.row, await visibleItems(ctx, r.row.id)));
-  return out;
-}
-
 export type BatchListFilters = Omit<BatchFilters, 'id' | 'includeCancelled'> & { statusKeys?: BatchStatusKey[] };
 
 export type BatchListMeta = {
@@ -218,16 +257,42 @@ export type BatchListMeta = {
   attention: { count: number; issues: string[] };
 };
 
-/** Every visible batch for the filters, as light views (status and issue), newest first. */
+/**
+ * Every visible batch for the filters, as light views (status and issue), newest first, in a fixed number of reads
+ * however many batches there are: the chain-visible set by grouped SQL, the account-visible ones by their visible rows.
+ */
 async function scanAll(ctx: ModuleContext, f: BatchFilters): Promise<Light[]> {
-  const out: Light[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await pageBatches(ctx, { ...f, cursor, limit: 200 });
-    out.push(...(await lightViews(ctx, page.data)));
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
-  return out;
+  const scope = await visibleArrivals(ctx);
+  const chain = sql`coalesce(${chainInScope(scope, { person: batch.personSourceId, agent: batch.agentSourceId, vendor: batch.vendorSourceId })}, false)`;
+  const where = and(eq(batch.tenantId, ctx.tenantId), ...batchWhere(ctx, f));
+  const facts = new Map<string, Facts>();
+  const chainRows = await ctx.tx
+    .select({ id: batch.id, status: batch.status, runAt: batch.runAt })
+    .from(batch)
+    .where(and(where, chain));
+  const chainSet = ctx.tx.select({ id: batch.id }).from(batch).where(and(where, chain));
+  if (chainRows.length > 0) {
+    await chainFacts(ctx, chainSet, facts);
+    await importFacts(ctx, chainSet, facts);
+  }
+  const all: { id: string; runAt: Date; light: Light }[] = chainRows.map((r) => ({ id: r.id, runAt: r.runAt, light: lightOf(r.id, factsFor(facts, r.id), r.status) }));
+  if (scope.viaAccounts) {
+    const otherRows = await ctx.tx
+      .select({ id: batch.id, runAt: batch.runAt })
+      .from(batch)
+      .where(and(where, sql`not ${chain}`));
+    const rows = await visibleRowsOfBatches(ctx, otherRows.map((r) => r.id));
+    const seen = otherRows.filter((r) => (rows.get(r.id)?.length ?? 0) > 0);
+    const seenRows = new Map(seen.map((r) => [r.id, rows.get(r.id)!]));
+    rowFacts(seenRows, facts);
+    await importFacts(ctx, seen.map((r) => r.id), facts);
+    for (const r of seen) {
+      const fx = factsFor(facts, r.id);
+      all.push({ id: r.id, runAt: r.runAt, light: lightOf(r.id, fx, narrowedStatus(fx)) });
+    }
+  }
+  all.sort((a, b) => b.runAt.getTime() - a.runAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  return all.map((x) => x.light);
 }
 
 /**
@@ -247,7 +312,7 @@ export async function listBatchRows(
       }
     : undefined;
   const page = await pageBatches(ctx, { ...base, cursor, limit }, keep);
-  const data = await fullViews(ctx, page.data, await baseViews(ctx, page.data));
+  const data = await fullViews(ctx, page.data);
 
   const all = await scanAll(ctx, base);
   const countsByStatus = Object.fromEntries(BATCH_STATUS_KEYS.map((k) => [k, 0])) as Record<BatchStatusKey, number>;
@@ -365,9 +430,10 @@ export async function listBatchItemRows(
 
 // ---- Files and the error report ----
 
-/** One original file of a batch the caller can see, by its id; null when the batch or the file is not there. */
+/** One original file of a batch whose chain the caller sees, by its id; null otherwise, or when the file is not there. */
 export async function readBatchFile(ctx: ModuleContext, batchId: string, fileId: string): Promise<(StoredFile & { bytes: Buffer }) | null> {
-  if (!(await getBatch(ctx, batchId))) return null;
+  // The upload holds every row, so a batch seen only through account visibility has no file to give.
+  if (!(await pageBatches(ctx, { id: batchId, limit: 1 })).data[0]?.chainOk) return null;
   const keys = await ctx.tx
     .select({ storageKey: batchFile.storageKey })
     .from(batchFile)

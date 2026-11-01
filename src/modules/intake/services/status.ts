@@ -246,7 +246,7 @@ export type BatchFilters = {
 
 const likeText = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
-function batchWhere(ctx: ModuleContext, o: BatchFilters): (SQL | undefined)[] {
+export function batchWhere(ctx: ModuleContext, o: BatchFilters): (SQL | undefined)[] {
   const like = o.q ? likeText(o.q.trim()) : undefined;
   return [
     o.id ? eq(batch.id, o.id) : undefined,
@@ -262,15 +262,53 @@ function batchWhere(ctx: ModuleContext, o: BatchFilters): (SQL | undefined)[] {
   ];
 }
 
+/** The columns of an arrival the batch reads need: its stage, rejection and resolution. */
+export type BatchArrival = Pick<ArrivalRow, 'id' | 'batchId' | 'status' | 'waitingOn' | 'rejectReason' | 'resolution' | 'resolvedAt' | 'accountId' | 'receivedAt'>;
+
+/**
+ * The rows of these batches the principal may see (by their chain, or resolved on an account Accounts lets them see),
+ * newest first, rows a retry replaced left out. One read of the rows and one visibility check, however many batches.
+ */
+export async function visibleRowsOfBatches(ctx: ModuleContext, batchIds: string[]): Promise<Map<string, BatchArrival[]>> {
+  const out = new Map<string, BatchArrival[]>(batchIds.map((id) => [id, []]));
+  if (batchIds.length === 0) return out;
+  const scope = await visibleArrivals(ctx);
+  const chain = chainInScope(scope, { person: arrival.personSourceId, agent: arrival.agentSourceId, vendor: arrival.vendorSourceId });
+  const candidate = scope.viaAccounts ? sql`(${chain} or (${arrival.status} = 'resolved' and ${arrival.accountId} is not null))` : chain;
+  const rows: (BatchArrival & { chainOk: boolean })[] = [];
+  for (let i = 0; i < batchIds.length; i += 1000) {
+    rows.push(
+      ...(await ctx.tx
+        .select({
+          id: arrival.id,
+          batchId: arrival.batchId,
+          status: arrival.status,
+          waitingOn: arrival.waitingOn,
+          rejectReason: arrival.rejectReason,
+          resolution: arrival.resolution,
+          resolvedAt: arrival.resolvedAt,
+          accountId: arrival.accountId,
+          receivedAt: arrival.receivedAt,
+          chainOk: sql<boolean>`${chain}`,
+        })
+        .from(arrival)
+        .where(and(eq(arrival.tenantId, ctx.tenantId), inArray(arrival.batchId, batchIds.slice(i, i + 1000)), notSuperseded, candidate))
+        .orderBy(desc(arrival.receivedAt), desc(arrival.id))),
+    );
+  }
+  const viaAccount = [...new Set(rows.filter((r) => !r.chainOk && r.accountId).map((r) => r.accountId!))];
+  const seen = new Set<string>();
+  for (let i = 0; i < viaAccount.length; i += 1000) for (const id of await filterVisibleAccountIds(ctx, viaAccount.slice(i, i + 1000))) seen.add(id);
+  for (const { chainOk, ...r } of rows) if (chainOk || (r.accountId && seen.has(r.accountId))) out.get(r.batchId!)!.push(r);
+  return out;
+}
+
 /** Batches whose chain the principal may see, or which hold an arrival whose account they may see. */
 async function visibleBatches(ctx: ModuleContext, rows: BatchCandidate[]): Promise<BatchCandidate[]> {
   const scope = await visibleArrivals(ctx);
-  const out: BatchCandidate[] = [];
-  for (const r of rows) {
-    if (r.chainOk) out.push(r);
-    else if (scope.viaAccounts && (await pageArrivals(ctx, { where: [eq(arrival.batchId, r.row.id)], limit: 1 })).data.length > 0) out.push(r);
-  }
-  return out;
+  const others = scope.viaAccounts ? rows.filter((r) => !r.chainOk) : [];
+  const seen = await visibleRowsOfBatches(ctx, others.map((r) => r.row.id));
+  return rows.filter((r) => r.chainOk || (seen.get(r.row.id)?.length ?? 0) > 0);
 }
 
 /**
@@ -326,7 +364,7 @@ export async function visibleItems(ctx: ModuleContext, batchId: string): Promise
   return rows;
 }
 
-export function narrowed(b: BatchRow, rows: ArrivalRow[]): BatchView {
+export function narrowed(b: BatchRow, rows: Pick<ArrivalRow, 'status' | 'resolution' | 'resolvedAt'>[]): BatchView {
   const counts = { resolved: 0, rejected: 0, newAccounts: 0, alreadyKnown: 0 };
   for (const r of rows) {
     if (r.status === 'rejected') counts.rejected++;

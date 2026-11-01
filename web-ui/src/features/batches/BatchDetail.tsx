@@ -29,11 +29,17 @@ export function BatchDetail() {
   const qc = useQueryClient();
   const tab: ItemTab = TABS.find((t) => t === search.tab) ?? 'all';
   const { data: me } = useQuery(meQuery(tenant));
-  const batch = useQuery(batchQuery(tenant, id));
-  const items = useInfiniteQuery(batchItemsQuery(tenant, id, tab));
+  // Rows answered here wait until the worker resolves them; until then the page asks again every 2 s (C14).
+  const [answered, setAnswered] = useState<Set<string>>(new Set());
+  const stillWaiting = (pages: { data: { id: string; outcome: string }[] }[] | undefined) =>
+    [...answered].some((rid) => pages?.some((p) => p.data.some((r) => r.id === rid && r.outcome === 'waiting')));
+  const items = useInfiniteQuery({ ...batchItemsQuery(tenant, id, tab), refetchInterval: (q) => (stillWaiting(q.state.data?.pages) ? 2_000 : false) });
+  const batch = useQuery({ ...batchQuery(tenant, id), refetchInterval: stillWaiting(items.data?.pages) ? 2_000 : false });
   const skip = useRun();
   const [skipping, setSkipping] = useState(false);
   const canResolve = !!me && hasScope(me, 'imports:run');
+  // The original upload holds every contact cell, so the API gives it only with people:read.
+  const canDownload = !!me && hasScope(me, 'people:read');
   const refresh = () => void qc.invalidateQueries({ queryKey: ['batches', tenant] });
 
   if (batch.isPending) return <div className={page.page}><LoadingRows>Loading the batch</LoadingRows></div>;
@@ -87,7 +93,7 @@ export function BatchDetail() {
           <h1 className={styles.title}>{b.notes ?? b.name}</h1>
           <p className={styles.meta}>{sub}</p>
         </div>
-        {file && (
+        {file && canDownload && (
           <Button size="sm" variant="secondary" onClick={() => void getFile()}>
             Download file
           </Button>
@@ -141,7 +147,14 @@ export function BatchDetail() {
                     {canResolve && r.outcome === 'waiting' && (
                       <tr>
                         <td colSpan={4}>
-                          <WaitingForm tenant={tenant} item={r} onResolved={refresh} />
+                          <WaitingForm
+                            tenant={tenant}
+                            item={r}
+                            onResolved={() => {
+                              setAnswered((prev) => new Set(prev).add(r.id));
+                              refresh();
+                            }}
+                          />
                         </td>
                       </tr>
                     )}
