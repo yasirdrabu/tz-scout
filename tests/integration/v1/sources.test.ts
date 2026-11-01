@@ -65,6 +65,8 @@ describe('GET /api/v1/sources', () => {
     });
     const person = body.data.findIndex((s: { id: string }) => s.id === w.source.personId);
     expect(body.data[person + 1].id).toBe(w.source.agentId);
+    // A person without a key of their own sends through their agents.
+    expect(body.data[person]).toMatchObject({ method: 'through_children', method_label: 'Through Sources Co Ash agent' });
     expect(body.meta.counts_by_kind.agent).toBeGreaterThanOrEqual(1);
     expect(body.meta.counts_by_kind.list).toBe(0);
     expect(body.meta.kind_labels.vendor).toBe('Data vendor');
@@ -91,6 +93,17 @@ describe('GET /api/v1/sources', () => {
   it("never lists another tenant's sources", async () => {
     const body = await json(w.as(operator, listRoute, 'sources'));
     expect(body.data.map((s: { id: string }) => s.id)).not.toContain(other.source.agentId);
+  });
+});
+
+describe('How a person sends', () => {
+  it('names one agent, counts several, and is Not sending yet with none', async () => {
+    const person = await json(w.as(operator, postSource, 'sources', 'POST', { kind: 'person', name: 'Agentless Pat' }), 201);
+    expect(person).toMatchObject({ method: 'none', method_label: 'Not sending yet' });
+    for (const name of ['Pat agent one', 'Pat agent two']) {
+      await json(w.as(operator, postSource, 'sources', 'POST', { kind: 'agent', name, parent_id: person.id }), 201);
+    }
+    expect(await json(w.as(operator, getSource, `sources/${person.id}`))).toMatchObject({ method: 'through_children', method_label: 'Runs 2 agents' });
   });
 });
 
@@ -421,7 +434,7 @@ describe('owner backfill (intake 0004)', () => {
     await adminDb.update(source).set({ ownerUserId: null }).where(eq(source.tenantId, t.tenantId));
     const { readFileSync } = await import('node:fs');
     const sqlText = readFileSync('src/modules/intake/db/migrations/0004_source_owner.sql', 'utf8');
-    for (const stmt of sqlText.split('--> statement-breakpoint').filter((s) => /^\s*(--.*\n)*\s*UPDATE/i.test(s))) await adminDb.execute(sql.raw(stmt));
+    for (const stmt of sqlText.split('--> statement-breakpoint').filter((s) => /^\s*(--.*\r?\n)*\s*UPDATE/i.test(s))) await adminDb.execute(sql.raw(stmt));
     const rows = await adminDb.select({ id: source.id, owner: source.ownerUserId }).from(source).where(eq(source.tenantId, t.tenantId));
     const owner = new Map(rows.map((r) => [r.id, r.owner]));
     expect(owner.get(ids.p)).toBe(u.id);

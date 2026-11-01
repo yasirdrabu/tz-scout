@@ -31,11 +31,17 @@ export function whyNowLine(input: BriefInput): { text: string; signalId: string 
 }
 
 export const clip = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, max - 3).trimEnd()}...`);
+/** The whole sentences that fit in `max`; `clip` only when even the first sentence is too long. */
+export const clipSentences = (s: string, max: number) => {
+  if (s.length <= max) return s;
+  const kept = s.slice(0, max + 1).match(/^.*[.!?](?=\s)/s)?.[0];
+  return kept ?? clip(s, max);
+};
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export function recommendation(input: BriefInput): BriefOutput['recommendation'] {
   const why = whyNowLine(input).text;
-  const out = (headline: string, detail: string) => ({ headline: clip(headline, HEADLINE_MAX), detail: clip(detail.trim(), DETAIL_MAX) });
+  const out = (headline: string, detail: string) => ({ headline: clip(headline, HEADLINE_MAX), detail: clipSentences(detail.trim(), DETAIL_MAX) });
   const crm = input.crm;
   if (crm && (crm.lifecycle === 'open_deal' || crm.lifecycle === 'customer')) {
     const owner = crm.ownerName ?? 'the HubSpot owner';
@@ -49,7 +55,7 @@ export function recommendation(input: BriefInput): BriefOutput['recommendation']
   }
   if (tier === 'watch') {
     const raise = input.score.wouldRaise[0];
-    return out('Keep it in review until a stronger signal arrives.', `Fit is ${fit} and buying intent is ${intent}.${raise ? ` ${raise}` : ''}`);
+    return out('Keep it in review until a stronger signal arrives.', `Fit is ${fit} and buying intent is ${intent}.${raise ? ` ${raise} would raise the score.` : ''}`);
   }
   const lowest = [...input.score.fitParts].sort((a, b) => a.points / (a.max || 1) - b.points / (b.max || 1))[0];
   return out('Send it back or decline it.', lowest?.note ?? `Fit is ${fit}.`);

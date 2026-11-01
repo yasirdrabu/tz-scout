@@ -132,7 +132,10 @@ export async function explainScore(ctx: ModuleContext, accountId: string, opts: 
     warmIntroPoints,
     wouldRaise: scoringOffer ? wouldRaise(explanation, toScoringOffer(scoringOffer), account) : [],
     summary: summarySentence(explanation),
-    tiles: scoreTiles({ priority: explanation.priority, fit, intent, lines: explanation.lines }, profile.tierThresholds),
+    tiles: scoreTiles(
+      { priority: explanation.priority, fit, intent, lines: explanation.lines, offer: offer?.name ?? null, datedSignals: view.signals.filter((s) => s.occurredAt).length },
+      profile.tierThresholds,
+    ),
     warmIntro: warmIntro(explanation.lines),
   };
 }

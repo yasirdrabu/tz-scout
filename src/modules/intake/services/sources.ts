@@ -471,15 +471,17 @@ export async function listSources(ctx: ModuleContext, f: SourceListFilter = {}, 
   return out;
 }
 
-/** How many live (active or paused) sources sit directly under each given source. */
-export async function liveChildCounts(ctx: ModuleContext, ids: string[]): Promise<Map<string, number>> {
+/** The live (active or paused) sources directly under each given source, by name. */
+export async function liveChildren(ctx: ModuleContext, ids: string[]): Promise<Map<string, { name: string; kind: string }[]>> {
   if (ids.length === 0) return new Map();
   const rows = await ctx.tx
-    .select({ parentId: source.parentId, n: sql<number>`count(*)::int` })
+    .select({ parentId: source.parentId, name: source.name, kind: source.kind })
     .from(source)
     .where(and(eq(source.tenantId, ctx.tenantId), inArray(source.parentId, ids), inArray(source.status, ['active', 'paused'])))
-    .groupBy(source.parentId);
-  return new Map(rows.map((r) => [r.parentId!, Number(r.n)]));
+    .orderBy(asc(source.name), asc(source.id));
+  const out = new Map<string, { name: string; kind: string }[]>();
+  for (const r of rows) out.set(r.parentId!, [...(out.get(r.parentId!) ?? []), { name: r.name, kind: r.kind }]);
+  return out;
 }
 
 /** One source the principal may see, with its arrival numbers; undefined when removed, hidden or another tenant's. */

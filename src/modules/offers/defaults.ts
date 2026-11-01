@@ -95,7 +95,7 @@ export const TAAZAA_OFFERS: SeedOffer[] = [
     name: 'FDE Sprint',
     practice: 'ai-transformation',
     promise: 'A forward-deployed engineer takes one workflow from we know what to fix to a working result in your environment.',
-    priceMinCents: 0,
+    priceMinCents: null,
     priceMaxCents: 1_000_000,
     typicalDealCents: 1_000_000,
     grossMargin: 0.5,

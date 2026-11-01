@@ -2,11 +2,11 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { exactly, problem } from '../../test/http';
-import { renderApp } from '../../test/renderApp';
+import { renderApp, serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
 import { serveQueue } from '../review/testing';
 import { crmSentence } from './RightRail';
-import { ACCOUNT, ASSIGNED, EMPTY_BRIEF, REVIEW, SELLER, serveAccount, serveCoastline } from './testing';
+import { ACCOUNT, ASSIGNED, EMPTY_BRIEF, FACTS, PAGE_LEADER, REVIEW, SELLER, serveAccount, serveCoastline } from './testing';
 
 const URL_BASE = 'http://app';
 const params = (href: string) => new URL(href, URL_BASE).searchParams;
@@ -146,6 +146,19 @@ describe('Review view sections', () => {
     expect(facts).toHaveTextContent('Staff3,800GovSpend · Sep 1, 2026');
     expect(facts).toHaveTextContent('Buying processFormal RFP with Board approvalRFP Watch · Oct 1, 2026');
     expect(facts).not.toHaveTextContent('jr@miamidade.gov');
+  });
+
+  it('shows a date-only signal and fact on their own day in a US workspace', async () => {
+    serveAccount({
+      account: { ...ACCOUNT, signals: [{ ...ACCOUNT.signals[0]!, occurred_at: '2026-10-14T00:00:00.000Z' }] },
+      facts: [{ ...FACTS[0]!, observed_at: '2026-09-01T00:00:00.000Z' }],
+    });
+    serveMe({ taazaa: { scopes: PAGE_LEADER, tenant: { id: 't1', slug: 'taazaa', name: 'Taazaa', currency: 'USD', timezone: 'America/Los_Angeles' } } });
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const why = await screen.findByRole('region', { name: 'Why now' });
+    expect(why).toHaveTextContent('Oct 14, 2026RFP re-issue expected in December');
+    const facts = screen.getByRole('region', { name: 'Account facts' });
+    expect(await within(facts).findByText('GovSpend · Sep 1, 2026')).toBeInTheDocument();
   });
 
   it('has no Before you approve card without a warm intro, and says when the account is not scored', async () => {
