@@ -1,4 +1,4 @@
-import { listBatches, submitBatch } from '@/modules/intake';
+import { childSources, listBatches, submitBatch } from '@/modules/intake';
 import { can } from '@/modules/tenancy';
 import { config } from '@/platform/config';
 import { BATCH_MAX_BYTES, readJson } from '../_lib/intake';
@@ -7,7 +7,10 @@ import { accepted, v1Route } from '../_lib/v1-route';
 
 export const GET = v1Route({ permission: 'arrivals:read' }, async (req, _principal, ctx) => {
   const url = new URL(req.url);
-  return listBatches(ctx, { cursor: url.searchParams.get('cursor') || undefined, limit: pageLimit(url) });
+  // `source_id`: the source's batches and those of the sources under it (the Source page's Batches tab).
+  const sourceId = url.searchParams.get('source_id') || undefined;
+  const sourceIds = sourceId ? [sourceId, ...(await childSources(ctx, [sourceId]))] : undefined;
+  return listBatches(ctx, { cursor: url.searchParams.get('cursor') || undefined, limit: pageLimit(url), sourceIds });
 });
 
 export const POST = v1Route({ permission: 'arrivals:write', maxBytes: BATCH_MAX_BYTES }, async (req, principal, ctx) => {

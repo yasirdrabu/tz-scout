@@ -34,6 +34,7 @@ export type AccountListFilters = {
 
 export type AccountListRow = SearchRow & {
   stageLabel: string | null;
+  tierLabel: string | null;
   reviewStatusLabel: string | null;
   ownerName: string | null;
   practiceName: string | null;
@@ -105,6 +106,7 @@ export async function listAccounts(ctx: ModuleContext, f: AccountListFilters = {
       return {
         ...r,
         stageLabel: r.stage ? (STAGE_LABELS[r.stage as Stage] ?? r.stage) : null,
+        tierLabel: r.tier ? (TIER_NAMES[r.tier as Tier] ?? r.tier) : null,
         reviewStatusLabel: r.reviewStatusKey ? (labels.get(r.reviewStatusKey) ?? null) : null,
         ownerName: names.person(r.ownerUserId),
         practiceName: names.practice(r.practiceId),
@@ -131,6 +133,8 @@ export type AccountFacets = {
   owners: FacetOption[];
   practices: FacetOption[];
   sources: FacetOption[];
+  /** Tiers with their names (C6), counted with the tier filter left out. */
+  tiers: FacetOption[];
 };
 
 const facetOptions = (counts: Map<string | null, number>, label: (id: string) => string | null, extra: string[] = []): FacetOption[] => {
@@ -153,6 +157,7 @@ export async function accountFacets(ctx: ModuleContext, f: AccountListFilters = 
   const ownerCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, ownerUserId: undefined, unassigned: undefined }, statuses), 'owner');
   const practiceCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, practiceId: undefined }, statuses), 'practice');
   const sourceCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, sourceId: undefined }, statuses), 'source');
+  const tierCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, tier: undefined }, statuses), 'tier');
   const sellers = (await members(ctx, { permission: 'assignments:respond' })).filter((m) => m.status === 'active').map((m) => m.userId);
   const sourceLabels = await sourceNames(ctx, [...sourceCounts.keys()].filter((k): k is string => k !== null));
   const owners = facetOptions(ownerCounts, (id) => names.person(id), sellers);
@@ -166,6 +171,7 @@ export async function accountFacets(ctx: ModuleContext, f: AccountListFilters = 
     owners: [...owners, { value: 'unassigned', label: 'Unassigned', count: ownerCounts.get(null) ?? 0 }],
     practices: facetOptions(practiceCounts, (id) => names.practice(id)),
     sources: facetOptions(sourceCounts, (id) => sourceLabels.get(id) ?? null),
+    tiers: (Object.keys(TIER_NAMES) as Tier[]).map((t) => ({ value: t, label: TIER_NAMES[t], count: tierCounts.get(t) ?? 0 })),
   };
 }
 

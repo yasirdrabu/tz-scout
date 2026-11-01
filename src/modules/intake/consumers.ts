@@ -42,7 +42,7 @@ export const intakeStatusFeedback = defineConsumer({
   orderedBy: (e) => e.data.accountId,
   handle: async ({ id, data }, ctx) => {
     const kind = data.isDeclined ? 'declined_at_review' : data.returnsToSource ? 'sent_back' : null;
-    if (kind) await recordFeedback(ctx, { accountId: data.accountId, kind, reasonKey: data.reasonKey, note: data.note, causeEventId: id });
+    if (kind) await recordFeedback(ctx, { accountId: data.accountId, kind, reasonKey: data.reasonKey, note: data.note, byUserId: data.by, causeEventId: id });
   },
 });
 
@@ -52,7 +52,7 @@ export const intakeSellerDeclineFeedback = defineConsumer({
   event: assignmentDeclined,
   orderedBy: (e) => e.data.accountId,
   handle: async ({ id, data }, ctx) =>
-    void (await recordFeedback(ctx, { accountId: data.accountId, kind: 'declined_by_seller', reasonKey: data.reasonKey, note: data.note, causeEventId: id })),
+    void (await recordFeedback(ctx, { accountId: data.accountId, kind: 'declined_by_seller', reasonKey: data.reasonKey, note: data.note, byUserId: data.sellerUserId, causeEventId: id })),
 });
 
 /** A contact the CRM's webhook says is qualified is read and submitted, the same as the poll does (Ruling 15). */

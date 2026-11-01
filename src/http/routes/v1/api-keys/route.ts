@@ -7,7 +7,7 @@ import { created, v1Route } from '../_lib/v1-route';
 // Every key in the workspace (or one source's with `?source_id=`), masked, with source and creator names.
 export const GET = v1Route({ permission: 'keys:manage' }, async (req, _principal, ctx) => {
   const sourceId = new URL(req.url).searchParams.get('source_id') || undefined;
-  const names = new Map((await listSources(ctx)).map((s) => [s.id, s.name]));
+  const names = new Map((await listSources(ctx, { statuses: ['active', 'paused', 'archived'] })).map((s) => [s.id, s.name]));
   const keys = await listApiKeys(ctx, { sourceId });
   return { data: keys.map((k) => ({ ...k, sourceName: k.sourceId ? (names.get(k.sourceId) ?? null) : null })) };
 });

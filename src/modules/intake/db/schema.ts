@@ -31,11 +31,12 @@ export const source = intake.table(
   {
     id: text('id').primaryKey(), // src_
     tenantId: text('tenant_id').notNull(),
-    kind: text('kind').notNull(), // person | agent | vendor | partner | crm | web_form | scheduled_pull
+    kind: text('kind').notNull(), // person | agent | vendor | list | partner | crm | web_form | scheduled_pull
     name: text('name').notNull(),
     parentId: text('parent_id').references((): AnyPgColumn => source.id),
     userId: text('user_id'), // person sources: the tenant user
-    status: text('status').notNull().default('active'), // active | paused | archived
+    ownerUserId: text('owner_user_id'), // who answers for what it sends (Decision 11); display only
+    status: text('status').notNull().default('active'), // active | paused | archived | removed
     initialReviewStatusKey: text('initial_review_status_key'),
     dailyArrivalCap: integer('daily_arrival_cap').notNull().default(500),
     trust: numeric('trust', { precision: 5, scale: 4, mode: 'number' }).notNull().default(0.6),
@@ -250,6 +251,7 @@ export const sourceFeedback = intake.table(
     kind: text('kind').notNull(), // conflict_lost | declined_at_review | sent_back | declined_by_seller | enrichment_declined
     reasonKey: text('reason_key'),
     note: text('note'),
+    byUserId: text('by_user_id'), // who sent it back or declined it; null on rows stored before it
     causeEventId: text('cause_event_id').notNull(), // the event that caused it, so a replay adds nothing
     createdAt: now('created_at'),
   },
@@ -267,6 +269,7 @@ export const crmLeadPoll = intake.table(
     tenantId: text('tenant_id').notNull(),
     connectionId: text('connection_id').notNull(),
     polledUntil: at('polled_until').notNull(),
+    polledAt: at('polled_at'), // when the last poll ran; null on rows stored before it
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.connectionId] })],
 );

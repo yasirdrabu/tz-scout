@@ -12,7 +12,9 @@ import {
 import { SAMPLE_ONLY, connectionStatus, ensureConnectionId } from '@/modules/integrations';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
+import { enqueueJob } from '@/platform/events/outbox';
 import { log } from '@/platform/log';
+import { qualifiedLeadsPollJob } from '../contracts/jobs';
 import { crmLeadPoll, source } from '../db/schema';
 import { isFreeEmailDomain } from '../domain/free-email';
 import { domainFromEmail } from '../domain/normalise';
@@ -161,8 +163,8 @@ export async function pollQualifiedLeads(ctx: ModuleContext): Promise<{ submitte
   }
   await ctx.tx
     .insert(crmLeadPoll)
-    .values({ tenantId: ctx.tenantId, connectionId: conn, polledUntil: until })
-    .onConflictDoUpdate({ target: [crmLeadPoll.tenantId, crmLeadPoll.connectionId], set: { polledUntil: until } });
+    .values({ tenantId: ctx.tenantId, connectionId: conn, polledUntil: until, polledAt: new Date() })
+    .onConflictDoUpdate({ target: [crmLeadPoll.tenantId, crmLeadPoll.connectionId], set: { polledUntil: until, polledAt: new Date() } });
   return { submitted };
 }
 
@@ -177,4 +179,34 @@ export async function simulateQualifiedLead(ctx: ModuleContext): Promise<SubmitR
   const lead = sample && (await fetchQualifiedLead(ctx, conn, sample.contact.externalId));
   if (!lead) throw new ScoutError({ slug: 'not-found', status: 404, title: 'The sample qualified contact was not found.' });
   return submitQualifiedLead(ctx, lead);
+}
+
+/** The HubSpot source's sync, for its Source page: when the poll last ran, the connection's last error, and whether it is connected. */
+export type SyncStatus = { lastPolledAt: Date | null; lastError: string | null; connected: boolean };
+
+/** Whether the poll would read from HubSpot: the connection is not off and, when live, is set up. */
+async function connected(ctx: ModuleContext): Promise<boolean> {
+  const status = await connectionStatus(ctx, SYSTEM);
+  return !(status.status === 'disabled' || (status.mode === 'live' && status.status === 'not_set_up'));
+}
+
+export async function syncStatus(ctx: ModuleContext): Promise<SyncStatus> {
+  const status = await connectionStatus(ctx, SYSTEM);
+  const [row] = await ctx.tx
+    .select({ polledAt: crmLeadPoll.polledAt })
+    .from(crmLeadPoll)
+    .where(eq(crmLeadPoll.tenantId, ctx.tenantId))
+    .orderBy(sql`${crmLeadPoll.polledAt} desc nulls last`)
+    .limit(1);
+  return { lastPolledAt: row?.polledAt ?? null, lastError: status.lastError ?? null, connected: await connected(ctx) };
+}
+
+/**
+ * "Sync now" on the HubSpot source: queues the qualified-leads poll. Another kind of source is a 400 and a HubSpot
+ * that is not connected a 409. The caller has checked the source exists and is visible.
+ */
+export async function requestSync(ctx: ModuleContext, sourceKind: string): Promise<void> {
+  if (sourceKind !== 'crm') throw new ScoutError({ slug: 'validation', status: 400, title: 'Only the HubSpot source syncs.' });
+  if (!(await connected(ctx))) throw new ScoutError({ slug: 'conflict', status: 409, title: 'Connect HubSpot first' });
+  await enqueueJob(ctx, qualifiedLeadsPollJob, {});
 }

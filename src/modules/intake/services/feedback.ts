@@ -19,6 +19,7 @@ export type FeedbackView = {
   kind: string;
   reasonKey: string | null;
   note: string | null;
+  byUserId: string | null;
   createdAt: Date;
 };
 
@@ -30,6 +31,7 @@ const view = (r: FeedbackRow): FeedbackView => ({
   kind: r.kind,
   reasonKey: r.reasonKey,
   note: r.note,
+  byUserId: r.byUserId,
   createdAt: r.createdAt,
 });
 
@@ -43,7 +45,7 @@ const WRITE_CHUNK = 500;
  */
 export async function recordFeedback(
   ctx: ModuleContext,
-  f: { accountId: string; kind: FeedbackKind; reasonKey: string | null; note: string | null; causeEventId: string },
+  f: { accountId: string; kind: FeedbackKind; reasonKey: string | null; note: string | null; byUserId?: string | null; causeEventId: string },
 ): Promise<number> {
   const arrivals = await ctx.tx
     .select({ id: arrival.id, person: arrival.personSourceId, agent: arrival.agentSourceId, vendor: arrival.vendorSourceId })
@@ -61,6 +63,7 @@ export async function recordFeedback(
     kind: f.kind,
     reasonKey: f.reasonKey,
     note: f.note,
+    byUserId: f.byUserId ?? null,
     causeEventId: f.causeEventId,
   }));
   let added = 0;
@@ -112,13 +115,14 @@ export async function feedbackForArrival(ctx: ModuleContext, arrivalId: string):
 
 /**
  * The feed (`GET /api/v1/feedback`): feedback for the principal's own source and its children, newest
- * first. A row is also held back when its account is outside the principal's data limit.
+ * first, or for `sourceIds` when the caller (a Source page) names them. A row is also held back when its account is
+ * outside the principal's data limit.
  */
 export async function listFeedback(
   ctx: ModuleContext,
-  f: { since?: Date; cursor?: string; limit?: number } = {},
+  f: { since?: Date; cursor?: string; limit?: number; sourceIds?: string[] } = {},
 ): Promise<{ data: FeedbackView[]; nextCursor: string | null }> {
-  const own = ownSources(ctx);
+  const own = f.sourceIds ?? ownSources(ctx);
   if (own?.length === 0) return { data: [], nextCursor: null };
   const scope = await visibleArrivals(ctx);
   const inChain = new Set(scope.sourceIds);

@@ -54,7 +54,8 @@ export {
 } from './services/members';
 export { PERMISSION_GROUP_NAMES, permissionGroup, type PermissionGroup } from './domain/permission-labels';
 export { KEY_ACCESS, KEY_ACCESS_CHOICES, type KeyAccess } from './domain/key-access';
-export { assertSourceExists, createKeyWithAccess, listApiKeys, type ApiKeyView } from './services/api-keys';
+export { activeKeysBySource, assertSourceExists, createKeyWithAccess, listApiKeys, revokeSourceKey, rotateSourceKey, type ActiveKey, type ApiKeyView } from './services/api-keys';
+export { memberDirectory, userNames, type DirectoryEntry } from './services/directory';
 export { AUDIT_AREAS, type AuditArea } from './domain/audit-areas';
 export { displayNameFromEmail } from './domain/display-name';
 export { auditEntries, type AuditEntryView, type AuditQuery } from './services/audit';

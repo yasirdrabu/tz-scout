@@ -20,8 +20,14 @@ export function asSource<T>(t: Tenant, sourceId: string, fn: (ctx: ModuleContext
   return t.run((ctx) => fn({ ...ctx, access }));
 }
 
-/** A person source and an agent it owns. */
-export async function personAndAgent(t: Tenant, name = 'Ash'): Promise<{ personId: string; agentId: string }> {
+const named = new Map<string, number>();
+
+/** A person source and an agent it owns. Source names are unique per tenant, so a repeat call numbers the name ("Ash 2"). */
+export async function personAndAgent(t: Tenant, base = 'Ash'): Promise<{ personId: string; agentId: string }> {
+  const key = `${t.tenantId}\u0000${base}`;
+  const n = (named.get(key) ?? 0) + 1;
+  named.set(key, n);
+  const name = n === 1 ? base : `${base} ${n}`;
   return t.run(async (ctx) => {
     const person = await registerSource(ctx, { kind: 'person', name });
     const agent = await registerSource(ctx, { kind: 'agent', name: `${name} agent`, parentId: person.id });

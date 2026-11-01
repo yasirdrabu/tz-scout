@@ -137,3 +137,37 @@ describe('the polish routes and their permissions', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('the sources routes and their permissions', () => {
+  const asKey = async (path: string, method = 'GET', body?: unknown) =>
+    new Request(`http://x/api/v1/${path}`, {
+      method,
+      headers: { authorization: `Bearer ${await apiKey()}`, 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  it.each([
+    ['GET', 'sources/stats', 'sources:manage', () => import('@/http/routes/v1/sources/stats/route')],
+    ['GET', 'sources/src_1', 'sources:manage', () => import('@/http/routes/v1/sources/[id]/route')],
+    ['DELETE', 'sources/src_1', 'sources:manage', () => import('@/http/routes/v1/sources/[id]/route')],
+    ['POST', 'sources/src_1:sync', 'sources:manage', () => import('@/http/routes/v1/sources/[id]/route')],
+    ['POST', 'sources/src_1/keys/key_1:rotate', 'sources:manage', () => import('@/http/routes/v1/sources/[id]/keys/[keyId]/route')],
+    ['DELETE', 'sources/src_1/keys/key_1', 'sources:manage', () => import('@/http/routes/v1/sources/[id]/keys/[keyId]/route')],
+    ['GET', 'members/directory', 'members:read', () => import('@/http/routes/v1/members/directory/route')],
+  ] as const)('%s %s needs %s', async (method, path, scope, load) => {
+    const mod = (await load()) as Record<string, (r: Request) => Promise<Response>>;
+    const res = await mod[method]!(await asKey(path, method, method === 'POST' ? {} : undefined));
+    expect(res.status).toBe(403);
+    expect((await res.json()).detail).toBe(`This key can't do that. It needs the \`${scope}\` scope.`);
+  });
+
+  it('GET feedback?source_id needs sources:manage', async () => {
+    const { GET } = await import('@/http/routes/v1/feedback/route');
+    const key = (
+      await inTenant(tenantId, owner.actor, (ctx) => createApiKey(ctx, { name: 'r', environment: 'live', scopes: ['arrivals:read'] }, SYSTEM_GRANTOR))
+    ).secret;
+    const res = await GET(new Request('http://x/api/v1/feedback?source_id=src_1', { headers: { authorization: `Bearer ${key}` } }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).detail).toBe("This key can't do that. It needs the `sources:manage` scope.");
+  });
+});

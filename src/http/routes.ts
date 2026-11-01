@@ -83,6 +83,7 @@ import * as v1Me from './routes/v1/me/route';
 import * as v1MeSessions from './routes/v1/me/sessions/route';
 import * as v1MeWorkspace from './routes/v1/me/workspace/route';
 import * as v1MembersId from './routes/v1/members/[id]/route';
+import * as v1MembersDirectory from './routes/v1/members/directory/route';
 import * as v1Members from './routes/v1/members/route';
 import * as v1OffersIdCaseStudies from './routes/v1/offers/[id]/case-studies/route';
 import * as v1OffersId from './routes/v1/offers/[id]/route';
@@ -113,11 +114,13 @@ import * as v1SettingsWarmIntrosKey from './routes/v1/settings/warm-intros/[key]
 import * as v1SettingsWarmIntros from './routes/v1/settings/warm-intros/route';
 import * as v1SignalTypes from './routes/v1/signal-types/route';
 import * as v1SignalsId from './routes/v1/signals/[id]/route';
+import * as v1SourcesIdKeysKeyId from './routes/v1/sources/[id]/keys/[keyId]/route';
 import * as v1SourcesIdKeys from './routes/v1/sources/[id]/keys/route';
 import * as v1SourcesIdMappingsMappingId from './routes/v1/sources/[id]/mappings/[mappingId]/route';
 import * as v1SourcesIdMappings from './routes/v1/sources/[id]/mappings/route';
 import * as v1SourcesId from './routes/v1/sources/[id]/route';
 import * as v1Sources from './routes/v1/sources/route';
+import * as v1SourcesStats from './routes/v1/sources/stats/route';
 import * as v1Waiting from './routes/v1/waiting/route';
 
 /** Where the public API is mounted. */
@@ -211,6 +214,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/me`, module: v1Me },
   { path: `${V1}/me/sessions`, module: v1MeSessions },
   { path: `${V1}/me/workspace`, module: v1MeWorkspace },
+  { path: `${V1}/members/directory`, module: v1MembersDirectory },
   { path: `${V1}/members/:id`, module: v1MembersId },
   { path: `${V1}/members`, module: v1Members },
   { path: `${V1}/offers/:id/case-studies`, module: v1OffersIdCaseStudies },
@@ -242,10 +246,12 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/settings/warm-intros`, module: v1SettingsWarmIntros },
   { path: `${V1}/signal-types`, module: v1SignalTypes },
   { path: `${V1}/signals/:id`, module: v1SignalsId },
+  { path: `${V1}/sources/:id/keys/:keyId`, module: v1SourcesIdKeysKeyId },
   { path: `${V1}/sources/:id/keys`, module: v1SourcesIdKeys },
   { path: `${V1}/sources/:id/mappings/:mappingId`, module: v1SourcesIdMappingsMappingId },
   { path: `${V1}/sources/:id/mappings`, module: v1SourcesIdMappings },
   { path: `${V1}/sources/:id`, module: v1SourcesId },
+  { path: `${V1}/sources/stats`, module: v1SourcesStats },
   { path: `${V1}/sources`, module: v1Sources },
   { path: `${V1}/waiting`, module: v1Waiting },
 ];

@@ -88,6 +88,8 @@ export async function senderOf(ctx: ModuleContext): Promise<Sender> {
     person: { personSourceId: row.id },
     partner: { personSourceId: row.id },
     agent: { agentSourceId: row.id, personSourceId: parent },
+    // A list takes the agent slot under its person (Ruling 1), so its accounts roll up to the person.
+    list: { agentSourceId: row.id, personSourceId: parent },
     scheduled_pull: { agentSourceId: row.id, vendorSourceId: parent },
     vendor: { vendorSourceId: row.id },
     crm: { vendorSourceId: row.id },

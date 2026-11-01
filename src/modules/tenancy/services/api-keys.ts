@@ -1,6 +1,6 @@
 import { createHash, randomInt } from 'node:crypto';
 import { hash, verify } from '@node-rs/argon2';
-import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb } from '@/platform/db/client';
@@ -285,14 +285,86 @@ export async function revokeActiveKeysNamed(ctx: ModuleContext, name: string, re
   return rows.length;
 }
 
-/** Revokes every active key that sends for this source, when the source is archived. Returns how many. */
-export async function revokeKeysForSource(ctx: ModuleContext, sourceId: string): Promise<number> {
+/** Revokes every active key that sends for this source, when the source is archived or removed. Returns how many. */
+export async function revokeKeysForSource(ctx: ModuleContext, sourceId: string, reason = 'Source archived'): Promise<number> {
   const rows = await ctx.tx
     .select({ id: apiKey.id })
     .from(apiKey)
     .where(and(eq(apiKey.tenantId, ctx.tenantId), eq(apiKey.sourceId, sourceId), isNull(apiKey.revokedAt)));
-  for (const r of rows) await revokeApiKey(ctx, r.id, 'Source archived');
+  for (const r of rows) await revokeApiKey(ctx, r.id, reason);
   return rows.length;
+}
+
+/** A source's newest working key, as "How it sends" shows it. */
+export type ActiveKey = { id: string; prefix: string; lastUsedAt: Date | null; createdAt: Date };
+
+/** For each given source with a working key (not revoked, not expired), its newest one. */
+export async function activeKeysBySource(ctx: ModuleContext, sourceIds: string[], now = new Date()): Promise<Map<string, ActiveKey>> {
+  if (sourceIds.length === 0) return new Map();
+  const rows = await ctx.tx
+    .select({ id: apiKey.id, sourceId: apiKey.sourceId, prefix: apiKey.prefix, lastUsedAt: apiKey.lastUsedAt, createdAt: apiKey.createdAt })
+    .from(apiKey)
+    .where(
+      and(
+        eq(apiKey.tenantId, ctx.tenantId),
+        inArray(apiKey.sourceId, sourceIds),
+        isNull(apiKey.revokedAt),
+        or(isNull(apiKey.expiresAt), gt(apiKey.expiresAt, now)),
+      ),
+    )
+    .orderBy(desc(apiKey.createdAt), desc(apiKey.id));
+  const out = new Map<string, ActiveKey>();
+  for (const { sourceId, ...k } of rows) if (sourceId && !out.has(sourceId)) out.set(sourceId, k);
+  return out;
+}
+
+const keyNotFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That key was not found.' });
+
+/** One key of this source that still works; a key of another source, or one already revoked, is a 404. */
+async function sourceKey(ctx: ModuleContext, sourceId: string, keyId: string) {
+  const [row] = await ctx.tx
+    .select()
+    .from(apiKey)
+    .where(and(eq(apiKey.tenantId, ctx.tenantId), eq(apiKey.id, keyId), eq(apiKey.sourceId, sourceId), isNull(apiKey.revokedAt)));
+  if (!row) throw keyNotFound();
+  return row;
+}
+
+/**
+ * Rotates one key of a source (Decision 14, Ruling 7): a new key with the old one's name, scopes, data limit,
+ * environment, expiry and limits, then the old one revoked as `Rotated`, in the caller's transaction, so a failed
+ * create leaves the old key working. Calls with the old key fail within 60 seconds (at once on this instance).
+ */
+export async function rotateSourceKey(
+  ctx: ModuleContext,
+  sourceId: string,
+  keyId: string,
+): Promise<{ id: string; prefix: string; secret: string; environment: 'live' | 'test'; createdAt: Date }> {
+  const old = await sourceKey(ctx, sourceId, keyId);
+  const scopes = old.scopes.filter(isPermission);
+  const dataLimit = old.dataLimit === null ? undefined : DataLimitSchema.parse(old.dataLimit);
+  const environment = old.environment === 'test' ? 'test' : 'live';
+  // The new key holds exactly what the old one did, so the old key is the grantor.
+  const grantor: Grantor = { permissions: scopes, dataLimit: dataLimit ?? { kind: 'all' } };
+  const { id, secret } = await createApiKey(
+    ctx,
+    { name: old.name, environment, scopes, dataLimit, sourceId, ...(old.expiresAt ? { expiresAt: old.expiresAt } : {}) },
+    grantor,
+  );
+  const [row] = await ctx.tx
+    .update(apiKey)
+    .set({ rateLimitPerMinute: old.rateLimitPerMinute, dailyArrivalCap: old.dailyArrivalCap, monthlyEnrichmentCreditCap: old.monthlyEnrichmentCreditCap })
+    .where(and(eq(apiKey.tenantId, ctx.tenantId), eq(apiKey.id, id)))
+    .returning({ prefix: apiKey.prefix, createdAt: apiKey.createdAt });
+  await revokeApiKey(ctx, old.id, 'Rotated');
+  await audit(ctx, { action: 'tenancy.api_key.rotated', subject: { type: 'api_key', id: old.id }, after: { replacedBy: id, sourceId } });
+  return { id, prefix: row!.prefix, secret, environment, createdAt: row!.createdAt };
+}
+
+/** Revokes one key of a source; a key of another source is a 404. */
+export async function revokeSourceKey(ctx: ModuleContext, sourceId: string, keyId: string): Promise<void> {
+  await sourceKey(ctx, sourceId, keyId);
+  await revokeApiKey(ctx, keyId, 'Revoked');
 }
 
 /**
