@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793500207625,
+      "tag": "0000_playbooks_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793504168589,
+      "tag": "0001_brief_drafting_guards",
+      "breakpoints": true
+    }
+  ]
+}

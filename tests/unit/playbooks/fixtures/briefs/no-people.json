@@ -1,0 +1,19 @@
+{
+  "account": { "name": "Northwind Logistics", "industry": "Logistics", "employees": null, "location": null, "description": null, "technologies": [] },
+  "offer": { "id": "off_map", "name": "Opportunity Map", "promise": "We find where AI pays back in two weeks.", "priceMinCents": null, "priceMaxCents": null, "salesCycleDays": null, "targetTitles": ["COO"], "targetBuyingRoles": ["economic_buyer"], "proofPoints": [] },
+  "practiceName": "AI Strategy",
+  "caseStudies": [],
+  "signals": [
+    { "id": "sig_fund", "type": "funding", "kind": "trigger", "title": "Raised a $40M Series C", "occurredAt": "2026-10-25T00:00:00.000Z", "sourceName": null }
+  ],
+  "facts": [
+    { "id": "fct_n2", "key": "name", "value": "Northwind Logistics" },
+    { "id": "fct_i2", "key": "industry", "value": "Logistics" }
+  ],
+  "people": [],
+  "score": { "tier": "act_now", "tierLabel": "Act now", "priority": 84, "fit": 70, "intent": 90, "fitParts": [], "wouldRaise": [] },
+  "crm": null,
+  "warmIntro": null,
+  "notes": [],
+  "insights": null
+}

@@ -292,6 +292,7 @@ function Queue({ tenant, me }: { tenant: string; me: Me }) {
           tenant={tenant}
           me={me}
           accountId={search.peek}
+          filters={filters}
           row={peekRow}
           position={peekRow ? { index: peekIndex + 1, total: facets.data?.total ?? rows.length } : null}
           onPrev={peekIndex > 0 ? () => update({ peek: rows[peekIndex - 1]!.account_id }, true) : undefined}

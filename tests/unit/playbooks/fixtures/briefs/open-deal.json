@@ -1,0 +1,20 @@
+{
+  "account": { "name": "Keystone Ridge", "industry": "Manufacturing", "employees": 1200, "location": "Pittsburgh, PA, US", "description": "Keystone Ridge makes industrial valves.", "technologies": ["SAP"] },
+  "offer": { "id": "off_mod", "name": "Modernization Blueprint", "promise": "We map the old system and price its replacement in two weeks.", "priceMinCents": 2000000, "priceMaxCents": 5000000, "salesCycleDays": 90, "targetTitles": ["CIO"], "targetBuyingRoles": ["economic_buyer"], "proofPoints": [] },
+  "practiceName": "Modernization",
+  "caseStudies": [{ "id": "cs_2", "title": "ERP rebuild", "clientName": null, "result": null }],
+  "signals": [
+    { "id": "sig_breach", "type": "risk", "kind": "trigger", "title": "Security breach or outage: Plant outage after ransomware", "occurredAt": "2026-10-15T00:00:00.000Z", "sourceName": "Research agent" },
+    { "id": "sig_cio2", "type": "leadership", "kind": "trigger", "title": "Keystone Ridge appoints first CIO", "occurredAt": "2026-10-01T00:00:00.000Z", "sourceName": "Research agent" }
+  ],
+  "facts": [{ "id": "fct_n4", "key": "name", "value": "Keystone Ridge" }, { "id": "fct_e4", "key": "employees", "value": "1200" }],
+  "people": [
+    { "id": "per_jo", "name": "Jo Park", "title": "VP Operations", "roleKeys": ["champion"], "roleLabels": ["Champion"], "isPrimary": false },
+    { "id": "per_raj", "name": "Raj Mehta", "title": "CFO", "roleKeys": ["economic_buyer"], "roleLabels": ["Economic buyer"], "isPrimary": false }
+  ],
+  "score": { "tier": "act_now", "tierLabel": "Act now", "priority": 82, "fit": 80, "intent": 85, "fitParts": [], "wouldRaise": [] },
+  "crm": { "exists": true, "ownerName": "Sam Patel", "lifecycle": "open_deal", "openDeals": 1 },
+  "warmIntro": null,
+  "notes": [],
+  "insights": null
+}

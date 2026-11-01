@@ -29,8 +29,11 @@ risks.
   instructions per section) and **custom fields** (for example "Fleet tier", "ABM motion",
   "Revenue potential" override, "Contract end date"). Fields marked `show_in_strip` appear in the
   score strip.
-- **Drafting:** in R1 the `account_brief` AI task (carried from v1) writes why now, the angle, the
-  opener and who to contact first; the other core sections come from rules. From R2 the
+- **Drafting:** in R1 the `account_brief` AI task (carried from v1) writes Scout's recommendation,
+  the sections `overview`, `approach`, `value_angle`, `risks` and `why_now`, the opener and who to
+  contact first; `what_they_do`, `potential_size` and `decision_makers` wait for R2. Claude drafts
+  for act now and good fit accounts (and on a manual redraft); every other scored account gets the
+  rules brief. From R2 the
   `brief_sections` task drafts every section of the practice's template from the account's facts,
   signals, people, best offer, case studies and score explanation, and `committee_gaps` names missing
   buying roles with titles to look for. Every AI-written claim cites the fact and signal ids it used

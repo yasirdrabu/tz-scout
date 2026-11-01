@@ -93,3 +93,25 @@ describe('route guards', () => {
     expect((await route(withCookie(await signedIn(admin.id)))).status).toBe(200);
   });
 });
+
+describe('the brief routes and their permissions', () => {
+  it.each([
+    ['GET', 'accounts/acc_1/brief', 'playbooks:read'],
+    ['PUT', 'accounts/acc_1/brief/sections/overview', 'playbooks:write'],
+    ['POST', 'accounts/acc_1:draft-brief', 'playbooks:write'],
+  ])('%s %s needs %s', async (method, path, scope) => {
+    const { GET } = await import('@/http/routes/v1/accounts/[id]/brief/route');
+    const { PUT } = await import('@/http/routes/v1/accounts/[id]/brief/sections/[key]/route');
+    const { POST } = await import('@/http/routes/v1/accounts/[id]/route');
+    const route = { GET, PUT, POST }[method as 'GET' | 'PUT' | 'POST'];
+    const res = await route(
+      new Request(`http://x/api/v1/${path}`, {
+        method,
+        headers: { authorization: `Bearer ${await apiKey()}`, 'content-type': 'application/json' },
+        ...(method === 'GET' ? {} : { body: JSON.stringify({ body: 'Hi' }) }),
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect((await res.json()).detail).toBe(`This key can't do that. It needs the \`${scope}\` scope.`);
+  });
+});

@@ -24,6 +24,9 @@ import { registerAdapter, saveCredential, setDisabled, setMode, testConnection }
 import { connection } from '@/modules/integrations/db/schema';
 import { adminDb } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
+import { accountBriefTask } from '@/modules/playbooks/tasks/account-brief';
+import type { BriefInput } from '@/modules/playbooks/domain/brief-io';
+import transitBrief from '../../unit/playbooks/fixtures/briefs/transit-rfp.json';
 import { cfg } from '../integrations/cfg';
 import { freshTenant, newKey } from '../integrations/helpers';
 
@@ -241,6 +244,86 @@ describe('runTask', () => {
     });
     const other = await freshTenant();
     await other.run(async (ctx) => expect(await getRun(ctx, a.runId)).toBeUndefined());
+  });
+});
+
+describe('runTask paid runs survive a rollback', () => {
+  it('keeps a live ok run when the caller rolls back, and reuseAfter finds it even for a fresh run', async () => {
+    const t = await freshTenant();
+    const complete = fakeLive([{ echoed: 'paid' }]);
+    await goLive(t);
+    const since = new Date(Date.now() - 1000);
+    await expect(
+      t.run(async (ctx) => {
+        await runTask(ctx, echo, { text: 'hi' }, { subject, fresh: true, reuseAfter: since });
+        throw new Error('the job timed out');
+      }),
+    ).rejects.toThrow('the job timed out');
+    expect((await runsOf(t.tenantId)).map((r) => `${r.status}:${r.mode}`)).toEqual(['ok:live']);
+    const again = await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject, fresh: true, reuseAfter: since }));
+    expect(again.output).toEqual({ echoed: 'paid' });
+    expect(complete).toHaveBeenCalledTimes(1);
+    // A later reuseAfter does not take the older run.
+    await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject, fresh: true, reuseAfter: new Date(Date.now() + 1000) }));
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('runTask cost cap for the whole run', () => {
+  it('skips the second attempt when spend so far plus its worst case would pass the cap', async () => {
+    const t = await freshTenant();
+    const complete = fakeLive([{ wrong: 1 }, { echoed: 'too late' }], { inputTokens: 120, outputTokens: 2000, cacheReadTokens: 0 });
+    await goLive(t);
+    const capped = defineTask({ ...echo, name: 'echo_capped', model: 'claude-sonnet-5-5', maxTokens: 2000, maxCostCents: 5 });
+    await expect(t.run((ctx) => runTask(ctx, capped, { text: 'hi' }, { subject }))).rejects.toMatchObject({ slug: 'invalid_output' });
+    expect(complete).toHaveBeenCalledTimes(1);
+    const [row] = await runsOf(t.tenantId);
+    expect(row).toMatchObject({ status: 'invalid_output', mode: 'live', outputTokens: 2000 });
+    expect(row!.costCents).toBeLessThanOrEqual(5);
+    expect(row!.error).toContain('cost limit');
+  });
+
+  it('still asks once more when the second attempt fits under the cap', async () => {
+    const t = await freshTenant();
+    const complete = fakeLive([{ wrong: 1 }, { echoed: 'ok' }]);
+    await goLive(t);
+    const capped = defineTask({ ...echo, name: 'echo_capped_ok', model: 'claude-sonnet-5-5', maxTokens: 2000, maxCostCents: 5 });
+    expect((await t.run((ctx) => runTask(ctx, capped, { text: 'hi' }, { subject }))).output).toEqual({ echoed: 'ok' });
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('runTask rulesOnly', () => {
+  it('records a rules run and makes no gateway call', async () => {
+    const t = await freshTenant();
+    const complete = fakeLive([{ echoed: 'from claude' }]);
+    await goLive(t);
+    const r = await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject, rulesOnly: true }));
+    expect(r).toMatchObject({ mode: 'rules', output: { echoed: 'hi' } });
+    expect(complete).not.toHaveBeenCalled();
+    const rows = await runsOf(t.tenantId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ mode: 'rules', status: 'ok', model: null });
+    const calls = (await adminDb.execute(
+      sql`select 1 from integrations.call_log where tenant_id = ${t.tenantId} and provider = 'anthropic' and operation like 'messages.%'`,
+    )) as unknown as unknown[];
+    expect(calls).toHaveLength(0);
+    await expect(t.run((ctx) => runTask(ctx, noRules, { text: 'hi' }, { subject, rulesOnly: true }))).rejects.toMatchObject({
+      slug: 'ai_unavailable',
+      detail: 'Add a Claude key to use this.',
+    });
+  });
+
+  it('refuses a live account_brief run over the tenant cap and returns the rules brief', async () => {
+    const t = await freshTenant();
+    const complete = fakeLive([{}]);
+    await goLive(t);
+    await adminDb.execute(sql`insert into ai.ai_setting (tenant_id, task, max_cost_cents_per_run) values (${t.tenantId}, 'account_brief', 1)`);
+    const r = await t.run((ctx) => runTask(ctx, accountBriefTask, transitBrief as BriefInput, { subject }));
+    expect(r.mode).toBe('rules');
+    expect(r.output.recommendation.headline).toBe('Approve and assign to someone who covers Digital Transformation.');
+    expect(complete).not.toHaveBeenCalled();
+    expect((await runsOf(t.tenantId)).map((x) => `${x.status}:${x.mode}`).sort()).toEqual(['ok:rules', 'refused_by_cap:live']);
   });
 });
 

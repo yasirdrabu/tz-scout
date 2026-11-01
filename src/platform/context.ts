@@ -15,4 +15,6 @@ export type ModuleContext = {
   ip?: string;
   /** Who is asking and what they may see. Set for requests from people and API keys, not for worker runs. */
   access?: Access;
+  /** Worker runs only: aborted when the handler runs past its time limit, so slow outside calls can stop. */
+  signal?: AbortSignal;
 };

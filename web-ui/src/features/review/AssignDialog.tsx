@@ -9,7 +9,7 @@ import { Dialog } from '../../ui/Dialog';
 import { Field } from '../../ui/Field';
 import { useToast } from '../../ui/Toast';
 import { errorText } from '../settings/shared';
-import { assign, bulk, previewAssign, sellersQuery, type BulkResult, type QueueRow, type Seller } from './api';
+import { assign, bulk, previewAssign, sellersQuery, type BulkResult, type DialogAccount, type Seller } from './api';
 import { NOTE_MAX } from './ReasonPicker';
 import styles from './Review.module.css';
 
@@ -17,7 +17,7 @@ export type AssignProps = {
   tenant: string;
   me: Me;
   /** One account (peek) or up to 50 (the bulk bar). */
-  accounts: QueueRow[];
+  accounts: DialogAccount[];
   onClose: () => void;
   /** After the API answered (202): the accounts assigned and the ones it refused, with its words. */
   onDone: (assigned: string[], refused: { account_id: string; message: string }[]) => void;

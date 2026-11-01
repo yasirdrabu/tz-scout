@@ -20,7 +20,7 @@ describe('Queue peek drawer', () => {
     expect(params(app.path()).get('peek')).toBe('acc_mdc');
     expect(peek).toHaveTextContent('Public agency · Miami, FL · miamidade.gov');
     expect(peek).toHaveTextContent('1 of 3');
-    expect(within(peek).getByRole('link', { name: 'Open full page' })).toHaveAttribute('href', '/t/taazaa/accounts/acc_mdc');
+    expect(within(peek).getByRole('link', { name: 'Open full page' })).toHaveAttribute('href', '/t/taazaa/accounts/acc_mdc?from=queue');
     expect(within(peek).getByRole('button', { name: 'Previous account' })).toBeDisabled();
     expect(peek).toHaveTextContent('Priority79');
     expect(peek).toHaveTextContent('Fit85');

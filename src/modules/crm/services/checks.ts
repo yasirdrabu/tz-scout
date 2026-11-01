@@ -33,8 +33,12 @@ export type CompanyCheck = {
   /** The company's deals as the CRM just returned them; only on a check that called the CRM. */
   freshDeals?: { status: string }[];
   openDeals: number;
+  /** The biggest open deal; `lastActivityAt` is when the CRM last changed it. */
+  openDeal: OpenDeal | null;
   checkedAt: Date;
 };
+
+export type OpenDeal = { name: string; amountCents: number | null; currency: string | null; lastActivityAt: Date | null };
 
 type Stored = typeof companyCheck.$inferSelect;
 
@@ -48,7 +52,24 @@ const toCheck = (r: Stored): CompanyCheck => ({
   lifecycle: (r.lifecycle ?? 'none') as CompanyLifecycle,
   crmLifecycle: r.crmLifecycle,
   openDeals: r.openDeals,
+  openDeal: r.openDealName === null ? null : { name: r.openDealName, amountCents: r.openDealAmountCents, currency: r.openDealCurrency, lastActivityAt: r.openDealLastActivityAt },
   checkedAt: r.checkedAt,
+});
+
+/** The open deal with the biggest amount (unknown amounts last), the newest first among equals. */
+export function topOpenDeal(deals: { name: string; status: string; amountCents: number | null; currency: string | null; openedAt: string | null; modifiedAt?: string | null }[]): OpenDeal | null {
+  const open = deals.filter((d) => d.status === 'open');
+  const [top] = [...open].sort((a, b) => (b.amountCents ?? -1) - (a.amountCents ?? -1) || (b.openedAt ?? '').localeCompare(a.openedAt ?? ''));
+  if (!top) return null;
+  const at = top.modifiedAt ?? top.openedAt;
+  return { name: top.name, amountCents: top.amountCents, currency: top.currency, lastActivityAt: at ? new Date(at) : null };
+}
+
+const openDealColumns = (d: OpenDeal | null) => ({
+  openDealName: d?.name ?? null,
+  openDealAmountCents: d?.amountCents ?? null,
+  openDealCurrency: d?.currency ?? null,
+  openDealLastActivityAt: d?.lastActivityAt ?? null,
 });
 
 /** Customer when the CRM says so or any deal is won; open deal when any deal is open; else none (Ruling 12). */
@@ -105,6 +126,7 @@ async function lookup(ctx: ModuleContext, system: string, domain: string, now: D
     crmLifecycle: found?.lifecycle ?? null,
     freshDeals: found?.deals ?? [],
     openDeals: found?.openDeals ?? 0,
+    openDeal: topOpenDeal(found?.deals ?? []),
     checkedAt: now,
   };
   // Kept under a key of its own, so a lookup that has no account still reuses it for 24 hours.
@@ -117,6 +139,7 @@ async function lookup(ctx: ModuleContext, system: string, domain: string, now: D
     lifecycle: check.lifecycle,
     crmLifecycle: check.crmLifecycle,
     openDeals: check.openDeals,
+    ...openDealColumns(check.openDeal),
     checkedAt: now,
   };
   await ctx.tx
@@ -166,6 +189,7 @@ async function storeCheck(ctx: ModuleContext, accountId: string, system: string,
     lifecycle: check.lifecycle,
     crmLifecycle: check.crmLifecycle,
     openDeals: check.openDeals,
+    ...openDealColumns(check.openDeal),
     checkedAt: check.checkedAt,
   };
   await ctx.tx

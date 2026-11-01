@@ -114,6 +114,7 @@ function AccountLink({ tenant, id, name, seen }: { tenant: string; id: string; n
     <Link
       to="/t/$tenant/accounts/$id"
       params={{ tenant, id }}
+      search={{ from: 'my' }}
       className={styles.accountLink}
       onClick={(e) => {
         e.stopPropagation();
@@ -254,7 +255,7 @@ function Active({ tenant, rows }: { tenant: string; rows: Assignment[] }) {
             </thead>
             <tbody>
               {rows.map((a) => (
-                <tr key={a.id} className={styles.clickable} onClick={() => void navigate({ to: '/t/$tenant/accounts/$id', params: { tenant, id: a.account_id } })}>
+                <tr key={a.id} className={styles.clickable} onClick={() => void navigate({ to: '/t/$tenant/accounts/$id', params: { tenant, id: a.account_id }, search: { from: 'my' } })}>
                   <td>
                     <AccountLink tenant={tenant} id={a.account_id} name={a.account_name ?? 'This account'} />
                     {a.offer_name && <div className={styles.sub}>{a.offer_name}</div>}

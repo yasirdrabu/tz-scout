@@ -21,6 +21,7 @@ import {
   signalsQuery,
   type Change,
   type FacetOption,
+  type QueueFilters,
   type QueueRow,
   type ReviewStatus,
 } from './api';
@@ -35,6 +36,8 @@ export type PeekProps = {
   accountId: string;
   /** The row in the list shown; null when it is not (or no longer) in this view. */
   row: QueueRow | null;
+  /** The queue's filters, so the full page can step through the same list. */
+  filters: QueueFilters;
   /** "{i} of {n}": the row's place in the filtered list and the list's total from the API. */
   position: { index: number; total: number } | null;
   onPrev?: (() => void) | undefined;
@@ -88,7 +91,7 @@ export function PeekDrawer(props: PeekProps) {
           </IconButton>
           {position && <span className={styles.position}>{`${position.index} of ${position.total}`}</span>}
           <span className={styles.grow} />
-          <Link to="/t/$tenant/accounts/$id" params={{ tenant, id: accountId }} className={styles.textButton}>
+          <Link to="/t/$tenant/accounts/$id" params={{ tenant, id: accountId }} search={{ from: 'queue', ...props.filters }} className={styles.textButton}>
             Open full page
           </Link>
         </>

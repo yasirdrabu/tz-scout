@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { convertShell, filterVisibleAccountIds, editAccount, mergeAccounts, overrideExclusion, pinPrimary } from '@/modules/accounts';
-import { checkFollowThrough, push } from '@/modules/crm';
+import { checkFollowThrough, crmCheckCard, push } from '@/modules/crm';
 import { submitArrival } from '@/modules/intake';
+import { PAGE_SECTIONS, requestDraft } from '@/modules/playbooks';
 import { assign, markSeen, previewAssign, type AssignInput } from '@/modules/routing';
 import { can } from '@/modules/tenancy';
 import { parseBody } from '../../_lib/body';
@@ -45,6 +46,8 @@ const assignBody = z.strictObject({
 const previewBody = z.strictObject({ seller_user_id: z.string() });
 const pushBody = z.strictObject({ keep_current_owner: z.boolean().optional() });
 const shellBody = z.strictObject({ name: z.string(), domain: z.string() });
+const pageKey = z.enum(PAGE_SECTIONS.map((s) => s.key) as [string, ...string[]]);
+const draftBody = z.strictObject({ include_edited: z.array(pageKey).max(PAGE_SECTIONS.length).optional() });
 
 /** `POST /accounts/{id}:action`. All are people only; the service of each checks the data limit. Assigning is 202. */
 export const POST = byAction('accounts', {
@@ -89,6 +92,15 @@ export const POST = byAction('accounts', {
     await checkFollowThrough(ctx, id);
     return accepted({});
   }),
+  /** Redraft the brief now (Ruling 2): Claude at any tier, a fresh run; `include_edited` names edited page sections it may rewrite. */
+  'draft-brief': v1Route({ permission: 'playbooks:write' }, async (req, _principal, ctx) => {
+    const { id } = idAndAction(req, 'accounts');
+    const { includeEdited } = (await req.clone().text()).trim() ? await parseBody<{ includeEdited?: string[] }>(req, draftBody) : { includeEdited: undefined };
+    const { state } = await requestDraft(ctx, id, { manual: true, includeEdited: includeEdited ?? [] });
+    return accepted({ state });
+  }),
+  /** Asks HubSpot about the company now and returns the In HubSpot card; 503 `crm_unavailable` when it does not answer. No body. */
+  'check-crm': v1Route({ permission: 'accounts:read', peopleOnly: true }, async (req, _principal, ctx) => crmCheckCard(ctx, idAndAction(req, 'accounts').id, { refresh: true })),
   /** The assigned seller has seen the new arrival ("New from <source>"). No body. */
   seen: v1Route({ permission: 'assignments:respond', peopleOnly: true }, async (req, _principal, ctx) => markSeen(ctx, idAndAction(req, 'accounts').id)),
 });

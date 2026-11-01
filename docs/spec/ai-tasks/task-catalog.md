@@ -8,7 +8,7 @@ the Zod schemas in code are the contract.
 
 | Task | Owner module | Input | Output | Rules fallback | Release |
 |---|---|---|---|---|---|
-| `account_brief` (was accountBrief) | PLB | account facts, signals, best offer, people | why now, angle, opener, who to contact first | yes | R1 |
+| `account_brief` (was accountBrief) | PLB | account facts, signals, score, lead offer, case studies, people, CRM check, notes | recommendation, overview, approach, value angle, risks, why now (each cited), opener, who to contact first | yes | R1 |
 | `call_prep` | PLB | account, offer, plan, past calls | discovery plan and questions | yes | R2 |
 | `call_review` | PLB | transcript or recap, checklist | 7-item score, pains in their words, next steps, coaching, follow-up email | no | R2 |
 | `offer_draft` (was offeringDraft) | OFF | URL text or file text | offer fields draft | no | R2 |

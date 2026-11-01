@@ -42,7 +42,15 @@ export type TaskDef<I, O> = {
 
 export const defineTask = <I, O>(def: TaskDef<I, O>): TaskDef<I, O> => def;
 
-export type RunOpts = { subject: { type: string; id: string }; allowRules?: boolean; fresh?: boolean };
+export type RunOpts = {
+  subject: { type: string; id: string };
+  allowRules?: boolean;
+  fresh?: boolean;
+  /** Skips mock and live and runs the rules, or says there is no key for a task without rules. Recorded as `mode: 'rules'`. */
+  rulesOnly?: boolean;
+  /** Like `fresh`, but a run made at or after this time is reused: a job retried after a timeout finds the run it paid for. */
+  reuseAfter?: Date;
+};
 export type RunResult<O> = { output: O; runId: string; mode: AiMode };
 
 /** JSON with object keys sorted at every depth, so equal inputs always hash equal. */
@@ -125,6 +133,7 @@ async function findReusable(
   hash: string,
   mode: AiMode,
   model: string | null,
+  after?: Date,
 ) {
   const [row] = await ctx.tx
     .select()
@@ -139,6 +148,7 @@ async function findReusable(
         eq(aiRun.mode, mode),
         model === null ? isNull(aiRun.model) : eq(aiRun.model, model),
         gte(aiRun.createdAt, new Date(Date.now() - REUSE_WINDOW_MS)),
+        after ? gte(aiRun.createdAt, after) : undefined,
       ),
     )
     .orderBy(desc(aiRun.createdAt))
@@ -151,16 +161,28 @@ type Attempt = { ok: true; output: unknown; usage: Usage } | { ok: false; errors
 
 const zodErrors = (e: z.ZodError) => e.issues.map((i) => `- ${i.path.join('.') || '(root)'}: ${i.message}`).join('\n');
 
-/** Asks the model, checks the answer, and asks once more with the problems listed if it does not fit. */
+export const SECOND_TRY_OVER_CAP = 'Stopped before a second try: it could pass the cost limit for this task.';
+
+/**
+ * Asks the model, checks the answer, and asks once more with the problems listed if it does not fit. With `capCents`
+ * the cap holds for the whole run: the second try is skipped when what the first cost plus its worst case would pass it.
+ */
 async function completeValidated<O>(
   adapter: AnthropicAdapter,
   base: CompleteRequest,
   schema: z.ZodType<O>,
+  capCents?: number,
 ): Promise<Attempt> {
   const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
   let user = base.user;
   let errors = '';
   for (let attempt = 0; attempt < 2; attempt++) {
+    // The caller gave up (time limit): no second, paid try.
+    if (attempt > 0 && base.signal?.aborted) return { ok: false, errors: `The caller stopped waiting.\n${errors}`, usage };
+    if (attempt > 0 && capCents !== undefined) {
+      const next = worstCaseCents(base.model, Math.ceil((base.system.length + user.length) / 4), base.maxTokens);
+      if (costCents(base.model, usage) + next > capCents) return { ok: false, errors: `${SECOND_TRY_OVER_CAP}\n${errors}`, usage };
+    }
     const r = await adapter.complete({ ...base, user });
     usage.inputTokens += r.inputTokens;
     usage.outputTokens += r.outputTokens;
@@ -209,14 +231,14 @@ export async function runTask<I, O>(
     .where(and(eq(aiSetting.tenantId, ctx.tenantId), eq(aiSetting.task, task.name)));
   const model = setting?.model ?? task.model;
   const reusable = (mode: AiMode) =>
-    opts.fresh ? undefined : findReusable(ctx, task.name, task.promptVersion, hash, mode, mode === 'rules' ? null : model);
+    opts.fresh && !opts.reuseAfter ? undefined : findReusable(ctx, task.name, task.promptVersion, hash, mode, mode === 'rules' ? null : model, opts.reuseAfter);
   const reuse = (row: AiRunRow): RunResult<O> => ({ output: row.output as O, runId: row.id, mode: row.mode as AiMode });
   const costCap = setting?.maxCostCentsPerRun ?? task.maxCostCents;
   const user = task.buildUser(input);
 
   // 1. Which mode would run?
   let tentative: 'mock' | 'live' | 'none' = 'none';
-  if (setting?.enabled !== false) {
+  if (setting?.enabled !== false && !opts.rulesOnly) {
     if (config.forceMock || ctx.environment === 'test') tentative = 'mock';
     else {
       const st = await connectionStatus(ctx, PROVIDER);
@@ -281,9 +303,11 @@ export async function runTask<I, O>(
               maxTokens: task.maxTokens,
               jsonSchema: z.toJSONSchema(task.output, { io: 'output' }),
               cacheSystem: true,
+              ...(ctx.signal ? { signal: ctx.signal } : {}),
               ...(mockOutput !== undefined ? { mockOutput } : {}),
             },
             task.output,
+            mode === 'live' ? costCap : undefined,
           );
           return a;
         },
@@ -301,7 +325,8 @@ export async function runTask<I, O>(
           ...attempt.usage,
           costCents: cost,
           durationMs,
-        });
+          // A paid run is kept even if the caller then rolls back (a job that times out), so its retry reuses it.
+        }, mode === 'live');
         return { output: attempt.output as O, runId, mode };
       }
       await record(

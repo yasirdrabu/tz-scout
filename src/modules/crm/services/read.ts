@@ -1,19 +1,22 @@
-import { and, desc, eq, inArray, max } from 'drizzle-orm';
-import { filterVisibleAccountIds } from '@/modules/accounts';
-import { connectionSettings } from '@/modules/integrations';
+import { and, count, desc, eq, inArray, max } from 'drizzle-orm';
+import { filterVisibleAccountIds, getAccount } from '@/modules/accounts';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import type { HandoffUndone } from '../contracts/types';
 import { activity, deal, followThrough, handoff } from '../db/schema';
 import { countsOfRow, type FollowThroughCounts } from '../domain/follow-through';
 import { latestRow } from './handoff';
-import { companyLink, getLinks, type AccountLinks } from './links';
+import { companyChecks, refreshCheck, type CompanyCheck, type OpenDeal } from './checks';
+import { companyLink, crmCompanyUrl, getLinks, type AccountLinks } from './links';
+import { CRM_UNAVAILABLE } from './preflight';
 
 const visible = async (ctx: ModuleContext, accountId: string) => (await filterVisibleAccountIds(ctx, [accountId])).length > 0;
 
 export type HandoffRow = {
   id: string;
   status: string;
+  /** The company in HubSpot, once pushed and the portal is known. */
+  crmUrl: string | null;
   ownershipAction: string;
   takenFromOwner: string | null;
   attempts: number;
@@ -28,7 +31,7 @@ export type HandoffsView = {
   /** Newest first. */
   handoffs: HandoffRow[];
   /** For the latest completed handoff, or null. */
-  followThrough: { handoffId: string; counts: FollowThroughCounts; stage: string | null; checkedAt: Date | null } | null;
+  followThrough: { handoffId: string; counts: FollowThroughCounts & { replies: number }; stage: string | null; checkedAt: Date | null } | null;
   deals: { id: string; name: string; stage: string | null; status: string; amountCents: number | null; currency: string | null; openedAt: Date | null; closedAt: Date | null }[];
   /** Two companies are linked: a person has to say which one is right. */
   conflict: boolean;
@@ -61,11 +64,23 @@ export async function getHandoffs(ctx: ModuleContext, accountId: string): Promis
     .from(deal)
     .where(and(eq(deal.tenantId, ctx.tenantId), eq(deal.accountId, accountId)))
     .orderBy(desc(deal.openedAt), deal.id);
+  const replies = completed
+    ? ((
+        await ctx.tx
+          .select({ n: count() })
+          .from(activity)
+          .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.handoffId, completed.id), eq(activity.kind, 'reply')))
+      )[0]?.n ?? 0)
+    : 0;
+  const company = await companyLink(ctx, accountId, rows[0]?.system ?? 'hubspot');
+  const urls = new Map<string, string | null>();
+  for (const r of rows) urls.set(r.id, await crmCompanyUrl(ctx, r.system, r.companyExternalId ?? company));
   return {
     links,
     handoffs: rows.map((r) => ({
       id: r.id,
       status: r.status,
+      crmUrl: urls.get(r.id) ?? null,
       ownershipAction: r.ownershipAction,
       takenFromOwner: r.takenFromOwner,
       attempts: r.attempts,
@@ -74,7 +89,7 @@ export async function getHandoffs(ctx: ModuleContext, accountId: string): Promis
       queuedAt: r.queuedAt,
       completedAt: r.completedAt,
     })),
-    followThrough: ft ? { handoffId: ft.handoffId, counts: countsOfRow(ft, null, new Date()), stage: ft.stage, checkedAt: ft.checkedAt } : null,
+    followThrough: ft ? { handoffId: ft.handoffId, counts: { ...countsOfRow(ft, null, new Date()), replies }, stage: ft.stage, checkedAt: ft.checkedAt } : null,
     deals,
     conflict: links.conflict,
   };
@@ -88,13 +103,8 @@ export async function latestHandoff(
   if (!(await visible(ctx, accountId))) return null;
   const h = await latestRow(ctx, accountId);
   if (!h) return null;
-  const portal = h.system === 'hubspot' ? (await connectionSettings(ctx, 'hubspot')).portal_id : undefined;
   // A re-push still in flight has no company yet: the company link has it.
-  const companyId = h.companyExternalId ?? (await companyLink(ctx, accountId, h.system));
-  const crmUrl =
-    (typeof portal === 'string' || typeof portal === 'number') && portal !== '' && companyId
-      ? `https://app.hubspot.com/contacts/${portal}/record/0-2/${companyId}`
-      : null;
+  const crmUrl = await crmCompanyUrl(ctx, h.system, h.companyExternalId ?? (await companyLink(ctx, accountId, h.system)));
   return { id: h.id, status: h.status, ownershipAction: h.ownershipAction, crmUrl };
 }
 
@@ -135,4 +145,46 @@ export async function crmFacts(ctx: ModuleContext, accountIds: string[]): Promis
     if (pick) out.get(id)!.value = { amountCents: pick.amountCents, currency: pick.currency, kind: pick.status === 'won' ? 'won' : 'open_deal', dealName: pick.name };
   }
   return out;
+}
+
+/** The account page's In HubSpot card (screens.md §4a). `exists` and `checkedAt` are null when the account was never checked. */
+export type CrmCheckCard =
+  | { exists: null; checkedAt: null }
+  | {
+      exists: boolean;
+      ownerName: string | null;
+      lifecycle: CompanyCheck['lifecycle'];
+      openDeals: number;
+      openDeal: OpenDeal | null;
+      checkedAt: Date;
+      hubspotUrl: string | null;
+    };
+
+/**
+ * The stored CRM check of the account, or with `refresh` a new one asked of the CRM now (a CRM that does not
+ * answer is a 503 `crm_unavailable`). Not found when the caller can't see the account.
+ */
+export async function crmCheckCard(ctx: ModuleContext, accountId: string, opts: { refresh?: boolean } = {}): Promise<CrmCheckCard> {
+  const account = await getAccount(ctx, accountId);
+  if (!account) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
+  let check: CompanyCheck | null = null;
+  if (opts.refresh) {
+    try {
+      check = await refreshCheck(ctx, account.id);
+    } catch (e) {
+      if (e instanceof ScoutError) throw e;
+      throw new ScoutError({ status: 503, slug: 'crm_unavailable', title: CRM_UNAVAILABLE });
+    }
+  }
+  check ??= (await companyChecks(ctx, [account.id]))[0] ?? null;
+  if (!check) return { exists: null, checkedAt: null };
+  return {
+    exists: check.exists,
+    ownerName: check.ownerName,
+    lifecycle: check.lifecycle,
+    openDeals: check.openDeals,
+    openDeal: check.openDeal,
+    checkedAt: check.checkedAt,
+    hubspotUrl: await crmCompanyUrl(ctx, check.system, check.companyExternalId),
+  };
 }

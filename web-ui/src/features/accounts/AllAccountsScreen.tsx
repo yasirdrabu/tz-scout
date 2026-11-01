@@ -171,9 +171,9 @@ function Table({ tenant, rows }: { tenant: string; rows: AccountRow[] }) {
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.account_id} className={styles.clickable} onClick={() => void navigate({ to: '/t/$tenant/accounts/$id', params: { tenant, id: r.account_id } })}>
+          <tr key={r.account_id} className={styles.clickable} onClick={() => void navigate({ to: '/t/$tenant/accounts/$id', params: { tenant, id: r.account_id }, search: { from: 'all' } })}>
             <td>
-              <Link to="/t/$tenant/accounts/$id" params={{ tenant, id: r.account_id }} className={styles.accountLink} onClick={(e) => e.stopPropagation()}>
+              <Link to="/t/$tenant/accounts/$id" params={{ tenant, id: r.account_id }} search={{ from: 'all' }} className={styles.accountLink} onClick={(e) => e.stopPropagation()}>
                 {r.name}
               </Link>
               {kindAndPlace(r) && <div className={styles.sub}>{kindAndPlace(r)}</div>}

@@ -99,6 +99,8 @@ describe('migrate order', () => {
 describe('handoff package provider', () => {
   it('returns null until one is registered, and again once cleared', async () => {
     const ctx = {} as never;
+    // compose.ts registers Playbooks' provider; cleared, the default applies.
+    registerHandoffPackageProvider(null);
     expect(await handoffPackageProvider().package(ctx, 'acc_1', 'asg_1')).toBeNull();
     const own: HandoffPackageProvider = {
       package: async () => ({ sections: [], properties: {}, firstTouch: null, followUps: [], planSteps: [] }),

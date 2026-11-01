@@ -1,0 +1,19 @@
+{
+  "account": { "name": "Bluebird Health", "industry": "Healthcare", "employees": 800, "location": "Austin, TX, US", "description": "Regional clinic network", "technologies": [] },
+  "offer": { "id": "off_ready", "name": "AgentReady Review", "promise": "We give a clear go, fix first or not ready answer on AI.", "priceMinCents": 1500000, "priceMaxCents": 3000000, "salesCycleDays": 45, "targetTitles": ["CIO"], "targetBuyingRoles": ["economic_buyer"], "proofPoints": ["Used by 3 health systems"] },
+  "practiceName": "AI Strategy",
+  "caseStudies": [],
+  "signals": [
+    { "id": "sig_r1", "type": "intent", "kind": "research", "title": "Researching: AI governance", "occurredAt": null, "sourceName": "Vibe Prospecting" },
+    { "id": "sig_r2", "type": "intent", "kind": "research", "title": "Researching: HIPAA compliance", "occurredAt": null, "sourceName": "Vibe Prospecting" }
+  ],
+  "facts": [{ "id": "fct_n3", "key": "name", "value": "Bluebird Health" }],
+  "people": [
+    { "id": "per_ann", "name": "Ann Cole", "title": "Director of IT", "roleKeys": ["technical_buyer"], "roleLabels": ["Technical buyer"], "isPrimary": false }
+  ],
+  "score": { "tier": "watch", "tierLabel": "Watch", "priority": 44, "fit": 55, "intent": 30, "fitParts": [{ "label": "Industry", "points": 20, "max": 25, "note": "Healthcare is on the offer's list." }], "wouldRaise": ["A dated trigger such as a new leader would raise buying intent."] },
+  "crm": { "exists": false, "ownerName": null, "lifecycle": "none", "openDeals": 0 },
+  "warmIntro": null,
+  "notes": [],
+  "insights": null
+}

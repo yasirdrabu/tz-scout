@@ -22,7 +22,8 @@ export type PersonView = {
   linkedinUrl: string | null;
   isPrimary: boolean;
   decisionNote: string | null;
-  roles: { key: string; origin: RoleOrigin }[];
+  /** `label` is the tenant's name for the role (the key when the role is gone). */
+  roles: { key: string; origin: RoleOrigin; label: string }[];
 };
 
 export type AccountView = {

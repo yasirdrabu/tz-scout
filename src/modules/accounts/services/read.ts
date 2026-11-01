@@ -2,7 +2,7 @@ import { and, arrayOverlaps, asc, desc, eq, exists, gt, gte, inArray, isNull, or
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import type { AccountView, CrmStatus, FactKind, FactView, PersonView, RoleOrigin, SignalKind, SignalView, SourceChain } from '../contracts/types';
-import { account, accountAlias, accountSummary, exclusionRule, fact, person, personAlias, personRole, signal } from '../db/schema';
+import { account, accountAlias, accountSummary, buyingRole, exclusionRule, fact, person, personAlias, personRole, signal } from '../db/schema';
 import type { Exclusion } from './exclusion';
 import { resolveAccountId } from './match';
 import { filterVisibleAccountIds, visibleAccounts } from './visibility';
@@ -64,6 +64,16 @@ const toSignal = (s: SignalRow): SignalView => ({
   archivedAt: s.archivedAt,
 });
 
+/** The tenant's buying roles, archived ones included, in their sort order. */
+async function allBuyingRoles(ctx: ModuleContext) {
+  return ctx.tx.select().from(buyingRole).where(eq(buyingRole.tenantId, ctx.tenantId)).orderBy(asc(buyingRole.sort), asc(buyingRole.key));
+}
+
+/** The active buying roles, by sort, for pickers (`GET /api/v1/buying-roles`). */
+export async function listBuyingRoles(ctx: ModuleContext): Promise<{ key: string; label: string }[]> {
+  return (await allBuyingRoles(ctx)).filter((r) => !r.archived).map((r) => ({ key: r.key, label: r.label }));
+}
+
 async function peopleOf(ctx: ModuleContext, accountIds: string[]): Promise<PersonView[]> {
   const rows = await ctx.tx
     .select()
@@ -77,6 +87,7 @@ async function peopleOf(ctx: ModuleContext, accountIds: string[]): Promise<Perso
         .where(and(eq(personRole.tenantId, ctx.tenantId), inArray(personRole.personId, rows.map((p) => p.id))))
         .orderBy(asc(personRole.roleKey))
     : [];
+  const labels = roles.length ? new Map((await allBuyingRoles(ctx)).map((r) => [r.key, r.label])) : new Map<string, string>();
   const view = (p: PersonRow): PersonView => ({
     id: p.id,
     accountId: p.accountId,
@@ -91,7 +102,7 @@ async function peopleOf(ctx: ModuleContext, accountIds: string[]): Promise<Perso
     linkedinUrl: p.linkedinUrl,
     isPrimary: p.isPrimary,
     decisionNote: p.decisionNote,
-    roles: roles.filter((r) => r.personId === p.id).map((r) => ({ key: r.roleKey, origin: r.origin as RoleOrigin })),
+    roles: roles.filter((r) => r.personId === p.id).map((r) => ({ key: r.roleKey, origin: r.origin as RoleOrigin, label: labels.get(r.roleKey) ?? r.roleKey })),
   });
   return rows.map(view);
 }

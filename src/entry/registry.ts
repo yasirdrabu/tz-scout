@@ -19,4 +19,6 @@ import '@/modules/routing/contracts/events';
 import '@/modules/routing';
 import '@/modules/crm/contracts/events';
 import '@/modules/crm';
+import '@/modules/playbooks/contracts/events';
+import '@/modules/playbooks';
 import './compose';

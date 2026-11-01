@@ -18,17 +18,17 @@ All v1 responses are snake_case JSON (`v1Route` runs `snakeCase`); field names b
 |---|---|---|---|---|---|---|
 | tenancy (incl. auth, HTTP layer) | 7 | 17 | 8 | 21 | 10 | 63 |
 | routing | 18 | 20 | 0 | 10 | 12 | 60 |
-| accounts | 9 | 12 | 0 | 5 | 3 | 29 |
-| scoring | 8 | 7 | 0 | 3 | 3 | 21 |
+| accounts | 11 | 10 | 0 | 5 | 3 | 29 |
+| scoring | 11 | 4 | 0 | 3 | 3 | 21 |
 | intake | 13 | 20 | 0 | 8 | 6 | 47 |
-| crm | 3 | 5 | 0 | 3 | 1 | 12 |
+| crm | 7 | 3 | 0 | 1 | 1 | 12 |
 | offers | 15 | 7 | 0 | 3 | 3 | 28 |
 | integrations | 1 | 5 | 5 | 1 | 3 | 15 |
 | ai-tasks | 0 | 2 | 1 | 5 | 1 | 9 |
 | platform | 1 | 8 | 11 | 1 | 2 | 23 |
-| playbooks (not built) | 0 | 0 | 0 | 0 | 12 | 12 |
+| playbooks | 1 | 0 | 0 | 0 | 11 | 12 |
 | analytics (not built) | 1 | 0 | 0 | 0 | 14 | 15 |
-| **Total** | **76** | **103** | **25** | **60** | **70** | **334** |
+| **Total** | **86** | **96** | **25** | **58** | **69** | **334** |
 
 Rows are de-duplicated across the four source passes; a need that spans modules is counted once, in
 the module that owns the data.
@@ -608,7 +608,7 @@ Files: `src/http/routes/v1/accounts/**`, `src/http/routes/v1/people/**`; service
 | 4a | Account facts with source and date | READY | `GET /api/v1/accounts/{id}/facts[?field][&include=history]` (`accounts:read`) | `FactView`: key, value, status (current, candidate, superseded), source_chain, observed_at, url, note, pinned_by. Source names need `GET /api/v1/sources` (`arrivals:read`, sellers cannot): resolve names in the response. |
 | 4a | Conflict badge, side by side, `Keep this one` | LATER (R2) | none | Candidate facts exist; no conflict list or pin endpoint. |
 | 4a | Buying committee: people, titles, roles, notes | READY | `GET /api/v1/accounts/{id}/people` (`accounts:read`; contact fields need `people:read`) | `PersonView.roles[{key,origin}]`, `decision_note`, `is_primary`. Role labels need a lookup. |
-| 4a | Role labels | SMALL GAP | `GET /api/v1/buying-roles` | No list endpoint for `buying_role`. Or return `label` in `roles[]`. |
+| 4a | Role labels | READY | `roles[].label` on the account read and `GET /api/v1/accounts/{id}/people`; `GET /api/v1/buying-roles` (`accounts:read`) `{data[{key,label}]}`, active ones by sort | |
 | 4a | `Add a person` | READY | `POST /api/v1/accounts/{id}/people` (`people:write`) | Inline arrival; returns `{arrival_id, person_id, already_known}`; roles in `role_keys`. Edit with `PATCH /api/v1/people/{id}`. |
 | 4a | Committee gap rows, `Find` | LATER (R2) | none | |
 | 3, 4a | Notes list, `Add note` | NEW ENDPOINT | `GET/POST /api/v1/accounts/{id}/notes` (read `accounts:read`, write `review:act` or `accounts:write`) | `accounts.account_note(id, tenant_id, account_id, body, by_user_id, at)`; returns `{id, body, by_name, at}`; 4,000 characters; `note_count` on `account_summary`. Decision 3. |
@@ -663,10 +663,10 @@ Files: `src/http/routes/v1/accounts/[id]/{score,matches}/**`, `src/http/routes/v
 | 3, 4a | Other offers' matches | READY | `GET /api/v1/accounts/{id}/matches` | `offer_match` rows, best first. |
 | 3, 4a | Manual tier change, "Changed by {name}" | NEW ENDPOINT | `PUT /api/v1/accounts/{id}/tier` `{tier\|null, note}` | Only if Decision 4 picks the override; else drop from the spec. |
 | 4a | Score strip notes | READY | `/score` `lines[]` (`label, points, max, text`) | Text is rule-built, not the mockup's wording. |
-| 4a | "Act now tier starts at 75" | SMALL GAP | `/score` `tier_thresholds` + a sentence | `GET /api/v1/scoring/profile` needs `scoring:manage` (sellers lack it). Act now is three thresholds (`act_now{fit,intent,total}`), `good_fit{fit}`, `not_fit_below`. |
-| 4a | Source trust tile | SMALL GAP | `/score` `trust`, `trust_source_name`, `trust_modifier` | Stored on `account_score` (`trust` 0..1, `trust_source_id`, `trust_modifier`), not in the response. Every source is 0.60 until R3. |
+| 4a | "Act now tier starts at 75" | READY | `/score` `tiles[]` (`key, label, value, max, note`) | The priority tile note is "Act now needs a priority of {total}, fit {fit} and buying intent {intent}." from the tenant thresholds. |
+| 4a | Source trust tile | READY | `/score` `tiles[]` `source_trust` | Value null, note "Not enough data yet" until R3. |
 | 4a | "6 won of 41 sent" on the trust tile | LATER (R3) | none | Trust from outcomes is R3. |
-| 4a | Warm intro line | SMALL GAP | `/score` `warm_introducer_name`, `warm_points` | Stored on `account_score`. |
+| 4a | Warm intro line | READY | `/score` `warm_intro{introducer_name, points}` or null | |
 | 4a | Revenue potential tile | LATER (R2) | none | `revenue_potential_cents`, `revenue_band` null until R2. |
 | 21f | Read weights and cutoffs | SMALL GAP | `GET /api/v1/scoring/profile` (`scoring:manage`) | Returns the profile and `version`; model differs from the screen. Decision 21. |
 | 21f | Sliders summing to 100, `Balance to 100` | SMALL GAP | `PUT /api/v1/scoring/profile` | Weights 0 to 1; fit parts must sum to exactly 100; the "adds up to 100" check maps to fit parts only. Decision 21. |
@@ -706,7 +706,7 @@ Files: `src/http/routes/v1/{sources,batches,imports,arrivals,waiting,feedback}/*
 | Screen § | Need | Status | Endpoint / proposed | Notes |
 |---|---|---|---|---|
 | Shell | Global search: batches | SMALL GAP | `GET /api/v1/batches?q=` (`arrivals:read`) | `listBatches` takes cursor and limit only. |
-| 4a | Source names behind source chains | SMALL GAP | resolve in account endpoints | `GET /api/v1/sources` needs `arrivals:read`; sellers cannot call it. |
+| 4a | Source names behind source chains | READY | `GET /api/v1/accounts/{id}/facts` `source_names{person,agent,vendor}` | Resolved in the route; no `arrivals:read` needed. |
 | 10 | Tree rows: name, kind, status, parent, created, trust, last 30 days | READY | `GET /api/v1/sources` (`arrivals:read`) | DFS tree order with `parent_id`, `user_id`, `status`, `kind`, `trust`, `arrivals_last_30_days`. Offset paged (default 50, max 200): follow `next_cursor`. Archived sources included: hide or add `?status=`. Spec says `sources:manage` (Spec corrections). |
 | 10 | Search, Type filter, option counts | SMALL GAP | `GET /api/v1/sources?kind=&status=&q=` + `meta.counts_by_kind` | Client-side works on the full list. Kinds: `person, agent, vendor, partner, crm, web_form, scheduled_pull`; no "Lists" (Decision 12). |
 | 10, 11 | "How it sends" | SMALL GAP | `method`, `active_key{id,prefix,last_used_at,created_at}\|null` on list and read | Agent or scheduled pull with parent = "Through {parent}"; crm = HubSpot sync; API key from `tenancy.api_key` where `source_id` and not revoked, via a tenancy port. "File upload" has no source meaning (Decision 12); Partner portal is R4. |
@@ -796,12 +796,12 @@ Files: `src/modules/crm/services/{push,read,leads,settings}.ts`, `src/modules/cr
 | Shell | CRM sync indicator | SMALL GAP | `crm_sync{state:"ok"\|"failing"\|"sample"\|"off", last_sync_at}` in `GET /api/v1/me/counts` | Only `GET /api/v1/settings/crm` (`settings:manage`) and `listConnections` (`integrations:manage`, server action) exist, both owner only, and nothing says "last sync". Data: integrations `connection.status`, `mode` and `platform.schedule.last_run_at` of the CRM poll jobs. Every role sees the header. |
 | 2 | "In HubSpot" rows, handoff state chips, retry | SMALL GAP | `QueueRow.crm` + `flags.handoff`; retry `POST /api/v1/accounts/{id}:push` (`crm:push`) | Data READY. Default queue hides accounts with an open assignment, so In-HubSpot rows show only under a `status` filter. States `sending, in_crm, needs_decision, failed, cancelled` need chips. |
 | 4 | Two HubSpot companies linked | READY | `GET /api/v1/accounts/{id}/handoffs` `conflict` | Not in the spec; the page needs a notice. |
-| 4, 4b | `Open in HubSpot` | SMALL GAP | `GET /api/v1/accounts/{id}/handoffs` add `crm_url` | Has `links.company.external_id`, no URL. `GET /api/v1/accounts/{id}/status` has `handoff.crm_url` but needs `crm:push`. Compute as `latestHandoff` does (`crm/services/read.ts:94`). |
-| 4a | "In HubSpot" check card: exists, owner, open deal name, amount, last activity | NEW ENDPOINT | `GET /api/v1/accounts/{id}/crm-check` (`accounts:read`) + `POST /api/v1/accounts/{id}/crm-check:refresh` | `crm.company_check` stores `exists, owner_name, lifecycle, open_deals (count), checked_at`, reachable only via `QueueRow.crm` and assign-preview. Deal name, amount, last activity are not stored for an unlinked company: extend the lookup (`CrmDeal` has name and amount) and store the top open deal. Return `{exists, owner_name, lifecycle, open_deals, open_deal{name, amount_cents, currency}?, last_activity_at, checked_at, hubspot_url}`. |
+| 4, 4b | `Open in HubSpot` | READY | `GET /api/v1/accounts/{id}/handoffs` `handoffs[].crm_url` | Null until the portal id is known. |
+| 4a | "In HubSpot" check card: exists, owner, open deal name, amount, last activity | READY | `GET /api/v1/accounts/{id}/crm-check` (`accounts:read`) + `POST /api/v1/accounts/{id}:check-crm` (`accounts:read`, people only; 503 `crm_unavailable`) | `{exists, owner_name, lifecycle, open_deals, open_deal{name, amount_cents, currency, last_activity_at}, checked_at, hubspot_url}`, or `{exists: null, checked_at: null}` when never checked. The top open deal is stored on `crm.company_check`. |
 | 4b | Outcome tiles: meetings, emails, opportunity | READY | `GET /api/v1/accounts/{id}/handoffs` | `follow_through.counts{emails, calls, meetings, deals, open_deals, tasks_done, tasks_total, overdue, last_activity_at}` and `deals[]{name, stage, status, amount_cents}`. |
-| 4b | Replies "3 of 9" | SMALL GAP | `follow_through.counts.replies` | `crm.activity.kind` has `reply`; counts omit it. |
+| 4b | Replies "3 of 9" | READY | `follow_through.counts.replies` | Counts `reply` activity of the latest completed handoff. |
 | 4b | Buyers engaged "2 of 4", "Next: Nov 18 with ...", committee engagement per person | LATER (R2) | none | Activity is per account; no next meeting stored. |
-| 4b | HubSpot activity feed, "Synced {when}" | NEW ENDPOINT | `GET /api/v1/accounts/{id}/activity?cursor` (`accounts:read`) | `crm.activity(kind, occurred_at)` has no text: `{id, kind, at, summary}` with generated one-liners; Scout's actions from `crm.handoff` (`ownership_action`, `completed_at`, `undone`). "Synced" = `follow_through.checked_at` (READY). |
+| 4b | HubSpot activity feed, "Synced {when}" | READY | `GET /api/v1/accounts/{id}/activity?cursor` (`accounts:read`) | `{data[{id, kind, at, summary}], next_cursor, synced_at}`, 25 a page; Scout rows (kind `scout`) from `crm.handoff`. |
 | 6 | Deal detail in the owner warning | SMALL GAP | `:assign-preview` deal fields | Stored top open deal (row above); see routing. |
 | 6 | Seller without a HubSpot owner | NEW ENDPOINT | `crm_owner_linked` in `GET /api/v1/assignable-sellers` | Today a `blocked` preflight. `GET /api/v1/crm/owners` needs `members:manage`. |
 | 6, 7 | Push failures as a row flag; handoff progress | READY | `QueueRow.flags.handoff`, `GET /api/v1/accounts/{id}/handoffs` (`handoffs[].status, attempts, last_error`) | Push is async (202, 6 attempts, retries from 30 s). |
@@ -990,18 +990,18 @@ Files: `src/platform/{dead-jobs,scheduler,health,relay,diagnostics,audit}.ts`;
 
 R1: items 1 to 5. Later: audit retention and sign-ins (Decision 20).
 
-## playbooks (not built)
+## playbooks
 
-No module code, no routes. Spec `docs/spec/playbooks/index.md` (PLB), `playbook-templates.md`
+R1 module: the account brief and the handoff package (Playbooks minimum). Spec `docs/spec/playbooks/index.md` (PLB), `playbook-templates.md`
 (PLB-E1, R2), `outcomes-and-what-worked.md` (PLB-E6, R3). Planned API: `GET /api/v1/playbooks`,
 `GET /api/v1/playbooks/{id}` (`playbooks:read`), `POST /api/v1/playbooks`, `PATCH /api/v1/playbooks/{id}`
-(`playbooks:manage`). The only R1 item is `HandoffPackageProvider` (Playbooks minimum), not built.
+(`playbooks:manage`). The R1 items are built: the brief endpoints below and `HandoffPackageProvider` (registered in `src/entry/compose.ts`).
 Permissions `playbooks:read`, `playbooks:write`, `playbooks:manage` exist (leader, operator and owner
 hold manage; sellers hold read and write).
 
 | Screen § | Need | Status | Endpoint / proposed | Notes |
 |---|---|---|---|---|
-| 4a | Scout's recommendation, Brief (Overview, Approach, Value angle, Risks, Edit); review record brief (§4b) | LATER (R1, not built) | `HandoffPackageProvider` / account brief | No generator. `/score` `summary` and `would_raise` are a stand-in. Decision 7. |
+| 4a | Scout's recommendation, Brief (Overview, Approach, Value angle, Risks, Edit); review record brief (§4b) | READY | `GET /api/v1/accounts/{id}/brief` (`playbooks:read`), `PUT /api/v1/accounts/{id}/brief/sections/{key}`, `POST /api/v1/accounts/{id}:draft-brief` (`playbooks:write`) | Each piece has `written_by` and `label`; sections `version` for `if_version`. Decision 7. |
 | 6 | Playbook cards in the assign dialog | LATER (R2) | none | `assignment.template_id` null in R1. |
 | 7 | Playbook name, next step, due | LATER (R2) | none | |
 | 20 | List: name, description, status | LATER (R2) | `GET /api/v1/playbooks` | `playbook_template`: name, description, status `draft\|active\|archived`, scope practice or offer, motion. |

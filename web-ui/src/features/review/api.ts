@@ -22,6 +22,9 @@ export type LeadOffer = { offer_id: string; name: string | null; practice_id: st
 
 export type SourceRef = { source_id: string; name: string; kind: string; via: string | null };
 
+/** What the Send-back and Assign dialogs read of an account: a queue row, or the account page's own. */
+export type DialogAccount = { account_id: string; name: string; lead_offer: LeadOffer | null; source: SourceRef | null };
+
 export type QueueRow = {
   account_id: string;
   name: string;
@@ -172,12 +175,39 @@ export const offersQuery = (tenant: string) =>
     staleTime: 5 * 60_000,
   });
 
+export type CurrentAssignment = {
+  id: string;
+  seller_user_id: string;
+  seller_name: string | null;
+  assigned_by_name: string | null;
+  assigned_at: string;
+  notes: string | null;
+  status: string;
+  accepted_how: 'seller' | 'crm_activity' | 'auto_timeout' | null;
+  responded_at: string | null;
+};
+
 export type AccountReview = {
   account_id: string;
   status: { key: string; label: string; color: Color; set_by: string; changed_at: string | null; changed_by_name: string | null } | null;
   stage: string | null;
   stage_label: string | null;
-  sources: { source_id: string; name: string; kind: string; via: string | null; owner_user_id: string | null; owner_name: string | null; arrived_at: string | null }[];
+  /** One step per pipeline stage, names and order from the API (C6). */
+  stages?: { key: string; label: string; at: string | null; current: boolean }[];
+  flags?: RowFlags;
+  current_assignment?: CurrentAssignment | null;
+  approved?: { by_name: string | null; at: string } | null;
+  sources: {
+    source_id: string;
+    name: string;
+    kind: string;
+    via: string | null;
+    owner_user_id: string | null;
+    owner_name: string | null;
+    batch_id?: string | null;
+    arrived_at: string | null;
+  }[];
+  lead_offer?: LeadOffer | null;
   version: number;
 };
 

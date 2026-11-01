@@ -29,3 +29,13 @@ describe('composition root', () => {
     expect(await provider()).toBe(stub);
   });
 });
+
+describe('the real composition root', () => {
+  it('registers the playbooks handoff package for the CRM push (PLB-E3-S4-AC1)', async () => {
+    vi.doUnmock('@/entry/compose');
+    await import('@/entry/compose');
+    const { handoffPackageProvider } = await import('@/modules/crm/contracts/ports');
+    const { playbooksHandoffPackage } = await import('@/modules/playbooks');
+    expect(handoffPackageProvider()).toBe(playbooksHandoffPackage);
+  });
+});

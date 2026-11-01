@@ -1,0 +1,18 @@
+{
+  "account": { "name": "Harbor Foods", "industry": "Food and beverage", "employees": 450, "location": "Portland, OR, US", "description": "Harbor Foods distributes seafood.", "technologies": [] },
+  "offer": { "id": "off_fde", "name": "FDE Sprint", "promise": "We put an engineer on one workflow and get it working in weeks.", "priceMinCents": 4000000, "priceMaxCents": 12000000, "salesCycleDays": 60, "targetTitles": ["COO"], "targetBuyingRoles": ["economic_buyer"], "proofPoints": [] },
+  "practiceName": "Digital Transformation",
+  "caseStudies": [],
+  "signals": [
+    { "id": "sig_hire", "type": "hiring", "kind": "pain", "title": "Hiring in Operations: Data Entry Clerk, Order Processor", "occurredAt": "2026-10-28T00:00:00.000Z", "sourceName": "Vibe Prospecting" }
+  ],
+  "facts": [{ "id": "fct_n5", "key": "name", "value": "Harbor Foods" }],
+  "people": [
+    { "id": "per_pat", "name": "Pat Kim", "title": "COO", "roleKeys": [], "roleLabels": [], "isPrimary": true }
+  ],
+  "score": { "tier": "good_fit", "tierLabel": "Good fit", "priority": 66, "fit": 72, "intent": 50, "fitParts": [], "wouldRaise": [] },
+  "crm": { "exists": true, "ownerName": "Lee Wong", "lifecycle": "customer", "openDeals": 0 },
+  "warmIntro": null,
+  "notes": [],
+  "insights": null
+}
