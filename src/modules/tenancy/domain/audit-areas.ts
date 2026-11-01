@@ -5,7 +5,7 @@ export type AuditArea = (typeof AUDIT_AREAS)[number];
 /** Action prefixes per area. Actions are `module.entity.verb`. */
 const PREFIXES: Record<Exclude<AuditArea, 'other'>, string[]> = {
   tenants: ['tenancy.tenant.'],
-  members: ['tenancy.member.'],
+  members: ['tenancy.member.', 'tenancy.role.'],
   sign_in: ['tenancy.sign_in.'],
   api_keys: ['tenancy.api_key.'],
   integrations: ['integrations.'],

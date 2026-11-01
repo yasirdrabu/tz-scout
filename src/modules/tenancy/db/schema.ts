@@ -8,7 +8,7 @@ import { boolean, index, integer, jsonb, pgSchema, primaryKey, text, timestamp, 
  * tenants): `tenant` (written through `adminDb`), `user`, and the better-auth tables `session`,
  * `account` and `verification` (read and written by better-auth through `adminDb`).
  *
- * Tenant tables (`membership`, `invite`, `api_key`, `member_preference`) carry `tenant_id` and have row level security
+ * Tenant tables (`membership`, `invite`, `api_key`, `member_preference`, `role_permission`) carry `tenant_id` and have row level security
  * enabled and forced with the standard `tenant_isolation` policy (added by hand in the migration).
  */
 export const tenancy = pgSchema('tenancy');
@@ -170,4 +170,17 @@ export const memberPreference = tenancy.table(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.userId, t.key] })],
+);
+
+/** A workspace's saved permission list for one role. No row means the role's default set (Decision 17). */
+export const rolePermission = tenancy.table(
+  'role_permission',
+  {
+    tenantId: text('tenant_id').notNull(),
+    role: text('role').notNull(),
+    permissions: text('permissions').array().notNull(),
+    updatedBy: text('updated_by'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.role] })],
 );

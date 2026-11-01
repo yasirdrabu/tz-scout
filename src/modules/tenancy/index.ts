@@ -64,3 +64,5 @@ export { clientIp } from './services/principal';
 export { clearPreference, getPreference, setPreference } from './services/preferences';
 export { adminTenants, setTenantStatus, type AdminActor, type AdminTenantRow } from './services/tenants';
 export { addPlatformAdmin, platformAdmins, removePlatformAdmin, type PlatformAdmin } from './services/platform-admins';
+export { listRoles, loadRoleSets, setRolePermissions, type RoleView } from './services/roles';
+export { forgetAccess } from './services/principal';
