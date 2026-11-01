@@ -56,12 +56,22 @@ export function followUps(i: FollowUpInput): FollowUp[] {
     Proof: `Hi ${first}, ${proof ? ensureStop(proof.replace(/^Guarantee:\s*/i, 'our guarantee: ')) : `here's what ${offer.name} is in one line.`} ${ensureStop(offer.promise)}\n\nWould it help to see how that would look for ${company}?`,
     'Close the loop': `Hi ${first}, I'll close the loop here so I'm not crowding your inbox. If ${offer.name.toLowerCase()} isn't a priority right now, no problem at all. If it is, just reply with a good week and I'll make it easy.`,
   };
+  // A safe fallback per purpose, without the offer's name or proof line.
+  const fallbacks: Record<Purpose, string> = {
+    'New angle': plainAngle,
+    Proof: `Hi ${first}, ${ensureStop(offer.promise)}\n\nWould it help to see how that would look for ${company}?`,
+    'Close the loop': `Hi ${first}, I'll close the loop here so I'm not crowding your inbox. If this isn't a priority right now, no problem at all. If it is, just reply with a good week and I'll make it easy.`,
+  };
   const who = i.buyer?.name ?? company;
-  const n = i.days.length;
-  return i.days.map((day, idx) => {
-    const purpose = purposeAt(idx, n);
-    let body = bodies[purpose];
-    if (!isBuyerSafe(body, i.signals)) body = purpose === 'New angle' ? plainAngle : body;
-    return { day, subject: `Follow-up ${idx + 1} of ${n} (day ${day}): ${purpose}, email ${who}`, body: `${body}\n\n(${AI_LABEL.rules})` };
+  const kept = i.days.flatMap((day, idx) => {
+    const purpose = purposeAt(idx, i.days.length);
+    const body = [bodies[purpose], fallbacks[purpose]].find((b) => isBuyerSafe(b, i.signals));
+    // No safe body: the follow-up is left out.
+    return body ? [{ day, purpose, body }] : [];
   });
+  return kept.map((f, idx) => ({
+    day: f.day,
+    subject: `Follow-up ${idx + 1} of ${kept.length} (day ${f.day}): ${f.purpose}, email ${who}`,
+    body: `${f.body}\n\n(${AI_LABEL.rules})`,
+  }));
 }

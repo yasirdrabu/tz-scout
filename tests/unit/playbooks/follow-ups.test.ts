@@ -52,6 +52,18 @@ describe('followUps (Ruling 10)', () => {
     for (const f of out) expect(f.body).not.toMatch(/governance|lawsuit|breach|researching/i);
   });
 
+  it('an unsafe offer name falls back per purpose, and a follow-up with no safe body is dropped', () => {
+    const offer = { name: 'Breach response', promise: 'We respond to breaches within the hour.', proofPoints: ['Cut response time for 3 banks'] };
+    const out = followUps({ ...base, offer, days: [3, 7, 14] });
+    for (const f of out) expect(f.body).not.toMatch(/breach/i);
+    expect(out.map((f) => f.subject)).toEqual(['Follow-up 1 of 2 (day 3): New angle, email Maria Lopez', 'Follow-up 2 of 2 (day 14): Close the loop, email Maria Lopez']);
+    expect(out[1]!.body).toContain("If this isn't a priority right now");
+    const safePromise = followUps({ ...base, offer: { ...offer, promise: 'We get you back to normal within the hour.', proofPoints: ['Our breach drills run monthly'] }, days: [3, 7, 14] });
+    expect(safePromise[1]!.body).toBe(
+      'Hi Maria, We get you back to normal within the hour.\n\nWould it help to see how that would look for Metro Valley Transit?\n\n(Assembled from rules)',
+    );
+  });
+
   it('is empty with no offer, so the CRM keeps its own tasks', () => {
     expect(followUps({ ...base, offer: null, days: [3, 7, 14] })).toEqual([]);
   });
