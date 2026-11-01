@@ -1,5 +1,5 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { shows, signInAs } from './helpers';
+import { sendAccount, shows, signInAs } from './helpers';
 
 // The review flow (screens.md, Main flows 1 and 2): a leader assigns from the queue and the AE
 // accepts; the AE declines with a reason and the account is back in the queue; a send back with a
@@ -7,35 +7,6 @@ import { shows, signInAs } from './helpers';
 
 const LEADER = 'zach.wiant@taazaa.com';
 const AE = 'ash@taazaa.com';
-
-/** Sends an account as the signed-in person and waits until the worker has put it in the queue. */
-async function sendAccount(page: Page, name: string) {
-  const domain = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}.com`;
-  const status = await page.evaluate(
-    async ({ name, domain }) => {
-      const res = await fetch('/api/v1/arrivals', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json', 'x-scout-tenant': 'taazaa', 'idempotency-key': crypto.randomUUID() },
-        body: JSON.stringify({ account: { name, domain } }),
-      });
-      return res.status;
-    },
-    { name, domain },
-  );
-  expect(status).toBe(202);
-  await expect
-    .poll(
-      () =>
-        page.evaluate(async (name) => {
-          const res = await fetch('/api/v1/review-queue?limit=200', { credentials: 'include', headers: { 'x-scout-tenant': 'taazaa' } });
-          const body = (await res.json()) as { data?: { name: string }[] };
-          return (body.data ?? []).some((a) => a.name === name);
-        }, name),
-      { timeout: 60_000 },
-    )
-    .toBe(true);
-}
 
 /** A second person in their own browser context. The AE signs in once first, so their membership is active. */
 async function aePage(browser: Browser) {

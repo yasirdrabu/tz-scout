@@ -18,6 +18,7 @@ import { errorText } from '../settings/shared';
 import { accountQuery, BUSY_REFRESH_MS, handoffsQuery, PAGE_REFRESH_MS } from './api';
 import styles from './Account.module.css';
 import { AccountHeader, ConflictNotice, type Stepper } from './AccountHeader';
+import { AssignedView } from './AssignedView';
 import { ReviewView } from './ReviewView';
 import { StageTracker } from './StageTracker';
 
@@ -216,7 +217,7 @@ function Account({ tenant, id, me }: { tenant: string; id: string; me: Me }) {
       />
       {handoffs.data?.conflict && <ConflictNotice />}
       <StageTracker review={r} reviewer={hasScope(me, 'review:act')} />
-      <ReviewView tenant={tenant} me={me} account={a} review={r} />
+      {r.current_assignment ? <AssignedView tenant={tenant} me={me} account={a} review={r} /> : <ReviewView tenant={tenant} me={me} account={a} review={r} />}
 
       {sendBack && (
         <SendBackDialog
