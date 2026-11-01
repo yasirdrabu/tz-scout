@@ -1,26 +1,38 @@
-import { createRoute } from '@tanstack/react-router';
+import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
+import { pickStrings } from '../lib/search';
 import { Placeholder } from './Placeholder';
 import { SCREENS } from './screens';
 import { tenantRoute } from './tenant';
 
 // Placeholders for every workspace screen. Each feature plan replaces one with the real screen.
 
+/**
+ * The queue's tier, filters (`status` keys comma separated) and the account open in the peek drawer, so
+ * a link or a reload keeps the place (C10).
+ */
+export type QueueSearch = { tier?: string; practice?: string; offer?: string; source?: string; status?: string; peek?: string };
+
 export const queueRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'queue',
-  component: () => <Placeholder screen={SCREENS.queue} />,
+  validateSearch: (search: Record<string, unknown>): QueueSearch => pickStrings(search, ['tier', 'practice', 'offer', 'source', 'status', 'peek']),
+  component: lazyRouteComponent(() => import('../features/review/QueueScreen'), 'QueueScreen'),
 });
 
 export const myRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'my',
-  component: () => <Placeholder screen={SCREENS.my} />,
+  component: lazyRouteComponent(() => import('../features/accounts/MyAccountsScreen'), 'MyAccountsScreen'),
 });
+
+/** All accounts' stage tab, search and filters (`owner` is a user id or `unassigned`), so the URL keeps them (C10). */
+export type AccountsSearch = { stage?: string; q?: string; owner?: string; practice?: string; source?: string };
 
 export const accountsRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'accounts',
-  component: () => <Placeholder screen={SCREENS.accounts} />,
+  validateSearch: (search: Record<string, unknown>): AccountsSearch => pickStrings(search, ['stage', 'q', 'owner', 'practice', 'source']),
+  component: lazyRouteComponent(() => import('../features/accounts/AllAccountsScreen'), 'AllAccountsScreen'),
 });
 
 export const accountRoute = createRoute({

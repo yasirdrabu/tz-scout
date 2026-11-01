@@ -46,3 +46,33 @@
   flex-direction: column;
   gap: 16px;
 }
+
+.count {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-bottom: 0;
+  border-radius: var(--radius-md);
+  background: var(--ink-150);
+}
+
+.segmented .tab {
+  height: 28px;
+  margin-bottom: 0;
+  padding: 0 12px;
+  border-bottom: 0;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.segmented .tab[aria-selected='true'] {
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}

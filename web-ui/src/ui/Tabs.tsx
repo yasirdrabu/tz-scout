@@ -2,7 +2,8 @@ import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { cx } from '../lib/cx';
 import styles from './Tabs.module.css';
 
-export type Tab = { id: string; label: string };
+/** `count` shows after the label, for example accounts in a tier (from the API). */
+export type Tab = { id: string; label: string; count?: number };
 
 export type TabsProps = {
   /** Names the tab list, for example "Member status". */
@@ -11,6 +12,8 @@ export type TabsProps = {
   value: string;
   onChange: (id: string) => void;
   size?: 'md' | 'sm';
+  /** `segmented`: pills on a sunken track, as the queue's tier tabs. */
+  variant?: 'line' | 'segmented';
   /** The panel for the selected tab. */
   children?: ReactNode;
 };
@@ -23,7 +26,7 @@ const KEYS: Record<string, (i: number, n: number) => number> = {
 };
 
 /** Tabs with their panel: arrow keys, Home and End move between tabs and select them. */
-export function Tabs({ label, tabs, value, onChange, size = 'md', children }: TabsProps) {
+export function Tabs({ label, tabs, value, onChange, size = 'md', variant = 'line', children }: TabsProps) {
   const base = useId();
   const list = useRef<HTMLDivElement>(null);
   const tabId = (id: string) => `${base}-tab-${id}`;
@@ -40,7 +43,7 @@ export function Tabs({ label, tabs, value, onChange, size = 'md', children }: Ta
 
   return (
     <div className={styles.tabs}>
-      <div ref={list} role="tablist" aria-label={label} className={cx(styles.list, styles[size])}>
+      <div ref={list} role="tablist" aria-label={label} className={cx(styles.list, styles[size], variant === 'segmented' && styles.segmented)}>
         {tabs.map((t) => {
           const selected = t.id === value;
           return (
@@ -57,6 +60,12 @@ export function Tabs({ label, tabs, value, onChange, size = 'md', children }: Ta
               onKeyDown={onKeyDown}
             >
               {t.label}
+              {t.count !== undefined && (
+                <>
+                  {' '}
+                  <span className={styles.count}>{t.count}</span>
+                </>
+              )}
             </button>
           );
         })}

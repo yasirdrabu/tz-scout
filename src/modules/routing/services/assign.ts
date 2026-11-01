@@ -9,7 +9,8 @@ import { newId } from '@/platform/ids';
 import { assignmentCreated } from '../contracts/events';
 import { ownershipPreflight, type OwnershipPreflightResult, type PreflightOptions } from '../contracts/ports';
 import type { HandoffFlag } from '../contracts/types';
-import { accountReview, assignment } from '../db/schema';
+import { accountReview, assignment, leadOfferChange } from '../db/schema';
+import { leadOffer, loadNames } from './lookups';
 import {
   applyStatusChange,
   changeStatus,
@@ -75,7 +76,9 @@ async function plan(
   const statuses = await loadStatuses(ctx);
   const current = statuses.find((s) => s.key === row.statusKey);
   if (current?.isDeclined) throw conflict('Reopen it before assigning.');
-  const approve = current?.countsAsReviewed ? undefined : statuses.find((s) => !s.archivedAt && s.countsAsReviewed && !s.isDeclined);
+  // A sent-back account is reviewed but not approved, so assigning it approves it too.
+  const approved = current?.countsAsReviewed && !current.returnsToSource;
+  const approve = approved ? undefined : statuses.find((s) => !s.archivedAt && s.countsAsReviewed && !s.isDeclined && !s.returnsToSource);
   const preflight = await ownershipPreflight().check(ctx, row.accountId, sellerUserId, opts);
   const open = await openAssignment(ctx, row.accountId);
   return {
@@ -146,6 +149,9 @@ export async function assign(ctx: ModuleContext, accountId: string, input: Assig
   }
 
   const leadOfferOverrideId = input.leadOfferId ?? row.leadOfferOverrideId;
+  if (leadOfferOverrideId !== row.leadOfferOverrideId) {
+    await ctx.tx.insert(leadOfferChange).values({ id: newId('loc'), tenantId: ctx.tenantId, accountId, fromOfferId: row.leadOfferOverrideId, toOfferId: leadOfferOverrideId, by });
+  }
   // The handoff to the CRM starts now; its id arrives with the later CRM events (Ruling 19).
   const sending: HandoffFlag = { handoffId: null, state: 'sending', at: new Date().toISOString() };
   // In SQL, so the "New from" that ending the replaced assignment cleared stays cleared.
@@ -200,4 +206,32 @@ export async function bulk(ctx: ModuleContext, accountIds: string[], action: Bul
     }
   }
   return ids.map((id) => results.get(id)!);
+}
+
+export type LeadOfferView = {
+  accountId: string;
+  /** The offer the account leads with: the one picked, else Scout's best. */
+  leadOffer: { offerId: string; name: string | null; practiceId: string | null; practiceName: string | null; chosen: boolean } | null;
+  bestOfferId: string | null;
+};
+
+/**
+ * Picks the offer the account leads with (Decision 5), approved offers only; null gives it back to
+ * Scout's best offer. Recorded for the change log and sent to the summary with the review snapshot.
+ */
+export async function setLeadOffer(ctx: ModuleContext, accountId: string, offerId: string | null): Promise<LeadOfferView> {
+  const by = requirePerson(ctx);
+  const row = await lockForWrite(ctx, accountId);
+  if (offerId) await checkLeadOffer(ctx, offerId).catch((e: unknown) => {
+    // The body names the field `offer_id`.
+    if (e instanceof ScoutError && e.status === 400) throw invalid('Pick an approved offer.', 'offer_id');
+    throw e;
+  });
+  if (row.leadOfferOverrideId !== offerId) {
+    await ctx.tx.update(accountReview).set({ leadOfferOverrideId: offerId }).where(and(eq(accountReview.tenantId, ctx.tenantId), eq(accountReview.accountId, accountId)));
+    await ctx.tx.insert(leadOfferChange).values({ id: newId('loc'), tenantId: ctx.tenantId, accountId, fromOfferId: row.leadOfferOverrideId, toOfferId: offerId, by });
+    await publishReviewSnapshot(ctx, accountId);
+  }
+  const bestOfferId = (await getSummaries(ctx, [accountId]))[0]?.bestOfferId ?? null;
+  return { accountId, leadOffer: leadOffer(await loadNames(ctx), offerId, bestOfferId), bestOfferId };
 }

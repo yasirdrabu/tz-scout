@@ -84,3 +84,20 @@
   width: 15px;
   height: 15px;
 }
+
+a.button:hover {
+  text-decoration: none;
+}
+
+a.primary,
+a.primary:hover,
+a.dark,
+a.dark:hover {
+  color: #ffffff;
+}
+
+a.secondary,
+a.secondary:hover,
+a.ghost:hover {
+  color: var(--text);
+}

@@ -29,7 +29,7 @@ describe('R1b exit path', () => {
     t = await routingTenant();
   });
 
-  it('an agent sends an account; it is scored, queued as Unvetted, approved and assigned, accepted and read back with the owner name', async () => {
+  it('an agent sends an account; it is scored, queued as Ready for review, approved and assigned, accepted and read back with the owner name', async () => {
     const seller = await member(t, 'seller');
     const { agentId } = await personAndAgent(t, 'Exit');
     const practice = await t.run((ctx) => createPractice(ctx, { name: 'Exit Practice', slug: `exit-${Date.now().toString(36)}` }));
@@ -57,11 +57,11 @@ describe('R1b exit path', () => {
     expect(score!.priority).toBeGreaterThan(0);
     expect((await asPerson(t, (ctx) => explainScore(ctx, accountId)))?.summary).toBeTruthy();
 
-    // In the queue as Unvetted with its priority.
+    // In the queue as Ready for review with its priority.
     const queue = await asPerson(t, (ctx) => listQueue(ctx));
     expect(queue.data.find((r) => r.accountId === accountId)).toMatchObject({
       reviewStatusKey: 'unvetted',
-      reviewStatusLabel: 'Unvetted',
+      reviewStatusLabel: 'Ready for review',
       priority: score!.priority,
     });
 
@@ -154,7 +154,7 @@ describe('backfillR1b', () => {
     expect(await counts(t.tenantId)).toMatchObject({ reviews: 0, statuses: 0, profiles: 0, schedules: 0 });
 
     await t.run((ctx) => backfillR1b(ctx));
-    expect(await counts(t.tenantId)).toMatchObject({ reviews: 3, statuses: 4, settings: 1, profiles: 1, schedules: 2, snapshots: 3, rescorePages: 1 });
+    expect(await counts(t.tenantId)).toMatchObject({ reviews: 3, statuses: 5, settings: 1, profiles: 1, schedules: 2, snapshots: 3, rescorePages: 1 });
 
     await runOutbox(t.tenantId);
     for (const id of ids) {

@@ -3,6 +3,7 @@ export { createTenant, tenantSummary, tenantTimezone, type CreateTenantInput } f
 export {
   addMember,
   changeMember,
+  assignableMembers,
   crmOwnerId,
   memberRole,
   members,
@@ -48,6 +49,7 @@ export {
   type InviteResult,
   type MemberRow,
   type MemberCounts,
+  type AssignableMember,
   type MemberLock,
 } from './services/members';
 export { PERMISSION_GROUP_NAMES, permissionGroup, type PermissionGroup } from './domain/permission-labels';
@@ -57,5 +59,6 @@ export { AUDIT_AREAS, type AuditArea } from './domain/audit-areas';
 export { auditEntries, type AuditEntryView, type AuditQuery } from './services/audit';
 export { endSessions, listSessions, signInFacts, type SessionView, type SignInMethod } from './services/sessions';
 export { clientIp } from './services/principal';
+export { clearPreference, getPreference, setPreference } from './services/preferences';
 export { adminTenants, setTenantStatus, type AdminActor, type AdminTenantRow } from './services/tenants';
 export { addPlatformAdmin, platformAdmins, removePlatformAdmin, type PlatformAdmin } from './services/platform-admins';

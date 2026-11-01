@@ -29,6 +29,7 @@ One-shot commands
   import <slug> <file>  Import a CSV or XLSX list into a workspace, as the platform admin's person source
   backfill-r1b <slug>   Give a workspace built before R1b its scoring and routing defaults, a review row for each account, and a rescore
   backfill-r1c <slug>   Give a workspace built before R1c its CRM defaults and schedules, a company check for each account, and its HubSpot links
+  backfill-review-flow <slug>  Send a workspace's earlier lead offer picks to the account summary, so the offer filter finds them
   keys:create         --tenant <slug> --name <name> --scopes a,b [--test]
   tenants:create      --slug <s> --name <n> --currency <USD> --timezone <zone> --owner-email <email>
                       Operator command: run it on the server. It acts as a system platform admin.
@@ -128,10 +129,10 @@ async function importFile(slug: string, file: string): Promise<number> {
   return 0;
 }
 
-/** Brings a workspace built before R1b or R1c up to date (see backfillR1b and backfillR1c). Safe to run again. */
-async function backfillTenant(slug: string, release: 'r1b' | 'r1c'): Promise<number> {
-  const { backfillR1b, backfillR1c } = await import('./seed');
-  const backfill = release === 'r1b' ? backfillR1b : backfillR1c;
+/** Brings a workspace built before R1b, R1c or the review flow up to date (see backfillR1b, backfillR1c, backfillReviewFlow). Safe to run again. */
+async function backfillTenant(slug: string, release: 'r1b' | 'r1c' | 'review-flow'): Promise<number> {
+  const { backfillR1b, backfillR1c, backfillReviewFlow } = await import('./seed');
+  const backfill = release === 'r1b' ? backfillR1b : release === 'r1c' ? backfillR1c : backfillReviewFlow;
   const { ensurePlatformAdmin, listTenants } = await import('@/modules/tenancy');
   const { withTenant } = await import('@/platform/db/tenant');
   const { newId } = await import('@/platform/ids');
@@ -141,7 +142,8 @@ async function backfillTenant(slug: string, release: 'r1b' | 'r1c'): Promise<num
   await withTenant(tenant.id, (tx) =>
     backfill({ tenantId: tenant.id, actor: { kind: 'system', id: adminId }, correlationId: newId('cor'), tx }),
   );
-  console.log(`Workspace ${slug} is up to date. ${release === 'r1b' ? 'Scores will refresh as the worker runs.' : 'Company checks will run as the worker runs.'}`);
+  const after = { r1b: 'Scores will refresh as the worker runs.', r1c: 'Company checks will run as the worker runs.', 'review-flow': 'The account summaries will update as the worker runs.' }[release];
+  console.log(`Workspace ${slug} is up to date. ${after}`);
   return 0;
 }
 
@@ -192,6 +194,13 @@ ${USAGE}`);
 
 ${USAGE}`);
       return backfillTenant(slug, 'r1c');
+    }
+    case 'backfill-review-flow': {
+      const [slug] = rest;
+      if (!slug) throw new Error(`Usage: scout backfill-review-flow <tenant-slug>
+
+${USAGE}`);
+      return backfillTenant(slug, 'review-flow');
     }
     case 'keys:create': {
       const { values } = parseArgs({

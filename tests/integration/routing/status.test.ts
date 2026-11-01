@@ -90,7 +90,7 @@ describe('account status (REV-E4-S2)', () => {
       ctx.tx.insert(reviewStatusDef).values({ id: newId('rsd'), tenantId: ctx.tenantId, key: 'needs_info', label: 'Needs more info', order: 5, returnsToSource: true }).onConflictDoNothing(),
     );
     const b = await arrivedAccount(t, { name: 'Back Co' });
-    await asPerson(t, (ctx) => changeStatus(ctx, b, { to: 'needs_info', note: 'Send the website' }));
+    await asPerson(t, (ctx) => changeStatus(ctx, b, { to: 'needs_info', reasonKey: 'bad_contact', note: 'Send the website' }));
     expect(await asPerson(t, (ctx) => getAccountStatus(ctx, b))).toMatchObject({
       reviewStatus: 'needs_info',
       declinedReason: null,

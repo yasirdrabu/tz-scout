@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mergeAccounts } from '@/modules/accounts';
 import { assign, changeStatus, reviewChanged, routingAccountMerged, setInsights, statusChanged } from '@/modules/routing';
-import { accountReview, assignment, reviewStatusDef, stageChange, statusChange } from '@/modules/routing/db/schema';
+import { accountReview, assignment, declineReasonDef, reviewStatusDef, stageChange, statusChange } from '@/modules/routing/db/schema';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
 import type { ModuleContext } from '@/platform/context';
@@ -79,17 +79,22 @@ describe('changeStatus (REV-E1-S2)', () => {
     expect(await reviewOf(a)).toMatchObject({ statusKey: 'declined', stage: 'declined' });
   });
 
-  it('send back needs a note (AC3)', async () => {
+  it('send back needs a send-back reason, and a note only when the reason needs one (AC3, Decision 1)', async () => {
     const a = await arrivedAccount(t);
     await t.run((ctx) =>
       ctx.tx
         .insert(reviewStatusDef)
-        .values({ id: newId('rsd'), tenantId: ctx.tenantId, key: 'needs_info', label: 'Needs more info', order: 5, returnsToSource: true })
+        .values({ id: newId('rsd'), tenantId: ctx.tenantId, key: 'needs_info', label: 'Needs more info', order: 6, returnsToSource: true })
         .onConflictDoNothing(),
     );
-    expect(await rejects(asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'needs_info' })))).toEqual({ status: 400, title: 'Say what the source should fix' });
-    await asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'needs_info', note: 'Send the website' }));
+    await t.run((ctx) => ctx.tx.update(declineReasonDef).set({ noteRequired: true }).where(and(eq(declineReasonDef.tenantId, ctx.tenantId), eq(declineReasonDef.key, 'bad_contact'))));
+    expect(await rejects(asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'needs_info', note: 'Send the website' })))).toEqual({ status: 400, title: 'Pick a reason' });
+    expect(await rejects(asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'needs_info', reasonKey: 'bad_contact' })))).toEqual({ status: 400, title: 'Say what the source should fix.' });
+    await asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'needs_info', reasonKey: 'bad_contact', note: 'Send the website' }));
     expect((await reviewOf(a)).statusKey).toBe('needs_info');
+    const b = await arrivedAccount(t);
+    await asPerson(t, (ctx) => changeStatus(ctx, b, { to: 'sent_back', reasonKey: 'wrong_practice' }));
+    expect((await reviewOf(b)).statusKey).toBe('sent_back');
   });
 
   it('refuses a status that is not on the list', async () => {

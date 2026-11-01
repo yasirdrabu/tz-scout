@@ -1,9 +1,9 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { listAccountIds } from '@/modules/accounts';
 import { initialReviewStatusKeys } from '@/modules/intake';
 import type { ModuleContext } from '@/platform/context';
 import { accountReview } from '../db/schema';
-import { ensureReview, loadStatuses } from './review';
+import { ensureReview, loadStatuses, lockRow } from './review';
 import { publishReviewSnapshot } from './snapshot';
 
 const PAGE = 200;
@@ -38,4 +38,25 @@ export async function backfillReviews(ctx: ModuleContext): Promise<number> {
     afterId = page.nextAfterId ?? undefined;
   } while (afterId);
   return created;
+}
+
+/**
+ * Review flow backfill: lead offers picked before the review snapshot carried them never reached the
+ * account summary, so the offer filter and facets missed them. Republishes the snapshot (locked, one
+ * version bump each) for every live review with a lead offer. Safe to run again. Returns how many it sent.
+ */
+export async function backfillLeadOffers(ctx: ModuleContext): Promise<number> {
+  const rows = await ctx.tx
+    .select({ id: accountReview.accountId })
+    .from(accountReview)
+    .where(and(eq(accountReview.tenantId, ctx.tenantId), isNotNull(accountReview.leadOfferOverrideId), isNull(accountReview.mergedInto)))
+    .orderBy(asc(accountReview.accountId));
+  let sent = 0;
+  for (const { id } of rows) {
+    const row = await lockRow(ctx, id);
+    if (!row || row.mergedInto || !row.leadOfferOverrideId) continue;
+    await publishReviewSnapshot(ctx, id);
+    sent++;
+  }
+  return sent;
 }

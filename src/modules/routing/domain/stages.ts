@@ -43,3 +43,18 @@ export function nextStage(current: Stage, event: StageEvent): Stage | null {
       return current === 'assigned' ? 'reviewed' : null;
   }
 }
+
+/** The pipeline stages in order, then the exits, with the names people see (C6, until stages are configurable, Decision 6). */
+export const STAGE_LABELS: Record<Stage, string> = {
+  arrived: 'Arrived',
+  reviewed: 'Reviewed',
+  assigned: 'Assigned',
+  engaged: 'Engaged',
+  opportunity: 'Opportunity',
+  won: 'Won',
+  lost: 'Lost',
+  declined: 'Not pursued',
+};
+export const PIPELINE_STAGES = FUNNEL;
+/** Exits: what All accounts' "Other" tab holds, with the accounts sent back to their source. */
+export const EXIT_STAGES = ['lost', 'declined'] as const;

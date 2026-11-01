@@ -9,7 +9,7 @@ import type { ReviewSnapshot } from '../contracts/types';
 import { DEFAULT_AUTO_ACCEPT_WORKING_DAYS } from '../defaults';
 import { accountReview, assignment, declineReasonDef, routingSetting } from '../db/schema';
 import { addWorkingDays } from '../domain/working-days';
-import { declineProblems } from '../domain/status-rules';
+import { declineProblems, inList, type ReasonDef } from '../domain/status-rules';
 import { assign, type AssignmentView } from './assign';
 import { checkLength, endAssignment, lockForWrite, lockRow, OPEN_STATUSES, openAssignment, requirePerson } from './review';
 import { currentReviewSnapshot, publishReviewSnapshot } from './snapshot';
@@ -81,7 +81,7 @@ export async function decline(ctx: ModuleContext, assignmentId: string, input: D
 
   const defs = await ctx.tx.select().from(declineReasonDef).where(eq(declineReasonDef.tenantId, ctx.tenantId));
   const reasonKey = input.reasonKey?.trim() ?? '';
-  const reason = defs.find((d) => d.key === reasonKey && d.appliesTo !== 'review' && !d.archivedAt);
+  const reason = defs.find((d) => d.key === reasonKey && inList(d as ReasonDef, 'assignment') && !d.archivedAt);
   const problems = declineProblems(reason, note);
   if (problems.length > 0) {
     throw new ScoutError({

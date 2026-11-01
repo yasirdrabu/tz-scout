@@ -1,11 +1,11 @@
-import { and, asc, count, desc, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, min, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { account, accountAlias, accountSummary, signal } from '../db/schema';
 import { overlaps, visibleAccounts } from './visibility';
 
-/** `queue` is the review queue's order: priority, then newest first. */
-export type SearchSort = 'priority' | 'last_signal' | 'created' | 'name' | 'queue';
+/** `queue` is the review queue's order: priority, then newest first. `stage_priority` is All accounts: pipeline stage, then priority. */
+export type SearchSort = 'priority' | 'last_signal' | 'created' | 'name' | 'queue' | 'stage_priority';
 
 /** Every ACC-E8 filter, plus the review queue's. Scoring columns come from scoring.account.scored and review columns from routing.review.changed; CRM columns stay empty until R1c, so filters on them match nothing for now. */
 export type SearchQuery = {
@@ -25,6 +25,12 @@ export type SearchQuery = {
   priorityMin?: number;
   reviewStatusKey?: string;
   stage?: string;
+  /** Any of these stages. */
+  stages?: string[];
+  /** Accounts whose stage is one of `stages` or whose review status is one of `reviewStatusKeys` (All accounts' "Other" tab). */
+  stageOrStatus?: { stages: string[]; reviewStatusKeys: string[] };
+  /** None of these review statuses. */
+  notReviewStatusKeys?: string[];
   ownerUserId?: string;
   unassigned?: boolean;
   sourceId?: string;
@@ -33,6 +39,8 @@ export type SearchQuery = {
   excluded?: boolean;
   /** Any of these review statuses. */
   reviewStatusKeys?: string[];
+  /** Accounts whose summary changed at or after this time (polling for updates). */
+  updatedSince?: Date;
   /** Accounts created at or after this time. */
   arrivedSince?: Date;
   /** Only these accounts; at most 1,000. */
@@ -60,7 +68,22 @@ export type SearchRow = {
   lastSignalAt: Date | null;
   excludedReasonKey: string | null;
   createdAt: Date;
+  industry: string | null;
+  hqCity: string | null;
+  hqState: string | null;
+  fit: number | null;
+  intent: number | null;
+  /** The practice of the best offer. */
+  practiceId: string | null;
+  /** Every source of every chain the account arrived through. */
+  sourceIds: string[];
+  /** The offer someone picked over Scout's best (Decision 5), or null. */
+  leadOfferOverrideId: string | null;
+  noteCount: number;
 };
+
+/** The offer an account leads with (Decision 5): someone's pick, else Scout's best. The offer filter and facet use it. */
+const LEAD_OFFER = sql`coalesce(${accountSummary.leadOfferOverrideId}, ${accountSummary.bestOfferId})`;
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -73,6 +96,12 @@ const SORTS: Record<SearchSort, { expr: SQL; cast: 'int' | 'timestamptz' | 'text
   created: { expr: sql`${account.createdAt}`, cast: 'timestamptz', dir: 'desc' },
   name: { expr: sql`${account.name}`, cast: 'text', dir: 'asc' },
   queue: { expr: sql`${accountSummary.priority}`, cast: 'int', dir: 'desc', idDir: 'desc' },
+  // One integer key: the pipeline position of the stage, then priority high to low (no priority last).
+  stage_priority: {
+    expr: sql`(case ${accountSummary.stage} when 'arrived' then 0 when 'reviewed' then 1 when 'assigned' then 2 when 'engaged' then 3 when 'opportunity' then 4 when 'won' then 5 when 'lost' then 6 when 'declined' then 7 else 8 end) * 1000 + (500 - coalesce(${accountSummary.priority}, -1))`,
+    cast: 'int',
+    dir: 'asc',
+  },
 };
 
 /** The sort key travels as text so timestamps keep their microseconds. */
@@ -151,11 +180,20 @@ function filters(ctx: ModuleContext, q: SearchQuery): (SQL | undefined)[] {
     q.practiceId
       ? or(sql`${accountSummary.practiceIds} @> ARRAY[${q.practiceId}]::text[]`, eq(accountSummary.practiceId, q.practiceId))
       : undefined,
-    q.bestOfferId ? eq(accountSummary.bestOfferId, q.bestOfferId) : undefined,
+    q.bestOfferId ? sql`${LEAD_OFFER} = ${q.bestOfferId}` : undefined,
     q.tier ? eq(accountSummary.tier, q.tier) : undefined,
     q.priorityMin !== undefined ? gte(accountSummary.priority, q.priorityMin) : undefined,
     q.reviewStatusKey ? eq(accountSummary.reviewStatusKey, q.reviewStatusKey) : undefined,
     q.stage ? eq(accountSummary.stage, q.stage) : undefined,
+    q.stages ? (q.stages.length ? inArray(accountSummary.stage, q.stages) : sql`false`) : undefined,
+    q.stageOrStatus
+      ? or(
+          q.stageOrStatus.stages.length ? inArray(accountSummary.stage, q.stageOrStatus.stages) : undefined,
+          q.stageOrStatus.reviewStatusKeys.length ? inArray(accountSummary.reviewStatusKey, q.stageOrStatus.reviewStatusKeys) : undefined,
+          sql`false`,
+        )
+      : undefined,
+    q.notReviewStatusKeys?.length ? or(isNull(accountSummary.reviewStatusKey), notInArray(accountSummary.reviewStatusKey, q.notReviewStatusKeys)) : undefined,
     q.ownerUserId ? eq(accountSummary.ownerUserId, q.ownerUserId) : undefined,
     q.unassigned ? isNull(accountSummary.ownerUserId) : undefined,
     q.sourceId ? sql`${accountSummary.sourceIds} @> ARRAY[${q.sourceId}]::text[]` : undefined,
@@ -176,6 +214,7 @@ function filters(ctx: ModuleContext, q: SearchQuery): (SQL | undefined)[] {
       : undefined,
     q.reviewStatusKeys ? (q.reviewStatusKeys.length ? inArray(accountSummary.reviewStatusKey, q.reviewStatusKeys) : sql`false`) : undefined,
     q.arrivedSince ? gte(account.createdAt, q.arrivedSince) : undefined,
+    q.updatedSince ? gte(accountSummary.updatedAt, q.updatedSince) : undefined,
     q.accountIds ? (q.accountIds.length ? inArray(account.id, q.accountIds) : sql`false`) : undefined,
     q.reviewFlags ? (q.reviewFlags.length ? overlaps(accountSummary.reviewFlags, q.reviewFlags) : sql`false`) : undefined,
     q.queueDefault
@@ -212,6 +251,48 @@ export async function countAccounts(ctx: ModuleContext, q: SearchQuery = {}): Pr
   return row?.n ?? 0;
 }
 
+/** What `countAccountsBy` groups on. `practice` is any practice the account is in or its best offer's; `source` any source of its chains. */
+export type FacetKey = 'tier' | 'practice' | 'offer' | 'source' | 'review_status' | 'stage' | 'owner';
+
+const FACET_VALUES: Record<FacetKey, SQL> = {
+  tier: sql`array[${accountSummary.tier}]`,
+  practice: sql`array_append(${accountSummary.practiceIds}, ${accountSummary.practiceId})`,
+  offer: sql`array[${LEAD_OFFER}]`,
+  source: sql`${accountSummary.sourceIds}`,
+  review_status: sql`array[${accountSummary.reviewStatusKey}]`,
+  stage: sql`array[${accountSummary.stage}]`,
+  owner: sql`array[${accountSummary.ownerUserId}]`,
+};
+
+/**
+ * How many accounts `search` would match for each value of `by` (same filters, same data limits).
+ * An account counts once per value; an account with no value counts under null.
+ */
+export async function countAccountsBy(ctx: ModuleContext, q: SearchQuery, by: FacetKey): Promise<Map<string | null, number>> {
+  const list = FACET_VALUES[by];
+  const values = ctx.tx
+    .select({ value: sql<string | null>`unnest(case when cardinality(${list}) = 0 then array[null]::text[] else ${list} end)`.as('value'), id: account.id })
+    .from(accountSummary)
+    .innerJoin(account, eq(account.id, accountSummary.accountId))
+    .where(and(...(await baseWhere(ctx, q))))
+    .as('facet');
+  const rows = await ctx.tx
+    .select({ value: values.value, n: sql<number>`count(distinct ${values.id})::int` })
+    .from(values)
+    .groupBy(values.value);
+  return new Map(rows.map((r) => [r.value, r.n]));
+}
+
+/** When the earliest of the accounts `search` would match was created, or null when none match. */
+export async function oldestCreatedAt(ctx: ModuleContext, q: SearchQuery = {}): Promise<Date | null> {
+  const [row] = await ctx.tx
+    .select({ at: min(account.createdAt) })
+    .from(accountSummary)
+    .innerJoin(account, eq(account.id, accountSummary.accountId))
+    .where(and(...(await baseWhere(ctx, q))));
+  return row?.at ?? null;
+}
+
 /**
  * Finds accounts the principal may see (data limits apply first), with every filter ANDed, paged by
  * a keyset cursor. Archived accounts keep their summary row but are never returned.
@@ -237,6 +318,15 @@ export async function search(ctx: ModuleContext, q: SearchQuery = {}): Promise<{
       lastSignalAt: accountSummary.lastSignalAt,
       excludedReasonKey: account.excludedReasonKey,
       createdAt: account.createdAt,
+      industry: account.industry,
+      hqCity: account.hqCity,
+      hqState: account.hqState,
+      fit: accountSummary.fit,
+      intent: accountSummary.intent,
+      practiceId: accountSummary.practiceId,
+      sourceIds: accountSummary.sourceIds,
+      leadOfferOverrideId: accountSummary.leadOfferOverrideId,
+      noteCount: accountSummary.noteCount,
       cursorKey: sql<string | null>`(${spec.expr})::text`,
     })
     .from(accountSummary)

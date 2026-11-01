@@ -23,7 +23,11 @@ export const reviewStatusDef = routing.table(
     isDeclined: boolean('is_declined').notNull().default(false),
     isInitial: boolean('is_initial').notNull().default(false),
     returnsToSource: boolean('returns_to_source').notNull().default(false),
-    tone: text('tone').notNull().default('neutral'), // neutral | near | good | bad
+    color: text('color').notNull().default('gray'), // plum | amber | green | red | gray
+    description: text('description').notNull().default(''),
+    setBy: text('set_by').notNull().default('reviewer'), // scout | reviewer
+    /** An account in the status longer than this is late; null is never (always null for a final status). */
+    flagAfterHours: integer('flag_after_hours'),
     archivedAt: at('archived_at'),
   },
   (t) => [uniqueIndex('review_status_def_key_uq').on(t.tenantId, t.key)],
@@ -48,7 +52,9 @@ export const declineReasonDef = routing.table(
     tenantId: text('tenant_id').notNull(),
     key: text('key').notNull(),
     label: text('label').notNull(),
-    appliesTo: text('applies_to').notNull(), // review | assignment | both
+    appliesTo: text('applies_to').notNull(), // review | assignment | both | send_back
+    noteRequired: boolean('note_required').notNull().default(false),
+    order: integer('order').notNull().default(0),
     archivedAt: at('archived_at'),
   },
   (t) => [uniqueIndex('decline_reason_def_key_uq').on(t.tenantId, t.key)],
@@ -151,4 +157,19 @@ export const routingSetting = routing.table(
     updatedAt: at('updated_at').notNull().defaultNow(),
   },
   (t) => [check('routing_setting_auto_accept_range', sql`${t.autoAcceptWorkingDays} is null or ${t.autoAcceptWorkingDays} between 1 and 10`)],
+);
+
+/** A person picking the lead offer, or giving it back to Scout (Decision 5), for the change log. */
+export const leadOfferChange = routing.table(
+  'lead_offer_change',
+  {
+    id: text('id').primaryKey(), // loc_
+    tenantId: text('tenant_id').notNull(),
+    accountId: text('account_id').notNull(),
+    fromOfferId: text('from_offer_id'),
+    toOfferId: text('to_offer_id'),
+    by: text('by').notNull(),
+    at: at('at').notNull().defaultNow(),
+  },
+  (t) => [index('lead_offer_change_account_at_idx').on(t.tenantId, t.accountId, sql`${t.at} desc`)],
 );

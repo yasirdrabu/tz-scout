@@ -116,7 +116,7 @@ describe('review queue', () => {
     expect(first.status).toBe(200);
     const p1 = await first.json();
     expect(p1.data.map((r: { account_id: string }) => r.account_id)).toEqual([b, c]);
-    expect(p1.data[0]).toMatchObject({ name: 'Beta Co', priority: 90, review_status_key: 'unvetted', review_status_label: 'Unvetted', insights: null, flags: {} });
+    expect(p1.data[0]).toMatchObject({ name: 'Beta Co', priority: 90, review_status_key: 'unvetted', review_status_label: 'Ready for review', insights: null, flags: {} });
     expect(p1.next_cursor).toEqual(expect.any(String));
     const p2 = await (await as('leader', queueRoute, `${path}&limit=2&cursor=${p1.next_cursor}`)).json();
     expect(p2.data.map((r: { account_id: string }) => r.account_id)).toEqual([a]);
@@ -237,7 +237,7 @@ describe('assign, respond and withdraw', () => {
     const a = await account();
     const res = await as('leader', accountAction, `accounts/${a}:assign-preview`, 'POST', { seller_user_id: ids.seller });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ preflight: { result: 'new' }, approves_to: { key: 'reviewed', label: 'Reviewed' }, replaces: null });
+    expect(await res.json()).toMatchObject({ preflight: { result: 'new' }, approves_to: { key: 'reviewed', label: 'Approved' }, replaces: null });
     expect((await as('seller', accountAction, `accounts/${a}:assign-preview`, 'POST', { seller_user_id: ids.seller })).status).toBe(403);
     expect((await as('leader', accountAction, `accounts/${a}:assign-preview`, 'POST', {})).status).toBe(400);
   });
@@ -474,8 +474,8 @@ describe('review settings', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.auto_accept_working_days).toBe(2);
-    expect(body.statuses.map((s: { key: string }) => s.key)).toEqual(['unvetted', 'needs_review', 'reviewed', 'declined']);
-    expect(body.statuses[3]).toMatchObject({ key: 'declined', label: 'Declined', counts_as_reviewed: true, is_declined: true, is_initial: false, returns_to_source: false, archived: false });
+    expect(body.statuses.map((s: { key: string }) => s.key)).toEqual(['unvetted', 'needs_review', 'reviewed', 'declined', 'sent_back']);
+    expect(body.statuses[3]).toMatchObject({ key: 'declined', label: 'Not pursued', counts_as_reviewed: true, is_declined: true, is_initial: false, returns_to_source: false, archived: false });
     expect(body.decline_reasons.map((r: { key: string }) => r.key)).toEqual(expect.arrayContaining(['not_a_fit', 'other', 'not_my_territory']));
     expect(body.decline_reasons.find((r: { key: string }) => r.key === 'other')).toMatchObject({ label: 'Other', applies_to: 'both', note_required: true });
     expect((await as('leader', getSettings, 'settings/review')).status).toBe(403);

@@ -117,6 +117,7 @@ describe('publishReviewSnapshot', () => {
       hasOpenAssignment: true,
       stage: 'assigned',
       reviewFlags: ['declined_by_seller', 'new_from'],
+      leadOfferOverrideId: null,
     });
     expect(snap.ownerHistoryUserIds).toHaveLength(2); // a pending assignment that was declined or replaced is not ownership
   });

@@ -6,7 +6,7 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { assignmentWithdrawn, statusChanged } from '../contracts/events';
 import type { ReviewSnapshot } from '../contracts/types';
-import { accountReview, assignment, declineReasonDef, reviewStatusDef, stageChange, statusChange } from '../db/schema';
+import { accountReview, assignment, declineReasonDef, leadOfferChange, reviewStatusDef, stageChange, statusChange } from '../db/schema';
 import { statusChangeProblems, type ReasonDef } from '../domain/status-rules';
 import { currentReviewSnapshot, publishReviewSnapshot } from './snapshot';
 import { moveStage } from './stage';
@@ -165,6 +165,7 @@ export async function reviewOnMerge(ctx: ModuleContext, survivorId: string, merg
   await ctx.tx.update(assignment).set(repoint).where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.accountId, mergedId)));
   await ctx.tx.update(statusChange).set(repoint).where(and(eq(statusChange.tenantId, ctx.tenantId), eq(statusChange.accountId, mergedId)));
   await ctx.tx.update(stageChange).set(repoint).where(and(eq(stageChange.tenantId, ctx.tenantId), eq(stageChange.accountId, mergedId)));
+  await ctx.tx.update(leadOfferChange).set(repoint).where(and(eq(leadOfferChange.tenantId, ctx.tenantId), eq(leadOfferChange.accountId, mergedId)));
   await ctx.tx.update(accountReview).set({ mergedInto: survivorId, currentAssignmentId: null }).where(reviewWhere(ctx, mergedId));
   if (moved) {
     await ctx.tx.update(accountReview).set({ currentAssignmentId: moved.id }).where(reviewWhere(ctx, survivorId));
@@ -202,7 +203,8 @@ export async function applyStatusChange(ctx: ModuleContext, row: ReviewRow, inpu
   if (!target) throw invalid('Pick a review status from your list.', 'to');
   const current = statuses.find((s) => s.key === row.statusKey);
 
-  const reopening = !!current?.isDeclined && !target.isDeclined;
+  // Leaving a declined status reopens the account, except a send back: that goes straight back to the source with its reason.
+  const reopening = !!current?.isDeclined && !target.isDeclined && !target.returnsToSource;
   if (reopening) {
     if (!note) throw invalid("Add a note saying why you're reopening it.", 'note');
     target = statuses.find((s) => s.key === 'needs_review' && !s.archivedAt) ?? statuses.find((s) => !s.archivedAt && !s.countsAsReviewed) ?? target;
@@ -233,8 +235,11 @@ export async function applyStatusChange(ctx: ModuleContext, row: ReviewRow, inpu
     .update(accountReview)
     .set({ statusKey: target.key, statusChangedAt: new Date(), statusChangedBy: by, flags: sql`${accountReview.flags} - 'declinedBySeller'` })
     .where(reviewWhere(ctx, accountId));
-  await ctx.tx.insert(statusChange).values({ id: changeId, tenantId: ctx.tenantId, accountId, fromKey: row.statusKey, toKey: target.key, note, reasonKey: target.isDeclined ? reasonKey : null, by });
-  const event = reopening ? 'reopened' : target.isDeclined ? 'declined' : target.countsAsReviewed ? 'reviewed' : null;
+  // A decline and a send back keep the reason picked (Decision 1).
+  const keptReason = target.isDeclined || target.returnsToSource ? reasonKey : null;
+  await ctx.tx.insert(statusChange).values({ id: changeId, tenantId: ctx.tenantId, accountId, fromKey: row.statusKey, toKey: target.key, note, reasonKey: keptReason, by });
+  // A send back leaves the stage where it is: the account goes back to its source, not on to a seller.
+  const event = reopening ? 'reopened' : target.isDeclined ? 'declined' : target.countsAsReviewed && !target.returnsToSource ? 'reviewed' : null;
   if (event) await moveStage(ctx, accountId, event, changeId);
   await publish(ctx, statusChanged, {
     accountId,
@@ -244,7 +249,7 @@ export async function applyStatusChange(ctx: ModuleContext, row: ReviewRow, inpu
     isDeclined: target.isDeclined,
     returnsToSource: target.returnsToSource,
     note,
-    reasonKey: target.isDeclined ? reasonKey : null,
+    reasonKey: keptReason,
     by,
   });
   return true;

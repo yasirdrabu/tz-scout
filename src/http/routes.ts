@@ -9,19 +9,26 @@ import * as readyz from './routes/readyz/route';
 import * as v1Resource from './routes/v1/[resource]/route';
 import * as v1AccountsIdArrivals from './routes/v1/accounts/[id]/arrivals/route';
 import * as v1AccountsIdAssignments from './routes/v1/accounts/[id]/assignments/route';
+import * as v1AccountsIdChanges from './routes/v1/accounts/[id]/changes/route';
 import * as v1AccountsIdExclusionOverride from './routes/v1/accounts/[id]/exclusion-override/route';
 import * as v1AccountsIdFacts from './routes/v1/accounts/[id]/facts/route';
 import * as v1AccountsIdHandoffs from './routes/v1/accounts/[id]/handoffs/route';
 import * as v1AccountsIdInsights from './routes/v1/accounts/[id]/insights/route';
+import * as v1AccountsIdLeadOffer from './routes/v1/accounts/[id]/lead-offer/route';
 import * as v1AccountsIdMatches from './routes/v1/accounts/[id]/matches/route';
+import * as v1AccountsIdNotes from './routes/v1/accounts/[id]/notes/route';
 import * as v1AccountsIdPeople from './routes/v1/accounts/[id]/people/route';
 import * as v1AccountsIdPractices from './routes/v1/accounts/[id]/practices/route';
 import * as v1AccountsIdReviewStatus from './routes/v1/accounts/[id]/review-status/route';
+import * as v1AccountsIdReview from './routes/v1/accounts/[id]/review/route';
 import * as v1AccountsId from './routes/v1/accounts/[id]/route';
 import * as v1AccountsIdScoreHistory from './routes/v1/accounts/[id]/score/history/route';
 import * as v1AccountsIdScore from './routes/v1/accounts/[id]/score/route';
 import * as v1AccountsIdSignals from './routes/v1/accounts/[id]/signals/route';
 import * as v1AccountsIdStatus from './routes/v1/accounts/[id]/status/route';
+import * as v1AccountsIdTier from './routes/v1/accounts/[id]/tier/route';
+import * as v1AccountsExport from './routes/v1/accounts/export/route';
+import * as v1AccountsFacets from './routes/v1/accounts/facets/route';
 import * as v1Accounts from './routes/v1/accounts/route';
 import * as v1AdminAiRunsId from './routes/v1/admin/ai-runs/[id]/route';
 import * as v1AdminAiRuns from './routes/v1/admin/ai-runs/route';
@@ -39,6 +46,7 @@ import * as v1ApiKeysId from './routes/v1/api-keys/[id]/route';
 import * as v1ApiKeys from './routes/v1/api-keys/route';
 import * as v1ArrivalsId from './routes/v1/arrivals/[id]/route';
 import * as v1Arrivals from './routes/v1/arrivals/route';
+import * as v1AssignableSellers from './routes/v1/assignable-sellers/route';
 import * as v1AssignmentsId from './routes/v1/assignments/[id]/route';
 import * as v1Assignments from './routes/v1/assignments/route';
 import * as v1Audit from './routes/v1/audit/route';
@@ -65,6 +73,7 @@ import * as v1IntegrationsKeyMode from './routes/v1/integrations/[key]/mode/rout
 import * as v1IntegrationsKey from './routes/v1/integrations/[key]/route';
 import * as v1Integrations from './routes/v1/integrations/route';
 import * as v1MeCounts from './routes/v1/me/counts/route';
+import * as v1MePreferencesReviewQueueColumns from './routes/v1/me/preferences/review-queue-columns/route';
 import * as v1Me from './routes/v1/me/route';
 import * as v1MeSessions from './routes/v1/me/sessions/route';
 import * as v1MeWorkspace from './routes/v1/me/workspace/route';
@@ -80,15 +89,19 @@ import * as v1Practices from './routes/v1/practices/route';
 import * as v1Rescore from './routes/v1/rescore/route';
 import * as v1ReviewQueueBulk from './routes/v1/review-queue/bulk/route';
 import * as v1ReviewQueueCount from './routes/v1/review-queue/count/route';
+import * as v1ReviewQueueFacets from './routes/v1/review-queue/facets/route';
 import * as v1ReviewQueue from './routes/v1/review-queue/route';
 import * as v1Roles from './routes/v1/roles/route';
 import * as v1ScoringProfileReset from './routes/v1/scoring/profile/reset/route';
 import * as v1ScoringProfile from './routes/v1/scoring/profile/route';
+import * as v1SettingsSetting from './routes/v1/settings/[setting]/route';
 import * as v1SettingsCrm from './routes/v1/settings/crm/route';
 import * as v1SettingsExclusionsListsKind from './routes/v1/settings/exclusions/lists/[kind]/route';
 import * as v1SettingsExclusions from './routes/v1/settings/exclusions/route';
 import * as v1SettingsExclusionsRulesKey from './routes/v1/settings/exclusions/rules/[key]/route';
+import * as v1SettingsReviewReasons from './routes/v1/settings/review/reasons/route';
 import * as v1SettingsReview from './routes/v1/settings/review/route';
+import * as v1SettingsReviewStatuses from './routes/v1/settings/review/statuses/route';
 import * as v1SettingsWarmIntrosKey from './routes/v1/settings/warm-intros/[key]/route';
 import * as v1SettingsWarmIntros from './routes/v1/settings/warm-intros/route';
 import * as v1SignalTypes from './routes/v1/signal-types/route';
@@ -118,19 +131,26 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/:resource`, module: v1Resource },
   { path: `${V1}/accounts/:id/arrivals`, module: v1AccountsIdArrivals },
   { path: `${V1}/accounts/:id/assignments`, module: v1AccountsIdAssignments },
+  { path: `${V1}/accounts/:id/changes`, module: v1AccountsIdChanges },
   { path: `${V1}/accounts/:id/exclusion-override`, module: v1AccountsIdExclusionOverride },
   { path: `${V1}/accounts/:id/facts`, module: v1AccountsIdFacts },
   { path: `${V1}/accounts/:id/handoffs`, module: v1AccountsIdHandoffs },
   { path: `${V1}/accounts/:id/insights`, module: v1AccountsIdInsights },
+  { path: `${V1}/accounts/:id/lead-offer`, module: v1AccountsIdLeadOffer },
   { path: `${V1}/accounts/:id/matches`, module: v1AccountsIdMatches },
+  { path: `${V1}/accounts/:id/notes`, module: v1AccountsIdNotes },
   { path: `${V1}/accounts/:id/people`, module: v1AccountsIdPeople },
   { path: `${V1}/accounts/:id/practices`, module: v1AccountsIdPractices },
   { path: `${V1}/accounts/:id/review-status`, module: v1AccountsIdReviewStatus },
+  { path: `${V1}/accounts/:id/review`, module: v1AccountsIdReview },
   { path: `${V1}/accounts/:id`, module: v1AccountsId },
   { path: `${V1}/accounts/:id/score/history`, module: v1AccountsIdScoreHistory },
   { path: `${V1}/accounts/:id/score`, module: v1AccountsIdScore },
   { path: `${V1}/accounts/:id/signals`, module: v1AccountsIdSignals },
   { path: `${V1}/accounts/:id/status`, module: v1AccountsIdStatus },
+  { path: `${V1}/accounts/:id/tier`, module: v1AccountsIdTier },
+  { path: `${V1}/accounts/export`, module: v1AccountsExport },
+  { path: `${V1}/accounts/facets`, module: v1AccountsFacets },
   { path: `${V1}/accounts`, module: v1Accounts },
   { path: `${V1}/admin/ai-runs/:id`, module: v1AdminAiRunsId },
   { path: `${V1}/admin/ai-runs`, module: v1AdminAiRuns },
@@ -148,6 +168,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/api-keys`, module: v1ApiKeys },
   { path: `${V1}/arrivals/:id`, module: v1ArrivalsId },
   { path: `${V1}/arrivals`, module: v1Arrivals },
+  { path: `${V1}/assignable-sellers`, module: v1AssignableSellers },
   { path: `${V1}/assignments/:id`, module: v1AssignmentsId },
   { path: `${V1}/assignments`, module: v1Assignments },
   { path: `${V1}/audit`, module: v1Audit },
@@ -174,6 +195,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/integrations/:key`, module: v1IntegrationsKey },
   { path: `${V1}/integrations`, module: v1Integrations },
   { path: `${V1}/me/counts`, module: v1MeCounts },
+  { path: `${V1}/me/preferences/review-queue-columns`, module: v1MePreferencesReviewQueueColumns },
   { path: `${V1}/me`, module: v1Me },
   { path: `${V1}/me/sessions`, module: v1MeSessions },
   { path: `${V1}/me/workspace`, module: v1MeWorkspace },
@@ -189,15 +211,19 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/rescore`, module: v1Rescore },
   { path: `${V1}/review-queue/bulk`, module: v1ReviewQueueBulk },
   { path: `${V1}/review-queue/count`, module: v1ReviewQueueCount },
+  { path: `${V1}/review-queue/facets`, module: v1ReviewQueueFacets },
   { path: `${V1}/review-queue`, module: v1ReviewQueue },
   { path: `${V1}/roles`, module: v1Roles },
   { path: `${V1}/scoring/profile/reset`, module: v1ScoringProfileReset },
   { path: `${V1}/scoring/profile`, module: v1ScoringProfile },
+  { path: `${V1}/settings/:setting`, module: v1SettingsSetting },
   { path: `${V1}/settings/crm`, module: v1SettingsCrm },
   { path: `${V1}/settings/exclusions/lists/:kind`, module: v1SettingsExclusionsListsKind },
   { path: `${V1}/settings/exclusions`, module: v1SettingsExclusions },
   { path: `${V1}/settings/exclusions/rules/:key`, module: v1SettingsExclusionsRulesKey },
+  { path: `${V1}/settings/review/reasons`, module: v1SettingsReviewReasons },
   { path: `${V1}/settings/review`, module: v1SettingsReview },
+  { path: `${V1}/settings/review/statuses`, module: v1SettingsReviewStatuses },
   { path: `${V1}/settings/warm-intros/:key`, module: v1SettingsWarmIntrosKey },
   { path: `${V1}/settings/warm-intros`, module: v1SettingsWarmIntros },
   { path: `${V1}/signal-types`, module: v1SignalTypes },

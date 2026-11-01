@@ -10,8 +10,9 @@ reason, and the reason is tracked so leaders see why accounts bounce.
 ## Rules
 
 - Assigning requires `assign:act` and data scope over the account. The account's status must count
-  as reviewed; assigning from Unvetted or Needs review sets it to the tenant's first "counts as
-  reviewed" status in the same action (one click: "Approve and assign").
+  as reviewed; assigning from Ready for review, In review or Sent back to source sets it to the tenant's
+  first status that counts as reviewed, is not declined and does not return to the source (Approved) in
+  the same action (one click: "Approve and assign").
 - Assignment fields: seller (members with the seller capability), notes, playbook template (optional,
   passed through; **R2**, absent in R1 where `templateId` is always null, D27), lead offer (defaults to
   best offer; an override is stored on `account_review`).
@@ -25,7 +26,8 @@ reason, and the reason is tracked so leaders see why accounts bounce.
   AEs mostly work in the CRM, so implicit acceptance keeps the funnel moving without forcing them into
   Scout.
 - **Decline.** The seller declines with a reason (tenant list with `applies_to` assignment; defaults:
-  Not my territory, Too much on my plate, Already talking to them, Not a fit, Other with note). The
+  Not my territory, Too much on my plate, Already talking to them, Not a fit, Other; a reason marked
+  "Note required", Other by default, needs a note). The
   account returns to the assigner with status unchanged, stage back to `reviewed`, and the decline
   shows on the queue as a flag "Declined by Mike: Not my territory". CRM sync undoes the handoff
   (REV-E3).
@@ -56,7 +58,7 @@ account reaches an AE in seconds.
 ### REV-E2-S3 Seller declines with a reason
 As an AE, I want to decline an account with a reason, so that it goes back to the leader instead of
 rotting in my list.
-- REV-E2-S3-AC1 Decline requires a reason; "Other" requires a note.
+- REV-E2-S3-AC1 Decline requires a reason; a reason marked "Note required" (Other by default) requires a note.
 - REV-E2-S3-AC2 After decline, the account is back in the leader's queue with the flag and the
   reason, stage `reviewed`, and `routing.assignment.declined` is published.
 - REV-E2-S3-AC3 Decline reasons are reportable by seller, practice, source and reason (Analytics).

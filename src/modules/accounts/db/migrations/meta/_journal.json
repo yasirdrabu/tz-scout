@@ -43,6 +43,13 @@
       "when": 1793338157378,
       "tag": "0005_crm_status_at",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793484224708,
+      "tag": "0006_notes_and_lead_offer",
+      "breakpoints": true
     }
   ]
 }

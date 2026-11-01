@@ -32,5 +32,7 @@ export const reviewSnapshotSchema = z.object({
   hasOpenAssignment: z.boolean(),
   stage: stageSchema,
   reviewFlags: z.array(z.enum(REVIEW_FLAGS)),
+  /** The offer someone picked (Decision 5); absent in snapshots published before it existed. */
+  leadOfferOverrideId: z.string().nullable().optional(),
 });
 export type ReviewSnapshot = z.infer<typeof reviewSnapshotSchema>;

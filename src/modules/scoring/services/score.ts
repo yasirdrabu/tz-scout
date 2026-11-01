@@ -252,7 +252,9 @@ export async function scoreAccount(
     trustSourceId: trust?.sourceId ?? null,
     trustModifier: pri.trustModifier,
     priority: pri.priority,
-    tier,
+    // A tier set by hand stays through every rescore (Decision 4); the scored tier is kept beside it.
+    tier: (prev?.tierOverride as Tier | null | undefined) ?? tier,
+    scoredTier: tier,
     tierReason,
     explanation,
     inputsHash: hash,
@@ -269,7 +271,7 @@ export async function scoreAccount(
     : await ctx.tx.insert(accountScore).values({ tenantId: ctx.tenantId, accountId: id, ...values }).returning();
   if (!score) throw new Error('The score was not saved.');
 
-  const moved = !prev || prev.priority !== score.priority || prev.tier !== score.tier || prev.bestOfferId !== score.bestOfferId;
+  const moved = !prev || prev.priority !== score.priority || prev.tier !== score.tier || prev.scoredTier !== score.scoredTier || prev.bestOfferId !== score.bestOfferId;
   if (moved) {
     await ctx.tx.insert(scoreChange).values({
       id: newId('scc'),
@@ -292,7 +294,7 @@ export async function scoreAccount(
         priority: score.priority,
         fit: score.fit,
         intent: score.intent,
-        tier,
+        tier: score.tier as Tier,
         previousTier: (prev?.tier as Tier | undefined) ?? null,
         bestOfferId: score.bestOfferId,
         previousBestOfferId: prev?.bestOfferId ?? null,

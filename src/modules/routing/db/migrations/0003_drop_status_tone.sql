@@ -1,0 +1,1 @@
+ALTER TABLE "routing"."review_status_def" DROP COLUMN "tone";
