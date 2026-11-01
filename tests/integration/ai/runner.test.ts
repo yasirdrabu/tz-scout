@@ -24,6 +24,9 @@ import { registerAdapter, saveCredential, setDisabled, setMode, testConnection }
 import { connection } from '@/modules/integrations/db/schema';
 import { adminDb } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
+import { accountBriefTask } from '@/modules/playbooks/tasks/account-brief';
+import type { BriefInput } from '@/modules/playbooks/domain/brief-io';
+import transitBrief from '../../unit/playbooks/fixtures/briefs/transit-rfp.json';
 import { cfg } from '../integrations/cfg';
 import { freshTenant, newKey } from '../integrations/helpers';
 
@@ -241,6 +244,40 @@ describe('runTask', () => {
     });
     const other = await freshTenant();
     await other.run(async (ctx) => expect(await getRun(ctx, a.runId)).toBeUndefined());
+  });
+});
+
+describe('runTask rulesOnly', () => {
+  it('records a rules run and makes no gateway call', async () => {
+    const t = await freshTenant();
+    const complete = fakeLive([{ echoed: 'from claude' }]);
+    await goLive(t);
+    const r = await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject, rulesOnly: true }));
+    expect(r).toMatchObject({ mode: 'rules', output: { echoed: 'hi' } });
+    expect(complete).not.toHaveBeenCalled();
+    const rows = await runsOf(t.tenantId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ mode: 'rules', status: 'ok', model: null });
+    const calls = (await adminDb.execute(
+      sql`select 1 from integrations.call_log where tenant_id = ${t.tenantId} and provider = 'anthropic' and operation like 'messages.%'`,
+    )) as unknown as unknown[];
+    expect(calls).toHaveLength(0);
+    await expect(t.run((ctx) => runTask(ctx, noRules, { text: 'hi' }, { subject, rulesOnly: true }))).rejects.toMatchObject({
+      slug: 'ai_unavailable',
+      detail: 'Add a Claude key to use this.',
+    });
+  });
+
+  it('refuses a live account_brief run over the tenant cap and returns the rules brief', async () => {
+    const t = await freshTenant();
+    const complete = fakeLive([{}]);
+    await goLive(t);
+    await adminDb.execute(sql`insert into ai.ai_setting (tenant_id, task, max_cost_cents_per_run) values (${t.tenantId}, 'account_brief', 1)`);
+    const r = await t.run((ctx) => runTask(ctx, accountBriefTask, transitBrief as BriefInput, { subject }));
+    expect(r.mode).toBe('rules');
+    expect(r.output.recommendation.headline).toBe('Approve and assign to someone who covers Digital Transformation.');
+    expect(complete).not.toHaveBeenCalled();
+    expect((await runsOf(t.tenantId)).map((x) => `${x.status}:${x.mode}`).sort()).toEqual(['ok:rules', 'refused_by_cap:live']);
   });
 });
 

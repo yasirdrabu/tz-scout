@@ -1,0 +1,28 @@
+{
+  "account": { "name": "Metro Valley Transit", "industry": "Government: Transit", "employees": 3200, "location": "Miami, FL, US", "description": "Metro Valley Transit runs buses and rail for 2.7 million riders. It is replacing its fare system.", "technologies": ["Oracle EBS", "Salesforce"] },
+  "offer": { "id": "off_fde", "name": "FDE Sprint", "promise": "We put an engineer on one workflow and get it working in weeks.", "priceMinCents": 4000000, "priceMaxCents": 12000000, "salesCycleDays": 60, "targetTitles": ["COO", "CIO"], "targetBuyingRoles": ["economic_buyer"], "proofPoints": ["Shipped in 6 weeks for a state agency"] },
+  "practiceName": "Digital Transformation",
+  "caseStudies": [{ "id": "cs_1", "title": "County fare data", "clientName": "Broward County", "result": "Cut fare reconciliation from 5 days to 1" }],
+  "signals": [
+    { "id": "sig_intent", "type": "intent", "kind": "research", "title": "Researching: AI governance", "occurredAt": "2026-10-20T00:00:00.000Z", "sourceName": "Vibe Prospecting" },
+    { "id": "sig_rfp", "type": "news", "kind": "trigger", "title": "Metro Valley Transit issues RFP for fare system modernization", "occurredAt": "2026-10-10T00:00:00.000Z", "sourceName": "Ash Patel" },
+    { "id": "sig_cio", "type": "leadership", "kind": "trigger", "title": "New leader joined: Chief Information Officer", "occurredAt": "2026-09-20T00:00:00.000Z", "sourceName": "Research agent" },
+    { "id": "sig_suit", "type": "risk", "kind": "trigger", "title": "Lawsuit: Rider data class action", "occurredAt": "2026-08-01T00:00:00.000Z", "sourceName": "Research agent" }
+  ],
+  "facts": [
+    { "id": "fct_name", "key": "name", "value": "Metro Valley Transit" },
+    { "id": "fct_ind", "key": "industry", "value": "Government: Transit" },
+    { "id": "fct_emp", "key": "employees", "value": "3200" },
+    { "id": "fct_city", "key": "hq_city", "value": "Miami" },
+    { "id": "fct_rfp", "key": "contract_value_cents", "value": "25000000" }
+  ],
+  "people": [
+    { "id": "per_maria", "name": "Maria Lopez", "title": "Chief Operating Officer", "roleKeys": ["economic_buyer"], "roleLabels": ["Economic buyer"], "isPrimary": true },
+    { "id": "per_tom", "name": "Tom Reed", "title": "IT Director", "roleKeys": ["technical_buyer"], "roleLabels": ["Technical buyer"], "isPrimary": false }
+  ],
+  "score": { "tier": "good_fit", "tierLabel": "Good fit", "priority": 71, "fit": 78, "intent": 60, "fitParts": [{ "label": "Industry", "points": 25, "max": 25, "note": "Government is on the offer's list." }, { "label": "Size", "points": 15, "max": 20, "note": "3,200 staff is in range." }], "wouldRaise": ["A dated signal in the last 30 days would raise buying intent."] },
+  "crm": { "exists": false, "ownerName": null, "lifecycle": "none", "openDeals": 0 },
+  "warmIntro": { "introducerName": "Dana Ruiz" },
+  "notes": [{ "text": "Their CFO spoke at the transit summit.", "at": "2026-10-21T00:00:00.000Z" }],
+  "insights": "Lead with the fare system RFP."
+}

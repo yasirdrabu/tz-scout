@@ -42,7 +42,13 @@ export type TaskDef<I, O> = {
 
 export const defineTask = <I, O>(def: TaskDef<I, O>): TaskDef<I, O> => def;
 
-export type RunOpts = { subject: { type: string; id: string }; allowRules?: boolean; fresh?: boolean };
+export type RunOpts = {
+  subject: { type: string; id: string };
+  allowRules?: boolean;
+  fresh?: boolean;
+  /** Skips mock and live and runs the rules, or says there is no key for a task without rules. Recorded as `mode: 'rules'`. */
+  rulesOnly?: boolean;
+};
 export type RunResult<O> = { output: O; runId: string; mode: AiMode };
 
 /** JSON with object keys sorted at every depth, so equal inputs always hash equal. */
@@ -216,7 +222,7 @@ export async function runTask<I, O>(
 
   // 1. Which mode would run?
   let tentative: 'mock' | 'live' | 'none' = 'none';
-  if (setting?.enabled !== false) {
+  if (setting?.enabled !== false && !opts.rulesOnly) {
     if (config.forceMock || ctx.environment === 'test') tentative = 'mock';
     else {
       const st = await connectionStatus(ctx, PROVIDER);

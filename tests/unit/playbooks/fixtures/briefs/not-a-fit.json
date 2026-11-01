@@ -1,0 +1,14 @@
+{
+  "account": { "name": "Tiny Bakery", "industry": "Retail", "employees": 6, "location": "Boise, ID, US", "description": null, "technologies": [] },
+  "offer": null,
+  "practiceName": null,
+  "caseStudies": [],
+  "signals": [],
+  "facts": [{ "id": "fct_n6", "key": "name", "value": "Tiny Bakery" }, { "id": "fct_e6", "key": "employees", "value": "6" }],
+  "people": [],
+  "score": { "tier": "not_fit", "tierLabel": "Not a fit", "priority": 12, "fit": 20, "intent": 0, "fitParts": [{ "label": "Industry", "points": 10, "max": 25, "note": "Retail is not on any offer's list." }, { "label": "Size", "points": 0, "max": 20, "note": "6 staff is below the smallest offer's range." }], "wouldRaise": [] },
+  "crm": { "exists": false, "ownerName": null, "lifecycle": "none", "openDeals": 0 },
+  "warmIntro": null,
+  "notes": [],
+  "insights": null
+}
