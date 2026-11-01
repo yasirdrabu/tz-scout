@@ -74,14 +74,8 @@ function problems(p: ScoringProfile): { path: string; message: string }[] {
   return out;
 }
 
-/**
- * Applies `patch` on top of the current profile (weights, fit parts and cutoffs merge field by field), validates the
- * result, bumps `version`, publishes `scoring.rules.changed` and audits the changed fields before and after.
- * A patch that changes nothing writes nothing. The route (`scoring:manage`) checks who may call this.
- */
-export async function updateProfile(ctx: ModuleContext, patch: ProfilePatch): Promise<ProfileView> {
-  await ctx.tx.execute(sql`select pg_advisory_xact_lock(hashtext(${ctx.tenantId} || ':scoring-profile'))`);
-  const { version, ...before } = await getProfile(ctx);
+/** `patch` on top of `before`, merged field by field and validated. Throws the 400 with the messages to show. */
+export function draftProfile(before: ScoringProfile, patch: ProfilePatch): ScoringProfile {
   const next: ScoringProfile = {
     ...before,
     ...patch,
@@ -91,6 +85,18 @@ export async function updateProfile(ctx: ModuleContext, patch: ProfilePatch): Pr
   };
   const errors = problems(next);
   if (errors.length > 0) throw new ScoutError({ slug: 'validation', status: 400, title: 'Check the scoring settings.', errors });
+  return next;
+}
+
+/**
+ * Applies `patch` on top of the current profile (weights, fit parts and cutoffs merge field by field), validates the
+ * result, bumps `version`, publishes `scoring.rules.changed` and audits the changed fields before and after.
+ * A patch that changes nothing writes nothing. The route (`scoring:manage`) checks who may call this.
+ */
+export async function updateProfile(ctx: ModuleContext, patch: ProfilePatch): Promise<ProfileView> {
+  await ctx.tx.execute(sql`select pg_advisory_xact_lock(hashtext(${ctx.tenantId} || ':scoring-profile'))`);
+  const { version, ...before } = await getProfile(ctx);
+  const next = draftProfile(before, patch);
   const changed = KEYS.filter((k) => !isDeepStrictEqual(before[k], next[k]));
   if (changed.length === 0) return { ...before, version };
 

@@ -72,12 +72,16 @@ export async function rescorePage(ctx: ModuleContext, filter: RescoreFilter, cau
 export const startRescore = (ctx: ModuleContext, filter: RescoreFilter, cause: ScoreCause): Promise<string> =>
   enqueueJob(ctx, rescorePageJob, { filter, cause });
 
-/** Rescores the whole tenant, or one practice or source (SCO-E5-S4-AC1). The route checks `scoring:manage`. */
-export function requestRescore(ctx: ModuleContext, filter: { practiceId?: string; sourceId?: string } = {}): Promise<string> {
+/** Rescores the whole tenant, or one practice or source (SCO-E5-S4-AC1); `scout rescore` passes `rules_changed` (SCO-E6). The route checks `scoring:manage`. */
+export function requestRescore(
+  ctx: ModuleContext,
+  filter: { practiceId?: string; sourceId?: string } = {},
+  cause: ScoreCause = 'manual_rescore',
+): Promise<string> {
   if (filter.practiceId && filter.sourceId) {
     throw new ScoutError({ slug: 'validation', status: 400, title: 'Choose a practice or a source, not both.' });
   }
-  return startRescore(ctx, filter, 'manual_rescore');
+  return startRescore(ctx, filter, cause);
 }
 
 /**

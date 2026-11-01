@@ -23,3 +23,6 @@ export const profilePatchBody = z
     research_floor_days: num,
   })
   .partial();
+
+/** The draft a preview is asked about: weights and cutoffs only. */
+export const previewBody = profilePatchBody.pick({ weights: true, tier_cutoffs: true });

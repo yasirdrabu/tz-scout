@@ -227,6 +227,32 @@ describe('scout CLI', () => {
     expect(await adminDb.execute(sql`select 1 from tenancy.tenant where slug = 'cli-sample'`)).toHaveLength(1);
   }, 60_000);
 
+  it('rescore queues a rules-changed rescore for every active workspace, or for the one named', async () => {
+    for (const slug of ['rescore-a', 'rescore-b', 'rescore-off']) {
+      const made = await scout(['tenants:create', '--slug', slug, '--name', slug, '--currency', 'USD', '--timezone', 'UTC', '--owner-email', `owner@${slug}.example`]).done;
+      expect(made.code, made.stderr).toBe(0);
+    }
+    await adminDb.execute(sql`update tenancy.tenant set status = 'suspended' where slug = 'rescore-off'`);
+    const queued = async (slug: string) =>
+      Number(
+        ((await adminDb.execute(sql`select count(*) n from platform.outbox o join tenancy.tenant t on t.id = o.tenant_id
+          where t.slug = ${slug} and o.kind = 'job' and o.nats_subject like '%scoring.rescore%' and o.payload->'data'->>'cause' = 'rules_changed'`)) as unknown as { n: string }[])[0]!.n,
+      );
+
+    const one = await scout(['rescore', '--tenant', 'rescore-a']).done;
+    expect(one.code, one.stderr).toBe(0);
+    expect(one.stdout).toContain('Workspace rescore-a: rescore queued.');
+    expect([await queued('rescore-a'), await queued('rescore-b'), await queued('rescore-off')]).toEqual([1, 0, 0]);
+
+    const all = await scout(['rescore']).done;
+    expect(all.code, all.stderr).toBe(0);
+    expect([await queued('rescore-a'), await queued('rescore-b'), await queued('rescore-off')]).toEqual([2, 1, 0]);
+
+    const missing = await scout(['rescore', '--tenant', 'nowhere']).done;
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain('No workspace with the slug "nowhere".');
+  }, 120_000);
+
   it('refuses to seed in production', async () => {
     const r = await scout(['seed'], {
       NODE_ENV: 'production',

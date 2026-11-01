@@ -17,6 +17,7 @@ export { scoringConsumers, scoringTenantDefaults } from './consumers';
 export { ageingHandler, rescoreAccountsHandler, rescorePageHandler } from './jobs';
 export { DEFAULT_PROFILE, seedScoringDefaults } from './defaults';
 export { getProfile, resetProfile, updateProfile, type ProfilePatch, type ProfileView } from './services/profile';
+export { previewProfile, type PreviewSample, type ProfilePreview } from './services/preview';
 export { lastRescore, type LastRescoreView } from './services/last-rescore';
 export { requestRescore } from './services/rescore';
 export { scoreAccount, type AccountScore, type ScoreOptions } from './services/score';

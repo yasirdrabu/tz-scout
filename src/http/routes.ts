@@ -103,6 +103,7 @@ import * as v1ReviewQueueFacets from './routes/v1/review-queue/facets/route';
 import * as v1ReviewQueue from './routes/v1/review-queue/route';
 import * as v1RolesRole from './routes/v1/roles/[role]/route';
 import * as v1Roles from './routes/v1/roles/route';
+import * as v1ScoringProfileAction from './routes/v1/scoring/[profile]/route';
 import * as v1ScoringLastRescore from './routes/v1/scoring/last-rescore/route';
 import * as v1ScoringProfileReset from './routes/v1/scoring/profile/reset/route';
 import * as v1ScoringProfile from './routes/v1/scoring/profile/route';
@@ -239,6 +240,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/review-queue`, module: v1ReviewQueue },
   { path: `${V1}/roles/:role`, module: v1RolesRole },
   { path: `${V1}/roles`, module: v1Roles },
+  { path: `${V1}/scoring/:profile`, module: v1ScoringProfileAction },
   { path: `${V1}/scoring/last-rescore`, module: v1ScoringLastRescore },
   { path: `${V1}/scoring/profile/reset`, module: v1ScoringProfileReset },
   { path: `${V1}/scoring/profile`, module: v1ScoringProfile },

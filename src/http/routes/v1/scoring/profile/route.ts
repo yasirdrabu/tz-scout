@@ -1,4 +1,4 @@
-import { getProfile, updateProfile, type ProfilePatch } from '@/modules/scoring';
+import { DEFAULT_PROFILE, getProfile, updateProfile, type ProfilePatch } from '@/modules/scoring';
 import { ScoutError } from '@/platform/errors';
 import { parseBody } from '../../_lib/body';
 import { accepted, v1Route } from '../../_lib/v1-route';
@@ -6,7 +6,7 @@ import { profilePatchBody } from './schema';
 
 const snake = (k: string) => k.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 
-export const GET = v1Route({ permission: 'scoring:manage' }, async (_req, _principal, ctx) => getProfile(ctx));
+export const GET = v1Route({ permission: 'scoring:manage' }, async (_req, _principal, ctx) => ({ ...(await getProfile(ctx)), defaults: DEFAULT_PROFILE }));
 
 /** SCO-E5-S3: only the fields sent change. 202 because accounts are rescored in the background (Ruling 13). Error paths name the request's snake_case fields. */
 export const PUT = v1Route({ permission: 'scoring:manage' }, async (req, _principal, ctx) => {
