@@ -52,29 +52,55 @@ they are the same strings.
 
 ## Roles (default permission sets)
 
-| Permission group | Owner | Leader | Seller | Operator |
-|---|---|---|---|---|
-| accounts, people, signals read/write | yes | yes | read + write on own | yes |
-| arrivals, imports | yes | yes | arrivals:write | yes |
-| sources:manage, scoring:manage | yes | yes | no | yes |
-| enrichment:request | yes | yes | yes | yes |
-| enrichment:approve | yes | yes | no | no |
-| review:act | yes | yes | grantable | grantable |
-| assign:act | yes | yes | no | no |
-| assignments:respond | yes | yes | yes | no |
-| playbooks read/write | yes | yes | yes | read |
-| playbooks:manage | yes | yes | no | yes |
-| offers:manage | yes | no | no | yes |
-| crm:push | yes | yes | no | no |
-| campaigns:manage | yes | no | no | yes |
-| campaigns:read | yes | yes | yes | yes |
-| searches:manage | yes | yes | no | yes |
-| warm_intro:declare | yes | yes | yes | yes |
-| analytics:read, costs:write | yes | yes | read | yes |
-| integrations, members, keys, webhooks, settings, audit | yes | members:read | no | no |
+| Permission group | Owner | Leader | Seller | Operator | Viewer |
+|---|---|---|---|---|---|
+| accounts, people, signals read/write | yes | yes | read + write on own | yes | accounts:read |
+| arrivals, imports | yes | yes | arrivals:write | yes | no |
+| sources:manage, scoring:manage | yes | yes | no | yes | no |
+| enrichment:request | yes | yes | yes | yes | no |
+| enrichment:approve | yes | yes | no | no | no |
+| review:act | yes | yes | grantable | yes (web-ui W6) | no |
+| assign:act | yes | yes | no | no | no |
+| assignments:respond | yes | yes | yes | no | no |
+| playbooks read/write | yes | yes | yes | read | no |
+| playbooks:manage | yes | yes | no | yes | no |
+| offers:read | yes | yes | yes | yes | yes |
+| offers:manage | yes | no | no | yes | no |
+| crm:push | yes | yes | no | no | no |
+| campaigns:manage | yes | no | no | yes | no |
+| campaigns:read | yes | yes | yes | yes | no |
+| searches:manage | yes | yes | no | yes | no |
+| warm_intro:declare | yes | yes | yes | yes | no |
+| analytics:read, costs:write | yes | yes | read | yes | read |
+| status:read | yes | yes | yes | yes | yes |
+| integrations, members, keys, webhooks, settings, audit | yes | members:read | no | no | no |
 
-"Grantable" means an owner can add it as an extra permission on a membership (review is a permission,
-not a role). Platform admins have every permission in every tenant, always audited.
+These are the **defaults**. Each workspace can change them (below). "Grantable" means an owner can add
+it as an extra permission on a membership (review is a permission, not a role). Platform admins have
+every permission in every tenant, always audited; they are not a role.
+
+The Viewer role (web-ui Decision 17) sees the pipeline and the scorecard and changes nothing:
+`accounts:read`, `offers:read`, `analytics:read`, `status:read`. Its data limit defaults to `all`.
+
+## Editable roles per workspace (web-ui Decision 17)
+
+- A workspace's role sets live in `tenancy.role_permission` (one row per tenant and role, the role's
+  permission list). A role with no row uses the default above, so a new workspace needs no seed and a
+  later change to the defaults reaches every workspace that never edited that role.
+- `GET /api/v1/roles` (`members:read`) returns per role its current `permissions`, its
+  `default_permissions`, `customised` and `locked` (true for Owner), and the permission list with labels
+  and groups. `PUT /api/v1/roles/{role}` (`members:manage`, people only) replaces one role's list.
+- **Owner is locked**: it always holds every permission; `PUT /api/v1/roles/owner` is 409
+  `role-locked`.
+- **No escalation**: someone who is not an owner or platform admin can add or remove only permissions
+  they hold themselves (403 `permission-not-yours`, as for extras). Restore defaults is a `PUT` with
+  `default_permissions`, under the same rule.
+- Saving writes the row, audits `tenancy.role.permissions_changed` with the added and removed
+  permissions, and drops the instance's cached principals for the workspace. Members pick the change up
+  on their next request (other instances within 60 seconds).
+- Effective permissions are the workspace's role set plus the membership's extras. Every check that
+  used the role's default set (sign-in principal, member list, "who can be assigned", "can you give
+  this role") reads the workspace's set. API keys keep their own scopes.
 
 ## Data limits
 
@@ -115,6 +141,16 @@ As an owner, I want to let a seller or operator review accounts, so that review 
 As an owner, I want principals without `people:read` to see people's names and roles but not emails
 or phones, so that partners can't harvest contacts.
 - TEN-E3-S3-AC1 Responses for such principals omit `email`, `phone`, `mobile` and `linkedin_url`.
+
+### TEN-E3-S5 Change what a role can do
+As an owner, I want to change a role's permissions for my workspace, so that the roles fit how my team
+works.
+- TEN-E3-S5-AC1 After saving, a member with that role gets the new set on their next request, in the
+  web app, API and MCP.
+- TEN-E3-S5-AC2 The Owner role can't be changed, and nobody but an owner or platform admin can add or
+  remove a permission they don't hold.
+- TEN-E3-S5-AC3 Restore defaults puts a role back to the table above; another workspace is never
+  affected.
 
 ### TEN-E3-S4 Explain access
 As a member, I want to see why I can't see or do something, so that I know whom to ask.
