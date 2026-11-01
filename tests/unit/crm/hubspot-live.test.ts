@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hubspotLive } from '@/modules/crm/adapters/hubspot/live';
-import { SCOUT_PROPERTIES } from '@/modules/crm/adapters/hubspot/properties';
+import { SCOUT_PROPERTIES, TIER_OPTIONS } from '@/modules/crm/adapters/hubspot/properties';
 import { noteFingerprint } from '@/modules/crm/domain/fingerprint';
 import { RateLimitedError } from '@/modules/integrations';
 
@@ -239,19 +239,21 @@ describe('hubspotLive test()', () => {
 
 describe('hubspotLive properties', () => {
   it('creates only the properties that are missing, so a second run creates nothing', async () => {
-    const have = new Set(['taazaa_tier', 'unrelated']);
+    const opts = TIER_OPTIONS.map((o) => ({ label: o, value: o }));
+    const have = new Map<string, unknown>([['taazaa_tier', opts], ['unrelated', null]]);
     const groups = new Set<string>();
     const f = fake(
       exact('GET', '/crm/v3/properties/companies/groups', () => ({ body: { results: [...groups].map((name) => ({ name })) } })),
       exact('POST', '/crm/v3/properties/companies/groups', (r) => (groups.add(r.body!.name), { body: {} })),
-      exact('GET', '/crm/v3/properties/companies', () => ({ body: { results: [...have].map((name) => ({ name })) } })),
-      exact('POST', '/crm/v3/properties/companies', (r) => (have.add(r.body!.name), { body: {} })),
+      exact('GET', '/crm/v3/properties/companies', () => ({ body: { results: [...have].map(([name, options]) => ({ name, options })) } })),
+      exact('POST', '/crm/v3/properties/companies', (r) => (have.set(r.body!.name, r.body!.options ?? null), { body: {} })),
     );
     const a = adapter(f);
     const input = { groupName: 'scout_buyer_signals', groupLabel: 'Scout buyer signals', properties: SCOUT_PROPERTIES };
     const first = await a.setUpProperties(input);
     expect(first.created).toHaveLength(SCOUT_PROPERTIES.length - 1);
     expect(first.created).not.toContain('taazaa_tier');
+    expect(first.updated).toEqual([]);
     expect(first.created).toContain('scout_link');
     const posts = f.calls.filter((c) => c.method === 'POST' && c.path === '/crm/v3/properties/companies');
     expect(posts.every((c) => c.body!.groupName === 'scout_buyer_signals')).toBe(true);
@@ -259,6 +261,32 @@ describe('hubspotLive properties', () => {
     const second = await a.setUpProperties(input);
     expect(second.created).toEqual([]);
     expect(await a.existingProperties({})).toContain('scout_link');
+  });
+
+  it('adds the options an existing select property lacks, keeping the ones it has, and does it once', async () => {
+    // A workspace set up before Nurture: the Buying tier property has the four old options and one a person added.
+    const old = [
+      { label: 'Act now', value: 'Act now', displayOrder: 0 },
+      { label: 'Good fit', value: 'Good fit', displayOrder: 1 },
+      { label: 'Watch', value: 'Watch', displayOrder: 2 },
+      { label: 'Not a fit', value: 'Not a fit', displayOrder: 3 },
+      { label: 'Custom', value: 'Custom', displayOrder: 4 },
+    ];
+    const have = new Map<string, unknown>(SCOUT_PROPERTIES.map((p) => [p.name, p.name === 'taazaa_tier' ? old : p.options?.map((o) => ({ label: o, value: o })) ?? null]));
+    const f = fake(
+      exact('GET', '/crm/v3/properties/companies', () => ({ body: { results: [...have].map(([name, options]) => ({ name, options })) } })),
+      exact('PATCH', '/crm/v3/properties/companies/taazaa_tier', (r) => (have.set('taazaa_tier', r.body!.options), { body: {} })),
+    );
+    const a = adapter(f);
+    const input = { groupName: 'scout_buyer_signals', properties: SCOUT_PROPERTIES };
+    const first = await a.setUpProperties(input);
+    expect(first).toEqual({ created: [], updated: ['taazaa_tier'] });
+    const patch = f.calls.find((c) => c.method === 'PATCH')!;
+    expect(patch.body!.options.map((o: { value: string }) => o.value)).toEqual(['Act now', 'Good fit', 'Watch', 'Not a fit', 'Custom', 'Nurture']);
+    expect(patch.body!.options[5]).toEqual({ label: 'Nurture', value: 'Nurture', displayOrder: 5 });
+    expect(f.calls.some((c) => c.method === 'POST')).toBe(false);
+    expect(await a.setUpProperties(input)).toEqual({ created: [], updated: [] });
+    expect(f.calls.filter((c) => c.method === 'PATCH')).toHaveLength(1);
   });
 });
 

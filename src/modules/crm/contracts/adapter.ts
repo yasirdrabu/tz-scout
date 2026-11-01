@@ -195,7 +195,8 @@ export const setUpPropertiesInput = z.object({
     }),
   ),
 });
-export const setUpPropertiesOutput = z.object({ created: z.array(z.string()) });
+/** `created` are new properties; `updated` are existing select properties that gained options they were missing. */
+export const setUpPropertiesOutput = z.object({ created: z.array(z.string()), updated: z.array(z.string()) });
 
 export const verifyWebhookInput = z.object({
   method: z.string().min(1),

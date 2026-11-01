@@ -85,6 +85,13 @@
       "when": 1793502742363,
       "tag": "0011_crm_check_open_deal",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793575055012,
+      "tag": "0012_crm_tier_nurture",
+      "breakpoints": true
     }
   ]
 }
