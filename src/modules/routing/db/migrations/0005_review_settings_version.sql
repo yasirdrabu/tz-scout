@@ -1,0 +1,1 @@
+ALTER TABLE "routing"."routing_setting" ADD COLUMN "version" integer DEFAULT 0 NOT NULL;

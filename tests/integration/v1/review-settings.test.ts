@@ -240,9 +240,11 @@ describe('send back with a reason (Decision 1)', () => {
 });
 
 describe('PUT /settings/review: statuses, reasons and auto-accept in one save (Ruling 19)', () => {
-  type Settings = { statuses: Status[]; decline_reasons: Reason[]; auto_accept_working_days: number | null };
+  type Settings = { statuses: Status[]; decline_reasons: Reason[]; auto_accept_working_days: number | null; version: number };
   const settings = async (who = w.owner, ws = w): Promise<Settings> => (await ws.as(who, getSettings, 'settings/review')).json();
-  const save = (body: unknown, who = w.owner, ws = w) => ws.as(who, putSettings, 'settings/review', 'PUT', body);
+  /** A save from a fresh load: the current version goes with it unless the body names one. */
+  const save = async (body: Record<string, unknown>, who = w.owner, ws = w) =>
+    ws.as(who, putSettings, 'settings/review', 'PUT', 'version' in body ? body : { ...body, version: (await settings(ws.owner, ws)).version });
   const audits = async (action: string) => (await adminDb.select().from(auditLog).where(and(eq(auditLog.tenantId, w.tenantId), eq(auditLog.action, action)))).length;
   const auditCounts = async () => [await audits('routing.statuses.updated'), await audits('routing.reasons.updated'), await audits('routing.settings.updated')];
 
@@ -332,11 +334,45 @@ describe('PUT /settings/review: statuses, reasons and auto-accept in one save (R
     expect((await summaryOf(w.tenant, a)).reviewStatusKey).toBe('unvetted');
   });
 
+  it('a save from an older load is a 409 and writes nothing; every write bumps the version', async () => {
+    const loaded = await settings();
+    // Another owner saves in between, through the older statuses route.
+    const renamed = asEdits(loaded.statuses).map((s) => (s.key === 'needs_review' ? { ...s, label: 'Theirs first' } : s));
+    expect((await w.as(w.owner, putStatuses, 'settings/review/statuses', 'PUT', { statuses: renamed })).status).toBe(200);
+    const after = await settings();
+    expect(after.version).toBeGreaterThan(loaded.version);
+    const counts = await auditCounts();
+    const mine = asEdits(loaded.statuses).map((s) => (s.key === 'needs_review' ? { ...s, label: 'Mine' } : s));
+    const res = await save({ statuses: mine, auto_accept_working_days: 8, version: loaded.version });
+    expect(res.status).toBe(409);
+    expect((await res.json()).title).toBe('Someone else changed these. Reload to see their changes.');
+    const now = await settings();
+    expect(now.statuses.find((s) => s.key === 'needs_review')!.label).toBe('Theirs first');
+    expect(now.auto_accept_working_days).toBe(after.auto_accept_working_days);
+    expect(now.version).toBe(after.version);
+    expect(await auditCounts()).toEqual(counts);
+    // The reasons route, the one save and the reset bump it too.
+    expect((await w.as(w.owner, putReasons, 'settings/review/reasons', 'PUT', { reasons: reasonEdits(now.decline_reasons) })).status).toBe(200);
+    const v1 = (await settings()).version;
+    expect(v1).toBeGreaterThan(now.version);
+    const ok = await save({ auto_accept_working_days: 3, version: v1 });
+    expect(ok.status).toBe(200);
+    const v2 = (await ok.json()).version;
+    expect(v2).toBeGreaterThan(v1);
+    const reset = await w.as(w.owner, settingAction, 'settings/review:reset', 'POST', {});
+    expect((await reset.json()).version).toBeGreaterThan(v2);
+  });
+
+  it('the version is required', async () => {
+    const res = await w.as(w.owner, putSettings, 'settings/review', 'PUT', { auto_accept_working_days: 3 });
+    expect(res.status).toBe(400);
+  });
+
   it('settings:manage people only', async () => {
     const edits = asEdits((await settings()).statuses);
     expect((await save({ statuses: edits }, leader)).status).toBe(403);
     const key = await keyFor(w.tenant, ['settings:manage']);
-    expect((await call(putSettings, key, 'settings/review', { method: 'PUT', body: { statuses: edits } })).status).toBe(403);
+    expect((await call(putSettings, key, 'settings/review', { method: 'PUT', body: { statuses: edits, version: 0 } })).status).toBe(403);
   });
 
   it("another tenant's status keys can't be saved here, and their save leaves this tenant alone", async () => {

@@ -51,6 +51,8 @@ export type ReviewSettings = {
   autoAcceptWorkingDays: number | null;
   /** The colors a status can take, with their words (the editor's picker). */
   colors: { value: string; label: string }[];
+  /** Bumped by every write to the statuses, reasons or auto-accept; the editor's save sends back the one it loaded. */
+  version: number;
 };
 
 /** Whether the lists carry tenant-wide counts (only for people who manage settings). */
@@ -136,13 +138,25 @@ export async function listReasons(ctx: ModuleContext, opts: ListOptions = {}): P
 
 /** The statuses, reasons and the auto-accept setting, with counts (the settings screen). */
 export async function getReviewSettings(ctx: ModuleContext): Promise<ReviewSettings> {
-  const [setting] = await ctx.tx.select({ days: routingSetting.autoAcceptWorkingDays }).from(routingSetting).where(eq(routingSetting.tenantId, ctx.tenantId));
+  const [setting] = await ctx.tx
+    .select({ days: routingSetting.autoAcceptWorkingDays, version: routingSetting.version })
+    .from(routingSetting)
+    .where(eq(routingSetting.tenantId, ctx.tenantId));
   return {
     statuses: await listStatuses(ctx, { counts: true }),
     declineReasons: await listReasons(ctx, { counts: true }),
     autoAcceptWorkingDays: setting ? setting.days : DEFAULT_AUTO_ACCEPT_WORKING_DAYS,
     colors: STATUS_COLOR_OPTIONS,
+    version: setting?.version ?? 0,
   };
+}
+
+/** Marks the review settings changed, so a save from an older load is refused. */
+async function bumpVersion(ctx: ModuleContext): Promise<void> {
+  await ctx.tx
+    .insert(routingSetting)
+    .values({ tenantId: ctx.tenantId, autoAcceptWorkingDays: DEFAULT_AUTO_ACCEPT_WORKING_DAYS, version: 1 })
+    .onConflictDoUpdate({ target: routingSetting.tenantId, set: { version: sql`${routingSetting.version} + 1`, updatedAt: new Date() } });
 }
 
 /** Moves every account in an archived status to the first status, one status change each, in account id order. */
@@ -200,6 +214,7 @@ export async function saveStatuses(ctx: ModuleContext, edits: StatusEdit[]): Pro
       .where(and(eq(reviewStatusDef.tenantId, ctx.tenantId), eq(reviewStatusDef.key, row.key)));
   }
   for (const s of nowArchived) await moveOutOf(ctx, s, by);
+  await bumpVersion(ctx);
   const after = await listStatuses(ctx, { counts: true });
   await audit(ctx, { action: 'routing.statuses.updated', subject: { type: 'routing_setting', id: ctx.tenantId }, before: { statuses: before }, after: { statuses: after.map(({ inStatusCount: _n, lateCount: _l, ...s }) => s) } });
   return after;
@@ -232,6 +247,7 @@ export async function saveReasons(ctx: ModuleContext, edits: ReasonEdit[]): Prom
       .set({ ...values, archivedAt: e.archived ? (row.archivedAt ?? now) : null })
       .where(and(eq(declineReasonDef.tenantId, ctx.tenantId), eq(declineReasonDef.key, row.key)));
   }
+  await bumpVersion(ctx);
   const after = await listReasons(ctx, { counts: true });
   await audit(ctx, { action: 'routing.reasons.updated', subject: { type: 'routing_setting', id: ctx.tenantId }, before: { reasons: before }, after: { reasons: after.map(({ usedThisQuarter: _n, ...r }) => r) } });
   return after;
@@ -264,7 +280,8 @@ export async function resetReviewSettings(ctx: ModuleContext): Promise<ReviewSet
 const autoAcceptProblem = (days: number | null): Problem | null =>
   days !== null && (!Number.isInteger(days) || days < 1 || days > 10) ? { path: 'auto_accept_working_days', message: 'Pick 1 to 10 working days, or turn it off.' } : null;
 
-export type ReviewSettingsEdit = { statuses?: StatusEdit[]; reasons?: ReasonEdit[]; autoAcceptWorkingDays?: number | null };
+/** `version` is the one the editor loaded (`ReviewSettings.version`). */
+export type ReviewSettingsEdit = { version: number; statuses?: StatusEdit[]; reasons?: ReasonEdit[]; autoAcceptWorkingDays?: number | null };
 
 /**
  * The editor's one save (Ruling 19): statuses, reasons and auto-accept together, in that order, in the
@@ -275,6 +292,11 @@ export async function saveReviewSettings(ctx: ModuleContext, edit: ReviewSetting
   requirePerson(ctx);
   if (edit.statuses === undefined && edit.reasons === undefined && edit.autoAcceptWorkingDays === undefined) {
     throw new ScoutError({ slug: 'validation', status: 400, title: 'Nothing to save.' });
+  }
+  // Locked first, so two saves from the same load can't both pass the check.
+  const [setting] = await ctx.tx.select({ version: routingSetting.version }).from(routingSetting).where(eq(routingSetting.tenantId, ctx.tenantId)).for('update');
+  if ((setting?.version ?? 0) !== edit.version) {
+    throw new ScoutError({ slug: 'conflict', status: 409, title: 'Someone else changed these. Reload to see their changes.' });
   }
   const problems: Problem[] = [];
   if (edit.statuses) {
@@ -306,6 +328,7 @@ export async function setAutoAcceptWorkingDays(ctx: ModuleContext, days: number 
     .insert(routingSetting)
     .values({ tenantId: ctx.tenantId, autoAcceptWorkingDays: days })
     .onConflictDoUpdate({ target: routingSetting.tenantId, set: { autoAcceptWorkingDays: days, updatedAt: new Date() } });
+  await bumpVersion(ctx);
   if (before !== days) {
     await audit(ctx, {
       action: 'routing.settings.updated',

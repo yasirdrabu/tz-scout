@@ -154,6 +154,8 @@ export const routingSetting = routing.table(
   {
     tenantId: text('tenant_id').primaryKey(),
     autoAcceptWorkingDays: integer('auto_accept_working_days').default(2),
+    /** Bumped by every write to the statuses, reasons or auto-accept, so the editor's save can refuse a stale load. */
+    version: integer('version').notNull().default(0),
     updatedAt: at('updated_at').notNull().defaultNow(),
   },
   (t) => [check('routing_setting_auto_accept_range', sql`${t.autoAcceptWorkingDays} is null or ${t.autoAcceptWorkingDays} between 1 and 10`)],

@@ -490,7 +490,8 @@ describe('review settings', () => {
   });
 
   it('PUT sets auto_accept_working_days (1 to 10, or null), audits it, and refuses bad values and an empty save', async () => {
-    const put = (body: unknown, who: Who = 'owner') => as(who, putSettings, 'settings/review', 'PUT', body);
+    const version = async () => (await (await as('owner', getSettings, 'settings/review')).json()).version as number;
+    const put = async (body: Record<string, unknown>, who: Who = 'owner') => as(who, putSettings, 'settings/review', 'PUT', { ...body, version: await version() });
     const ok = await put({ auto_accept_working_days: 5 });
     expect(ok.status).toBe(200);
     expect((await ok.json()).auto_accept_working_days).toBe(5);
@@ -511,7 +512,7 @@ describe('review settings', () => {
     expect((await put({})).status).toBe(400);
     expect((await put({ auto_accept_working_days: 3, statuses: [] })).status).toBe(400);
     expect((await put({ auto_accept_working_days: 3 }, 'leader')).status).toBe(403);
-    expect((await viaKey(await keyIn(['settings:manage']), putSettings, 'settings/review', 'PUT', { auto_accept_working_days: 3 })).status).toBe(403);
+    expect((await viaKey(await keyIn(['settings:manage']), putSettings, 'settings/review', 'PUT', { auto_accept_working_days: 3, version: await version() })).status).toBe(403);
     expect((await (await as('owner', getSettings, 'settings/review')).json()).auto_accept_working_days).toBeNull();
   });
 });
