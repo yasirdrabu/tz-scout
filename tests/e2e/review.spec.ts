@@ -22,7 +22,7 @@ async function assignToAe(page: Page, name: string) {
   const peek = page.getByRole('dialog', { name });
   await peek.getByRole('button', { name: 'Approve and assign' }).click();
   const dialog = page.getByRole('dialog', { name: `Assign ${name}` });
-  await dialog.getByRole('radio', { name: /^ash/i }).check();
+  await dialog.getByRole('radio', { name: /^Ash/ }).check();
   const go = dialog.getByRole('button', { name: /^Assign to / });
   await expect(go).toBeEnabled();
   await go.click();

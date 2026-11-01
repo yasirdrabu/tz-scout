@@ -107,6 +107,37 @@ describe('scout CLI', () => {
     expect(vendors.length).toBeGreaterThan(0);
   }, 30_000);
 
+  it('seed names people by display name, adds Riley as an operator, and renames handles left by an older seed', async () => {
+    const id = ((await adminDb.execute(sql`select id from tenancy.tenant where slug = 'taazaa'`)) as unknown as { id: string }[])[0]!.id;
+    // An older seed named people and their person sources by the email's local part.
+    await adminDb.execute(sql`update tenancy."user" set name = 'zach.wiant' where email = 'zach.wiant@taazaa.com'`);
+    await adminDb.execute(sql`update tenancy."user" set name = 'ash' where email = 'ash@taazaa.com'`);
+    await adminDb.execute(
+      sql`update intake.source s set name = 'zach.wiant' from tenancy."user" u where s.user_id = u.id and s.kind = 'person' and u.email = 'zach.wiant@taazaa.com'`,
+    );
+    const seeded = await scout(['seed']).done;
+    expect(seeded.code, seeded.stderr).toBe(0);
+    const people = (await adminDb.execute(
+      sql`select u.email, u.name, m.role from tenancy.membership m join tenancy."user" u on u.id = m.user_id where m.tenant_id = ${id} order by u.email`,
+    )) as unknown as { email: string; name: string; role: string }[];
+    expect(people.map((p) => [p.email, p.name, p.role])).toEqual([
+      ['andy@taazaa.com', 'Andy', 'seller'],
+      ['ash@taazaa.com', 'Ash', 'seller'],
+      ['mike@taazaa.com', 'Mike', 'seller'],
+      ['riley@taazaa.com', 'Riley', 'operator'],
+      ['zach.wiant@taazaa.com', 'Zach Wiant', 'owner'],
+    ]);
+    const admin = (await adminDb.execute(sql`select name from tenancy."user" where email = 'yasir@taazaa.com'`)) as unknown as { name: string }[];
+    expect(admin[0]!.name).toBe('Yasir Drabu');
+    const sources = (await adminDb.execute(
+      sql`select s.name from intake.source s where s.tenant_id = ${id} and s.kind = 'person' order by s.name`,
+    )) as unknown as { name: string }[];
+    expect(sources.map((s) => s.name)).toEqual(expect.arrayContaining(['Zach Wiant', 'Ash', 'Mike', 'Andy', 'Yasir Drabu', 'Riley']));
+    expect(sources.map((s) => s.name)).not.toContain('zach.wiant');
+    const north = (await adminDb.execute(sql`select name from tenancy."user" where email = 'owner@northwind.example'`)) as unknown as { name: string }[];
+    expect(north[0]!.name).toBe('Northwind Owner');
+  }, 90_000);
+
   it('seed twice leaves one scoring profile, one set of review statuses and the signal rules; backfill-r1b changes nothing more', async () => {
     // Seeds here rather than relying on an earlier test having done it.
     const seeded = await scout(['seed']).done;

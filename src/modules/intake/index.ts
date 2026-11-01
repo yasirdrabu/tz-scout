@@ -47,6 +47,7 @@ export {
   listSources,
   personSourceFor,
   registerSource,
+  renamePersonSources,
   firstSources,
   sourceNames,
   sourcesOfAccount,

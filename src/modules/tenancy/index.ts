@@ -34,7 +34,7 @@ export { handleDevSignIn } from './services/dev-sign-in';
 export { SYSTEM_GRANTOR, createApiKey, createKeyFromCli, revokeActiveKeysNamed, revokeApiKey, revokeKeysForSource, type CreateApiKeyInput, type Grantor } from './services/api-keys';
 export { resolvePrincipal } from './services/principal';
 export { registerSourceValidator, type SourceValidator } from './contracts/source-validator';
-export { listTenants, ensurePlatformAdmin, userIdForEmail, type TenantRow } from './services/tenants';
+export { listTenants, ensurePlatformAdmin, renameHandleUsers, userIdForEmail, type DisplayNameRow, type TenantRow } from './services/tenants';
 export { devSignInUsers, type DevSignInUser } from './services/dev-sign-in';
 export { sessionUser, type SessionUser } from './services/principal';
 export { completeSignIn } from './services/sign-in';
@@ -56,6 +56,7 @@ export { PERMISSION_GROUP_NAMES, permissionGroup, type PermissionGroup } from '.
 export { KEY_ACCESS, KEY_ACCESS_CHOICES, type KeyAccess } from './domain/key-access';
 export { assertSourceExists, createKeyWithAccess, listApiKeys, type ApiKeyView } from './services/api-keys';
 export { AUDIT_AREAS, type AuditArea } from './domain/audit-areas';
+export { displayNameFromEmail } from './domain/display-name';
 export { auditEntries, type AuditEntryView, type AuditQuery } from './services/audit';
 export { endSessions, listSessions, signInFacts, type SessionView, type SignInMethod } from './services/sessions';
 export { clientIp } from './services/principal';

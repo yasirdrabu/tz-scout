@@ -84,7 +84,7 @@ test('Audit log: shows the invite, role change, credential and key entries, and 
     'tenancy.api_key.created',
     'tenancy.api_key.revoked',
   ]) {
-    await expect(page.getByRole('row').filter({ hasText: action }).first()).toContainText('zach.wiant');
+    await expect(page.getByRole('row').filter({ hasText: action }).first()).toContainText('Zach Wiant');
   }
 
   await page.getByRole('searchbox', { name: 'Find an action, person or target' }).fill('api_key');

@@ -8,6 +8,7 @@ import { newId } from '@/platform/ids';
 import { memberAdded, memberRemoved, memberRoleChanged } from '../contracts/events';
 import { ROLES, CRM_OWNER_TAKEN, type DataLimit, type Member, type MembershipStatus, type Role } from '../contracts/members';
 import { DEFAULT_DATA_LIMIT, DataLimitSchema, isWithin } from '../domain/data-limit';
+import { displayNameFromEmail } from '../domain/display-name';
 import { memberActionRefusal, type MemberAction, type MemberActor, type MemberRefusal } from '../domain/member-rules';
 import { PERMISSIONS, isPermission, permissionsFor, type Permission } from '../domain/permissions';
 import { membership, tenant, user } from '../db/schema';
@@ -235,7 +236,7 @@ export async function addMember(
 
   await ctx.tx
     .insert(user)
-    .values({ id: newId('usr'), name: email.split('@')[0] ?? email, email })
+    .values({ id: newId('usr'), name: displayNameFromEmail(email), email })
     .onConflictDoNothing({ target: user.email });
   const [u] = await ctx.tx.select().from(user).where(eq(user.email, email));
   const status = u!.lastSignInAt ? 'active' : 'invited';

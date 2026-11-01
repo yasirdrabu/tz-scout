@@ -1,5 +1,5 @@
 import { getAccount, getSignals, type PersonView } from '@/modules/accounts';
-import { getArrival, type InlineResult, type SubmitResult } from '@/modules/intake';
+import { getArrival, sourceNames, type InlineResult, type SubmitResult } from '@/modules/intake';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { notFound } from '../_lib/path';
@@ -38,5 +38,17 @@ export const objectBody = (raw: unknown): Record<string, unknown> => {
 export async function accountOf(ctx: ModuleContext, id: string, canReadPeople: boolean) {
   const account = await getAccount(ctx, id);
   if (!account) throw notFound();
-  return { ...account, mergedInto: account.mergedInto ?? null, people: account.people.map((p) => personFor(p, canReadPeople)), signals: await getSignals(ctx, account.id) };
+  return { ...account, mergedInto: account.mergedInto ?? null, people: account.people.map((p) => personFor(p, canReadPeople)), signals: await namedSignals(ctx, account.id) };
+}
+
+/** Live signals, each with its sources by name (no arrivals:read needed) and `sourceName`, the nearest of vendor, agent and person. */
+async function namedSignals(ctx: ModuleContext, accountId: string) {
+  const signals = await getSignals(ctx, accountId);
+  const chain = (s: (typeof signals)[number]) => [s.sourceChain.personSourceId, s.sourceChain.agentSourceId, s.sourceChain.vendorSourceId];
+  const names = await sourceNames(ctx, [...new Set(signals.flatMap(chain).filter((x): x is string => !!x))]);
+  const name = (id: string | null | undefined) => (id ? (names.get(id) ?? null) : null);
+  return signals.map((s) => {
+    const byKind = { person: name(s.sourceChain.personSourceId), agent: name(s.sourceChain.agentSourceId), vendor: name(s.sourceChain.vendorSourceId) };
+    return { ...s, sourceName: byKind.vendor ?? byKind.agent ?? byKind.person, sourceNames: byKind };
+  });
 }
