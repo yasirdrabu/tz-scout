@@ -2,15 +2,18 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { upsertFromArrival } from '@/modules/accounts';
-import { getBatch, listBatches, markCopied, seedMockCrm, syncOwners } from '@/modules/crm';
+import { getBatch, listBatches, markCopied, refreshBatch, registerHandoffPackageProvider, seedMockCrm, syncOwners } from '@/modules/crm';
 import { handoff, handoffBatch, handoffMessage } from '@/modules/crm/db/schema';
 import { setConnectionSettings } from '@/modules/integrations';
+import { approveOffer, createOffer, createPractice } from '@/modules/offers';
+import { playbooksHandoffPackage } from '@/modules/playbooks';
 import { assignmentCreated, bulk } from '@/modules/routing';
 import { addMember } from '@/modules/tenancy';
 import { closeDbs } from '@/platform/db/client';
 import type { DataLimit } from '@/platform/access';
 import { newId } from '@/platform/ids';
 import { publishTestEvent } from '../helpers/publish';
+import { completeOffer } from '../offers/helpers';
 import { runOutbox } from '../helpers/run-outbox';
 import { asPerson, domain, member, resolved, routingTenant, setSummary, type Tenant } from '../routing/helpers';
 import { seedUser } from '../tenancy/helpers';
@@ -237,5 +240,36 @@ describe('batches seen through a data limit (final review I3)', () => {
     expect(m.handoffs.map((h) => h.accountId)).toEqual([inside]);
     expect(m.messages.every((x) => x.text === null && x.restricted)).toBe(true);
     expect(JSON.stringify(m)).not.toContain('Outside Co');
+  });
+});
+
+describe('the batch message offer (light best-offer read)', () => {
+  it('names the lead offer without building a package', async () => {
+    const practice = await t.run((ctx) => createPractice(ctx, { name: 'Batch Practice', slug: `bp-${newId('prc').slice(-8).toLowerCase()}` }));
+    const lead = await t.run((ctx) => createOffer(ctx, { name: 'Batch Lead Offer', practiceId: practice.id, ...completeOffer }));
+    await t.run((ctx) => approveOffer(ctx, lead.id));
+    const a = await account('Lead Offer Co');
+    await assigned(a, mike, null);
+    await runOutbox(t.tenantId);
+    // The lead offer someone picked, as the review snapshot copies it to the summary.
+    await setSummary(t, a, { leadOfferOverrideId: lead.id });
+    const id = await batchIdOf(a);
+
+    let calls = 0;
+    registerHandoffPackageProvider({
+      ...playbooksHandoffPackage,
+      package: async (...args) => {
+        calls++;
+        return playbooksHandoffPackage.package(...args);
+      },
+    });
+    try {
+      await t.run((ctx) => refreshBatch(ctx, id));
+    } finally {
+      registerHandoffPackageProvider(playbooksHandoffPackage);
+    }
+    expect(calls).toBe(0);
+    expect((await view(id))!.messages[0]!.text).toContain('1. Lead Offer Co');
+    expect((await view(id))!.messages[0]!.text).toContain(': Batch Lead Offer.');
   });
 });

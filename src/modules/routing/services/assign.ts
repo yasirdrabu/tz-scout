@@ -43,7 +43,7 @@ export type AssignmentView = {
 };
 
 export type AssignPreview = {
-  preflight: OwnershipPreflightResult;
+  preflight: Required<OwnershipPreflightResult>;
   /** The status "Approve and assign" moves the account to, or null when it already counts as reviewed. */
   approvesTo: { key: string; label: string } | null;
   /** The open assignment this one would replace. */
@@ -79,7 +79,7 @@ async function plan(
   // A sent-back account is reviewed but not approved, so assigning it approves it too.
   const approved = current?.countsAsReviewed && !current.returnsToSource;
   const approve = approved ? undefined : statuses.find((s) => !s.archivedAt && s.countsAsReviewed && !s.isDeclined && !s.returnsToSource);
-  const preflight = await ownershipPreflight().check(ctx, row.accountId, sellerUserId, opts);
+  const preflight = { reason: null, currentOwnerName: null, deal: null, ...(await ownershipPreflight().check(ctx, row.accountId, sellerUserId, opts)) };
   const open = await openAssignment(ctx, row.accountId);
   return {
     preflight,
@@ -90,11 +90,36 @@ async function plan(
 }
 
 /** What the assign dialog shows before submit: the preflight, the approval and the assignment it replaces. */
-export async function previewAssign(ctx: ModuleContext, accountId: string, sellerUserId: string): Promise<AssignPreview> {
+export async function previewAssign(ctx: ModuleContext, accountId: string, sellerUserId: string, opts: PreflightOptions = {}): Promise<AssignPreview> {
   requirePerson(ctx);
   const row = await visibleReview(ctx, accountId, { lock: false });
-  const { open: _open, ...preview } = await plan(ctx, row, sellerUserId);
+  const { open: _open, ...preview } = await plan(ctx, row, sellerUserId, opts);
   return preview;
+}
+
+export type BulkPreviewRow = ({ accountId: string; ok: true } & AssignPreview) | { accountId: string; ok: false; status: number; message: string };
+
+/**
+ * The bulk assign dialog's preview (Ruling 17): each account as `previewAssign` gives it, in the order asked, from a
+ * CRM check under a day old (the CRM is asked only for accounts with none). Each account runs in its own savepoint,
+ * so one that is hidden or missing (404) or whose CRM check fails (503) is that account's row. A bad seller is a 400.
+ */
+export async function previewBulkAssign(ctx: ModuleContext, accountIds: string[], sellerUserId: string): Promise<BulkPreviewRow[]> {
+  requirePerson(ctx);
+  const ids = [...new Set(accountIds)];
+  if (ids.length === 0 || ids.length > MAX_BULK) throw invalid('Pick 1 to 50 accounts.', 'account_ids');
+  await checkSeller(ctx, sellerUserId);
+  const out: BulkPreviewRow[] = [];
+  for (const accountId of ids) {
+    try {
+      const preview = await ctx.tx.transaction((tx) => previewAssign({ ...ctx, tx }, accountId, sellerUserId, { fresh: false }));
+      out.push({ accountId, ok: true, ...preview });
+    } catch (e) {
+      if (!(e instanceof ScoutError)) throw e;
+      out.push({ accountId, ok: false, status: e.status, message: e.message });
+    }
+  }
+  return out;
 }
 
 async function checkLeadOffer(ctx: ModuleContext, offerId: string): Promise<void> {

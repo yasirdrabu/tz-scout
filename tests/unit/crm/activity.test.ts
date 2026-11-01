@@ -40,6 +40,22 @@ describe('activity entries', () => {
     expect(undoReason({ ...undone, failed: true, reason: 'HubSpot was busy and every retry failed.' }, null)).toBe('HubSpot was busy and every retry failed');
   });
 
+  it('words an undo with its cause: who declined it and why, or who withdrew it', () => {
+    const base = { tasksClosed: ['t1', 't2'], tasksLeftDone: [], ownerReturnedTo: 'own_9', noteExternalId: 'n1', ownerNote: null, at: at('12').toISOString() };
+    const declined = { ...base, cause: { kind: 'declined' as const, reasonLabel: 'Not my territory', byName: 'Ash' } };
+    expect(scoutEntries(handoff({ undone: declined }), names)[1]!.summary).toBe(
+      'Scout took the account back: Ash declined it (Not my territory). Closed 2 tasks and gave the company back to Rita Gomez.',
+    );
+    const withdrawn = { ...base, tasksClosed: [], ownerReturnedTo: null, cause: { kind: 'withdrawn' as const, reasonLabel: null, byName: 'Zach Wiant' } };
+    expect(scoutEntries(handoff({ undone: withdrawn }), names)[1]!.summary).toBe(
+      'Scout took the account back: Zach Wiant withdrew the assignment. Nothing else had to change in HubSpot.',
+    );
+    const noReason = { ...base, cause: { kind: 'declined' as const, reasonLabel: null, byName: null } };
+    expect(scoutEntries(handoff({ undone: noReason }), names)[1]!.summary).toBe(
+      'Scout took the account back: the seller declined it. Closed 2 tasks and gave the company back to Rita Gomez.',
+    );
+  });
+
   it('sorts newest first and pages after a cursor', () => {
     const rows = [
       { id: 'b', kind: 'email', at: at('10'), summary: '' },

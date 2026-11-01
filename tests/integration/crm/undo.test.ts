@@ -175,6 +175,18 @@ describe('undo on decline (CRM-E3-S7)', () => {
     expect((await handoffOf(asg)).undone).toMatchObject({ noteExternalId: added.externalId });
   });
 
+  it('records the cause: who declined and why, or who withdrew', async () => {
+    const declined = await pushed();
+    await declineAs(ash, declined.asg);
+    await runOutbox(t.tenantId);
+    expect((await handoffOf(declined.asg)).undone!.cause).toEqual({ kind: 'declined', reasonLabel: 'Not my territory', byName: await nameOf(ash) });
+
+    const withdrawn = await pushed();
+    await asPerson(t, (ctx) => withdraw(ctx, withdrawn.asg, {}), { userId: leader });
+    await runOutbox(t.tenantId);
+    expect((await handoffOf(withdrawn.asg)).undone!.cause).toEqual({ kind: 'withdrawn', reasonLabel: null, byName: await nameOf(leader) });
+  });
+
   it('running the undo twice changes nothing', async () => {
     const { a, asg, d, h } = await pushed();
     await declineAs(ash, asg);

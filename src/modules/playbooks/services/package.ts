@@ -9,6 +9,7 @@ import { labelFor } from '../domain/labels';
 import { buildPackage, rulesPackageBrief, type PackageBrief, type PackageSignal } from '../domain/package';
 import { rulesBrief } from '../domain/rules-brief';
 import { readBrief } from './brief';
+import { bestOfferNames } from './best-offer';
 import { buildBriefInput, closestSource } from './inputs';
 
 const EMPTY: HandoffPackage = { sections: [], properties: {}, firstTouch: null, followUps: [], planSteps: [] };
@@ -86,4 +87,4 @@ export async function handoffPackage(ctx: ModuleContext, accountId: string): Pro
 }
 
 /** CRM's `HandoffPackageProvider` (PLB-E3-S4-AC1), registered in src/entry/compose.ts. */
-export const playbooksHandoffPackage: HandoffPackageProvider = { package: (ctx, accountId) => handoffPackage(ctx, accountId) };
+export const playbooksHandoffPackage: HandoffPackageProvider = { package: (ctx, accountId) => handoffPackage(ctx, accountId), bestOfferNames };

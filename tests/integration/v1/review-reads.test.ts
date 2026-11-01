@@ -108,6 +108,24 @@ describe('GET /review-queue/facets', () => {
     expect(all.last_reviewed_at).toEqual(expect.any(String));
   });
 
+  it('total_all_tiers drops only the tier filter; source_count counts the sources with an account, every filter but source_id applied', async () => {
+    const one = await personAndAgent(w.tenant, 'Count One');
+    const two = await personAndAgent(w.tenant, 'Count Two');
+    const offerId = newId('off');
+    const accounts = [await w.account('Count A', one.agentId), await w.account('Count B', one.agentId), await w.account('Count C', two.agentId)];
+    for (const a of accounts) await setSummary(w.tenant, a, { bestOfferId: offerId });
+    await setSummary(w.tenant, accounts[0]!, { tier: 'act_now' });
+    await setSummary(w.tenant, accounts[1]!, { tier: 'watch' });
+    await setSummary(w.tenant, accounts[2]!, { tier: 'good_fit' });
+    const f = await json(w.as(leader, facetsRoute, `review-queue/facets?offer_id=${offerId}&tier=act_now`));
+    expect(f.total).toBe(1);
+    expect(f.total_all_tiers).toBe(3);
+    expect(f.source_count).toBe(1);
+    const all = await json(w.as(leader, facetsRoute, `review-queue/facets?offer_id=${offerId}&source_id=${one.agentId}`));
+    expect(all.total).toBe(2);
+    expect(all.source_count).toBe(2);
+  });
+
   it("needs review:act, checks the filters, and never counts another tenant's accounts", async () => {
     expect((await w.as(seller, facetsRoute, 'review-queue/facets')).status).toBe(403);
     expect((await w.as(leader, facetsRoute, 'review-queue/facets?arrived_since=soon')).status).toBe(400);
