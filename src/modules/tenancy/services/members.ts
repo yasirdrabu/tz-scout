@@ -403,6 +403,21 @@ export async function changeMember(
   });
 }
 
+/**
+ * `changeMember` and `setCrmOwnerIds` together, in one control transaction: when either refuses, the
+ * other's change, event and audit row are not kept either.
+ */
+export async function updateMember(
+  ws: ModuleContext,
+  membershipId: string,
+  update: { change: Parameters<typeof changeMember>[2]; crmOwnerIds?: Record<string, string> },
+): Promise<void> {
+  return onControl(ws, async () => {
+    if (Object.keys(update.change).length > 0) await changeMember(ws, membershipId, update.change);
+    if (update.crmOwnerIds) await setCrmOwnerIds(ws, membershipId, update.crmOwnerIds);
+  });
+}
+
 /** Replaces the CRM owner ids of a membership, e.g. `{ hubspot: '123' }`. */
 export async function setCrmOwnerIds(
   ws: ModuleContext,

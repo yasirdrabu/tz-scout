@@ -10,6 +10,7 @@ export {
   removeMember,
   setCrmOwnerId,
   setCrmOwnerIds,
+  updateMember,
   tenantsFor,
   userForCrmOwner,
 } from './services/members';

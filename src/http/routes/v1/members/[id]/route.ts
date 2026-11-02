@@ -3,13 +3,12 @@ import { openAssignmentCounts } from '@/modules/routing';
 import {
   DataLimitSchema,
   ROLES,
-  changeMember,
   memberList,
   reactivateMember,
   removeMember,
-  setCrmOwnerIds,
   signOutMemberEverywhere,
   suspendMember,
+  updateMember,
   type DataLimit,
   type Role,
 } from '@/modules/tenancy';
@@ -47,8 +46,7 @@ type Patch = { role?: Role; dataLimit?: DataLimit | null; extraPermissions?: str
 export const PATCH = v1Route(MANAGE, async (req, _principal, ctx) => {
   const id = memberId(req);
   const { crmOwnerIds, ...change } = await parseBody<Patch>(req, patchBody);
-  if (Object.keys(change).length > 0) await changeMember(ctx, id, change);
-  if (crmOwnerIds) await setCrmOwnerIds(ctx, id, crmOwnerIds);
+  await updateMember(ctx, id, { change, crmOwnerIds });
   return view(ctx, id);
 });
 
