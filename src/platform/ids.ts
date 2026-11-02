@@ -56,7 +56,8 @@ export type IdPrefix =
   | 'blk'
   | 'nte'
   | 'loc'
-  | 'cfl';
+  | 'cfl'
+  | 'rsr';
 
 const ulid = monotonicFactory();
 

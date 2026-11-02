@@ -135,6 +135,20 @@ export const lastRescoreQuery = (tenant: string) =>
     staleTime: 5 * 60_000,
   });
 
+/** The newest rescore of the last 24 hours (Ruling 12): a count, no account data; null when there is none. */
+export type RescoreRun = { id: string; cause: string; total: number; done: number; started_at: string; finished_at: string | null };
+
+/** How often the banner asks again while a rescore runs. */
+export const RESCORE_REFRESH_MS = 3_000;
+
+export const rescoreQuery = (tenant: string) =>
+  queryOptions({
+    queryKey: ['review-queue', tenant, 'rescore'],
+    queryFn: () => apiFetch<{ data: RescoreRun | null }>('/scoring/rescores/latest', { tenant }),
+    select: (r) => r.data,
+    refetchInterval: (q) => (q.state.data?.data && !q.state.data.data.finished_at ? RESCORE_REFRESH_MS : false),
+  });
+
 export type Column = { key: string; label: string; visible: boolean };
 export type Columns = { columns: Column[]; shown: number; total: number; is_default: boolean };
 

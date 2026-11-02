@@ -107,6 +107,7 @@ import * as v1RolesRole from './routes/v1/roles/[role]/route';
 import * as v1Roles from './routes/v1/roles/route';
 import * as v1ScoringProfileAction from './routes/v1/scoring/[profile]/route';
 import * as v1ScoringLastRescore from './routes/v1/scoring/last-rescore/route';
+import * as v1ScoringRescoresLatest from './routes/v1/scoring/rescores/latest/route';
 import * as v1ScoringProfileReset from './routes/v1/scoring/profile/reset/route';
 import * as v1ScoringProfile from './routes/v1/scoring/profile/route';
 import * as v1SettingsSetting from './routes/v1/settings/[setting]/route';
@@ -248,6 +249,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/roles`, module: v1Roles },
   { path: `${V1}/scoring/:profile`, module: v1ScoringProfileAction },
   { path: `${V1}/scoring/last-rescore`, module: v1ScoringLastRescore },
+  { path: `${V1}/scoring/rescores/latest`, module: v1ScoringRescoresLatest },
   { path: `${V1}/scoring/profile/reset`, module: v1ScoringProfileReset },
   { path: `${V1}/scoring/profile`, module: v1ScoringProfile },
   { path: `${V1}/settings/:setting`, module: v1SettingsSetting },

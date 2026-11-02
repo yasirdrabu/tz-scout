@@ -10,6 +10,7 @@ import { ageingJob, rescoreAccountsJob, rescorePageJob, type RescoreFilter } fro
 import type { ScoreCause } from '../contracts/types';
 import { accountScore, offerMatch } from '../db/schema';
 import { getProfile } from './profile';
+import { countAccounts, countPage, createRun } from './rescore-runs';
 import { scoreAccount } from './score';
 
 /** Accounts per message (Ruling 10): a smaller page than the spec's 500 shortens how long account locks are held. */
@@ -21,8 +22,10 @@ const AGEING_MIN_AGE_MS = 20 * 3_600_000;
  * Scores each account in its own savepoint, with the profile and approved offers loaded once. An account that is
  * gone is skipped. Any other failure is logged and that account is queued again on its own, so one bad account
  * does not undo the other scores; a lone account that fails fails the message, and the normal retries apply.
+ * With `runId` the message counts the accounts it settled (scored or gone) into the run, once; the accounts it
+ * queued again are left out, and each counts itself when its own message runs.
  */
-export async function rescoreAccounts(ctx: ModuleContext, accountIds: string[], cause: ScoreCause): Promise<void> {
+export async function rescoreAccounts(ctx: ModuleContext, accountIds: string[], cause: ScoreCause, runId?: string): Promise<void> {
   const profile = await getProfile(ctx);
   const offers = await listApprovedOffers(ctx);
   const failed: string[] = [];
@@ -36,7 +39,10 @@ export async function rescoreAccounts(ctx: ModuleContext, accountIds: string[], 
       failed.push(id);
     }
   }
-  for (const id of failed) await enqueueJob(ctx, rescoreAccountsJob, { accountIds: [id], cause });
+  for (const id of failed) await enqueueJob(ctx, rescoreAccountsJob, { accountIds: [id], cause, ...(runId ? { runId } : {}) });
+  // Names the message: a run's pages are disjoint and in id order, and an account queued again alone came from a larger message.
+  const part = `${accountIds[0]}:${accountIds[accountIds.length - 1]}:${accountIds.length}`;
+  if (runId) await countAccounts(ctx, runId, part, accountIds.length - failed.length);
 }
 
 /** One page of account ids for `filter`, in id order. */
@@ -61,23 +67,27 @@ async function pageIds(ctx: ModuleContext, filter: RescoreFilter, afterId: strin
   });
 }
 
-/** Queues rescore.accounts for one page of `filter` and, when there is more, the next page. */
-export async function rescorePage(ctx: ModuleContext, filter: RescoreFilter, cause: ScoreCause, afterId?: string): Promise<void> {
+/** Queues rescore.accounts for one page of `filter` and, when there is more, the next page. With `runId` the page adds its accounts to the run's total. */
+export async function rescorePage(ctx: ModuleContext, filter: RescoreFilter, cause: ScoreCause, afterId?: string, runId?: string): Promise<void> {
   const page = await pageIds(ctx, filter, afterId);
-  if (page.ids.length > 0) await enqueueJob(ctx, rescoreAccountsJob, { accountIds: page.ids, cause });
-  if (page.nextAfterId) await enqueueJob(ctx, rescorePageJob, { filter, cause, afterId: page.nextAfterId });
+  const run = runId ? { runId } : {};
+  if (page.ids.length > 0) await enqueueJob(ctx, rescoreAccountsJob, { accountIds: page.ids, cause, ...run });
+  if (page.nextAfterId) await enqueueJob(ctx, rescorePageJob, { filter, cause, afterId: page.nextAfterId, ...run });
+  if (runId) await countPage(ctx, runId, afterId ?? 'first', page.ids.length, !page.nextAfterId);
 }
 
-/** Starts a rescore of every account matching `filter`. Returns the job id. */
-export const startRescore = (ctx: ModuleContext, filter: RescoreFilter, cause: ScoreCause): Promise<string> =>
-  enqueueJob(ctx, rescorePageJob, { filter, cause });
+/** Starts a rescore of every account matching `filter` and records its run (Ruling 12). Returns the job and run ids. */
+export async function startRescore(ctx: ModuleContext, filter: RescoreFilter, cause: ScoreCause): Promise<{ jobId: string; runId: string }> {
+  const runId = await createRun(ctx, filter, cause);
+  return { jobId: await enqueueJob(ctx, rescorePageJob, { filter, cause, runId }), runId };
+}
 
 /** Rescores the whole tenant, or one practice or source (SCO-E5-S4-AC1); `scout rescore` passes `rules_changed` (SCO-E6). The route checks `scoring:manage`. */
 export function requestRescore(
   ctx: ModuleContext,
   filter: { practiceId?: string; sourceId?: string } = {},
   cause: ScoreCause = 'manual_rescore',
-): Promise<string> {
+): Promise<{ jobId: string; runId: string }> {
   if (filter.practiceId && filter.sourceId) {
     throw new ScoutError({ slug: 'validation', status: 400, title: 'Choose a practice or a source, not both.' });
   }

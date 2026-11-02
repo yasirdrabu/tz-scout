@@ -22,6 +22,13 @@
       "when": 1793566892463,
       "tag": "0002_four_weights",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793654811139,
+      "tag": "0003_rescore_runs",
+      "breakpoints": true
     }
   ]
 }

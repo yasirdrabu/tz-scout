@@ -1,12 +1,12 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { hasScope, meQuery } from '../../api/me';
 import { useFormat } from '../../lib/useFormat';
 import { buttonClass } from '../../ui/Button';
 import { IconButton } from '../../ui/IconButton';
-import { lastRescoreQuery } from './api';
+import { lastRescoreQuery, rescoreQuery } from './api';
 import styles from './Review.module.css';
 
 const storageKey = (tenant: string, version: number) => `scout:rescore-banner:${tenant}:${version}`;
@@ -30,12 +30,33 @@ function remember(key: string): void {
 /**
  * §2 banner after a scoring settings change (Ruling 16): the API's summary, who and when, the weights and how many
  * accounts changed tier, and `Open settings` for those who manage scoring. Dismissed per person and per change.
+ * While a rescore runs (Ruling 12) it shows the run's progress instead, asking again every 3 seconds; when the run
+ * finishes the summary is loaded again, so it counts what the rescore moved.
  */
 export function RescoreBanner({ tenant }: { tenant: string }) {
   const f = useFormat();
+  const qc = useQueryClient();
   const { data } = useQuery(lastRescoreQuery(tenant));
+  const { data: run } = useQuery(rescoreQuery(tenant));
   const { data: me } = useQuery(meQuery(tenant));
   const [dismissed, setDismissed] = useState<string | null>(null);
+  const running = !!run && !run.finished_at;
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !running) void qc.invalidateQueries({ queryKey: lastRescoreQuery(tenant).queryKey });
+    wasRunning.current = running;
+  }, [running, qc, tenant]);
+
+  if (running) {
+    return (
+      <div className={styles.banner} role="region" aria-label="Rescore progress">
+        <span className={styles.grow}>
+          <strong>{`Rescoring ${f.number(run.total)} accounts`}</strong>
+          <span>{`${f.number(run.done)} of ${f.number(run.total)} rescored`}</span>
+        </span>
+      </div>
+    );
+  }
   if (!data) return null;
   const key = storageKey(tenant, data.version);
   if (dismissed === key || wasDismissed(key)) return null;

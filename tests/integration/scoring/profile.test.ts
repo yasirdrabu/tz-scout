@@ -90,13 +90,13 @@ describe('scoring profile service', () => {
     expect(saved).toMatchObject({ halfLifeDays: 30, version: 1 });
   });
 
-  it('requestRescore returns the job id of the queued page job', async () => {
+  it('requestRescore returns the job id of the queued page job and the id of its run', async () => {
     const t = await tenant();
-    const id = await t.run((ctx) => requestRescore(ctx, { sourceId: 'src_one' }));
-    const jobs = await rows(t, sql`select payload from platform.outbox where id = ${id}`);
+    const { jobId, runId } = await t.run((ctx) => requestRescore(ctx, { sourceId: 'src_one' }));
+    const jobs = await rows(t, sql`select payload from platform.outbox where id = ${jobId}`);
     expect((jobs[0] as { payload: { type: string; data: unknown } }).payload).toMatchObject({
       type: 'jobs.scoring.rescore.page',
-      data: { filter: { sourceId: 'src_one' }, cause: 'manual_rescore' },
+      data: { filter: { sourceId: 'src_one' }, cause: 'manual_rescore', runId },
     });
   });
 });

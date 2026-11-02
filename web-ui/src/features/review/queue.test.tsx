@@ -125,6 +125,38 @@ describe('Review queue', () => {
     );
   });
 
+  it('shows a running rescore with its progress every 3 seconds, then the last-rescore summary once it finishes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const run = { id: 'rsr_1', cause: 'rules_changed', total: 450, done: 120, started_at: new Date().toISOString(), finished_at: null };
+      const seen = serveQueue({ rescore: null, run });
+      renderApp('/t/taazaa/queue');
+      const progress = await screen.findByRole('region', { name: 'Rescore progress' });
+      expect(progress).toHaveTextContent('Rescoring 450 accounts');
+      expect(progress).toHaveTextContent('120 of 450 rescored');
+      expect(screen.queryByRole('region', { name: 'Scoring change' })).toBeNull();
+
+      serveQueue({ rescore: null, run: { ...run, done: 400 } });
+      await act(() => vi.advanceTimersByTimeAsync(3_000));
+      expect(await screen.findByText('400 of 450 rescored')).toBeInTheDocument();
+
+      const later = serveQueue({ rescore: RESCORE, run: { ...run, done: 450, finished_at: new Date().toISOString() } });
+      await act(() => vi.advanceTimersByTimeAsync(3_000));
+      const banner = await screen.findByRole('region', { name: 'Scoring change' });
+      expect(banner).toHaveTextContent('Priorities were recalculated with Fit 60%, buying intent 40%. 12 accounts changed tier.');
+      expect(screen.queryByRole('region', { name: 'Rescore progress' })).toBeNull();
+      expect(seen['/api/v1/scoring/last-rescore']).toHaveLength(1);
+      expect(later['/api/v1/scoring/last-rescore']).toHaveLength(1);
+
+      // Finished: no more polling.
+      const after = later['/api/v1/scoring/rescores/latest']!.length;
+      await act(() => vi.advanceTimersByTimeAsync(9_000));
+      expect(later['/api/v1/scoring/rescores/latest']).toHaveLength(after);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('the banner links to Scoring weights only for scoring:manage', async () => {
     serveQueue({ rescore: RESCORE, scopes: ['review:act', 'scoring:manage'] });
     const first = renderApp('/t/taazaa/queue');
