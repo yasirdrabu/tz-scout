@@ -121,25 +121,34 @@ export async function copyTenantRows(fromUrl: string, toUrl: string, tenantId: s
   }
 }
 
+/** Rows deleted per statement: each is its own short transaction, so no lock is held for long. */
+export const DELETE_BATCH = 5000;
+
 /**
  * Deletes `tenantId`'s rows from the database `url` names (the shared one, once the workspace has
- * moved), children before parents, in one transaction. Safe to run again. Returns what it deleted.
+ * moved), `batch` rows per statement, each statement on its own. That is safe because the registry
+ * already points away: nothing reads or writes these rows any more. The per-event tables go first
+ * (they are found through the outbox), then children before parents. Safe to run again, also after a
+ * crash part way. Returns what it deleted.
  */
-export async function deleteTenantRows(url: string, tenantId: string): Promise<TableCount[]> {
+export async function deleteTenantRows(url: string, tenantId: string, batch = DELETE_BATCH): Promise<TableCount[]> {
   if (!TENANT_ID.test(tenantId)) throw new Error(`Not a tenant id: ${tenantId}`);
   const sql = postgres(url, { max: 1, onnotice: () => {} });
   try {
     const tables = await movingTables(sql);
-    // The per-event tables first (they select through the outbox), then children before parents.
     const order = [...tables.filter((t) => BY_EVENT.has(t)), ...tables.filter((t) => !BY_EVENT.has(t)).reverse()];
-    return await sql.begin(async (tx) => {
-      const out: TableCount[] = [];
-      for (const table of order) {
-        const gone = await tx.unsafe(`delete from ${qualified(table)} where ${tenantRows(table, tenantId)}`);
-        out.push({ table, rows: gone.count });
+    const out: TableCount[] = [];
+    for (const table of order) {
+      const t = qualified(table);
+      let rows = 0;
+      for (;;) {
+        const gone = await sql.unsafe(`delete from ${t} where ctid in (select ctid from ${t} where ${tenantRows(table, tenantId)} limit ${batch})`);
+        rows += gone.count;
+        if (gone.count < batch) break;
       }
-      return out;
-    });
+      out.push({ table, rows });
+    }
+    return out;
   } finally {
     await sql.end();
   }

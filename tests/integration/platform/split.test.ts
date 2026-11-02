@@ -2,17 +2,19 @@ import { dropAfter } from '../helpers/per-workspace';
 import '@/entry/compose';
 import { consumers } from '@/entry/worker';
 import { and, eq, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { run } from '@/entry/cli';
 import { GET as buyingRoles } from '@/http/routes/v1/buying-roles/route';
 import { GET as stages } from '@/http/routes/v1/stages/route';
 import { createTenant, splitWorkspace, workspaceDatabaseName } from '@/modules/tenancy';
 import { tenant, workspaceInfra } from '@/modules/tenancy/db/schema';
 import { config } from '@/platform/config';
 import { adminDb } from '@/platform/db/client';
-import { databaseExists } from '@/platform/db/migrate';
+import { forgetWorkspace } from '@/platform/db/doors';
+import { createDatabase, databaseExists, migrateWorkspaceDatabase } from '@/platform/db/migrate';
 import { schedule } from '@/platform/db/schema';
 import { schedulerTick } from '@/platform/scheduler';
-import { countTenantRows, type TableCount } from '@/platform/db/move';
+import { copyTenantRows, countTenantRows, deleteTenantRows, type TableCount } from '@/platform/db/move';
 import { withTenant } from '@/platform/db/tenant';
 import { urlForDatabase } from '@/platform/db/workspace-pools';
 import type { Envelope } from '@/platform/events/envelope';
@@ -96,7 +98,6 @@ describe('tenant split (D35 "Moving existing workspaces")', () => {
     const res = await buyingRoles(v1Req('/buying-roles', { cookies, tenant: t.slug }));
     // The row may be cached as active for this instance; a split waits that out (settleMs). Here: forget it.
     if (res.status === 200) {
-      const { forgetWorkspace } = await import('@/platform/db/doors');
       forgetWorkspace(t.tenantId);
     }
     const refused = await buyingRoles(v1Req('/buying-roles', { cookies, tenant: t.slug }));
@@ -130,5 +131,85 @@ describe('tenant split (D35 "Moving existing workspaces")', () => {
     expect(await infra(t.tenantId)).toMatchObject({ database: workspaceDatabaseName(t.tenantId) });
     const left = await adminDb.select().from(workspaceInfra).where(and(eq(workspaceInfra.tenantId, t.tenantId), eq(workspaceInfra.database, shared)));
     expect(left).toEqual([]);
+  });
+});
+
+describe('a split that stopped part way is finished by running it again', () => {
+  const own = (tenantId: string) => workspaceDatabaseName(tenantId);
+  const ownUrl = (tenantId: string) => urlForDatabase(config.databaseAdminUrl, own(tenantId));
+  const setRow = async (tenantId: string, set: Partial<typeof workspaceInfra.$inferInsert>) => {
+    await adminDb.update(workspaceInfra).set(set).where(eq(workspaceInfra.tenantId, tenantId));
+    forgetWorkspace(tenantId);
+  };
+  /** The workspace database made and fully copied into, as a crashed split could have left it. */
+  const copiedAlready = async (tenantId: string) => {
+    await createDatabase(own(tenantId));
+    await migrateWorkspaceDatabase(ownUrl(tenantId));
+    await copyTenantRows(sharedUrl, ownUrl(tenantId), tenantId);
+  };
+  const movedCleanly = async (tenantId: string, counts: Record<string, number>) => {
+    expect(await infra(tenantId)).toMatchObject({ status: 'active', database: own(tenantId) });
+    expect(nonEmpty(await countTenantRows(sharedUrl, tenantId))).toEqual({});
+    expect((await withTenant(tenantId, (tx) => tx.execute<{ n: number }>(sql`select count(*)::int as n from routing.review_status_def`)))[0]!.n).toBe(
+      counts['routing.review_status_def'],
+    );
+  };
+
+  it('stopped once it was moving, before its database was made', async () => {
+    const t = await sharedWorkspace();
+    const counts = nonEmpty(await countTenantRows(sharedUrl, t.tenantId));
+    await setRow(t.tenantId, { status: 'moving' });
+    expect(await splitWorkspace(t.tenantId, { settleMs: 0 })).toMatchObject({ outcome: 'moved' });
+    await movedCleanly(t.tenantId, counts);
+  });
+
+  it('stopped during or after the copy, before the switch: the copy is dropped and made again, not doubled', async () => {
+    const t = await sharedWorkspace();
+    const counts = nonEmpty(await countTenantRows(sharedUrl, t.tenantId));
+    await setRow(t.tenantId, { status: 'moving' });
+    await copiedAlready(t.tenantId);
+    const r = await splitWorkspace(t.tenantId, { settleMs: 0 });
+    expect(r).toMatchObject({ outcome: 'moved' });
+    expect(nonEmpty(r.outcome === 'moved' ? r.copied : [])).toEqual(counts);
+    await movedCleanly(t.tenantId, counts);
+  });
+
+  it('stopped after the switch, part way through deleting from the shared database', async () => {
+    const t = await sharedWorkspace();
+    const counts = nonEmpty(await countTenantRows(sharedUrl, t.tenantId));
+    await setRow(t.tenantId, { status: 'moving' });
+    await copiedAlready(t.tenantId);
+    await setRow(t.tenantId, { status: 'active', database: own(t.tenantId) });
+    // Part of the delete happened: the outbox's per-event rows and one table.
+    await adminDb.execute(sql`delete from routing.review_status_def where tenant_id = ${t.tenantId}`);
+    expect(await splitWorkspace(t.tenantId, { settleMs: 0 })).toMatchObject({ outcome: 'cleaned' });
+    await movedCleanly(t.tenantId, counts);
+  });
+
+  it('deletes from the shared database in batches, each statement on its own', async () => {
+    const t = await sharedWorkspace();
+    const counts = nonEmpty(await countTenantRows(sharedUrl, t.tenantId));
+    await setRow(t.tenantId, { status: 'moving' });
+    await copiedAlready(t.tenantId);
+    await setRow(t.tenantId, { status: 'active', database: own(t.tenantId) });
+    const deleted = nonEmpty(await deleteTenantRows(sharedUrl, t.tenantId, 2));
+    expect(deleted).toEqual(counts);
+    expect(nonEmpty(await countTenantRows(sharedUrl, t.tenantId))).toEqual({});
+  });
+
+  it('scout tenant split prints what it did, and fails for an unknown workspace', async () => {
+    const t = await sharedWorkspace();
+    const lines: string[] = [];
+    const out = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void lines.push(a.join(' ')));
+    try {
+      expect(await run(['tenant', 'split', t.slug, '--settle-seconds', '0'])).toBe(0);
+      expect(await run(['tenant', 'split', t.slug, '--settle-seconds', '0'])).toBe(0);
+    } finally {
+      out.mockRestore();
+    }
+    expect(lines[0]).toMatch(new RegExp(`^Workspace ${t.slug}: moved to ${own(t.tenantId)}, \\d+ rows in \\d+ tables\\.$`));
+    expect(lines[1]).toBe(`Workspace ${t.slug}: its last rows deleted from the shared database.`);
+    await expect(run(['tenant', 'split', 'no-such-workspace', '--settle-seconds', '0'])).rejects.toThrow('No workspace with the slug "no-such-workspace"');
+    await expect(run(['tenant', 'split'])).rejects.toThrow('Name a workspace or pass --all.');
   });
 });
