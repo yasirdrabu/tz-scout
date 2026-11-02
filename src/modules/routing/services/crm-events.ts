@@ -5,7 +5,8 @@ import type { Envelope } from '@/platform/events/envelope';
 import type { EventDef } from '@/platform/events/registry';
 import type { HandoffFlag } from '../contracts/types';
 import { accountReview, assignment } from '../db/schema';
-import type { StageEvent } from '../domain/stages';
+import type { StageSignal } from '../domain/pipeline';
+import { eventSignals, type StageEvent } from '../domain/stages';
 import { lockRow, openAssignment } from './review';
 import { acceptLocked } from './respond';
 import { publishReviewSnapshot } from './snapshot';
@@ -35,12 +36,17 @@ export async function onCrmActivity(e: EventOf<typeof activityObserved>, ctx: Mo
 
 const DEAL_STAGE: Record<'open' | 'won' | 'lost', StageEvent> = { open: 'opportunity', won: 'won', lost: 'lost' };
 
-/** `crm.deal.changed`: an open deal moves the stage to `opportunity`, a won one to `won`, a lost one to `lost`. */
+/**
+ * `crm.deal.changed`: a won deal moves the stage to the Closed won one, a lost deal to the Closed lost one, and an open
+ * deal to the stage mapped to its HubSpot stage (`deal_reaches_stage`) or the one for a created deal; furthest forward wins.
+ */
 export async function onCrmDeal(e: EventOf<typeof dealChanged>, ctx: ModuleContext): Promise<void> {
   const { accountId, status } = e.data;
   const row = await lockRow(ctx, accountId);
   if (!row || row.mergedInto) return;
-  if (await moveStage(ctx, accountId, DEAL_STAGE[status], e.id)) await publishReviewSnapshot(ctx, accountId);
+  const signals: StageSignal[] = eventSignals(DEAL_STAGE[status]);
+  if (status === 'open' && e.data.stage) signals.push({ trigger: 'deal_reaches_stage', hubspotStage: e.data.stage });
+  if (await moveStage(ctx, accountId, signals, e.id)) await publishReviewSnapshot(ctx, accountId);
 }
 
 /** Sets `flags.handoff` unless the event is for an assignment other than the account's latest or the stored state is newer; one snapshot when it changed. */

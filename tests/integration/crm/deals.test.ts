@@ -4,6 +4,8 @@ import '@/entry/compose';
 import { upsertFromArrival } from '@/modules/accounts';
 import { checkCompany, companyChecked, dealChanged, hubspotMock, pollDeals, recordLink, refreshCheck, seedMockCrm, syncAccount } from '@/modules/crm';
 import { crmSetting, deal, link, mockDeal } from '@/modules/crm/db/schema';
+import { accountReview, pipelineStage } from '@/modules/routing/db/schema';
+import { runOutbox } from '../helpers/run-outbox';
 import { mockAddDeal, mockSetDeal } from '@/modules/crm/fixtures';
 import { recentCalls } from '@/modules/integrations';
 import { adminDb, closeDbs } from '@/platform/db/client';
@@ -115,13 +117,36 @@ describe('deals (CRM-E5-S3)', () => {
     expect((await events(accountId)).map((e) => e.companyLifecycle)).toEqual(['customer']);
   });
 
-  it('a stage change alone publishes nothing', async () => {
+  it('REV-E5-S3-AC2: a stage change alone publishes once, and re-reading it publishes nothing more', async () => {
     const { accountId, company } = await linked();
     const ext = await t.run((ctx) => mockAddDeal(ctx, { companyExternalId: company, name: 'Stage', stage: 'a' }));
     await poll();
     await t.run((ctx) => mockSetDeal(ctx, ext, { stage: 'b' }));
     await poll();
-    expect(await events(accountId)).toHaveLength(1);
+    await poll();
+    expect((await events(accountId)).map((e) => [e.stage, e.status, e.previousStatus])).toEqual([['a', 'open', null], ['b', 'open', 'open']]);
+  });
+
+  it('REV-E5-S3-AC1: a deal moving to a mapped HubSpot stage moves the account to that stage within one poll', async () => {
+    await t.run(async (ctx) => {
+      await ctx.tx.update(pipelineStage).set({ position: 6 }).where(eq(pipelineStage.key, 'won'));
+      await ctx.tx.insert(pipelineStage).values({ id: newId('pst'), tenantId: ctx.tenantId, key: 'stg_proposal', name: 'Proposal', kind: 'flow', position: 5, trigger: 'deal_reaches_stage', hubspotStage: 'presentationscheduled' });
+    });
+    const { accountId, company } = await linked();
+    await t.run((ctx) => ctx.tx.insert(accountReview).values({ tenantId: ctx.tenantId, accountId, statusKey: 'reviewed', stage: 'engaged' }));
+    const ext = await t.run((ctx) => mockAddDeal(ctx, { companyExternalId: company, name: 'Staged', stage: 'qualifiedtobuy' }));
+    await poll();
+    await runOutbox(t.tenantId);
+    const stageOf = async () => (await t.run((ctx) => ctx.tx.select().from(accountReview).where(eq(accountReview.accountId, accountId))))[0]!.stage;
+    expect(await stageOf()).toBe('opportunity');
+    await t.run((ctx) => mockSetDeal(ctx, ext, { stage: 'presentationscheduled' }));
+    await poll();
+    await runOutbox(t.tenantId);
+    expect(await stageOf()).toBe('stg_proposal');
+    await t.run((ctx) => mockSetDeal(ctx, ext, { stage: 'qualifiedtobuy' }));
+    await poll();
+    await runOutbox(t.tenantId);
+    expect(await stageOf()).toBe('stg_proposal'); // never back
   });
 
   it('a deal on an unlinked company is ignored', async () => {
