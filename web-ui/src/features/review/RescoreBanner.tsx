@@ -37,8 +37,10 @@ export function RescoreBanner({ tenant }: { tenant: string }) {
   const f = useFormat();
   const qc = useQueryClient();
   const { data } = useQuery(lastRescoreQuery(tenant));
-  const { data: run } = useQuery(rescoreQuery(tenant));
   const { data: me } = useQuery(meQuery(tenant));
+  // Progress is for those who review or manage scoring.
+  const canSeeRuns = !!me && (hasScope(me, 'review:act') || hasScope(me, 'scoring:manage'));
+  const { data: run } = useQuery({ ...rescoreQuery(tenant), enabled: canSeeRuns });
   const [dismissed, setDismissed] = useState<string | null>(null);
   // A run that has found no accounts yet, or has stalled, shows the summary instead.
   const running = !!run && !run.finished_at && !run.stalled && run.total > 0;

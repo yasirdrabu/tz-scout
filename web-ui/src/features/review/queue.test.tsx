@@ -196,6 +196,14 @@ describe('Review queue', () => {
     }
   });
 
+  it('does not ask about rescore progress without review:act or scoring:manage', async () => {
+    const seen = serveQueue({ rescore: RESCORE, run, scopes: ['accounts:read'] });
+    renderApp('/t/taazaa/queue');
+    await screen.findByRole('region', { name: 'Scoring change' });
+    expect(seen['/api/v1/scoring/rescores/latest']).toBeUndefined();
+    expect(screen.queryByRole('region', { name: 'Rescore progress' })).toBeNull();
+  });
+
   it('the banner links to Scoring weights only for scoring:manage', async () => {
     serveQueue({ rescore: RESCORE, scopes: ['review:act', 'scoring:manage'] });
     const first = renderApp('/t/taazaa/queue');

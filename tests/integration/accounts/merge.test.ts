@@ -274,11 +274,27 @@ describe('mergeAccounts', () => {
       await t.run((ctx) => upsertFromArrival(ctx, arrival(value('src_y', 1_840_000_000, '2026-10-02T00:00:00Z')), a.accountId));
       const b = await seed({ account: { name: 'Both Merged', domain: domain() }, ...value('src_z', 1_500_000_000, '2026-10-03T00:00:00Z') });
       await t.run((ctx) => upsertFromArrival(ctx, arrival(value('src_w', 1_000_000_000, '2026-10-04T00:00:00Z')), b.accountId));
+      const [mine] = await openConflicts(a.accountId);
+      await t.run((ctx) => ctx.tx.update(conflict).set({ explanation: 'An older figure.', explanationFactIds: mine!.factIds }).where(eq(conflict.id, mine!.id)));
+      const outboxFor = async (type: string) =>
+        (await adminDb.execute(
+          sql`select payload from platform.outbox where tenant_id = ${t.tenantId} and payload->>'type' = ${type}
+              and payload->'data'->>'conflictId' = ${mine!.id} order by seq`,
+        )) as unknown as { payload: { data: Record<string, unknown> } }[];
+      const jobsBefore = (await outboxFor('jobs.accounts.conflict.explain')).length;
+      const detectedBefore = (await outboxFor('accounts.conflict.detected')).length;
 
       await asPerson((ctx) => mergeAccounts(ctx, a.accountId, b.accountId));
       const open = await openConflicts(a.accountId);
       expect(open).toHaveLength(1);
       expect(open[0]!.factIds).toHaveLength(4);
+      // The joined conflict has new facts: its explanation is cleared and Claude explains it again.
+      expect(open[0]).toMatchObject({ id: mine!.id, explanation: null, explanationFactIds: null });
+      expect(await outboxFor('jobs.accounts.conflict.explain')).toHaveLength(jobsBefore + 1);
+      const detected = await outboxFor('accounts.conflict.detected');
+      expect(detected).toHaveLength(detectedBefore + 1);
+      expect(detected.at(-1)!.payload.data).toMatchObject({ accountId: a.accountId, key: 'contract_value_cents' });
+      expect(detected.at(-1)!.payload.data.factIds).toHaveLength(4);
       expect(await count(a.accountId)).toBe(1);
       expect(await count(b.accountId)).toBe(0);
       expect(await openConflicts(b.accountId)).toHaveLength(0);
