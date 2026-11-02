@@ -244,24 +244,34 @@ export function v1Route(opts: V1Options, handler: V1Handler): (req: Request) => 
     if (opts.peopleOnly && principal.kind !== 'user') throw forbidden(opts.peopleOnly, 'Only a person can do this.');
     const actor = actorFor(principal);
     const ip = clientIp(req);
-    return execute(
-      req,
-      opts,
-      { tenantId: principal.tenantId, principalId: principal.id },
-      (fn) => withTenant(principal.tenantId, fn),
-      correlationId,
-      async (r, tx) => {
-        const ctx: ModuleContext = {
-          tenantId: principal.tenantId,
-          actor,
-          correlationId,
-          tx,
-          ...(principal.environment ? { environment: principal.environment } : {}),
-          ...(ip ? { ip } : {}),
-        };
-        return handler(r, principal, { ...ctx, access: await accessWithSources(ctx, principal, sourceAccessProvider()) });
-      },
-    );
+    const undos: (() => Promise<void>)[] = [];
+    try {
+      return await execute(
+        req,
+        opts,
+        { tenantId: principal.tenantId, principalId: principal.id },
+        (fn) => withTenant(principal.tenantId, fn),
+        correlationId,
+        async (r, tx) => {
+          const ctx: ModuleContext = {
+            tenantId: principal.tenantId,
+            actor,
+            correlationId,
+            tx,
+            ...(principal.environment ? { environment: principal.environment } : {}),
+            ...(ip ? { ip } : {}),
+            onRollback: (undo) => void undos.push(undo),
+          };
+          return handler(r, principal, { ...ctx, access: await accessWithSources(ctx, principal, sourceAccessProvider()) });
+        },
+      );
+    } catch (e) {
+      // The workspace transaction rolled back: undo what was committed on the control plane, newest first.
+      for (const undo of undos.reverse()) {
+        await undo().catch((err) => logFor({ correlationId }).error({ err }, 'could not undo a control plane change'));
+      }
+      throw e;
+    }
   });
 }
 

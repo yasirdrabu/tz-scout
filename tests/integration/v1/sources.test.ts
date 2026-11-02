@@ -14,6 +14,7 @@ import { setDisabled } from '@/modules/integrations';
 import { personSourceFor } from '@/modules/intake';
 import { source } from '@/modules/intake/db/schema';
 import { addMember } from '@/modules/tenancy';
+import { apiKey } from '@/modules/tenancy/db/schema';
 import { authenticateKey, setKeyCacheTtl } from '@/modules/tenancy/services/api-keys';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { auditLog, idempotencyKey } from '@/platform/db/schema';
@@ -186,6 +187,24 @@ describe('POST /api/v1/sources', () => {
     expect(JSON.stringify(again)).not.toContain(first.api_key.secret);
     const stored = await adminDb.select().from(idempotencyKey).where(and(eq(idempotencyKey.tenantId, w.tenantId), eq(idempotencyKey.key, 'add-agent-1')));
     expect(stored).toEqual([]);
+  });
+
+  it('revokes the key when the source is not kept: no working key without its source (D35)', async () => {
+    // Fails the workspace transaction at commit, after the key committed on the control plane.
+    await adminDb.execute(sql`create or replace function intake.test_doomed() returns trigger language plpgsql as $$
+      begin if new.name = 'Doomed agent' then raise exception 'doomed'; end if; return new; end $$`);
+    await adminDb.execute(sql`create constraint trigger test_doomed after insert on intake.source deferrable initially deferred for each row execute function intake.test_doomed()`);
+    try {
+      const res = await w.as(operator, postSource, 'sources', 'POST', { kind: 'agent', name: 'Doomed agent', parent_id: personSource, create_key: true });
+      expect(res.status).toBe(500);
+    } finally {
+      await adminDb.execute(sql`drop trigger if exists test_doomed on intake.source`);
+      await adminDb.execute(sql`drop function if exists intake.test_doomed()`);
+    }
+    expect(await adminDb.select().from(source).where(and(eq(source.tenantId, w.tenantId), eq(source.name, 'Doomed agent')))).toEqual([]);
+    const keys = await adminDb.select().from(apiKey).where(and(eq(apiKey.tenantId, w.tenantId), eq(apiKey.name, 'Doomed agent key')));
+    expect(keys).toHaveLength(1);
+    expect(keys[0]!.revokedAt).not.toBeNull();
   });
 
   it('refuses a key for a list', async () => {

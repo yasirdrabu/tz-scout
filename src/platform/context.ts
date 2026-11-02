@@ -17,4 +17,9 @@ export type ModuleContext = {
   access?: Access;
   /** Worker runs only: aborted when the handler runs past its time limit, so slow outside calls can stop. */
   signal?: AbortSignal;
+  /**
+   * HTTP requests only: registers work that undoes a change committed outside `tx` (on the control
+   * plane, D35), run if `tx` rolls back or fails to commit.
+   */
+  onRollback?: (undo: () => Promise<void>) => void;
 };

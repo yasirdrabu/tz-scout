@@ -151,6 +151,9 @@ export async function createApiKey(
         throw e;
       }
     }
+    // The key commits on the control plane; if the request's workspace transaction then fails (the
+    // source it sends for is not kept, say), it is revoked, so no working key is left behind.
+    ws.onRollback?.(() => revokeOrphan(ws, id));
     await publish(
       ctx,
       apiKeyCreated,
@@ -178,6 +181,15 @@ export async function createApiKey(
     });
     return { id, secret };
   });
+}
+
+/** Revokes a key whose request failed after it was made, in a new workspace transaction; nothing when it was never kept. */
+async function revokeOrphan(ws: ModuleContext, id: string): Promise<void> {
+  try {
+    await withTenant(ws.tenantId, (tx) => revokeApiKey({ ...ws, tx, onRollback: undefined }, id, 'The request that made it failed'));
+  } catch (e) {
+    if (!(e instanceof ScoutError && e.slug === 'not-found')) throw e;
+  }
 }
 
 /** Revokes a key. Requests with it fail within 60 seconds on every instance (the cache lifetime). */
