@@ -89,8 +89,8 @@ function valueTypeOf(value: unknown): string {
  * Stores what a source said, as `candidate` facts; `reproject` decides which are current.
  * A fact this chain already said (same key, same value, still live) is not stored again.
  * `pinnedBy` (a user id) stores them pinned; only an already pinned fact counts as said then.
- * An unpinned value this chain already lost (equal to one of its `archived` facts for the key) is stored
- * `archived`: it stays in the history and takes no part in picking or conflicts (Ruling 5).
+ * An unpinned value this chain already lost (equal to one of its `archived` facts for the key) is not stored
+ * again: the archived copy is its history, and it takes no part in picking or conflicts (Ruling 5).
  * Returns the ids of the facts it stored.
  */
 export async function recordFacts(
@@ -119,7 +119,7 @@ export async function recordFacts(
   const sig = (f: { key: string; value: unknown }, c: SourceChain) => `${f.key}\n${chainKey(c)}\n${stableJson(f.value)}`;
   const said = new Set(live.filter((f) => f.status !== 'archived' && !!f.pinnedAt === !!pinnedBy).map((f) => sig(f, chainOf(f))));
   const lost = new Set(pinnedBy ? [] : live.filter((f) => f.status === 'archived').map((f) => sig(f, chainOf(f))));
-  const fresh = given.filter((f) => !said.has(sig(f, chain)));
+  const fresh = given.filter((f) => !said.has(sig(f, chain)) && !lost.has(sig(f, chain)));
   if (fresh.length === 0) return [];
   const inserted = await ctx.tx
     .insert(fact)
@@ -140,7 +140,7 @@ export async function recordFacts(
         url: f.url ?? null,
         note: f.note ?? null,
         observedAt: f.observedAt ?? new Date(),
-        status: lost.has(sig(f, chain)) ? 'archived' : 'candidate',
+        status: 'candidate',
         ...(pinnedBy ? { pinnedBy, pinnedAt: new Date() } : {}),
       })),
     )
@@ -208,9 +208,12 @@ export async function reproject(ctx: ModuleContext, accountId: string, keys?: st
     const picks = facts.map<PickFact>((f) => ({ id: f.id, key: f.key, value: f.value, observedAt: f.observedAt, pinned: !!f.pinnedAt, sourceChain: chainOf(f) }));
     const pick = pickCurrent(picks, (f) => trust.get(chainKey(f.sourceChain)) ?? 0);
     const superseded = new Set(pick.supersededIds);
-    if (pick.currentId && facts.some((f) => touched.has(f.id))) {
+    // A new fact must take part: it disagrees with the current value, or it became current and older facts disagree
+    // with it. An agreeing new fact never pulls older disagreements into a conflict (Ruling 10).
+    if (pick.currentId && touched.size) {
       const group = { personId, key, currentId: pick.currentId, live: picks.filter((f) => !superseded.has(f.id)) };
-      if (disagreeingIds(group).length) disagreeing.push(group);
+      const others = disagreeingIds(group);
+      if (others.some((id) => touched.has(id)) || (touched.has(pick.currentId) && others.length)) disagreeing.push(group);
     }
     for (const f of facts) {
       const next = f.id === pick.currentId ? 'current' : superseded.has(f.id) ? 'superseded' : 'candidate';

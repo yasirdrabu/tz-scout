@@ -1,6 +1,6 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
+import { editAccount, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { accountSummary, conflict, fact } from '@/modules/accounts/db/schema';
 import { adminDb } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
@@ -160,14 +160,58 @@ describe('detecting conflicts (ACC-E3-S3)', () => {
         status: 'archived',
       }),
     );
-    const b = await send(a.accountId, { ...from('src_b'), research: { contract_value_cents: 1_840_000_000 } });
-    expect(b.conflictIds).toEqual([]);
+    for (let i = 0; i < 2; i++) {
+      const b = await send(a.accountId, { ...from('src_b'), research: { contract_value_cents: 1_840_000_000 } });
+      expect(b.conflictIds).toEqual([]);
+    }
     expect(await conflictsOf(a.accountId)).toHaveLength(0);
     const resent = await t.run((ctx) =>
       ctx.tx.select().from(fact).where(and(eq(fact.accountId, a.accountId), eq(fact.key, 'contract_value_cents'), eq(fact.vendorSourceId, 'src_b'))),
     );
-    expect(resent).toHaveLength(2);
-    expect(resent.every((f) => f.status === 'archived')).toBe(true);
+    // One archived copy per lost value, however often the source re-sends it.
+    expect(resent.map((f) => [f.id, f.status])).toEqual([[lost, 'archived']]);
+  });
+
+  it('a new fact that agrees with the current value does not pull an older disagreement into a conflict (Ruling 10)', async () => {
+    const a = await seeded({ ...from('src_a'), research: { contract_value_cents: 2_090_000_000 } });
+    // A disagreeing candidate from before detection existed.
+    await t.run((ctx) =>
+      ctx.tx.insert(fact).values({
+        id: newId('fct'),
+        tenantId: ctx.tenantId,
+        accountId: a.accountId,
+        key: 'contract_value_cents',
+        value: 1_000_000_000,
+        valueType: 'number',
+        kind: 'research',
+        vendorSourceId: 'src_old',
+        observedAt: new Date('2026-01-01T00:00:00Z'),
+        status: 'candidate',
+      }),
+    );
+    // src_b agrees with src_a (2%) and is older, so src_a stays current.
+    const b = await send(a.accountId, { ...from('src_b'), receivedAt: new Date('2026-02-01T00:00:00Z'), research: { contract_value_cents: 2_050_000_000 } });
+    expect(b.conflictIds).toEqual([]);
+    expect(await conflictsOf(a.accountId)).toHaveLength(0);
+    expect(await countOf(a.accountId)).toBe(0);
+  });
+
+  it('a source disagreeing with a value a person pinned opens a conflict with the pinned fact', async () => {
+    const a = await seeded({ ...from('src_a'), account: { name: 'Pinned Co', domain: domain(), employees: 1000 } });
+    const personAccess = { userId: 'usr_editor', sourceId: 'src_editor', dataLimit: { kind: 'all' as const } };
+    await t.run((ctx) => editAccount({ ...ctx, access: personAccess }, a.accountId, { employees: 1200 }));
+    const pinned = await t.run((ctx) =>
+      ctx.tx.select({ id: fact.id }).from(fact).where(and(eq(fact.accountId, a.accountId), eq(fact.key, 'employees'), isNotNull(fact.pinnedAt))),
+    );
+    expect(await conflictsOf(a.accountId)).toHaveLength(0);
+
+    const b = await send(a.accountId, { ...from('src_b'), account: { employees: 1800 } });
+    const rows = await conflictsOf(a.accountId);
+    expect(rows).toHaveLength(1);
+    const bFact = (await factIdsOf(a.accountId, 'employees')).filter((id) => b.factIds.includes(id));
+    expect(bFact).toHaveLength(1);
+    expect([...rows[0]!.factIds].sort()).toEqual([pinned[0]!.id, ...bFact].sort());
+    expect(b.conflictIds).toEqual([rows[0]!.id]);
   });
 });
 
