@@ -92,7 +92,7 @@ export async function applyDeals(ctx: ModuleContext, deals: CrmDeal[], now: Date
       await ctx.tx.insert(deal).values({ id, tenantId: ctx.tenantId, system: sys, externalId: d.externalId, ...values });
       await recordLink(ctx, { scoutType: 'deal', scoutId: id, system: sys, externalId: d.externalId });
     }
-    if (known && known.status === d.status && known.amountCents === d.amountCents) continue;
+    if (known && known.status === d.status && known.amountCents === d.amountCents && known.stage === d.stage) continue;
     await publish(
       ctx,
       dealChanged,

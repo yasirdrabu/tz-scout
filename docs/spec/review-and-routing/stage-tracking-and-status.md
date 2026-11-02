@@ -2,6 +2,8 @@
 
 Release R1
 
+> **Pipeline stages redesign:** [REV-E5](configurable-stages.md) replaces this epic's fixed stage set and transition table with per-workspace stages. Where they differ, REV-E5 wins.
+
 ## Why
 
 Leaders, AEs and the agents that sent accounts all ask the same question: where is this account now?

@@ -214,9 +214,10 @@ function Account({ tenant, id, me }: { tenant: string; id: string; me: Me }) {
         onSendBack={() => setSendBack(true)}
         onAssign={() => setAssigning(true)}
         onRetry={() => void retry()}
+        onMoved={() => void changed()}
       />
       {handoffs.data?.conflict && <ConflictNotice />}
-      <StageTracker review={r} reviewer={hasScope(me, 'review:act')} />
+      <StageTracker tenant={tenant} review={r} reviewer={hasScope(me, 'review:act')} />
       {r.current_assignment ? <AssignedView tenant={tenant} me={me} account={a} review={r} /> : <ReviewView tenant={tenant} me={me} account={a} review={r} />}
 
       {sendBack && (

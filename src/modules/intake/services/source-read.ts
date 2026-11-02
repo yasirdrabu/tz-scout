@@ -1,8 +1,8 @@
 import { and, asc, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { stageCountsBySource } from '@/modules/accounts';
-import { STAGES } from '@/modules/routing/contracts/types';
 import { activeKeysBySource, userNames, type ActiveKey } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
+import { funnelStages } from '../contracts/ports';
 import { arrival, batch, source } from '../db/schema';
 import { syncStatus, type SyncStatus } from './qualified-leads';
 import { childSources, liveChildren, readSource, sourceBreadcrumb, sourceNames, type SourceKind, type SourceListRow, type SourceStatus, type SourceView } from './sources';
@@ -73,14 +73,14 @@ export type SourceFunnel = {
 const pct = (n: number, base: number): number | null => (base === 0 ? null : Math.round((n / base) * 100));
 
 /**
- * Ruling 4: Sent is every account; Reviewed, Assigned and Won are cumulative by funnel rank, and an exit (declined,
- * lost) counts in Sent and Reviewed only. An account with no stage yet has arrived.
+ * Ruling 4: Sent is every account; Reviewed, Assigned and Won are cumulative by funnel rank (Assigned is the stages at
+ * or past the one an acceptance moves to), and an exit counts in Sent and Reviewed only. An account with no stage yet has arrived.
  */
-export function sourceFunnel(counts: Map<string | null, number>): SourceFunnel {
+export function sourceFunnel(counts: Map<string | null, number>, stages: { key: string; assigned: boolean }[]): SourceFunnel {
   const at = (k: string) => (counts.get(k) ?? 0) + (k === 'arrived' ? (counts.get(null) ?? 0) : 0);
   const sent = [...counts.values()].reduce((s, n) => s + n, 0);
   const reviewed = sent - at('arrived');
-  const assigned = at('assigned') + at('engaged') + at('opportunity') + at('won');
+  const assigned = stages.filter((s) => s.assigned).reduce((n, s) => n + at(s.key), 0);
   const won = at('won');
   return {
     sent,
@@ -90,7 +90,7 @@ export function sourceFunnel(counts: Map<string | null, number>): SourceFunnel {
     reviewedPct: pct(reviewed, sent),
     assignedPct: pct(assigned, reviewed),
     wonPct: pct(won, assigned),
-    byStage: STAGES.map((key) => ({ key, count: at(key) })),
+    byStage: stages.map(({ key }) => ({ key, count: at(key) })),
     isNew: reviewed < NEW_UNDER_REVIEWED,
   };
 }
@@ -113,7 +113,8 @@ export async function sourceStats(ctx: ModuleContext, sourceIds: string[]): Prom
   const tree = await descendants(ctx);
   const groups = sourceIds.map((id) => ({ sourceId: id, memberIds: tree.get(id) ?? [] }));
   const counts = await stageCountsBySource(ctx, groups);
-  return new Map(sourceIds.map((id) => [id, sourceFunnel(counts.get(id) ?? new Map())]));
+  const stages = await funnelStages().stages(ctx);
+  return new Map(sourceIds.map((id) => [id, sourceFunnel(counts.get(id) ?? new Map(), stages)]));
 }
 
 function methodOf(

@@ -473,3 +473,9 @@
     grid-template-columns: minmax(0, 1fr) 300px;
   }
 }
+
+.moveError {
+  margin: 8px 0 0;
+  color: var(--bad);
+  font-size: var(--text-sm);
+}

@@ -104,7 +104,7 @@ describe('Stage tracker', () => {
     renderApp('/t/taazaa/accounts/acc_mdc');
     const steps = await screen.findByRole('list', { name: 'Stages' });
     const items = within(steps).getAllByRole('listitem');
-    expect(items.map((i) => i.textContent)).toEqual(['ArrivedOct 24, 2026', 'ReviewedWaiting on you', 'Assigned', 'Engaged', 'Opportunity', 'Won']);
+    await waitFor(() => expect(items.map((i) => i.textContent)).toEqual(['ArrivedOct 24, 2026', 'ReviewedWaiting on you', 'Assigned', 'Engaged', 'Opportunity', 'Won']));
     expect(items[0]).toHaveAttribute('aria-current', 'step');
   });
 

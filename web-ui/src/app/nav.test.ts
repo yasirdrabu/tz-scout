@@ -56,10 +56,11 @@ describe('nav', () => {
     expect(landingPath(meWith(['offers:read']))).toBeNull();
   });
 
-  it('hides settings tabs without their scope and the pipeline stages tab', () => {
+  it('hides settings tabs without their scope', () => {
     expect(visibleSettingsTabs(meWith(['members:read', 'settings:manage', 'scoring:manage'])).map((t) => t.tab)).toEqual([
       'members',
       'review-statuses',
+      'pipeline-stages',
       'scoring-weights',
       'ai-runs',
     ]);

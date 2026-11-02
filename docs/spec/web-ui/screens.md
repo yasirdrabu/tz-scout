@@ -744,7 +744,7 @@ now shows them."). Mockup gap: the mockup has no decline-reasons editor and no a
 
 ### 21e. Pipeline stages
 
-**Tag** Redesign (pipeline stages plan, Decision 6; quarter targets R3) · **Who** `settings:manage`
+**Tag** R1 since the pipeline stages plan (Decision 6, REV-E5, 2026-11-01; targets shown in R3) · **Who** `settings:manage`
 
 Stages become fully configurable in their own backend plan (routing, CRM and analytics). The editor
 ships with that plan and the tab is hidden until then; meanwhile every screen reads stage names and

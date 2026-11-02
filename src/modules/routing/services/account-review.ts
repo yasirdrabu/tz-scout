@@ -4,9 +4,9 @@ import { sourceNames, sourcesOfAccount } from '@/modules/intake';
 import { causeInWords, getScoreHistory, TIER_NAMES, type Tier } from '@/modules/scoring';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
-import type { ReviewFlags, Stage } from '../contracts/types';
+import type { ReviewFlags } from '../contracts/types';
 import { assignment, leadOfferChange, stageChange, statusChange } from '../db/schema';
-import { EXIT_STAGES, PIPELINE_STAGES, STAGE_LABELS } from '../domain/stages';
+import { loadStageNames, loadStages } from './pipeline-stages';
 import { leadOffer, loadNames } from './lookups';
 import { loadStatuses, OPEN_STATUSES, visibleReview } from './review';
 import { reasonLabels } from './settings';
@@ -53,10 +53,13 @@ export async function getAccountReview(ctx: ModuleContext, accountId: string): P
     .from(stageChange)
     .where(and(eq(stageChange.tenantId, ctx.tenantId), eq(stageChange.accountId, accountId)))
     .orderBy(asc(stageChange.at), asc(stageChange.id));
+  const stages = await loadStages(ctx);
+  const stageNames = await loadStageNames(ctx);
   const reached = new Map<string, Date>([['arrived', row.createdAt]]);
   for (const m of moves) reached.set(m.toStage, m.at);
-  const stage = row.stage as Stage;
-  const steps: string[] = [...PIPELINE_STAGES, ...((EXIT_STAGES as readonly string[]).includes(stage) ? [stage] : [])];
+  // One step per live flow stage, then the exit the account holds (or a stage since deleted, until it moves).
+  const steps: string[] = stages.filter((s) => s.kind === 'flow').map((s) => s.key);
+  if (!steps.includes(row.stage)) steps.push(row.stage);
   const [open] = row.currentAssignmentId
     ? await ctx.tx.select().from(assignment).where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.id, row.currentAssignmentId)))
     : [];
@@ -82,9 +85,9 @@ export async function getAccountReview(ctx: ModuleContext, accountId: string): P
       changedByName: names.person(row.statusChangedBy),
     },
     stage: row.stage,
-    stageLabel: STAGE_LABELS[stage] ?? row.stage,
+    stageLabel: stageNames.get(row.stage) ?? row.stage,
     stageChangedAt: row.stageChangedAt,
-    stages: steps.map((key) => ({ key, label: STAGE_LABELS[key as Stage], at: reached.get(key) ?? null, current: key === row.stage })),
+    stages: steps.map((key) => ({ key, label: stageNames.get(key) ?? key, at: reached.get(key) ?? null, current: key === row.stage })),
     insights: row.insights ? { text: row.insights, byName: names.person(row.insightsBy), at: row.insightsAt } : null,
     flags: newFrom ? { ...flags, newFrom: { ...newFrom, sourceName: newFromName } } : flags,
     currentAssignment:
@@ -161,6 +164,7 @@ export async function listChanges(ctx: ModuleContext, accountId: string, opts: {
   const row = await visibleReview(ctx, accountId, { lock: false });
   const names = await loadNames(ctx);
   const statuses = new Map((await loadStatuses(ctx)).map((s) => [s.key, s.label]));
+  const stageNames = await loadStageNames(ctx);
   const statusRows = await ctx.tx.select().from(statusChange).where(and(eq(statusChange.tenantId, ctx.tenantId), eq(statusChange.accountId, accountId)));
   const stageRows = await ctx.tx.select().from(stageChange).where(and(eq(stageChange.tenantId, ctx.tenantId), eq(stageChange.accountId, accountId)));
   const assignments = await ctx.tx.select().from(assignment).where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.accountId, accountId)));
@@ -186,7 +190,18 @@ export async function listChanges(ctx: ModuleContext, accountId: string, opts: {
       reason: s.reasonKey ? (reasons.get(s.reasonKey) ?? s.reasonKey) : null,
     });
   }
-  for (const s of stageRows) add({ id: s.id, at: s.at, kind: 'stage', field: 'stage', from: STAGE_LABELS[s.fromStage as Stage] ?? s.fromStage, to: STAGE_LABELS[s.toStage as Stage] ?? s.toStage });
+  for (const s of stageRows) {
+    add({
+      id: s.id,
+      at: s.at,
+      kind: 'stage',
+      field: 'stage',
+      from: s.fromName ?? stageNames.get(s.fromStage) ?? s.fromStage,
+      to: s.toName ?? stageNames.get(s.toStage) ?? s.toStage,
+      byName: names.person(s.by),
+      note: s.note,
+    });
+  }
   for (const a of assignments) {
     add({ id: a.id, at: a.assignedAt, kind: 'assigned', field: 'owner', to: names.person(a.sellerUserId), byName: names.person(a.assignedBy), note: a.notes });
     if (!a.respondedAt) continue;

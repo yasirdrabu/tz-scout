@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
 export const STAGES = ['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity', 'won', 'lost', 'declined'] as const;
-export const stageSchema = z.enum(STAGES);
-export type Stage = z.infer<typeof stageSchema>;
+/** A stage is its key: a workspace names, adds and deletes stages (REV-E5); `STAGES` are only the keys it starts with. */
+export const stageKeySchema = z.string().min(1);
+export type Stage = z.infer<typeof stageKeySchema>;
 
 export const ASSIGNMENT_STATUSES = ['pending', 'accepted', 'declined', 'withdrawn', 'replaced'] as const;
 export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
@@ -30,7 +31,7 @@ export const reviewSnapshotSchema = z.object({
   ownerUserId: z.string().nullable(),
   ownerHistoryUserIds: z.array(z.string()),
   hasOpenAssignment: z.boolean(),
-  stage: stageSchema,
+  stage: stageKeySchema,
   reviewFlags: z.array(z.enum(REVIEW_FLAGS)),
   /** The offer someone picked (Decision 5); absent in snapshots published before it existed. */
   leadOfferOverrideId: z.string().nullable().optional(),

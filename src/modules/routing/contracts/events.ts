@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { defineEvent } from '@/platform/events/registry';
-import { reviewSnapshotSchema, stageSchema } from './types';
+import { reviewSnapshotSchema, stageKeySchema } from './types';
 
 /** After every write to an account's review. `version` is `account_review.version`. */
 export const reviewChanged = defineEvent(
@@ -82,5 +82,24 @@ export const assignmentWithdrawn = defineEvent(
 export const stageChanged = defineEvent(
   'routing.stage.changed',
   1,
-  z.object({ accountId: z.string(), from: stageSchema, to: stageSchema, causeEventId: z.string() }),
+  z.object({
+    accountId: z.string(),
+    from: stageKeySchema,
+    to: stageKeySchema,
+    /** Added with configurable stages (REV-E5), so events stored before it have none. */
+    fromName: z.string().optional(),
+    toName: z.string().optional(),
+    causeEventId: z.string(),
+  }),
+);
+
+/** A workspace saved its pipeline stages (REV-E5). Carries the live stages in order and the keys it deleted. */
+export const stagesChanged = defineEvent(
+  'routing.stages.changed',
+  1,
+  z.object({
+    by: z.string(),
+    stages: z.array(z.object({ key: z.string(), name: z.string(), kind: z.enum(['flow', 'exit']) })),
+    archived: z.array(z.string()),
+  }),
 );

@@ -139,6 +139,12 @@ export const stageChange = routing.table(
     accountId: text('account_id').notNull(),
     fromStage: text('from_stage').notNull(),
     toStage: text('to_stage').notNull(),
+    /** The stage names when it moved, so a rename leaves history alone; null on rows written before names existed and not backfilled. */
+    fromName: text('from_name'),
+    toName: text('to_name'),
+    /** Who moved it by hand, and why; null when an event moved it. */
+    by: text('by'),
+    note: text('note'),
     causeEventId: text('cause_event_id').notNull(),
     at: at('at').notNull().defaultNow(),
   },
@@ -174,4 +180,31 @@ export const leadOfferChange = routing.table(
     at: at('at').notNull().defaultNow(),
   },
   (t) => [index('lead_offer_change_account_at_idx').on(t.tenantId, t.accountId, sql`${t.at} desc`)],
+);
+
+/**
+ * The tenant's pipeline stages (REV-E5). `key` is stable and never reused; a deleted stage is archived
+ * and keeps its key. Order is `position` within `kind`.
+ */
+export const pipelineStage = routing.table(
+  'pipeline_stage',
+  {
+    id: text('id').primaryKey(), // pst_
+    tenantId: text('tenant_id').notNull(),
+    key: text('key').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    kind: text('kind').notNull(), // flow | exit
+    position: integer('position').notNull(),
+    trigger: text('trigger').notNull(),
+    hubspotStage: text('hubspot_stage'),
+    quarterTarget: integer('quarter_target'),
+    locked: text('locked'), // first | won
+    archivedAt: at('archived_at'),
+  },
+  (t) => [
+    uniqueIndex('pipeline_stage_key_uq').on(t.tenantId, t.key),
+    uniqueIndex('pipeline_stage_name_uq').on(t.tenantId, sql`lower(${t.name})`).where(sql`${t.archivedAt} is null`),
+    check('pipeline_stage_kind', sql`${t.kind} in ('flow', 'exit')`),
+  ],
 );

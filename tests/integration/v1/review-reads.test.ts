@@ -200,7 +200,7 @@ describe('GET /accounts/{id}/review and /changes', () => {
     expect(kinds[kinds.length - 1]).toBe('arrived');
     expect(changes.data).toContainEqual(expect.objectContaining({ kind: 'status', field: 'review_status', from: 'Ready for review', to: 'In review', by_name: 'Dana Leader' }));
     expect(changes.data).toContainEqual(expect.objectContaining({ kind: 'assigned', to: 'Sam Seller', by_name: 'Dana Leader', note: 'Start with the transit team.' }));
-    expect(changes.data).toContainEqual(expect.objectContaining({ kind: 'stage', from: 'Arrived', to: 'Reviewed' }));
+    expect(changes.data).toContainEqual(expect.objectContaining({ kind: 'stage', from: 'Sent', to: 'Reviewed' }));
     expect(changes.data.find((c: { kind: string }) => c.kind === 'arrived')).toMatchObject({ to: 'Reads Co Ash agent' });
     const first = await json(w.as(leader, changesRoute, `accounts/${a}/changes?limit=2`));
     expect(first.data).toHaveLength(2);
@@ -290,7 +290,7 @@ describe('All accounts: GET /accounts, /accounts/facets, /accounts/export (scree
     const f = await res.json();
     expect(f.total).toBe(4);
     expect(f.stages).toEqual([
-      { key: 'arrived', label: 'Arrived', count: 1 },
+      { key: 'arrived', label: 'Sent', count: 1 },
       { key: 'reviewed', label: 'Reviewed', count: 1 },
       { key: 'assigned', label: 'Assigned', count: 0 },
       { key: 'engaged', label: 'Engaged', count: 0 },

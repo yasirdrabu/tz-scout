@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { moveStage, publishReviewSnapshot, reviewChanged, stageChanged } from '@/modules/routing';
-import { accountReview, assignment, stageChange } from '@/modules/routing/db/schema';
+import { moveStage, seedRoutingDefaults, publishReviewSnapshot, reviewChanged, stageChanged } from '@/modules/routing';
+import { accountReview, assignment, pipelineStage, routingSetting, stageChange } from '@/modules/routing/db/schema';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -75,6 +75,33 @@ describe('moveStage', () => {
     const rows = await t.run((ctx) => ctx.tx.select().from(stageChange).where(eq(stageChange.accountId, accountId)));
     expect(rows).toEqual([]);
     expect((await review(t, accountId)).version).toBe(1);
+  });
+
+  it('waits for a stage save in progress, then sees the stages it left (a move never lands on a stage just archived)', async () => {
+    await t.run((ctx) => seedRoutingDefaults(ctx));
+    const accountId = await seedReview(t, 'assigned');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const holding = new Promise<void>((r) => (locked = r));
+    // What saveStages does first: take the tenant's routing_setting row, then archive a stage.
+    await t.run((ctx) => ctx.tx.insert(routingSetting).values({ tenantId: ctx.tenantId }).onConflictDoNothing());
+    const save = t.run(async (ctx) => {
+      await ctx.tx.select().from(routingSetting).where(eq(routingSetting.tenantId, ctx.tenantId)).for('update');
+      await ctx.tx.update(pipelineStage).set({ archivedAt: new Date() }).where(eq(pipelineStage.key, 'engaged'));
+      locked();
+      await gate;
+    });
+    await holding;
+    let done = false;
+    const move = t.run((ctx) => moveStage(ctx, accountId, 'engaged', 'evt_during_save')).then((r) => ((done = true), r));
+    await new Promise((r) => setTimeout(r, 400));
+    expect(done).toBe(false);
+    release();
+    await save;
+    expect(await move).toBeNull();
+    expect((await review(t, accountId)).stage).toBe('assigned');
+    await t.run((ctx) => ctx.tx.update(pipelineStage).set({ archivedAt: null }).where(eq(pipelineStage.key, 'engaged')));
   });
 
   it('does nothing for an account without a review', async () => {

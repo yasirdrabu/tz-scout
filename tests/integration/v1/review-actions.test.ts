@@ -15,7 +15,7 @@ import { GET as queueRoute } from '@/http/routes/v1/review-queue/route';
 import { backfillReviewFlow } from '@/entry/seed';
 import { accountSummary } from '@/modules/accounts/db/schema';
 import { sourceFeedback } from '@/modules/intake/db/schema';
-import { assignment, statusChange } from '@/modules/routing/db/schema';
+import { accountReview, assignment, stageChange, statusChange } from '@/modules/routing/db/schema';
 import { seedMockCrm, syncOwners } from '@/modules/crm';
 import { activity, mockCompany } from '@/modules/crm/db/schema';
 import { callLog } from '@/modules/integrations/db/schema';
@@ -387,5 +387,54 @@ describe('assign previews: ownership details and the bulk preview', () => {
     expect((await post(seller, { account_ids: [a], seller_user_id: seller })).status).toBe(403);
     const key = await keyFor(w.tenant, ['assign:act', 'review:act'], { dataLimit: { kind: 'all' } });
     expect((await call(assignPreviewRoute, key, 'review-queue/assign-preview', { body: { account_ids: [a], seller_user_id: seller } })).status).toBe(403);
+  });
+});
+
+describe('Move to stage (REV-E5-S4)', () => {
+  const move = (who: string, a: string, body: unknown) => w.as(who, accountAction, `accounts/${a}:move-stage`, 'POST', body);
+  const stageOf = async (a: string) => (await w.run((ctx) => ctx.tx.select().from(accountReview).where(eq(accountReview.accountId, a))))[0]!.stage;
+
+  it('AC1: a reviewer moves an account out of Lost with a note; history shows who, the names and the note', async () => {
+    const a = await w.account('Moved Co');
+    await w.run((ctx) => ctx.tx.update(accountReview).set({ stage: 'lost' }).where(eq(accountReview.accountId, a)));
+    const res = await move(leader, a, { stage: 'opportunity', note: '  Deal reopened by phone.  ' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ stage: 'opportunity' });
+    expect(await stageOf(a)).toBe('opportunity');
+    const [row] = await w.run((ctx) => ctx.tx.select().from(stageChange).where(eq(stageChange.accountId, a)));
+    expect(row).toMatchObject({ fromStage: 'lost', toStage: 'opportunity', fromName: 'Lost', toName: 'Opportunity', by: leader, note: 'Deal reopened by phone.' });
+    // The change log the account page shows carries who and the note too.
+    const changes = await json(w.as(leader, changesRoute, `accounts/${a}/changes`));
+    expect(changes.data.find((c: { kind: string }) => c.kind === 'stage')).toMatchObject({
+      from: 'Lost',
+      to: 'Opportunity',
+      by_name: 'Dana Leader',
+      note: 'Deal reopened by phone.',
+    });
+  });
+
+  it('moves back as well as forward, and writes nothing for the stage it is already in', async () => {
+    const a = await w.account('Moved Back Co');
+    expect((await move(leader, a, { stage: 'won' })).status).toBe(200);
+    expect((await move(leader, a, { stage: 'reviewed' })).status).toBe(200);
+    expect(await stageOf(a)).toBe('reviewed');
+    expect((await move(leader, a, { stage: 'reviewed' })).status).toBe(200);
+    expect(await w.run((ctx) => ctx.tx.select().from(stageChange).where(eq(stageChange.accountId, a)))).toHaveLength(2);
+  });
+
+  it('refuses a stage the workspace does not have', async () => {
+    const a = await w.account('No Such Stage Co');
+    const res = await move(leader, a, { stage: 'stg_nope' });
+    expect(res.status).toBe(400);
+    expect((await res.json()).errors).toEqual([{ path: 'stage', message: 'Pick a stage from your list.' }]);
+    expect((await move(leader, a, {})).status).toBe(400);
+  });
+
+  it('AC2: 403 without review:act, and for an API key; 404 for another workspace’s account', async () => {
+    const a = await w.account('Forbidden Move Co');
+    expect((await move(seller, a, { stage: 'reviewed' })).status).toBe(403);
+    expect((await call(accountAction, await keyFor(w.tenant, ['review:act']), `accounts/${a}:move-stage`, { method: 'POST', body: { stage: 'reviewed' } })).status).toBe(403);
+    expect((await move(leader, otherAccount, { stage: 'reviewed' })).status).toBe(404);
+    expect(await stageOf(a)).toBe('arrived');
   });
 });

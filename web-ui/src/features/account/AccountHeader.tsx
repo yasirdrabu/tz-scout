@@ -9,6 +9,7 @@ import { IconButton } from '../../ui/IconButton';
 import type { AccountReview } from '../review/api';
 import { Flag, HANDOFF, HandoffChip, kindAndPlace, StatusDot } from '../review/parts';
 import type { AccountDetail } from './api';
+import { MoveToStage } from './MoveToStage';
 import styles from './Account.module.css';
 
 export type Stepper = { index: number; total: number; onPrev: (() => void) | undefined; onNext: (() => void) | undefined };
@@ -28,6 +29,8 @@ export type HeaderProps = {
   onSendBack: () => void;
   onAssign: () => void;
   onRetry: () => void;
+  /** After the account was moved to a stage by hand. */
+  onMoved: () => void;
 };
 
 const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
@@ -178,7 +181,10 @@ export function AccountHeader(props: HeaderProps) {
               {origin && <span>{origin}</span>}
             </div>
           </div>
-          <div className={styles.actions}>{actions}</div>
+          <div className={styles.actions}>
+            {actions}
+            {hasScope(me, 'review:act') && <MoveToStage tenant={tenant} account={account} current={review.stage} onMoved={props.onMoved} />}
+          </div>
         </div>
       </div>
 

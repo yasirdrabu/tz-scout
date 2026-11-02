@@ -3,7 +3,7 @@ import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
 import { reviewChanged } from '../contracts/events';
 import type { ReviewFlag, ReviewSnapshot } from '../contracts/types';
-import { stageSchema } from '../contracts/types';
+import { stageKeySchema } from '../contracts/types';
 import { accountReview, assignment } from '../db/schema';
 
 const OPEN = ['pending', 'accepted'];
@@ -58,7 +58,7 @@ async function buildSnapshot(ctx: ModuleContext, review: typeof accountReview.$i
     ownerUserId: open?.sellerUserId ?? null,
     ownerHistoryUserIds: past,
     hasOpenAssignment: !!open,
-    stage: stageSchema.parse(review.stage),
+    stage: stageKeySchema.parse(review.stage),
     reviewFlags,
     leadOfferOverrideId: review.leadOfferOverrideId,
   };

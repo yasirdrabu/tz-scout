@@ -115,6 +115,7 @@ import * as v1SettingsExclusionsRulesKey from './routes/v1/settings/exclusions/r
 import * as v1SettingsReviewReasons from './routes/v1/settings/review/reasons/route';
 import * as v1SettingsReview from './routes/v1/settings/review/route';
 import * as v1SettingsReviewStatuses from './routes/v1/settings/review/statuses/route';
+import * as v1SettingsStages from './routes/v1/settings/stages/route';
 import * as v1SettingsWarmIntrosKey from './routes/v1/settings/warm-intros/[key]/route';
 import * as v1SettingsWarmIntros from './routes/v1/settings/warm-intros/route';
 import * as v1SignalTypes from './routes/v1/signal-types/route';
@@ -126,6 +127,7 @@ import * as v1SourcesIdMappings from './routes/v1/sources/[id]/mappings/route';
 import * as v1SourcesId from './routes/v1/sources/[id]/route';
 import * as v1Sources from './routes/v1/sources/route';
 import * as v1SourcesStats from './routes/v1/sources/stats/route';
+import * as v1Stages from './routes/v1/stages/route';
 import * as v1Waiting from './routes/v1/waiting/route';
 
 /** Where the public API is mounted. */
@@ -252,6 +254,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/settings/review/reasons`, module: v1SettingsReviewReasons },
   { path: `${V1}/settings/review`, module: v1SettingsReview },
   { path: `${V1}/settings/review/statuses`, module: v1SettingsReviewStatuses },
+  { path: `${V1}/settings/stages`, module: v1SettingsStages },
   { path: `${V1}/settings/warm-intros/:key`, module: v1SettingsWarmIntrosKey },
   { path: `${V1}/settings/warm-intros`, module: v1SettingsWarmIntros },
   { path: `${V1}/signal-types`, module: v1SignalTypes },
@@ -263,5 +266,6 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/sources/:id`, module: v1SourcesId },
   { path: `${V1}/sources/stats`, module: v1SourcesStats },
   { path: `${V1}/sources`, module: v1Sources },
+  { path: `${V1}/stages`, module: v1Stages },
   { path: `${V1}/waiting`, module: v1Waiting },
 ];

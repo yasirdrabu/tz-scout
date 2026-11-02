@@ -4,6 +4,7 @@ import { serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
 import type { AccountReview } from '../review/api';
 import { LEADER, REASONS, SELLERS, STATUSES } from '../review/testing';
+import type { StagesView } from '../settings/stages/api';
 import type { AccountDetail, AccountScore, Brief, BriefSection, CrmCheck, Fact, Handoffs } from './api';
 
 // Fixtures in the API's shapes (snake_case), for the account page's tests.
@@ -157,6 +158,24 @@ export function serveCoastline() {
   );
 }
 
+const T = (trigger: string) => ({ trigger, trigger_label: trigger });
+const STAGE = { description: null, hubspot_stage: null, quarter_target: null, locked: null, kind: 'flow' as const };
+
+/** The workspace's default stages, as `GET /stages` answers them. */
+export const STAGES: StagesView = {
+  stages: [
+    { ...STAGE, ...T('source_creates'), key: 'arrived', name: 'Arrived', position: 0, locked: 'first' },
+    { ...STAGE, ...T('reviewer_sets_tier'), key: 'reviewed', name: 'Reviewed', position: 1 },
+    { ...STAGE, ...T('ae_accepts'), key: 'assigned', name: 'Assigned', position: 2 },
+    { ...STAGE, ...T('reply_or_meeting'), key: 'engaged', name: 'Engaged', position: 3 },
+    { ...STAGE, ...T('deal_created'), key: 'opportunity', name: 'Opportunity', position: 4 },
+    { ...STAGE, ...T('deal_closed_won'), key: 'won', name: 'Won', position: 5, locked: 'won' },
+    { ...STAGE, ...T('reviewer_rejects'), key: 'declined', name: 'Disqualified', position: 0, kind: 'exit' },
+  ],
+  defaults: [],
+  triggers: [],
+};
+
 export type Served = {
   scopes?: string[];
   account?: AccountDetail;
@@ -166,6 +185,7 @@ export type Served = {
   brief?: Brief;
   crm?: CrmCheck;
   handoffs?: Handoffs;
+  stages?: StagesView;
 };
 
 /** Everything the account page reads, answered; returns the request bodies seen per path. */
@@ -178,6 +198,7 @@ export function serveAccount(opts: Served = {}) {
   };
   serveMe({ taazaa: { scopes: opts.scopes ?? PAGE_LEADER, user: { id: 'usr_zach', name: 'Zach Wiant', email: 'zach@taazaa.com' } } });
   server.use(
+    http.get('/api/v1/stages', () => HttpResponse.json(opts.stages ?? STAGES)),
     http.get('/api/v1/accounts/acc_mdc', () => HttpResponse.json(opts.account ?? ACCOUNT)),
     http.get('/api/v1/accounts/acc_mdc/review', () => HttpResponse.json(opts.review ?? REVIEW)),
     http.get('/api/v1/accounts/acc_mdc/score', () =>

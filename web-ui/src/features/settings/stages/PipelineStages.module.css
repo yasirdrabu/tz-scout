@@ -1,0 +1,154 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.intro {
+  max-width: 720px;
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.5;
+}
+
+.buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.sectionIntro {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.stages th,
+.stages td {
+  padding-right: 8px;
+  padding-left: 8px;
+  vertical-align: top;
+}
+
+.stages th:first-child,
+.stages td:first-child {
+  padding-left: 14px;
+}
+
+.nameCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dot,
+.dotWon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.dotWon {
+  background: var(--good);
+  color: var(--surface);
+}
+
+.name {
+  width: 100%;
+  min-width: 120px;
+}
+
+.meaning {
+  width: 100%;
+  min-width: 180px;
+}
+
+.select {
+  width: auto;
+  max-width: 260px;
+}
+
+.hubspot {
+  width: 150px;
+}
+
+.target {
+  width: 90px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.error {
+  margin: 4px 0 0;
+  color: var(--bad);
+  font-size: var(--text-xs);
+}
+
+.failure {
+  padding: 10px 14px;
+  border: 1px solid var(--bad);
+  border-radius: var(--radius-lg);
+  color: var(--bad);
+  font-size: var(--text-sm);
+}
+
+.failure p {
+  margin: 0;
+}
+
+.footer {
+  max-width: 720px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

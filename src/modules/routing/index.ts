@@ -6,6 +6,7 @@ export {
   assignmentWithdrawn,
   reviewChanged,
   stageChanged,
+  stagesChanged,
   statusChanged,
 } from './contracts/events';
 export { autoAcceptJob } from './contracts/jobs';
@@ -29,7 +30,8 @@ export {
 } from './contracts/types';
 export { routingAccountMerged, routingArrivalResolved, routingConsumers, routingCrmActivity, routingCrmDeal, routingCrmHandoffCancelled, routingCrmHandoffCompleted, routingCrmHandoffFailed, routingCrmHandoffNeedsDecision, routingMemberRemoved, routingTenantDefaults } from './consumers';
 export { DEFAULT_AUTO_ACCEPT_WORKING_DAYS, DEFAULT_REASONS, DEFAULT_STATUSES, seedRoutingDefaults } from './defaults';
-export { EXIT_STAGES, nextStage, PIPELINE_STAGES, STAGE_LABELS, type StageEvent } from './domain/stages';
+export { nextStage, type StageEvent } from './domain/stages';
+export { listStages, loadStageNames as stageNames, routingFunnelStages, type StagesView } from './services/pipeline-stages';
 export { declineProblems, inList, REASON_LISTS, statusChangeProblems, type ReasonDef, type ReasonList, type StatusDefRules } from './domain/status-rules';
 export { STATUS_COLORS, STATUS_SET_BY, type ReasonEdit, type StatusEdit } from './domain/review-settings';
 export { addWorkingDays } from './domain/working-days';
@@ -37,6 +39,9 @@ export { autoAcceptHandler } from './jobs';
 export { backfillLeadOffers, backfillReviews } from './services/backfill';
 export { publishReviewSnapshot } from './services/snapshot';
 export { moveStage } from './services/stage';
+export { moveToStage } from './services/move-stage';
+export { saveStages } from './services/save-stages';
+export { TRIGGERS, type PipelineStageInput, type Trigger } from './domain/pipeline';
 export { routingReviewStatusValidator } from './services/status-validator';
 export { routingOfferUsage } from './services/offer-usage';
 export { assign, bulk, MAX_BULK, previewAssign, previewBulkAssign, setLeadOffer, type BulkPreviewRow, type LeadOfferView, type AssignInput, type AssignmentView, type AssignPreview, type BulkAction, type BulkResult } from './services/assign';

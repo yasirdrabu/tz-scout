@@ -12,6 +12,7 @@ import { IntegrationsTab } from './integrations/IntegrationsTab';
 import { MembersTab } from './members/MembersTab';
 import { ScoringWeights } from './scoring/ScoringWeights';
 import { ReviewStatusesTab } from './review-statuses/ReviewStatusesTab';
+import { PipelineStages } from './stages/PipelineStages';
 import styles from './Settings.module.css';
 
 /** What every tab gets: the person, the workspace, and the item open in a drawer (from the URL). */
@@ -21,6 +22,7 @@ const SCREENS: Record<string, (props: TabProps) => ReactNode> = {
   members: (p) => <MembersTab {...p} />,
   integrations: (p) => <IntegrationsTab {...p} />,
   'review-statuses': (p) => <ReviewStatusesTab {...p} />,
+  'pipeline-stages': (p) => <PipelineStages {...p} />,
   'scoring-weights': (p) => <ScoringWeights {...p} />,
   'api-keys': (p) => <ApiKeysTab {...p} />,
   'audit-log': (p) => <AuditTab {...p} />,

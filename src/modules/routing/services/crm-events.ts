@@ -5,17 +5,20 @@ import type { Envelope } from '@/platform/events/envelope';
 import type { EventDef } from '@/platform/events/registry';
 import type { HandoffFlag } from '../contracts/types';
 import { accountReview, assignment } from '../db/schema';
-import type { StageEvent } from '../domain/stages';
+import type { StageSignal } from '../domain/pipeline';
+import { eventSignals, type StageEvent } from '../domain/stages';
 import { lockRow, openAssignment } from './review';
 import { acceptLocked } from './respond';
 import { publishReviewSnapshot } from './snapshot';
+import { loadStages } from './pipeline-stages';
 import { moveStage } from './stage';
 
 type EventOf<T> = T extends EventDef<infer D> ? Envelope<D> : never;
 
 /**
  * `crm.activity.observed` (Ruling 19): the open pending assignment's seller doing something in the CRM
- * accepts it, with `crm_activity`; a reply or meeting moves the stage to `engaged`. The two moves use
+ * accepts it, with `crm_activity`; a reply or meeting moves the stage to the one that owns "a reply or meeting is
+ * logged" (a meeting also fires "a meeting is booked"). The two moves use
  * distinct causes, since one cause moves an account at most once. One snapshot, only when something changed.
  */
 export async function onCrmActivity(e: EventOf<typeof activityObserved>, ctx: ModuleContext): Promise<void> {
@@ -28,18 +31,26 @@ export async function onCrmActivity(e: EventOf<typeof activityObserved>, ctx: Mo
     await acceptLocked(ctx, open, 'crm_activity', new Date());
     changed = true;
   }
-  if (kind === 'reply' || kind === 'meeting') changed = !!(await moveStage(ctx, accountId, 'engaged', e.id)) || changed;
+  if (kind === 'reply' || kind === 'meeting') changed = !!(await moveStage(ctx, accountId, kind === 'meeting' ? 'meeting' : 'engaged', e.id)) || changed;
   if (changed) await publishReviewSnapshot(ctx, accountId);
 }
 
 const DEAL_STAGE: Record<'open' | 'won' | 'lost', StageEvent> = { open: 'opportunity', won: 'won', lost: 'lost' };
 
-/** `crm.deal.changed`: an open deal moves the stage to `opportunity`, a won one to `won`, a lost one to `lost`. */
+/**
+ * `crm.deal.changed`: a won deal moves the stage to the Closed won one, a lost deal to the Closed lost one, and an open
+ * deal to the stage mapped to its HubSpot stage (`deal_reaches_stage`), else the one for a created deal; forward only.
+ */
 export async function onCrmDeal(e: EventOf<typeof dealChanged>, ctx: ModuleContext): Promise<void> {
   const { accountId, status } = e.data;
   const row = await lockRow(ctx, accountId);
   if (!row || row.mergedInto) return;
-  if (await moveStage(ctx, accountId, DEAL_STAGE[status], e.id)) await publishReviewSnapshot(ctx, accountId);
+  let signals: StageSignal[] = eventSignals(DEAL_STAGE[status]);
+  if (status === 'open' && e.data.stage) {
+    const mapped = (await loadStages(ctx)).some((s) => s.trigger === 'deal_reaches_stage' && s.hubspotStage === e.data.stage);
+    if (mapped) signals = [{ trigger: 'deal_reaches_stage', hubspotStage: e.data.stage }];
+  }
+  if (await moveStage(ctx, accountId, signals, e.id)) await publishReviewSnapshot(ctx, accountId);
 }
 
 /** Sets `flags.handoff` unless the event is for an assignment other than the account's latest or the stored state is newer; one snapshot when it changed. */
