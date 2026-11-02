@@ -389,8 +389,8 @@ describe('All accounts: estimated value (Ruling 13)', () => {
     expect(by(noPotential).value).toBeNull();
   });
 
-  it('the CSV value kind is estimated', async () => {
+  it('the CSV value kind is Estimated', async () => {
     const lines = (await (await w.as(leader, exportRoute, `accounts/export?source_id=${src.agentId}`)).text()).trim().split('\r\n');
-    expect(lines.find((l) => l.includes('Estimated Co'))).toContain('75000.00,USD,estimated');
+    expect(lines.find((l) => l.includes('Estimated Co'))).toContain('75000.00,USD,Estimated');
   });
 });

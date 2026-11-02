@@ -232,7 +232,7 @@ export async function exportAccounts(ctx: ModuleContext, f: AccountListFilters =
       r.lastActivity?.at.toISOString(),
       r.value?.amountCents === null || r.value?.amountCents === undefined ? null : (r.value.amountCents / 100).toFixed(2),
       r.value?.currency,
-      r.value ? { won: 'Won', open_deal: 'Open deal', estimated: 'estimated' }[r.value.kind] : null,
+      r.value ? { won: 'Won', open_deal: 'Open deal', estimated: 'Estimated' }[r.value.kind] : null,
     ]),
   );
   return { csv, count: kept.length };
