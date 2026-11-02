@@ -6,12 +6,12 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { run } from '@/entry/cli';
 import { GET as buyingRoles } from '@/http/routes/v1/buying-roles/route';
 import { GET as stages } from '@/http/routes/v1/stages/route';
-import { createTenant, provisionWorkspace, splitWorkspace, workspaceDatabaseName } from '@/modules/tenancy';
+import { createTenant, provisionWorkspace, splitWorkspace, workspaceDatabaseName, workspaceInfo, workspaceList } from '@/modules/tenancy';
 import postgres from 'postgres';
 import { tenant, workspaceInfra } from '@/modules/tenancy/db/schema';
 import { config } from '@/platform/config';
 import { adminDb } from '@/platform/db/client';
-import { forgetWorkspace, withWorkspaceAdmin } from '@/platform/db/doors';
+import { forgetWorkspace, registerWorkspaceLookup, withWorkspaceAdmin } from '@/platform/db/doors';
 import { discardDeadJob, retryDeadJob } from '@/platform/dead-jobs';
 import { createDatabase, databaseExists, migrateWorkspaceDatabase } from '@/platform/db/migrate';
 import { deadJob, schedule } from '@/platform/db/schema';
@@ -269,6 +269,43 @@ describe('tenant split: no write is lost (Task 6 review)', () => {
     expect(await withTenant(t.tenantId, async () => 'in')).toBe('in');
   });
 
+  it('a transaction routed to the shared database before the switch and started after it is refused, and writes nothing there', async () => {
+    const t = await sharedWorkspace();
+    const write = (n: number) =>
+      withTenant(t.tenantId, (tx) => publish({ tenantId: t.tenantId, actor: { kind: 'system', id: 'test' }, correlationId: newId('cor'), tx }, probe, { n }));
+    // Another process (the API, while the split runs from the CLI): its cached row still says the shared database.
+    registerWorkspaceLookup(async (id) => (id === t.tenantId ? { status: 'active', database: shared } : workspaceInfo(id)), workspaceList);
+    try {
+      expect(await splitWorkspace(t.tenantId, { settleMs: 0 })).toMatchObject({ outcome: 'moved' });
+      await expect(write(77)).rejects.toMatchObject({ slug: 'workspace-unavailable', status: 503 });
+      expect(nonEmpty(await countTenantRows(sharedUrl, t.tenantId))).toEqual({});
+    } finally {
+      registerWorkspaceLookup(workspaceInfo, workspaceList);
+    }
+    // With the real row, the retry goes to its own database.
+    await write(78);
+    expect(nonEmpty(await countTenantRows(sharedUrl, t.tenantId))).toEqual({});
+  });
+
+  it('workspaces not moved out yet use the shared pools at full size, not a small workspace pool', async () => {
+    const a = await sharedWorkspace();
+    const b = await sharedWorkspace();
+    // More at once than a workspace pool admits (SCOUT_WORKSPACE_POOL_MAX - 1), fewer than the shared pool does.
+    const n = config.workspacePoolMax + 1;
+    expect(n).toBeLessThan(config.databasePoolMax);
+    let inside = 0;
+    let open!: () => void;
+    const all = new Promise<void>((r) => (open = r));
+    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`only ${inside} of ${n} got in`)), 5000));
+    const one = (tenantId: string) =>
+      withTenant(tenantId, async () => {
+        if (++inside === n) open();
+        await Promise.race([all, timeout]);
+      });
+    await Promise.all(Array.from({ length: n }, (_, i) => one(i % 2 ? a.tenantId : b.tenantId)));
+    expect(inside).toBe(n);
+  });
+
   it('admin actions on its schedules and dead jobs are refused while it moves', async () => {
     const t = await sharedWorkspace();
     const deadId = newId('dead');
@@ -321,5 +358,6 @@ describe('tenant split: no write is lost (Task 6 review)', () => {
       warn.mockRestore();
     }
     expect(warned[0]).toContain('under 65');
+    expect(warned[0]).toContain('Only safe when no API or worker is running.');
   });
 });

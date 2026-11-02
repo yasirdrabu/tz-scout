@@ -305,7 +305,7 @@ ${USAGE}`);
       const settle = values['settle-seconds'] ?? '65';
       if (!/^\d+$/.test(settle)) throw new Error(`--settle-seconds takes a whole number of seconds, 0 or more (not "${settle}").`);
       if (Number(settle) < 65) {
-        console.warn(`--settle-seconds ${settle}: under 65, another instance may still serve the workspace from its cache while it is copied. Only for a single instance.`);
+        console.warn(`--settle-seconds ${settle}: under 65, a running API or worker may still serve the workspace from its cache while it is copied. Only safe when no API or worker is running.`);
       }
       return splitTenants(values.all ? undefined : positionals[0], values.all === true, Number(settle) * 1000);
     }

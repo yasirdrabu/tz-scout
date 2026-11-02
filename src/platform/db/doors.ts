@@ -10,9 +10,9 @@ import type { Tx } from './tenant';
 /**
  * The doors to the databases (D35). The control plane holds tenancy and the platform-wide tables;
  * each workspace's data is reached through `workspaceDb(tenantId)`. With
- * `SCOUT_WORKSPACE_DATABASES=shared` (the default) every workspace is the control plane's database,
- * on pools of their own so a request holding a workspace connection never waits for its own pool to
- * open a control-plane transaction.
+ * `SCOUT_WORKSPACE_DATABASES=shared`, and for a workspace not moved out yet in `per_workspace` (the
+ * default), the workspace is the control plane's database, on pools of their own so a request holding
+ * a workspace connection never waits for its own pool to open a control-plane transaction.
  */
 
 /** The workspace registry's row for a tenant (`tenancy.workspace_infra`). */
@@ -168,9 +168,12 @@ export async function workspaceDb(tenantId: string, opts: WorkspaceOpen = {}): P
   // Provisioning reads the row fresh: a cached one may still say `failed` from before a retry.
   const route = workspaceRoute(tenantId, await infoFor(tenantId, opts.provisioning), config.workspaceDatabases, opts.provisioning);
   if (!('database' in route)) return { ...sharedWorkspace, inShared: false, pool: 'shared', poolSize: config.databasePoolMax };
+  // Not moved out yet (`per_workspace` before `scout tenant split`): the shared database's own pools, at
+  // their full size, not a small workspace pool every unsplit workspace would queue on.
+  if (route.database === controlDatabase()) return { ...sharedWorkspace, inShared: true, pool: 'shared', poolSize: config.databasePoolMax };
   return {
     ...poolsOf(route.database),
-    inShared: route.database === controlDatabase(),
+    inShared: false,
     pool: route.database,
     poolSize: config.workspacePoolMax,
   };
@@ -184,10 +187,21 @@ export const moveLockKey = (tenantId: string) => `ws:${tenantId}`;
  * the workspace's move lock shared, for the rest of the transaction, so a split waits for this work to
  * commit before it copies. Never waits: while a split holds the lock the workspace is moving, so it
  * is 503 (a stale cache may still have let the request this far).
+ * The route came from a cached registry row (up to 60 seconds old, and a split run from the CLI cannot
+ * clear another process's cache), so with the lock held the row itself is read here, in the same
+ * database: unless it still says `active` in this database, the workspace is moving or has moved, and
+ * the transaction is refused (503) with the cached row dropped, so a retry goes where the row says.
  */
 export async function holdAgainstMove(tx: Tx, tenantId: string): Promise<void> {
   const [row] = await tx.execute<{ ok: boolean }>(sql`select pg_try_advisory_xact_lock_shared(hashtext(${moveLockKey(tenantId)})) as ok`);
   if (!row?.ok) throw unavailable('moving');
+  const [here] = await tx.execute<{ ok: boolean }>(
+    sql`select status = 'active' and database = current_database() as ok from tenancy.workspace_infra where tenant_id = ${tenantId}`,
+  );
+  if (!here?.ok) {
+    forgetWorkspace(tenantId);
+    throw unavailable('moving');
+  }
 }
 
 /**
@@ -221,7 +235,7 @@ export async function listWorkspaceDatabases(): Promise<Array<{ tenantId: string
     tenantId,
     database,
     get admin() {
-      return poolsOf(database).admin;
+      return database === controlDatabase() ? sharedWorkspace.admin : poolsOf(database).admin;
     },
   }));
 }
