@@ -13,7 +13,8 @@ const stage = z.strictObject({
   quarter_target: z.number().nullish(),
 });
 const body = z.strictObject({ stages: z.array(stage).max(50) });
-type Body = { stages: (Omit<PipelineStageInput, 'description' | 'hubspotStage' | 'quarterTarget'> & { description?: string | null; hubspotStage?: string | null; quarterTarget?: number | null })[] };
+// `parseBody` camelCases only the top-level keys, so the stages arrive in snake_case.
+type Body = { stages: z.infer<typeof stage>[] };
 
 export const GET = v1Route({ permission: 'settings:manage' }, async (_req, _principal, ctx) => listStages(ctx));
 
@@ -25,6 +26,14 @@ export const PUT = v1Route({ permission: 'settings:manage', peopleOnly: true }, 
   const b = await parseBody<Body>(req, body);
   return saveStages(
     ctx,
-    b.stages.map((s) => ({ ...s, description: s.description ?? null, hubspotStage: s.hubspotStage ?? null, quarterTarget: s.quarterTarget ?? null })),
+    b.stages.map((s): PipelineStageInput => ({
+      ...(s.key ? { key: s.key } : {}),
+      name: s.name,
+      description: s.description ?? null,
+      kind: s.kind,
+      trigger: s.trigger,
+      hubspotStage: s.hubspot_stage ?? null,
+      quarterTarget: s.quarter_target ?? null,
+    })),
   );
 });

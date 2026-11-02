@@ -4,7 +4,7 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { stageChanged } from '../contracts/events';
 import { stageKeySchema } from '../contracts/types';
-import { accountReview, stageChange } from '../db/schema';
+import { accountReview, routingSetting, stageChange } from '../db/schema';
 import { moveFor, type StageSignal } from '../domain/pipeline';
 import { eventSignals, type StageEvent } from '../domain/stages';
 import { loadStageNames, loadStages } from './pipeline-stages';
@@ -27,6 +27,8 @@ export async function moveStage(
   causeId: string,
   opts: { by?: string; note?: string | null } = {},
 ): Promise<{ from: string; to: string } | null> {
+  // Shared on the tenant's setting row, which a stage save holds exclusively: wait for a save in progress and read the stages it left.
+  await ctx.tx.select({ t: routingSetting.tenantId }).from(routingSetting).where(eq(routingSetting.tenantId, ctx.tenantId)).for('share');
   const [review] = await ctx.tx
     .select({ stage: accountReview.stage })
     .from(accountReview)

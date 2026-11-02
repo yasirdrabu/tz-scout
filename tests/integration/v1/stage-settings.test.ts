@@ -46,6 +46,45 @@ describe('PUT /settings/stages (REV-E5-S1)', () => {
     expect((await res.json()).stages.map((s: { key: string }) => s.key)).toEqual(['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity', 'won', 'declined', 'back_to_nurture', 'lost']);
   });
 
+  it('keeps HubSpot stages and quarter targets: the defaults round trip, and a mapped stage with a target reads back', async () => {
+    const first = await json(w.as(w.owner, getStages, 'settings/stages'));
+    const hs = (list: { key: string; hubspot_stage: string | null }[]) => Object.fromEntries(list.map((s) => [s.key, s.hubspot_stage]));
+    expect(hs(first.stages)).toMatchObject({ won: 'closedwon', lost: 'closedlost' });
+    expect((await save(await current())).status).toBe(200);
+    const same = await json(w.as(w.owner, getStages, 'settings/stages'));
+    expect(hs(same.stages)).toMatchObject({ won: 'closedwon', lost: 'closedlost' });
+    const stages = await current();
+    const mapped = { ...NEW, name: 'Demo booked', trigger: 'deal_reaches_stage', hubspot_stage: 'presentationscheduled', quarter_target: 40 };
+    const res = await save(([...stages.slice(0, 5), mapped, ...stages.slice(5)] as S[]).map((s) => (s.key === 'reviewed' ? { ...s, quarter_target: 7 } : s)));
+    expect(res.status).toBe(200);
+    const back = (await res.json()).stages;
+    expect(back.find((s: { name: string }) => s.name === 'Demo booked')).toMatchObject({ trigger: 'deal_reaches_stage', hubspot_stage: 'presentationscheduled', quarter_target: 40 });
+    expect(back.find((s: { key: string }) => s.key === 'reviewed').quarter_target).toBe(7);
+    // And it reads back on a fresh load, then goes again.
+    expect((await current()).find((s) => s.name === 'Demo booked')).toMatchObject({ hubspot_stage: 'presentationscheduled', quarter_target: 40 });
+    expect((await save((await current()).filter((s) => s.name !== 'Demo booked').map((s) => (s.key === 'reviewed' ? { ...s, quarter_target: null } : s)))).status).toBe(200);
+  });
+
+  it('a stage deleted, restored, entered again and deleted again still moves its accounts', async () => {
+    const a = await w.account('Twice Co');
+    const without = async () => save((await current()).filter((s) => s.key !== 'opportunity'));
+    const defaultsList = async () => (await json(w.as(w.owner, getStages, 'settings/stages'))).defaults.map(({ key, name, description, kind, trigger, hubspot_stage, quarter_target }: S) => ({ key, name, description, kind, trigger, hubspot_stage, quarter_target }));
+    await moveTo(a, 'opportunity');
+    expect((await without()).status).toBe(200);
+    expect(await stageOf(a)).toBe('engaged');
+    const current0 = await current();
+    expect((await save([...current0.slice(0, 4), (await defaultsList()).find((s: S) => s.key === 'opportunity'), ...current0.slice(4)])).status).toBe(200);
+    expect(await keysOf()).toContain('opportunity');
+    await moveTo(a, 'opportunity');
+    expect((await without()).status).toBe(200);
+    expect(await stageOf(a)).toBe('engaged');
+    const deleted = (await historyOf(a)).filter((r) => r.causeEventId.startsWith('stage_deleted:opportunity'));
+    expect(deleted).toHaveLength(2);
+    expect(new Set(deleted.map((r) => r.causeEventId)).size).toBe(2);
+    const restore = await current();
+    await save([...restore.slice(0, 4), (await defaultsList()).find((s: S) => s.key === 'opportunity'), ...restore.slice(4)]);
+  });
+
   it('AC1: a rename shows everywhere on the next load and history keeps the old name', async () => {
     const a = await w.account('Rename Co');
     expect((await moveTo(a, 'engaged')).status).toBe(200);
@@ -80,7 +119,7 @@ describe('PUT /settings/stages (REV-E5-S1)', () => {
     expect(res.status).toBe(200);
     expect(await stageOf(a)).toBe('assigned');
     const rows = await historyOf(a);
-    expect(rows.find((r) => r.causeEventId === 'stage_deleted:engaged')).toMatchObject({ fromStage: 'engaged', toStage: 'assigned', fromName: 'Engaged', toName: 'Assigned' });
+    expect(rows.find((r) => r.causeEventId.startsWith('stage_deleted:engaged:'))).toMatchObject({ fromStage: 'engaged', toStage: 'assigned', fromName: 'Engaged', toName: 'Assigned' });
     expect((await json(w.as(leader, facetsRoute, 'accounts/facets'))).stages.map((s: { key: string }) => s.key)).not.toContain('engaged');
     expect((await json(w.as(leader, reviewRoute, `accounts/${a}/review`))).stages.map((s: { key: string }) => s.key)).not.toContain('engaged');
   });

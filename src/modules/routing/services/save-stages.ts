@@ -29,8 +29,11 @@ const brief = (s: { key: string; name: string; kind: string; trigger: string; hu
  */
 export async function saveStages(ctx: ModuleContext, input: PipelineStageInput[]): Promise<StagesView> {
   const by = requirePerson(ctx);
-  // Locked, so two saves cannot both audit the same "before".
+  // The tenant's setting row is the stage lock: taken here, exclusively, so two saves cannot both audit the same "before",
+  // and shared by every `moveStage`, so a move waits for a save and never lands on a stage the save just archived.
+  await ctx.tx.insert(routingSetting).values({ tenantId: ctx.tenantId }).onConflictDoNothing();
   await ctx.tx.select({ t: routingSetting.tenantId }).from(routingSetting).where(eq(routingSetting.tenantId, ctx.tenantId)).for('update');
+  const saveId = newId('evt');
   // A workspace whose defaults were never delivered starts from them.
   await ctx.tx.insert(pipelineStage).values(DEFAULT_STAGES.map((s) => ({ id: newId('pst'), tenantId: ctx.tenantId, ...s }))).onConflictDoNothing();
   const prev = await loadStages(ctx);
@@ -88,7 +91,7 @@ export async function saveStages(ctx: ModuleContext, input: PipelineStageInput[]
           .orderBy(desc(stageChange.at), desc(stageChange.id))
       ).map((h) => h.from);
       const to = plan.moveTo(key, history);
-      if (await moveStage(ctx, accountId, [{ kind: 'by_hand', to }], `stage_deleted:${key}`, { by, note: 'Stage deleted' })) touched.push(accountId);
+      if (await moveStage(ctx, accountId, [{ kind: 'by_hand', to }], `stage_deleted:${key}:${saveId}`, { by, note: 'Stage deleted' })) touched.push(accountId);
     }
   }
   for (const accountId of touched) await publishReviewSnapshot(ctx, accountId);
