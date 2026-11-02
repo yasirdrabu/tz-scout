@@ -6,8 +6,7 @@ import { members, tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { accountReview, assignment, declineReasonDef, statusChange } from '../db/schema';
-import type { Stage } from '../contracts/types';
-import { STAGE_LABELS } from '../domain/stages';
+import { loadStageNames } from './pipeline-stages';
 import { loadNames } from './lookups';
 import { OPEN_STATUSES, loadStatuses, requirePerson } from './review';
 
@@ -200,6 +199,7 @@ async function assignmentRows(ctx: ModuleContext, rows: (typeof assignment.$infe
   const visible = [...accounts.keys()];
   const names = new Map((await members(ctx)).map((m) => [m.userId, m.name]));
   const lookups = await loadNames(ctx);
+  const stageNames = await loadStageNames(ctx);
   const reviews = new Map(
     (accountIds.length ? await ctx.tx.select().from(accountReview).where(and(eq(accountReview.tenantId, ctx.tenantId), inArray(accountReview.accountId, accountIds))) : []).map((r) => [r.accountId, r]),
   );
@@ -227,7 +227,7 @@ async function assignmentRows(ctx: ModuleContext, rows: (typeof assignment.$infe
     offerName: lookups.offer(offerId)?.name ?? null,
     playbookName: null,
     stage,
-    stageLabel: stage ? (STAGE_LABELS[stage as Stage] ?? stage) : null,
+    stageLabel: stage ? (stageNames.get(stage) ?? stage) : null,
     nextStep: null,
     lastActivity: crm.get(a.accountId)?.lastActivity ?? null,
     handoff: review?.flags.handoff && review.currentAssignmentId === a.id ? { state: review.flags.handoff.state, at: review.flags.handoff.at } : null,

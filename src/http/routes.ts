@@ -126,6 +126,7 @@ import * as v1SourcesIdMappings from './routes/v1/sources/[id]/mappings/route';
 import * as v1SourcesId from './routes/v1/sources/[id]/route';
 import * as v1Sources from './routes/v1/sources/route';
 import * as v1SourcesStats from './routes/v1/sources/stats/route';
+import * as v1Stages from './routes/v1/stages/route';
 import * as v1Waiting from './routes/v1/waiting/route';
 
 /** Where the public API is mounted. */
@@ -263,5 +264,6 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/sources/:id`, module: v1SourcesId },
   { path: `${V1}/sources/stats`, module: v1SourcesStats },
   { path: `${V1}/sources`, module: v1Sources },
+  { path: `${V1}/stages`, module: v1Stages },
   { path: `${V1}/waiting`, module: v1Waiting },
 ];

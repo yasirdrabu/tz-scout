@@ -15,8 +15,6 @@ export type StageEvent =
   | 'won'
   | 'lost';
 
-const FUNNEL = ['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity', 'won'] as const;
-
 /** What an event means for the workspace's stages (REV-E5 "Triggers"). */
 export function eventSignals(event: StageEvent): StageSignal[] {
   switch (event) {
@@ -46,19 +44,3 @@ export function eventSignals(event: StageEvent): StageSignal[] {
 
 /** The stage after `event` with the default stages (REV-E4's rule, now `moveFor`), or null when nothing moves. */
 export const nextStage = (current: Stage, event: StageEvent): Stage | null => moveFor(current, eventSignals(event), DEFAULT_STAGES);
-
-/** The pipeline stages in order, then the exits, with the names people see (C6, until stages are configurable, Decision 6). */
-export const STAGE_LABELS: Record<Stage, string> = {
-  arrived: 'Arrived',
-  reviewed: 'Reviewed',
-  assigned: 'Assigned',
-  engaged: 'Engaged',
-  opportunity: 'Opportunity',
-  won: 'Won',
-  lost: 'Lost',
-  declined: 'Not pursued',
-  back_to_nurture: 'Back to nurture',
-};
-export const PIPELINE_STAGES = FUNNEL;
-/** Exits: what All accounts' "Other" tab holds, with the accounts sent back to their source. */
-export const EXIT_STAGES = ['lost', 'declined'] as const;

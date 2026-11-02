@@ -6,10 +6,11 @@ import { TIER_NAMES, type Tier } from '@/modules/scoring';
 import { members, tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
-import type { Stage } from '../contracts/types';
 import { accountReview, stageChange } from '../db/schema';
 import { toCsv } from '../domain/csv';
-import { EXIT_STAGES, PIPELINE_STAGES, STAGE_LABELS } from '../domain/stages';
+import type { PipelineStage } from '../domain/pipeline';
+import { stageRank } from '../domain/pipeline';
+import { loadStageNames, loadStages } from './pipeline-stages';
 import { leadOffer, loadNames } from './lookups';
 import { loadStatuses, type StatusDef } from './review';
 import type { FacetOption } from './queue';
@@ -48,6 +49,8 @@ export type AccountListRow = SearchRow & {
 
 /** The "Other" tab: exits, plus accounts sent back to their source (they keep an earlier stage). */
 const OTHER = 'other';
+const exitKeys = (stages: PipelineStage[]) => stages.filter((s) => s.kind === 'exit').map((s) => s.key);
+const flowKeys = (stages: PipelineStage[]) => stages.filter((s) => s.kind === 'flow').map((s) => s.key);
 const sentBackKeys = (statuses: StatusDef[]) => statuses.filter((s) => s.returnsToSource).map((s) => s.key);
 
 function ownerFilter(ctx: ModuleContext, ownerUserId: string | undefined): string | undefined {
@@ -57,7 +60,7 @@ function ownerFilter(ctx: ModuleContext, ownerUserId: string | undefined): strin
   return me;
 }
 
-function queryFor(ctx: ModuleContext, f: AccountListFilters, statuses: StatusDef[]): SearchQuery {
+function queryFor(ctx: ModuleContext, f: AccountListFilters, statuses: StatusDef[], stages: PipelineStage[]): SearchQuery {
   const q: SearchQuery = {
     text: f.text,
     domain: f.domain,
@@ -68,13 +71,15 @@ function queryFor(ctx: ModuleContext, f: AccountListFilters, statuses: StatusDef
     ownerUserId: ownerFilter(ctx, f.ownerUserId),
     unassigned: f.unassigned || undefined,
     reviewStatusKeys: f.reviewStatusKeys?.length ? f.reviewStatusKeys : undefined,
+    stageOrder: [...stageRank(stages).keys()],
   };
-  const stages = f.stages ?? [];
-  if (stages.includes(OTHER)) q.stageOrStatus = { stages: [...EXIT_STAGES, ...stages.filter((s) => s !== OTHER)], reviewStatusKeys: sentBackKeys(statuses) };
-  else if (stages.length) {
-    q.stages = stages;
+  const picked = f.stages ?? [];
+  if (picked.includes(OTHER)) q.stageOrStatus = { stages: [...exitKeys(stages), ...picked.filter((s) => s !== OTHER)], reviewStatusKeys: sentBackKeys(statuses) };
+  else if (picked.length) {
+    q.stages = picked;
     // A sent-back account sits in the Other tab, not in the stage it kept.
-    if (stages.every((s) => (PIPELINE_STAGES as readonly string[]).includes(s))) q.notReviewStatusKeys = sentBackKeys(statuses);
+    const flow = flowKeys(stages);
+    if (picked.every((s) => flow.includes(s))) q.notReviewStatusKeys = sentBackKeys(statuses);
   }
   return q;
 }
@@ -82,7 +87,9 @@ function queryFor(ctx: ModuleContext, f: AccountListFilters, statuses: StatusDef
 /** All accounts (screens.md §8): rows under the data limit, with names, CRM facts and the page's total. */
 export async function listAccounts(ctx: ModuleContext, f: AccountListFilters = {}): Promise<{ data: AccountListRow[]; nextCursor: string | null; total: number }> {
   const statuses = await loadStatuses(ctx);
-  const q = queryFor(ctx, f, statuses);
+  const stages = await loadStages(ctx);
+  const stageNames = await loadStageNames(ctx);
+  const q = queryFor(ctx, f, statuses, stages);
   const page = await search(ctx, { ...q, sort: f.sort, cursor: f.cursor, limit: f.limit });
   const ids = page.data.map((r) => r.accountId);
   const names = await loadNames(ctx);
@@ -105,7 +112,7 @@ export async function listAccounts(ctx: ModuleContext, f: AccountListFilters = {
       const facts = crm.get(r.accountId);
       return {
         ...r,
-        stageLabel: r.stage ? (STAGE_LABELS[r.stage as Stage] ?? r.stage) : null,
+        stageLabel: r.stage ? (stageNames.get(r.stage) ?? r.stage) : null,
         tierLabel: r.tier ? (TIER_NAMES[r.tier as Tier] ?? r.tier) : null,
         reviewStatusLabel: r.reviewStatusKey ? (labels.get(r.reviewStatusKey) ?? null) : null,
         ownerName: names.person(r.ownerUserId),
@@ -151,21 +158,22 @@ const facetOptions = (counts: Map<string | null, number>, label: (id: string) =>
 export async function accountFacets(ctx: ModuleContext, f: AccountListFilters = {}): Promise<AccountFacets> {
   const statuses = await loadStatuses(ctx);
   const names = await loadNames(ctx);
-  const anyStage = queryFor(ctx, { ...f, stages: undefined }, statuses);
+  const stages = await loadStages(ctx);
+  const anyStage = queryFor(ctx, { ...f, stages: undefined }, statuses, stages);
   const stageCounts = await countAccountsBy(ctx, { ...anyStage, notReviewStatusKeys: sentBackKeys(statuses) }, 'stage');
-  const other = await countAccounts(ctx, { ...anyStage, stageOrStatus: { stages: [...EXIT_STAGES], reviewStatusKeys: sentBackKeys(statuses) } });
-  const ownerCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, ownerUserId: undefined, unassigned: undefined }, statuses), 'owner');
-  const practiceCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, practiceId: undefined }, statuses), 'practice');
-  const sourceCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, sourceId: undefined }, statuses), 'source');
-  const tierCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, tier: undefined }, statuses), 'tier');
+  const other = await countAccounts(ctx, { ...anyStage, stageOrStatus: { stages: exitKeys(stages), reviewStatusKeys: sentBackKeys(statuses) } });
+  const ownerCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, ownerUserId: undefined, unassigned: undefined }, statuses, stages), 'owner');
+  const practiceCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, practiceId: undefined }, statuses, stages), 'practice');
+  const sourceCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, sourceId: undefined }, statuses, stages), 'source');
+  const tierCounts = await countAccountsBy(ctx, queryFor(ctx, { ...f, tier: undefined }, statuses, stages), 'tier');
   const sellers = (await members(ctx, { permission: 'assignments:respond' })).filter((m) => m.status === 'active').map((m) => m.userId);
   const sourceLabels = await sourceNames(ctx, [...sourceCounts.keys()].filter((k): k is string => k !== null));
   const owners = facetOptions(ownerCounts, (id) => names.person(id), sellers);
   return {
     total: await countAccounts(ctx, anyStage),
-    wonThisYear: await wonThisYear(ctx),
+    wonThisYear: await wonThisYear(ctx, stages),
     stages: [
-      ...PIPELINE_STAGES.map((s) => ({ key: s, label: STAGE_LABELS[s] ?? s, count: stageCounts.get(s) ?? 0 })),
+      ...stages.filter((s) => s.kind === 'flow').map((s) => ({ key: s.key, label: s.name, count: stageCounts.get(s.key) ?? 0 })),
       { key: OTHER, label: 'Other', count: other },
     ],
     owners: [...owners, { value: 'unassigned', label: 'Unassigned', count: ownerCounts.get(null) ?? 0 }],
@@ -175,12 +183,13 @@ export async function accountFacets(ctx: ModuleContext, f: AccountListFilters = 
   };
 }
 
-async function wonThisYear(ctx: ModuleContext): Promise<number> {
+async function wonThisYear(ctx: ModuleContext, stages: PipelineStage[]): Promise<number> {
+  const won = stages.find((s) => s.locked === 'won')?.key ?? 'won';
   const tz = await tenantTimezone(ctx);
   const rows = await ctx.tx
     .selectDistinct({ accountId: stageChange.accountId })
     .from(stageChange)
-    .where(and(eq(stageChange.tenantId, ctx.tenantId), eq(stageChange.toStage, 'won'), gte(stageChange.at, sql`date_trunc('year', now() at time zone ${tz}) at time zone ${tz}`)));
+    .where(and(eq(stageChange.tenantId, ctx.tenantId), eq(stageChange.toStage, won), gte(stageChange.at, sql`date_trunc('year', now() at time zone ${tz}) at time zone ${tz}`)));
   return (await filterVisibleAccountIds(ctx, rows.map((r) => r.accountId))).length;
 }
 

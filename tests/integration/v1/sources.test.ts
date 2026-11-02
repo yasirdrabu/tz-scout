@@ -271,8 +271,8 @@ describe('GET /api/v1/sources/stats', () => {
     const body = await json(w.as(operator, statsRoute, 'sources/stats'));
     const ofList = body.data.find((s: { source_id: string }) => s.source_id === list.id);
     expect(ofList).toMatchObject({ sent: 2, reviewed: 0, assigned: 0, won: 0, reviewed_pct: 0, assigned_pct: null, won_pct: null, is_new: true });
-    expect(ofList.by_stage[0]).toEqual({ key: 'arrived', label: 'Arrived', count: 2 });
-    expect(ofList.by_stage.map((b: { key: string }) => b.key)).toEqual(['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity', 'won', 'lost', 'declined']);
+    expect(ofList.by_stage[0]).toEqual({ key: 'arrived', label: 'Sent', count: 2 });
+    expect(ofList.by_stage.map((b: { key: string }) => b.key)).toEqual(['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity', 'won', 'declined', 'back_to_nurture', 'lost']);
     const ofPerson = body.data.find((s: { source_id: string }) => s.source_id === personSource);
     expect(ofPerson.sent).toBeGreaterThanOrEqual(2);
     // The account's chain names the list and its person, so the account rolls up (Ruling 1).

@@ -1,4 +1,5 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import type { FunnelStages } from '@/modules/intake';
 import type { ModuleContext } from '@/platform/context';
 import { pipelineStage } from '../db/schema';
 import { DEFAULT_STAGES, TRIGGERS, type PipelineStage } from '../domain/pipeline';
@@ -38,4 +39,27 @@ export async function loadStages(ctx: ModuleContext): Promise<PipelineStage[]> {
 export async function loadStageNames(ctx: ModuleContext): Promise<Map<string, string>> {
   const rows = await ctx.tx.select({ key: pipelineStage.key, name: pipelineStage.name }).from(pipelineStage).where(eq(pipelineStage.tenantId, ctx.tenantId));
   return new Map((rows.length > 0 ? rows : DEFAULT_STAGES).map((s) => [s.key, s.name]));
+}
+
+/** Intake's `FunnelStages`: the source funnel counts "Assigned" as at or past the stage an acceptance moves to. */
+export const routingFunnelStages: FunnelStages = {
+  stages: async (ctx) => {
+    const stages = await loadStages(ctx);
+    const accepts = stages.find((s) => s.trigger === 'ae_accepts');
+    return stages.map((s) => ({ key: s.key, assigned: !!accepts && s.kind === 'flow' && s.position >= accepts.position }));
+  },
+};
+
+export type StagesView = {
+  stages: (PipelineStage & { triggerLabel: string })[];
+  triggers: { key: string; label: string; limit: string }[];
+};
+
+/** The live stages, flow then exits, with each trigger's label, and the list of triggers to pick from (REV-E5 "Editing"). */
+export async function listStages(ctx: ModuleContext): Promise<StagesView> {
+  const label = new Map<string, string>(TRIGGERS.map((t) => [t.key, t.label]));
+  return {
+    stages: (await loadStages(ctx)).map((s) => ({ ...s, triggerLabel: label.get(s.trigger)! })),
+    triggers: TRIGGERS.map((t) => ({ ...t })),
+  };
 }

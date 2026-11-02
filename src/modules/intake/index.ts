@@ -143,7 +143,7 @@ export {
   type ImportCreated,
   type ImportView,
 } from './services/imports';
-export { registerReviewStatusValidator, type ReviewStatusValidator } from './contracts/ports';
+export { registerFunnelStages, registerReviewStatusValidator, type FunnelStages, type ReviewStatusValidator } from './contracts/ports';
 export {
   ITEM_STATUSES,
   fileIdOf,

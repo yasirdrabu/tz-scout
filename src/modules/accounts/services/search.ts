@@ -29,6 +29,8 @@ export type SearchQuery = {
   stages?: string[];
   /** Accounts whose stage is one of `stages` or whose review status is one of `reviewStatusKeys` (All accounts' "Other" tab). */
   stageOrStatus?: { stages: string[]; reviewStatusKeys: string[] };
+  /** The workspace's stage keys, first to last, for the `stage_priority` sort. */
+  stageOrder?: string[];
   /** None of these review statuses. */
   notReviewStatusKeys?: string[];
   ownerUserId?: string;
@@ -96,13 +98,17 @@ const SORTS: Record<SearchSort, { expr: SQL; cast: 'int' | 'timestamptz' | 'text
   created: { expr: sql`${account.createdAt}`, cast: 'timestamptz', dir: 'desc' },
   name: { expr: sql`${account.name}`, cast: 'text', dir: 'asc' },
   queue: { expr: sql`${accountSummary.priority}`, cast: 'int', dir: 'desc', idDir: 'desc' },
-  // One integer key: the pipeline position of the stage, then priority high to low (no priority last).
-  stage_priority: {
-    expr: sql`(case ${accountSummary.stage} when 'arrived' then 0 when 'reviewed' then 1 when 'assigned' then 2 when 'engaged' then 3 when 'opportunity' then 4 when 'won' then 5 when 'lost' then 6 when 'declined' then 7 else 8 end) * 1000 + (500 - coalesce(${accountSummary.priority}, -1))`,
-    cast: 'int',
-    dir: 'asc',
-  },
+  // Placeholder: the order is the caller's (`stageOrder`), see `sortSpec`.
+  stage_priority: { expr: sql`0`, cast: 'int', dir: 'asc' },
 };
+
+/** One integer key: the position of the stage in `stageOrder` (stages not in it last), then priority high to low (no priority last). */
+function sortSpec(sort: SearchSort, stageOrder: string[] = []): (typeof SORTS)[SearchSort] {
+  if (sort !== 'stage_priority') return SORTS[sort];
+  const rank = stageOrder.length ? sql`(case ${accountSummary.stage} ${sql.join(stageOrder.map((k, i) => sql`when ${k} then ${sql.raw(String(i))}`), sql` `)} else ${stageOrder.length} end)` : sql`0`;
+  return { ...SORTS.stage_priority, expr: sql`${rank} * 1000 + (500 - coalesce(${accountSummary.priority}, -1))` };
+}
+
 
 /** The sort key travels as text so timestamps keep their microseconds. */
 type Cursor = { sort: SearchSort; key: string | null; id: string };
@@ -130,8 +136,8 @@ function decodeCursor(raw: string, sort: SearchSort): Cursor {
 }
 
 /** Rows strictly after the cursor in the sort order (nulls come last). */
-function afterCursor(sort: SearchSort, c: Cursor): SQL {
-  const { expr, cast, dir, idDir } = SORTS[sort];
+function afterCursor(spec: ReturnType<typeof sortSpec>, c: Cursor): SQL {
+  const { expr, cast, dir, idDir } = spec;
   const idAfter = idDir === 'desc' ? sql`${account.id} < ${c.id}` : sql`${account.id} > ${c.id}`;
   if (c.key === null) return and(sql`${expr} is null`, idAfter) as SQL;
   const key = sql`${c.key}::${sql.raw(cast)}`;
@@ -299,7 +305,7 @@ export async function oldestCreatedAt(ctx: ModuleContext, q: SearchQuery = {}): 
  */
 export async function search(ctx: ModuleContext, q: SearchQuery = {}): Promise<{ data: SearchRow[]; nextCursor: string | null }> {
   const sort = q.sort ?? 'priority';
-  const spec = SORTS[sort];
+  const spec = sortSpec(sort, q.stageOrder);
   const limit = Math.min(Math.max(Math.trunc(Number.isFinite(q.limit) ? q.limit! : DEFAULT_LIMIT), 1), MAX_LIMIT);
   const cursor = q.cursor ? decodeCursor(q.cursor, sort) : undefined;
   const keyOrder = spec.dir === 'desc' ? sql`${spec.expr} desc nulls last` : sql`${spec.expr} asc nulls last`;
@@ -334,7 +340,7 @@ export async function search(ctx: ModuleContext, q: SearchQuery = {}): Promise<{
     .where(
       and(
         ...(await baseWhere(ctx, q)),
-        cursor ? afterCursor(sort, cursor) : undefined,
+        cursor ? afterCursor(spec, cursor) : undefined,
       ),
     )
     .orderBy(keyOrder, spec.idDir === 'desc' ? desc(account.id) : asc(account.id))
