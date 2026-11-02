@@ -149,7 +149,10 @@ export const rescoreQuery = (tenant: string) =>
     queryKey: ['review-queue', tenant, 'rescore'],
     queryFn: () => apiFetch<{ data: RescoreRun | null }>('/scoring/rescores/latest', { tenant }),
     select: (r) => r.data,
-    refetchInterval: (q) => (q.state.data?.data && !q.state.data.data.finished_at ? RESCORE_REFRESH_MS : false),
+    refetchInterval: (q) => {
+      const run = q.state.data?.data;
+      return run && !run.finished_at && !run.stalled ? RESCORE_REFRESH_MS : false;
+    },
   });
 
 export type Column = { key: string; label: string; visible: boolean };

@@ -139,6 +139,25 @@ describe('Review queue', () => {
     expect(screen.queryByText(/^Rescoring/)).toBeNull();
   });
 
+  it.each([
+    ['keeps asking about a run with no accounts yet', { total: 0, done: 0 }, true],
+    ['stops asking about a stalled run', { stalled: true }, false],
+  ])('%s', async (_, over, polls) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const seen = serveQueue({ rescore: RESCORE, run: { ...run, ...over } });
+      renderApp('/t/taazaa/queue');
+      await screen.findByRole('region', { name: 'Scoring change' });
+      const before = seen['/api/v1/scoring/rescores/latest']!.length;
+      await act(() => vi.advanceTimersByTimeAsync(9_000));
+      const asked = seen['/api/v1/scoring/rescores/latest']!.length - before;
+      if (polls) expect(asked).toBeGreaterThanOrEqual(2);
+      else expect(asked).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('says "1 account" for a run of one', async () => {
     serveQueue({ run: { ...run, total: 1, done: 0 } });
     renderApp('/t/taazaa/queue');
