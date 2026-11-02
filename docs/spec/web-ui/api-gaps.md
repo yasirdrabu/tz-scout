@@ -105,7 +105,7 @@ These sit in the HTTP layer (`src/http/routes/v1/_lib/v1-route.ts`, `src/modules
 | 24 | (As recommended.) Admin cross-tenant AI runs list with Succeeded, Failed, Stopped by limit; no daily cap, no Retry; tenant `GET /api/v1/ai-runs` kept for owners. |
 | 25 | (As recommended.) The mockup wins for Playbooks: `offer_playbook(offer_id, tier, template_id)`, day-based steps, a stop rule and a draft or auto-send mode go into `docs/spec/playbooks/` before its plan. |
 | 26 | Cost budgets per category and month with the 90% alert and the 110% pause of paid pulls through integrations `checkCap`; return on spend from actual won amounts. R3. |
-| 6 | Pipeline stages are fully configurable (add, rename, reorder, delete, HubSpot stage, targets). This is a routing, CRM and analytics redesign and gets its own backend plan; until it lands the app reads stages from the API and the editor is hidden. |
+| 6 | Pipeline stages are fully configurable (add, rename, reorder, delete, HubSpot stage, targets). This is a routing, CRM and analytics redesign and gets its own backend plan; until it lands the app reads stages from the API and the editor is hidden. **Status:** done 2026-11-01 (`docs/plans/2026-11-01-pipeline-stages.md`, REV-E5). |
 
 ## Decision analysis
 
@@ -550,11 +550,11 @@ Files: `src/http/routes/v1/review-queue/**`, `src/http/routes/v1/accounts/[id]/{
 | 21d | Restore defaults, Discard, Save | READY | `POST /api/v1/settings/review:reset`, `PUT /api/v1/settings/review` `{statuses?, reasons?, auto_accept_working_days?}` | One transaction; every part is checked first, so a bad part saves nothing; errors at `statuses.{i}.*`, `reasons.{i}.*`, `auto_accept_working_days`; audited per part (Ruling 19). Discard is client side. |
 | 21d | "Flag after" hours and "{n} late" | READY | `flag_after_hours` on `review_status_def`, `late_count` in the read | 1 to 720 hours or never; final statuses are never flagged. Late = `status_changed_at` older than `flag_after_hours`. |
 | 21d | Auto-accept days | READY | `PUT /api/v1/settings/review` `{auto_accept_working_days}` | 1 to 10 working days or off; on the screen. |
-| 21e | List stages: name, meaning, moves-here-when, order, exits | SMALL GAP | `GET /api/v1/stages` (`analytics:read`) | Constants (`STAGES`); rule text from `docs/spec/review-and-routing/stage-tracking-and-status.md`; `kind: funnel\|exit`. |
-| 21e | Rename stages | NEW ENDPOINT | `PUT /api/v1/settings/stages` (`settings:manage`) | Labels and descriptions over fixed keys, `routing.stage_def`. Decision 6. |
-| 21e | Add, reorder, delete stages | LATER (unscheduled) | none | Keys are wired into `nextStage()`, events and CRM. Decision 6. |
-| 21e | HubSpot stage per stage | LATER (unscheduled) | none | CRM derives events from `dealstage`, `hs_is_closed*`, `lifecyclestage` (`crm/adapters/hubspot/live.ts`); CRM-E7-S3 (R2) maps fields, not stages. |
-| 21e | Quarter target | LATER (R3) | none | `analytics.scorecard_target`. |
+| 21e | List stages: name, meaning, moves-here-when, order, exits | READY | `GET /api/v1/stages` (`accounts:read` or `status:read`), `GET /api/v1/settings/stages` (`settings:manage`, with `defaults`) | Per workspace, done 2026-11-01 (`docs/plans/2026-11-01-pipeline-stages.md`, REV-E5). |
+| 21e | Rename stages | READY | `PUT /api/v1/settings/stages` (`settings:manage`, people only) | History keeps the names it had (`from_name`, `to_name`). |
+| 21e | Add, reorder, delete stages | READY | `PUT /api/v1/settings/stages` | Deleting moves accounts per REV-E5 (cause `stage_deleted`); triggers per stage. |
+| 21e | HubSpot stage per stage | READY | `PUT /api/v1/settings/stages` `hubspot_stage` | A deal reaching a mapped HubSpot stage moves the account; stage-only deal changes publish `crm.deal.changed`. |
+| 21e | Quarter target | READY (stored); shown in R3 | `PUT /api/v1/settings/stages` `quarter_target` | Overview pace markers use it in R3. |
 
 ### Proposed changes
 
