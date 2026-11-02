@@ -1,7 +1,7 @@
 import { and, eq, lte } from 'drizzle-orm';
 import { CronExpressionParser } from 'cron-parser';
 import type { controlAdminDb } from './db/client';
-import { inDatabaseHolding, platformDatabases, withControlAdmin, withWorkspaceAdmin, type PlatformDatabase } from './db/doors';
+import { inDatabaseHolding, platformDatabases, withControlAdmin, withWorkspaceAdmin, workspaceOpen, type PlatformDatabase } from './db/doors';
 import { schedule } from './db/schema';
 import { PLATFORM_TENANT, platformAudit, type AuditEntry } from './audit';
 import type { AdminCtx } from './dead-jobs';
@@ -222,6 +222,8 @@ async function tickDatabase(db: PlatformDatabase, now: Date): Promise<number> {
       .for('update', { skipLocked: true });
     let published = 0;
     for (const row of due) {
+      // A workspace not open (being made, moved, suspended) runs nothing: its schedule stays due until it opens.
+      if (!(await workspaceOpen(row.tenantId))) continue;
       try {
         const next = nextRun(row.cron, row.timezone, now);
         // Savepoint: a SQL failure rolls back only this row.

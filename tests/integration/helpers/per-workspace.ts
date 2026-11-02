@@ -1,4 +1,7 @@
 import { afterAll } from 'vitest';
+import { inArray } from 'drizzle-orm';
+import { workspaceInfra } from '@/modules/tenancy/db/schema';
+import { adminDb } from '@/platform/db/client';
 import { closeWorkspacePools } from '@/platform/db/doors';
 import { superuserSql } from './db';
 
@@ -28,6 +31,9 @@ afterAll(async () => {
   } finally {
     await su.end({ timeout: 1 });
   }
+  // Their registry rows stay in the run's control plane: mark them deleted, as a real delete would,
+  // so later files' cross-workspace reads do not look for them.
+  await adminDb.update(workspaceInfra).set({ status: 'deleted' }).where(inArray(workspaceInfra.database, [...made]));
   for (const [k, v] of [
     ['SCOUT_WORKSPACE_DATABASES', before.mode],
     ['SCOUT_WORKSPACE_TEMPLATE_DATABASE', before.template],

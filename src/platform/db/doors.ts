@@ -109,8 +109,16 @@ export function openWorkspacePools(): string[] {
   return workspacePools.openDatabases();
 }
 
-const unavailable = () =>
-  new ScoutError({ slug: 'workspace-unavailable', status: 503, title: 'This workspace is not available right now.' });
+/** A workspace that will open again shortly (being made or moved) says when to try again. */
+const SHORTLY = new Set(['provisioning', 'moving']);
+
+const unavailable = (status: string) =>
+  new ScoutError({
+    slug: 'workspace-unavailable',
+    status: 503,
+    title: 'This workspace is not available right now.',
+    ...(SHORTLY.has(status) ? { headers: { 'retry-after': '30' } } : {}),
+  });
 
 /**
  * Where a tenant's workspace is, from its registry row: 503 `workspace-unavailable` when the row says
@@ -125,10 +133,17 @@ export function workspaceRoute(
   mode: Config['workspaceDatabases'],
   opening = false,
 ): { shared: true } | { database: string } {
-  if (info && info.status !== 'active' && !(opening && info.status === 'provisioning')) throw unavailable();
+  if (info && info.status !== 'active' && !(opening && info.status === 'provisioning')) throw unavailable(info.status);
   if (mode === 'shared') return { shared: true };
   if (!info) throw new Error(`Tenant ${tenantId} has no workspace registry row (tenancy.workspace_infra).`);
   return { database: info.database };
+}
+
+/** True when `tenantId`'s workspace takes work now (`t_platform` always does). */
+export async function workspaceOpen(tenantId: string): Promise<boolean> {
+  if (tenantId === PLATFORM_TENANT) return true;
+  const info = await infoFor(tenantId);
+  return !info || info.status === 'active';
 }
 
 /** `provisioning`: open a workspace that is still `provisioning`, to seed it. Only provisioning does. */

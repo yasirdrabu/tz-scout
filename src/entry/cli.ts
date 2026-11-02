@@ -40,6 +40,9 @@ One-shot commands
   keys:create         --tenant <slug> --name <name> --scopes a,b [--test]
   tenants:create      --slug <s> --name <n> --currency <USD> --timezone <zone> --owner-email <email>
                       Operator command: run it on the server. It acts as a system platform admin.
+  tenant split <slug> | --all  [--settle-seconds 65]
+                      Move a workspace (or every one still there) out of the shared database into its own
+                      (SCOUT_WORKSPACE_DATABASES=per_workspace). Its requests get 503 while it moves.
 `;
 
 /** Aborts when the process is told to stop: SIGTERM, SIGINT, or an IPC "shutdown" message (Windows has no SIGTERM). */
@@ -175,6 +178,27 @@ async function backfillTenant(slug: string, release: 'r1b' | 'r1c' | 'review-flo
   return 0;
 }
 
+/** Moves one workspace, or every active one still in the shared database, into its own database (D35). */
+async function splitTenants(slug: string | undefined, all: boolean, settleMs: number): Promise<number> {
+  if (!slug && !all) throw new Error(`Name a workspace or pass --all.\n\n${USAGE}`);
+  const { listTenants, splitWorkspace } = await import('@/modules/tenancy');
+  const tenants = (await listTenants()).filter((t) => (slug ? t.slug === slug : true));
+  if (slug && tenants.length === 0) throw new Error(`No workspace with the slug "${slug}".`);
+  let failed = 0;
+  for (const t of tenants) {
+    try {
+      const r = await splitWorkspace(t.id, { settleMs });
+      if (r.outcome === 'skipped') console.log(`Workspace ${t.slug}: left as it is, ${r.reason}.`);
+      else if (r.outcome === 'cleaned') console.log(`Workspace ${t.slug}: its last rows deleted from the shared database.`);
+      else console.log(`Workspace ${t.slug}: moved to ${r.database}, ${r.copied.reduce((n, c) => n + c.rows, 0)} rows in ${r.copied.length} tables.`);
+    } catch (e) {
+      failed++;
+      console.error(`Workspace ${t.slug}: not moved, ${(e as Error).message}`);
+    }
+  }
+  return failed > 0 ? 1 : 0;
+}
+
 /** Queues a rescore of every account in one workspace, or in every active one. The worker does the scoring. */
 async function rescoreTenants(slug: string | undefined): Promise<number> {
   const { requestRescore } = await import('@/modules/scoring');
@@ -273,6 +297,12 @@ ${USAGE}`);
       });
       console.log(secret);
       return 0;
+    }
+    case 'tenant': {
+      const [sub, ...args] = rest;
+      if (sub !== 'split') throw new Error(`Unknown command: tenant ${sub ?? ''}\n\n${USAGE}`);
+      const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { all: { type: 'boolean' }, 'settle-seconds': { type: 'string' } } });
+      return splitTenants(values.all ? undefined : positionals[0], values.all === true, Number(values['settle-seconds'] ?? 65) * 1000);
     }
     case 'tenants:create': {
       const { values } = parseArgs({

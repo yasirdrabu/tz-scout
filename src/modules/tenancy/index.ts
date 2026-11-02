@@ -77,3 +77,4 @@ export { registerWorkspaceSeeder, type WorkspaceSeeder } from './contracts/works
 export { provisionWorkspace, retryProvisioning, type ProvisionStep } from './services/provisioning';
 export { workspaceDatabaseName } from './services/workspace-infra';
 export { migrateWorkspaces, type WorkspaceMigration } from './services/workspace-migrate';
+export { SPLIT_SETTLE_MS, splitWorkspace, type SplitResult } from './services/split';
