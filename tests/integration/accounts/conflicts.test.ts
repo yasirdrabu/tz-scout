@@ -1,5 +1,13 @@
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/modules/accounts/services/lock', async (orig) => {
+  const real = await orig<typeof import('@/modules/accounts/services/lock')>();
+  return { ...real, lockAccount: vi.fn(real.lockAccount) };
+});
+
+import { resolveConflict } from '@/modules/accounts/services/conflicts';
+import { lockAccount } from '@/modules/accounts/services/lock';
 import { editAccount, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { accountSummary, conflict, fact } from '@/modules/accounts/db/schema';
 import { adminDb } from '@/platform/db/client';
@@ -243,5 +251,25 @@ describe('concurrency (Review Focus 2)', () => {
     expect(b.conflictIds).toEqual([rows[0]!.id]);
     expect(c.conflictIds).toEqual([rows[0]!.id]);
     expect(await countOf(a.accountId)).toBe(1);
+  });
+});
+
+describe('a merge that moves the conflict while resolve waits (Review Focus 3)', () => {
+  it('a survivor the caller cannot see is a 404, and nothing changes', async () => {
+    const merged = await seeded({ ...from('src_a'), research: { contract_value_cents: 2_090_000_000 } });
+    const b = await send(merged.accountId, { ...from('src_b'), research: { contract_value_cents: 1_840_000_000 } });
+    const conflictId = b.conflictIds[0]!;
+    const survivor = await seeded({ ...from('src_s'), account: { name: 'Hidden Survivor', domain: domain() } });
+    // The seller owns the merged account only.
+    await t.run((ctx) => ctx.tx.update(accountSummary).set({ ownerUserId: 'usr_seller' }).where(eq(accountSummary.accountId, merged.accountId)));
+    const seller = { userId: 'usr_seller', dataLimit: { kind: 'own_accounts' as const } };
+
+    // The merge commits while resolve waits for the merged account's lock.
+    vi.mocked(lockAccount).mockImplementationOnce(async (ctx) => {
+      await ctx.tx.update(conflict).set({ accountId: survivor.accountId }).where(eq(conflict.id, conflictId));
+    });
+    await expect(t.run((ctx) => resolveConflict({ ...ctx, access: seller }, conflictId, b.factIds[0]!))).rejects.toMatchObject({ status: 404 });
+    const [row] = await t.run((ctx) => ctx.tx.select().from(conflict).where(eq(conflict.id, conflictId)));
+    expect(row).toMatchObject({ accountId: merged.accountId, status: 'open' });
   });
 });

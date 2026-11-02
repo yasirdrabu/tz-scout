@@ -133,8 +133,14 @@ export async function moveConflicts(
         : [];
     if (mine) {
       const factIds = [...mine.factIds, ...c.factIds.filter((id) => !mine.factIds.includes(id))];
-      await ctx.tx.update(conflict).set({ factIds }).where(and(eq(conflict.tenantId, ctx.tenantId), eq(conflict.id, mine.id)));
       await ctx.tx.delete(conflict).where(and(eq(conflict.tenantId, ctx.tenantId), eq(conflict.id, c.id)));
+      if (factIds.length === mine.factIds.length) continue;
+      // It gained facts: the old explanation no longer covers them.
+      await ctx.tx
+        .update(conflict)
+        .set({ factIds, explanation: null, explanationFactIds: null })
+        .where(and(eq(conflict.tenantId, ctx.tenantId), eq(conflict.id, mine.id)));
+      await conflictChanged(ctx, { id: mine.id, accountId: survivorId, personId, key: mine.key, factIds });
     } else {
       await ctx.tx.update(conflict).set({ accountId: survivorId, personId }).where(and(eq(conflict.tenantId, ctx.tenantId), eq(conflict.id, c.id)));
     }
@@ -283,11 +289,30 @@ async function archive(ctx: ModuleContext, facts: FactRow[]): Promise<void> {
   await ctx.tx.update(fact).set({ status: 'archived' }).where(and(eq(fact.tenantId, ctx.tenantId), inArray(fact.id, facts.map((f) => f.id))));
 }
 
+/** Whether the key (of the account, or of the same person) has a conflict opened after `c`. Only the newest can be changed. */
+async function newerConflictExists(ctx: ModuleContext, c: ConflictRow): Promise<boolean> {
+  const [row] = await ctx.tx
+    .select({ id: conflict.id })
+    .from(conflict)
+    .where(
+      and(
+        eq(conflict.tenantId, ctx.tenantId),
+        eq(conflict.accountId, c.accountId),
+        sql`coalesce(${conflict.personId}, '') = ${c.personId ?? ''}`,
+        eq(conflict.key, c.key),
+        // Compared in the database: a JS Date drops created_at's microseconds.
+        sql`${conflict.createdAt} > (select created_at from accounts.conflict where tenant_id = ${ctx.tenantId} and id = ${c.id})`,
+      ),
+    )
+    .limit(1);
+  return !!row;
+}
+
 /**
  * A person keeps one value of the conflict (Ruling 6): the kept fact is pinned, the conflict's other live facts are
  * archived and the key is re-picked. On a resolved conflict this switches the kept value: the chosen archived fact
  * is pinned and the previous one archived. A missing or hidden conflict is a 404, a fact outside it a 400, and a
- * fact its source has since replaced a 409.
+ * fact its source has since replaced a 409. Only the key's newest conflict can be changed; an older one is a 409.
  */
 export async function resolveConflict(ctx: ModuleContext, id: string, keptFactId: string, note?: string): Promise<ConflictView> {
   const userId = ctx.access?.userId;
@@ -302,12 +327,15 @@ export async function resolveConflict(ctx: ModuleContext, id: string, keptFactId
     await lockAccount(ctx, c.accountId);
     c = await read();
   }
-  if (!c) throw notFound();
+  if (!c || (c.accountId !== seen.accountId && (await filterVisibleAccountIds(ctx, [c.accountId])).length === 0)) throw notFound();
   if (!c.factIds.includes(keptFactId)) {
     const message = 'That value is not part of this conflict.';
     throw new ScoutError({ slug: 'validation', status: 400, title: message, errors: [{ path: 'kept_fact_id', message }] });
   }
   if (c.status === 'resolved' && c.keptFactId === keptFactId) return (await views(ctx, [c]))[0]!;
+  if (c.status === 'resolved' && (await newerConflictExists(ctx, c))) {
+    throw new ScoutError({ slug: 'conflict', status: 409, title: 'A newer disagreement about this value has been settled since. Change that one instead.' });
+  }
 
   const facts = await factsOf(ctx, c.factIds);
   const kept = facts.find((f) => f.id === keptFactId);

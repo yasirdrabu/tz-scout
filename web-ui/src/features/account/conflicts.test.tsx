@@ -117,6 +117,18 @@ describe('Conflicting facts on the account page', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['account', 'taazaa', 'acc_mdc'] });
   });
 
+  it('only the newest settled conflict for a fact offers Change', async () => {
+    const older: Conflict = { ...CONFLICT, id: 'cfl_0', status: 'resolved', resolution: 'kept', kept_fact_id: 'fct_cv2', resolved_by_name: 'Dana Whitfield', resolved_at: '2026-10-20T12:00:00Z' };
+    const newer: Conflict = { ...CONFLICT, status: 'resolved', resolution: 'kept', kept_fact_id: 'fct_cv1', resolved_by_name: 'Zach Wiant', resolved_at: '2026-11-01T12:00:00Z' };
+    serveAccount({ facts: FACTS_WITH_CONTRACT, conflicts: [newer, older] });
+    renderApp(PAGE);
+    const facts = await factsCard();
+    expect(await within(facts).findByText(/^Kept by Zach Wiant/)).toHaveTextContent('Kept by Zach Wiant · Change');
+    expect(within(facts).getAllByRole('button', { name: 'Change' })).toHaveLength(1);
+    expect(facts).not.toHaveTextContent('Kept by Dana Whitfield');
+    expect(document.getElementById('conflict-cfl_0')).toBeNull();
+  });
+
   it('a later edit hides an older Kept by for the same fact', async () => {
     const older: Conflict = { ...CONFLICT, id: 'cfl_0', status: 'resolved', resolution: 'kept', kept_fact_id: 'fct_cv2', resolved_by_name: 'Dana Whitfield', resolved_at: '2026-10-20T12:00:00Z' };
     const edited: Conflict = { ...CONFLICT, status: 'resolved', resolution: 'edited', kept_fact_id: 'fct_cv1', resolved_by_name: 'Zach Wiant', resolved_at: '2026-11-01T12:00:00Z' };

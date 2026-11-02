@@ -231,6 +231,30 @@ describe('POST /conflicts/{id}:resolve', () => {
     expect(events[1]!.winningSourceIds).toEqual([w.source.personId, w.source.agentId].sort());
   });
 
+  it("only the key's newest conflict can be changed: an older one is a 409 and the newer pin stays", async () => {
+    const cy = await personAndAgent(w.tenant, 'Cy');
+    const { accountId, conflictId: first, a, b } = await pair();
+    expect((await resolve(first, { kept_fact_id: a })).status).toBe(200);
+    const domain = (await w.run((ctx) => ctx.tx.select({ domain: account.domain }).from(account).where(eq(account.id, accountId))))[0]!.domain!;
+    expect(await w.sent({ name: 'Pair Co', domain, employees: 3000 }, cy.agentId)).toBe(accountId);
+    const second = (await list(accountId)).find((c) => c.status === 'open')!;
+    const c = second.facts.find((f) => f.value === 3000)!.id;
+    expect((await resolve(second.id, { kept_fact_id: c })).status).toBe(200);
+
+    const res = await resolve(first, { kept_fact_id: b });
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain('A newer disagreement about this value has been settled since. Change that one instead.');
+    const pinned = await w.run((ctx) =>
+      ctx.tx
+        .select({ id: fact.id })
+        .from(fact)
+        .where(and(eq(fact.accountId, accountId), eq(fact.key, 'employees'), sql`${fact.pinnedAt} is not null`, sql`${fact.status} <> 'archived'`)),
+    );
+    expect(pinned.map((f) => f.id)).toEqual([c]);
+    expect(await employeesOf(accountId)).toBe(3000);
+    expect((await factRow(b)).status).toBe('archived');
+  });
+
   it('a kept_fact_id not in the conflict is a 400; a hidden or missing conflict is a 404; nothing changes', async () => {
     const { accountId, conflictId, a } = await pair();
     const other = await pair();
