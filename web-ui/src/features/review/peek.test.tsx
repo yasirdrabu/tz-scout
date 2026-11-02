@@ -189,6 +189,32 @@ describe('Queue peek drawer', () => {
     expect(await screen.findByRole('dialog', { name: 'Send back to RFP Watch (Marcus Lee)' })).toBeInTheDocument();
   });
 
+  it('a status changed while the changes are still loading shows in the changes once saved', async () => {
+    serveQueue();
+    let saved = false;
+    let release = () => {};
+    const firstLoad = new Promise<void>((resolve) => (release = resolve));
+    const changed = { id: 'c1', at: '2026-10-26T12:00:00Z', kind: 'status', field: 'review_status', from: 'Ready for review', to: 'In review', by_name: 'Dana Whitfield', note: null, reason: null, priority: null };
+    server.use(
+      http.get('/api/v1/accounts/acc_mdc/changes', async () => {
+        // The first load read the account before the change: it answers after the change, without it.
+        const before = !saved;
+        if (before) await firstLoad;
+        return HttpResponse.json({ data: before ? [] : [changed], next_cursor: null });
+      }),
+      http.patch('/api/v1/accounts/:id/review-status', () => {
+        saved = true;
+        setTimeout(release, 0);
+        return HttpResponse.json({ review_status_key: 'needs_review' });
+      }),
+    );
+    renderApp('/t/taazaa/queue?peek=acc_mdc');
+    const peek = await screen.findByRole('dialog', { name: 'Miami-Dade County DTPW' });
+    await userEvent.selectOptions(within(peek).getByRole('combobox', { name: 'Review status' }), 'In review');
+    expect(await screen.findByText('Review status changed to In review.')).toBeInTheDocument();
+    expect(await within(peek).findByText(/^Review status changed from Ready for review to In review/)).toBeInTheDocument();
+  });
+
   it('Send back from the peek names the source owner, sends the reason and opens the next account', async () => {
     serveQueue();
     let body: unknown = null;
