@@ -20,7 +20,7 @@ export async function explainConflict(ctx: ModuleContext, conflictId: string): P
   if (rows.length < 2) return;
   const closest = (f: (typeof rows)[number]) => f.agentSourceId ?? f.vendorSourceId ?? f.personSourceId;
   const ids = [...new Set(rows.map(closest).filter((s): s is string => !!s))];
-  const names = (await sourceInfoProvider().sourceNames?.(ctx, ids)) ?? new Map<string, string>();
+  const names = await sourceInfoProvider().sourceNames(ctx, ids);
   const input = {
     key: c.key,
     label: factLabel(c.key),

@@ -56,7 +56,8 @@ export async function detectConflicts(ctx: ModuleContext, accountId: string, gro
       insert into accounts.conflict (id, tenant_id, account_id, person_id, key, fact_ids)
       values (${newId('cfl')}, ${ctx.tenantId}, ${accountId}, ${g.personId}, ${g.key}, ${textArray(factIds)})
       on conflict (tenant_id, account_id, coalesce(person_id, ''), key) where status = 'open'
-      do update set fact_ids = conflict.fact_ids || array(select f from unnest(excluded.fact_ids) as f where f <> all(conflict.fact_ids))
+      do update set fact_ids = conflict.fact_ids || array(select f from unnest(excluded.fact_ids) as f where f <> all(conflict.fact_ids)),
+        explanation = null, explanation_fact_ids = null
       where not (excluded.fact_ids <@ conflict.fact_ids)
       returning id, fact_ids
     `)) as unknown as { id: string; fact_ids: string[] }[];

@@ -10,7 +10,7 @@ export interface SourceInfoProvider {
   getTrust(ctx: ModuleContext, chain: SourceChain): Promise<number>;
   sourcesForAccount(ctx: ModuleContext, accountId: string): Promise<string[]>;
   /** Source names by id, for the conflict explanation. */
-  sourceNames?(ctx: ModuleContext, ids: string[]): Promise<Map<string, string>>;
+  sourceNames(ctx: ModuleContext, ids: string[]): Promise<Map<string, string>>;
 }
 
 /** Implemented by CRM. */
@@ -35,6 +35,7 @@ const DEFAULT_TRUST = 0.6;
 const defaultSourceInfo: SourceInfoProvider = {
   getTrust: async () => DEFAULT_TRUST,
   sourcesForAccount: async () => [],
+  sourceNames: async () => new Map(),
 };
 const defaultMergeGuard: MergeGuard = { check: async () => ({ allowed: true }) };
 const defaultSourceAccess: SourceAccessProvider = {

@@ -12,6 +12,7 @@ import { conflict } from '@/modules/accounts/db/schema';
 import { explainConflict } from '@/modules/accounts/services/explain';
 import { adminDb } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
+import { ScoutError } from '@/platform/errors';
 import { runOutbox } from '../helpers/run-outbox';
 import { freshTenant } from '../offers/helpers';
 
@@ -106,6 +107,34 @@ describe('conflict explanation (Ruling 9)', () => {
     await adminDb.update(conflict).set({ status: 'resolved' }).where(eq(conflict.id, conflictId));
     await t.run((ctx) => explainConflict(ctx, conflictId));
     expect(runTask).not.toHaveBeenCalled();
+    expect((await row(conflictId)).explanation).toBeNull();
+  });
+
+  it('a new fact clears the sentence the conflict had', async () => {
+    const { accountId, conflictId } = await opened();
+    live({ explanation: 'Old sentence.', fact_ids: [] });
+    await t.run((ctx) => explainConflict(ctx, conflictId));
+    expect((await row(conflictId)).explanation).toBe('Old sentence.');
+    await send(accountId, { ...from('src_c'), research: { contract_value_cents: 1_500_000_000 } });
+    const c = await row(conflictId);
+    expect(c.explanation).toBeNull();
+    expect(c.explanationFactIds).toBeNull();
+  });
+
+  it('no Claude (ai_unavailable) is swallowed and nothing is stored', async () => {
+    const { conflictId } = await opened();
+    vi.mocked(runTask).mockRejectedValueOnce(new ScoutError({ slug: 'ai_unavailable', status: 409, title: 'Add a Claude key to use this.' }));
+    await t.run((ctx) => explainConflict(ctx, conflictId));
+    expect((await row(conflictId)).explanation).toBeNull();
+  });
+
+  it('does not store a sentence when the conflict was resolved while Claude answered', async () => {
+    const { conflictId } = await opened();
+    vi.mocked(runTask).mockImplementationOnce((async () => {
+      await adminDb.update(conflict).set({ status: 'resolved' }).where(eq(conflict.id, conflictId));
+      return { output: { explanation: 'late', fact_ids: [] }, runId: 'air_x', mode: 'live' };
+    }) as never);
+    await t.run((ctx) => explainConflict(ctx, conflictId));
     expect((await row(conflictId)).explanation).toBeNull();
   });
 
