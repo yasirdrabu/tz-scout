@@ -1,9 +1,9 @@
 import { sql } from 'drizzle-orm';
 import { PLATFORM_TENANT } from '../audit';
-import type { appDb } from './client';
+import type { controlDb } from './client';
 import { withControlTenant, workspaceDb, workspaceTx } from './doors';
 
-export type Tx = Parameters<Parameters<typeof appDb.transaction>[0]>[0];
+export type Tx = Parameters<Parameters<typeof controlDb.transaction>[0]>[0];
 
 /**
  * Runs `fn` in a transaction on the tenant's workspace database (`workspaceDb`) with the tenant set

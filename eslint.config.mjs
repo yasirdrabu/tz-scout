@@ -47,8 +47,8 @@ export const ADMIN_DB_ALLOWED = [
   "src/modules/tenancy/services/**",
   "src/modules/tenancy/auth.ts",
   "src/modules/integrations/jobs.ts",
-  // An unauthenticated webhook has no tenant until its connection is found (connectionTenant).
-  "src/modules/integrations/services/inbound.ts",
+  // Platform admins read every workspace's AI runs (Decision 24), one workspace database at a time.
+  "src/modules/ai-tasks/services/admin-runs.ts",
   // adminRoute: platform-admin requests have no tenant and run on adminDb, after the admin check.
   "src/http/routes/v1/_lib/v1-route.ts",
   "src/entry/**",

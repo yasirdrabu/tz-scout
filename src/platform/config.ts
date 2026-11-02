@@ -11,7 +11,7 @@ export type Config = {
   databaseAdminUrl: string;
   /** Superuser connection; only for creating roles and test databases. Optional in production. */
   databaseSuperuserUrl: string;
-  /** Connections in the appDb pool. The worker caps messages in flight below this. */
+  /** Connections in the control plane app pool and, in `shared` mode, the workspace app pool. The worker caps messages in flight below this. */
   databasePoolMax: number;
   /** `shared`: every workspace in the control plane's database; `per_workspace`: one database each (D35). */
   workspaceDatabases: 'shared' | 'per_workspace';

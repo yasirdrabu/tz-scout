@@ -8,7 +8,7 @@ import { adminRoute } from '../../../_lib/v1-route';
 export const GET = adminRoute({}, async (req, _person, { tx }) => {
   const { id, action } = idAndAction(req, 'ai-runs');
   if (action) throw notFound();
-  const run = await anyRun(tx, id);
+  const run = await anyRun(id);
   if (!run) throw notFound();
   const tenantName = (await listTenants(tx)).find((t) => t.id === run.tenantId)?.name ?? null;
   return { ...runDetail(run), tenantName };

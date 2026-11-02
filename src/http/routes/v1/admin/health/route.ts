@@ -11,7 +11,7 @@ import { adminRoute } from '../../_lib/v1-route';
  * When NATS does not answer, `queues_available` is false and `queues` is empty; the rest is current.
  */
 export const GET = adminRoute({}, async (_req, _person, { tx }) => {
-  const [health, dead, tenants, ai] = await Promise.all([systemHealth({ tx }), listDeadJobs({ limit: 100, tx }), listTenants(tx), runsSummary(tx)]);
+  const [health, dead, tenants, ai] = await Promise.all([systemHealth({ tx }), listDeadJobs({ limit: 100, tx }), listTenants(tx), runsSummary()]);
   const names = new Map(tenants.map((t) => [t.id, t.name]));
   const tenantName = (id: string) => names.get(id) ?? null;
   return {

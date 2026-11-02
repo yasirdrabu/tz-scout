@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { PLATFORM_TENANT } from '../audit';
-import { config } from '../config';
+import { config, type Config } from '../config';
 import { ScoutError } from '../errors';
 import { adminTransaction, controlAdminDb, controlDb, pool, type Db } from './client';
 import type { Tx } from './tenant';
@@ -57,18 +57,31 @@ const unavailable = () =>
   new ScoutError({ slug: 'workspace-unavailable', status: 503, title: 'This workspace is not available right now.' });
 
 /**
+ * Where a tenant's workspace is, from its registry row: 503 `workspace-unavailable` when the row says
+ * it is not `active` (`suspended` included: every request is refused). With no row, `shared` mode
+ * uses the shared database (rows the tests write by hand); `per_workspace` mode has nowhere to go, so
+ * that is an error (tenant creation writes the row in its own transaction, and migration 0006 backfilled
+ * every older tenant).
+ */
+export function workspaceRoute(
+  tenantId: string,
+  info: WorkspaceInfo | null,
+  mode: Config['workspaceDatabases'],
+): { shared: true } | { database: string } {
+  if (info && info.status !== 'active') throw unavailable();
+  if (mode === 'shared') return { shared: true };
+  if (!info) throw new Error(`Tenant ${tenantId} has no workspace registry row (tenancy.workspace_infra).`);
+  return { database: info.database };
+}
+
+/**
  * The connections for one workspace: `app` (row level security applies) and `admin` (bypasses it).
- * `t_platform` is the control plane. 503 `workspace-unavailable` when the registry says the workspace
- * is not `active`; a tenant with no registry row (written before the registry, or by hand) is the
- * shared database.
+ * `t_platform` is the control plane; every other tenant goes where `workspaceRoute` says.
  */
 export async function workspaceDb(tenantId: string): Promise<{ app: Db; admin: Db }> {
   if (tenantId === PLATFORM_TENANT) return { app: controlDb, admin: controlAdminDb };
-  const info = await infoFor(tenantId);
-  if (info && info.status !== 'active') throw unavailable();
-  if (config.workspaceDatabases === 'per_workspace') {
-    throw new Error('SCOUT_WORKSPACE_DATABASES=per_workspace is not available yet.');
-  }
+  const route = workspaceRoute(tenantId, await infoFor(tenantId), config.workspaceDatabases);
+  if ('database' in route) throw new Error('SCOUT_WORKSPACE_DATABASES=per_workspace is not available yet.');
   return sharedWorkspace;
 }
 

@@ -5,6 +5,7 @@ import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { log } from '@/platform/log';
 import { config } from '@/platform/config';
+import { registerInboundRoute } from '@/modules/tenancy';
 import { callLog, connection, credential } from './db/schema';
 import { adapterFactories, isKnownProvider, providerName, type Adapter } from './providers';
 import { credentialAad, openValue } from './services/vault';
@@ -69,17 +70,24 @@ async function findConnection(tx: Tx, tenantId: string, provider: string): Promi
   return row;
 }
 
-/** One connection per provider here (the earliest). Creates the default row when none exists. */
+/**
+ * One connection per provider here (the earliest). Creates the default row when none exists, and
+ * registers a new one with tenancy so its inbound webhooks find this tenant (D35).
+ */
 export async function ensureConnection(
   tx: Tx,
   tenantId: string,
   provider: string,
   createdBy?: string,
 ): Promise<ConnectionRow> {
-  await tx
+  const [made] = await tx
     .insert(connection)
     .values({ id: newId('con'), tenantId, provider, name: providerName(provider), createdBy: createdBy ?? null })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning({ id: connection.id });
+  if (made) {
+    await registerInboundRoute({ tenantId, actor: { kind: 'system', id: 'integrations' }, correlationId: newId('cor'), tx }, made.id);
+  }
   const [row] = await tx
     .select()
     .from(connection)

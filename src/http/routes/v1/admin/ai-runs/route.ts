@@ -23,7 +23,7 @@ export const GET = adminRoute({}, async (req, _person, { tx }) => {
   const url = new URL(req.url);
   const p = url.searchParams;
   const limit = pageLimit(url);
-  const rows = await allRuns(tx, {
+  const rows = await allRuns({
     q: p.get('q') || undefined,
     status: runStatusParam(p.get('status')),
     task: p.get('task') || undefined,
@@ -36,6 +36,6 @@ export const GET = adminRoute({}, async (req, _person, { tx }) => {
   return {
     data: items.map((r) => ({ ...runRow(r), tenantName: names.get(r.tenantId) ?? null })),
     nextCursor,
-    summary: await runsSummary(tx),
+    summary: await runsSummary(),
   };
 });

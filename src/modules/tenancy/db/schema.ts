@@ -8,7 +8,7 @@ import { boolean, index, integer, jsonb, pgSchema, primaryKey, text, timestamp, 
  * tenants): `tenant` (written through `adminDb`), `user`, and the better-auth tables `session`,
  * `account` and `verification` (read and written by better-auth through `adminDb`).
  *
- * Tenant tables (`membership`, `invite`, `api_key`, `member_preference`, `role_permission`, `workspace_infra`) carry `tenant_id` and have row level security
+ * Tenant tables (`membership`, `invite`, `api_key`, `member_preference`, `role_permission`, `workspace_infra`, `inbound_route`) carry `tenant_id` and have row level security
  * enabled and forced with the standard `tenant_isolation` policy (added by hand in the migration).
  */
 export const tenancy = pgSchema('tenancy');
@@ -187,7 +187,7 @@ export const rolePermission = tenancy.table(
 
 /**
  * The workspace registry (D35): where each tenant's workspace data lives and its state. One row per
- * tenant, written with the tenant; read through `adminDb` by the database doors. Data key columns
+ * tenant, written with the tenant; read through `controlAdminDb` by the database doors. Data key columns
  * come with the keys plan.
  */
 export const workspaceInfra = tenancy.table('workspace_infra', {
@@ -204,4 +204,15 @@ export const workspaceInfra = tenancy.table('workspace_infra', {
   supportAccessBy: text('support_access_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Which tenant an inbound webhook's connection belongs to (D35): the webhook is unauthenticated and
+ * names only its connection, whose row is in a workspace database. Written by integrations (through
+ * `registerInboundRoute`) when a connection is made; read through `controlAdminDb` before the tenant is known.
+ */
+export const inboundRoute = tenancy.table('inbound_route', {
+  connectionId: text('connection_id').primaryKey(), // con_
+  tenantId: text('tenant_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });

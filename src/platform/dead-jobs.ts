@@ -2,7 +2,7 @@ import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { scrubError } from '@/platform/scrub-error';
 import { platformAudit } from './audit';
-import { adminDb } from './db/client';
+import { controlAdminDb } from './db/client';
 import { inDatabaseHolding, platformDatabases, withWorkspaceAdmin } from './db/doors';
 import type { Tx } from './db/tenant';
 import { deadJob, outbox } from './db/schema';
@@ -20,7 +20,7 @@ export const jobDead = defineEvent(
   z.object({ jobType: z.string(), error: z.string(), attempts: z.number().int() }),
 );
 
-/** A platform admin acting on dead jobs. Not tenant-scoped. `tx`: the request's `adminDb` transaction, to work in. */
+/** A platform admin acting on dead jobs. Not tenant-scoped. `tx`: the request's `controlAdminDb` transaction, to work in. */
 export type AdminCtx = { actor: Actor; correlationId?: string; tx?: Tx };
 
 export type DeadJobView = {
@@ -84,7 +84,7 @@ export async function listDeadJobs(opts: { limit?: number; tx?: Tx } = {}): Prom
   const limit = opts.limit ?? 200;
   const rows: (typeof deadJob.$inferSelect)[] = [];
   for (const db of await platformDatabases()) {
-    const from = db.control ? (opts.tx ?? adminDb) : db.admin;
+    const from = db.control ? (opts.tx ?? controlAdminDb) : db.admin;
     rows.push(...(await from.select().from(deadJob).orderBy(desc(deadJob.deadAt), desc(deadJob.id)).limit(limit)));
   }
   rows.sort((a, b) => b.deadAt.getTime() - a.deadAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));

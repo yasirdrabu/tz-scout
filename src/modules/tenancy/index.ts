@@ -70,3 +70,4 @@ export { forgetAccess } from './services/principal';
 export { workspaceInfo } from './services/workspace-infra';
 export { memberActivatedAuditJob } from './contracts/jobs';
 export { memberActivatedAuditHandler } from './jobs';
+export { inboundRouteTenant, registerInboundRoute } from './services/inbound-routes';

@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, ilike, inArray, like, lte, not, or, sql, type SQL } from 'drizzle-orm';
-import { adminDb } from './db/client';
+import { controlAdminDb } from './db/client';
 import { auditLog } from './db/schema';
 import type { Tx } from './db/tenant';
 import type { ModuleContext } from './context';
@@ -68,15 +68,15 @@ export async function audit(ctx: ModuleContext, entry: AuditEntry): Promise<void
 }
 
 /**
- * Records a platform-wide action (tenant `t_platform`) through `adminDb`. Pass `tx` (an adminDb
+ * Records a platform-wide action (tenant `t_platform`) through `controlAdminDb`. Pass `tx` (an controlAdminDb
  * transaction) to commit with the change; otherwise it is written on its own.
  */
 export async function platformAudit(
   entry: AuditEntry & { actor: Actor; correlationId?: string },
-  tx?: Pick<Tx, 'insert'> | Pick<typeof adminDb, 'insert'>,
+  tx?: Pick<Tx, 'insert'> | Pick<typeof controlAdminDb, 'insert'>,
 ): Promise<void> {
   const { actor, correlationId, ...rest } = entry;
-  await (tx ?? adminDb).insert(auditLog).values(row(PLATFORM_TENANT, actor, correlationId, rest));
+  await (tx ?? controlAdminDb).insert(auditLog).values(row(PLATFORM_TENANT, actor, correlationId, rest));
 }
 
 export type AuditRow = typeof auditLog.$inferSelect;

@@ -74,8 +74,8 @@ export type WorkerOptions = {
   /** Messages handled at once per consumer or job. Default 8. */
   concurrency?: number;
   /**
-   * Messages handled at once across the whole worker. Each holds one appDb connection, so the
-   * default, and the most allowed, is half of DATABASE_POOL_MAX: a handler can hold its transaction
+   * Messages handled at once across the whole worker. Each holds one workspace connection, so the
+   * default, and the most allowed, is `inFlightCap` (half the workspace connections): a handler can hold its transaction
    * connection while it needs a second one (the integrations gateway writes its call log in its own
    * transaction), so more than half in flight could leave every connection waiting on another.
    */

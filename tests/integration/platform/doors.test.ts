@@ -51,6 +51,22 @@ describe('the workspace registry (tenancy.workspace_infra)', () => {
     expect(await withTenant(tenantId, async () => 'in')).toBe('in');
   });
 
+  it('writes the row in the tenant creation transaction: a failed creation leaves neither', async () => {
+    const admin = await seedUser({ admin: true });
+    const slug = uniqueSlug();
+    let made = '';
+    await expect(
+      adminDb.transaction(async (tx) => {
+        made = (await createTenant(admin.actor, { slug, name: 'Gone', currency: 'USD', timezone: 'UTC', ownerEmail: `${uniqueSlug()}@example.com` }, tx)).tenantId;
+        expect(await tx.select().from(workspaceInfra).where(eq(workspaceInfra.tenantId, made))).toHaveLength(1);
+        throw new Error('rolled back');
+      }),
+    ).rejects.toThrow('rolled back');
+    expect(await adminDb.select().from(workspaceInfra).where(eq(workspaceInfra.tenantId, made))).toEqual([]);
+    const orphans = await adminDb.execute(sql`select w.tenant_id from tenancy.workspace_infra w left join tenancy.tenant t on t.id = w.tenant_id where t.id is null`);
+    expect(orphans).toEqual([]);
+  });
+
   it('refuses a workspace that is not active with 503 workspace-unavailable', async () => {
     const admin = await seedUser({ admin: true });
     const { tenantId } = await createTenant(admin.actor, {

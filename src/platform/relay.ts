@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import postgres from 'postgres';
 import { config } from '@/platform/config';
-import { adminDb } from '@/platform/db/client';
+import { controlAdminDb } from '@/platform/db/client';
 import { platformDatabases, type PlatformDatabase } from '@/platform/db/doors';
 import { log } from '@/platform/log';
 import { errorText } from '@/platform/scrub-error';
@@ -263,7 +263,7 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
 }
 
 /** Age in milliseconds of the oldest unsent outbox row, 0 when none. */
-export async function relayLagMs(db: Pick<typeof adminDb, 'execute'> = adminDb): Promise<number> {
+export async function relayLagMs(db: Pick<typeof controlAdminDb, 'execute'> = controlAdminDb): Promise<number> {
   const rows = await db.execute(
     sql`select coalesce(extract(epoch from (clock_timestamp() - min(created_at))) * 1000, 0)::float8 as lag from platform.outbox where sent_at is null`,
   );

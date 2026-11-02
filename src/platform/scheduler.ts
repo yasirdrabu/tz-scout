@@ -1,6 +1,6 @@
 import { and, eq, lte } from 'drizzle-orm';
 import { CronExpressionParser } from 'cron-parser';
-import type { adminDb } from './db/client';
+import type { controlAdminDb } from './db/client';
 import { inDatabaseHolding, platformDatabases, withControlAdmin, withWorkspaceAdmin, type PlatformDatabase } from './db/doors';
 import { schedule } from './db/schema';
 import { PLATFORM_TENANT, platformAudit, type AuditEntry } from './audit';
@@ -24,7 +24,7 @@ function logOnce(row: ScheduleRow, reason: string): void {
   log.error({ scheduleId: row.id, jobName: row.jobName, err: reason }, 'schedule skipped');
 }
 
-type Tx = Parameters<Parameters<typeof adminDb.transaction>[0]>[0];
+type Tx = Parameters<Parameters<typeof controlAdminDb.transaction>[0]>[0];
 type ScheduleRow = typeof schedule.$inferSelect;
 
 export type ScheduleInput = {
