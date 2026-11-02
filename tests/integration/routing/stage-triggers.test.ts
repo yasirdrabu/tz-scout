@@ -1,4 +1,4 @@
-import { and, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { activityObserved } from '@/modules/crm/contracts/events';
 import { assign, stageChanged } from '@/modules/routing';
@@ -53,7 +53,7 @@ describe('events move accounts by the workspace’s triggers (REV-E5-S2)', () =>
       ['reviewed', 'assigned', 'Reviewed', 'Assigned'],
       ['assigned', 'stg_talking', 'Assigned', 'Talking'],
     ]);
-    const events = (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId)))
+    const events = (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId)).orderBy(asc(outbox.seq)))
       .map((r) => r.payload as { type: string; data: { accountId: string; to: string; toName?: string } })
       .filter((e) => e.type === stageChanged.type && e.data.accountId === a);
     expect(events.at(-1)!.data).toMatchObject({ to: 'stg_talking', toName: 'Talking' });
