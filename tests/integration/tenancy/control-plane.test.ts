@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import {
   addMember,
   auditEntries,
@@ -22,6 +23,8 @@ import { forgetWorkspace } from '@/platform/db/doors';
 import { auditLog, outbox } from '@/platform/db/schema';
 import { withTenant } from '@/platform/db/tenant';
 import type { Envelope } from '@/platform/events/envelope';
+import { publish } from '@/platform/events/outbox';
+import { defineEvent } from '@/platform/events/registry';
 import { deliverOnce } from '@/platform/runtime/worker';
 import { runOutbox } from '../helpers/run-outbox';
 import { TenancyOnWorkspaceTx } from '../helpers/tenancy-guard';
@@ -64,6 +67,28 @@ describe('the workspace transaction guard', () => {
 });
 
 describe('tenancy with a workspace context', () => {
+  // The guard cannot see platform.* writes, so this checks which transaction wrote each row: a row's
+  // `xmin` is the id of the transaction that inserted it.
+  it('writes its event on the control transaction and its audit row on the workspace one; workspace events stay on the workspace one', async () => {
+    const t = await newTenant();
+    const probe = defineEvent('platform.split_probe.published', 1, z.object({}));
+    const { wsXact, id } = await inTenant(t.tenantId, t.owner.actor, async (ctx) => {
+      const [x] = await ctx.tx.execute<{ id: string }>(sql`select (pg_current_xact_id()::text::bigint % 4294967296)::text as id`);
+      const membershipId = await addMember(ctx, { email: `${uniqueSlug()}@example.com`, role: 'seller' });
+      await publish(ctx, probe, {}, { type: 'membership', id: membershipId });
+      return { wsXact: x!.id, id: membershipId };
+    });
+    const writers = await adminDb.execute<{ kind: string; xmin: string }>(sql`
+      select 'outbox ' || (payload->>'type') as kind, xmin::text as xmin from platform.outbox where tenant_id = ${t.tenantId} and payload->'subject'->>'id' = ${id}
+      union all
+      select 'audit ' || action, xmin::text from platform.audit_log where tenant_id = ${t.tenantId} and subject_id = ${id}`);
+    const by = Object.fromEntries(writers.map((r) => [r.kind, r.xmin]));
+    expect(Object.keys(by).sort()).toEqual(['audit tenancy.member.added', 'outbox platform.split_probe.published', 'outbox tenancy.member.added']);
+    expect(by['outbox tenancy.member.added']).not.toBe(wsXact);
+    expect(by['audit tenancy.member.added']).toBe(wsXact);
+    expect(by['outbox platform.split_probe.published']).toBe(wsXact);
+  });
+
   it('reads and writes members, keys and the audit log without touching the workspace transaction', async () => {
     const t = await newTenant();
     const res = await inTenant(t.tenantId, t.owner.actor, async (ctx) => {

@@ -28,7 +28,11 @@ export function registerWorkspaceLookup(fn: WorkspaceLookup): void {
   cache.clear();
 }
 
-/** Drops this instance's cached registry row for a tenant, or every one. Other instances catch up within 60 seconds. */
+/**
+ * Drops this instance's cached registry row for a tenant, or every one. Other instances catch up within
+ * 60 seconds. Call it after every commit that writes a tenant's `workspace_infra` row (creation today;
+ * provisioning, suspend, move, delete with Task 5 and later), so this instance never routes on the old one.
+ */
 export function forgetWorkspace(tenantId?: string): void {
   if (tenantId) cache.delete(tenantId);
   else cache.clear();

@@ -66,8 +66,8 @@ one database; it can't give a per-workspace backup, restore, export, key or dele
   pool closes first.
 - `adminDb` keeps meaning the control plane. Cross-tenant jobs (relay, scheduler, nightly ageing,
   admin AI runs) loop over active workspaces and open each one's admin pool in turn.
-- A workspace not `active` (or `suspended` for writes) refuses requests the way a suspended tenant
-  does today.
+- A workspace not `active` (`suspended` included) refuses every request, read or write, with 503
+  `workspace-unavailable`, as a suspended tenant refuses every request today.
 
 ### Events and jobs
 

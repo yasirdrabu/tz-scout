@@ -2,6 +2,7 @@ import { asc, desc, eq, sql } from 'drizzle-orm';
 import { platformAudit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { controlAdminDb, adminTransaction } from '@/platform/db/client';
+import { forgetWorkspace } from '@/platform/db/doors';
 import type { Tx } from '@/platform/db/tenant';
 import { ScoutError } from '@/platform/errors';
 import type { Actor } from '@/platform/events/envelope';
@@ -52,7 +53,7 @@ export async function createTenant(
   }
   const correlationId = newId('cor');
   try {
-    return await adminTransaction(outer, async (tx) => {
+    const created = await adminTransaction(outer, async (tx) => {
       const [admin] = await tx
         .select({ isAdmin: user.platformAdmin, disabledAt: user.disabledAt })
         .from(user)
@@ -104,6 +105,9 @@ export async function createTenant(
       );
       return { tenantId, ownerMembershipId };
     });
+    // A lookup before the row existed may be cached as "no row"; drop it now the row is written.
+    forgetWorkspace(created.tenantId);
+    return created;
   } catch (e) {
     if (isUniqueViolation(e)) throw slugTaken();
     throw e;
