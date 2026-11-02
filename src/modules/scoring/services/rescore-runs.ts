@@ -6,8 +6,19 @@ import type { ScoreCause } from '../contracts/types';
 import { rescoreRun, rescoreRunPart } from '../db/schema';
 
 const DAY_MS = 86_400_000;
+/** A run whose pages are all listed and that has counted nothing for this long has a message that will not finish. */
+const STALLED_MS = 15 * 60_000;
 
-export type RescoreRunView = { id: string; cause: string; total: number; done: number; startedAt: Date; finishedAt: Date | null };
+export type RescoreRunView = {
+  id: string;
+  cause: string;
+  total: number;
+  done: number;
+  startedAt: Date;
+  finishedAt: Date | null;
+  /** Unfinished, every page listed, and nothing counted for 15 minutes: the banner stops showing it as running. */
+  stalled: boolean;
+};
 
 /** Records a new rescore run with nothing counted yet. Returns its id. */
 export async function createRun(ctx: ModuleContext, filter: RescoreFilter, cause: ScoreCause): Promise<string> {
@@ -50,7 +61,7 @@ export async function countPage(ctx: ModuleContext, runId: string, partKey: stri
   if (!(await claim(ctx, runId, `page:${partKey}`))) return;
   await ctx.tx
     .update(rescoreRun)
-    .set({ total: sql`${rescoreRun.total} + ${found}`, ...(last ? { pagingDone: true } : {}) })
+    .set({ total: sql`${rescoreRun.total} + ${found}`, updatedAt: sql`now()`, ...(last ? { pagingDone: true } : {}) })
     .where(and(eq(rescoreRun.tenantId, ctx.tenantId), eq(rescoreRun.id, runId)));
   await finishIfDone(ctx, runId);
 }
@@ -60,7 +71,7 @@ export async function countAccounts(ctx: ModuleContext, runId: string, partKey: 
   if (!(await claim(ctx, runId, `accounts:${partKey}`))) return;
   await ctx.tx
     .update(rescoreRun)
-    .set({ done: sql`${rescoreRun.done} + ${processed}` })
+    .set({ done: sql`${rescoreRun.done} + ${processed}`, updatedAt: sql`now()` })
     .where(and(eq(rescoreRun.tenantId, ctx.tenantId), eq(rescoreRun.id, runId)));
   await finishIfDone(ctx, runId);
 }
@@ -75,10 +86,14 @@ export async function latestRescore(ctx: ModuleContext, now: Date = new Date()):
       done: rescoreRun.done,
       startedAt: rescoreRun.startedAt,
       finishedAt: rescoreRun.finishedAt,
+      pagingDone: rescoreRun.pagingDone,
+      updatedAt: rescoreRun.updatedAt,
     })
     .from(rescoreRun)
     .where(and(eq(rescoreRun.tenantId, ctx.tenantId), gte(rescoreRun.startedAt, new Date(now.getTime() - DAY_MS))))
     .orderBy(desc(rescoreRun.startedAt), desc(rescoreRun.id))
     .limit(1);
-  return run ?? null;
+  if (!run) return null;
+  const { pagingDone, updatedAt, ...view } = run;
+  return { ...view, stalled: pagingDone && !run.finishedAt && now.getTime() - updatedAt.getTime() > STALLED_MS };
 }

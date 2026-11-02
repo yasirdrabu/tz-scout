@@ -135,8 +135,11 @@ export const lastRescoreQuery = (tenant: string) =>
     staleTime: 5 * 60_000,
   });
 
-/** The newest rescore of the last 24 hours (Ruling 12): a count, no account data; null when there is none. */
-export type RescoreRun = { id: string; cause: string; total: number; done: number; started_at: string; finished_at: string | null };
+/**
+ * The newest rescore of the last 24 hours (Ruling 12): a count, no account data; null when there is none. `stalled`:
+ * unfinished, every page listed and nothing counted for 15 minutes, so the banner stops showing it as running.
+ */
+export type RescoreRun = { id: string; cause: string; total: number; done: number; started_at: string; finished_at: string | null; stalled: boolean };
 
 /** How often the banner asks again while a rescore runs. */
 export const RESCORE_REFRESH_MS = 3_000;

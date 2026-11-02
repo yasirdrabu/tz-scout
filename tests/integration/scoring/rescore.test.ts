@@ -1,14 +1,17 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
-// A test can name accounts whose scoring throws; every other account scores as usual.
+// A test can name accounts whose scoring throws (or is refused with a 409); every other account scores as usual.
 const failing = vi.hoisted(() => new Set<string>());
+const refused = vi.hoisted(() => new Set<string>());
 vi.mock('@/modules/scoring/services/score', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/modules/scoring/services/score')>();
+  const { ScoutError } = await import('@/platform/errors');
   return {
     ...real,
     scoreAccount: (...args: Parameters<typeof real.scoreAccount>) => {
       if (failing.has(args[1])) throw new Error('boom');
+      if (refused.has(args[1])) throw new ScoutError({ slug: 'conflict', status: 409, title: 'Refused.' });
       return real.scoreAccount(...args);
     },
   };
@@ -38,6 +41,7 @@ afterAll(closeDbs);
 afterEach(() => {
   vi.restoreAllMocks();
   failing.clear();
+  refused.clear();
 });
 
 type Tenant = Awaited<ReturnType<typeof freshTenant>>;
@@ -431,6 +435,7 @@ describe('paging', () => {
       done: 450,
       startedAt: done.startedAt,
       finishedAt: done.finishedAt,
+      stalled: false,
     });
   }, 120_000);
 });
@@ -455,6 +460,39 @@ describe('rescore runs (Ruling 12)', () => {
     await t.run((ctx) => rescoreAccounts(ctx, [bad.accountId], 'manual_rescore', runId));
     await t.run((ctx) => rescoreAccounts(ctx, [one.accountId, bad.accountId, three.accountId], 'manual_rescore', runId));
     expect(await runOf(t, runId)).toMatchObject({ total: 3, done: 3, finishedAt: finished.finishedAt });
+  });
+
+  it('a lone account refused with a 4xx is settled, not retried, so the run finishes', async () => {
+    const { t, practice } = await world();
+    await approved(t, practice.id, 'Lead');
+    await runOutbox(t.tenantId);
+    const [, bad] = [await seed(t, [practice.id]), await seed(t, [practice.id]), await seed(t, [practice.id])];
+    await runOutbox(t.tenantId);
+    refused.add(bad.accountId);
+    const { runId } = await t.run((ctx) => requestRescore(ctx, { practiceId: practice.id }));
+    await runOutbox(t.tenantId);
+    expect(await current(t, bad.accountId)).toBeUndefined();
+    const run = await runOf(t, runId);
+    expect(run).toMatchObject({ total: 3, done: 3, finishedAt: expect.any(Date) });
+    expect(run.updatedAt.getTime()).toBeGreaterThan(run.startedAt.getTime());
+  });
+
+  it('a run with every page listed that counts nothing for 15 minutes is stalled', async () => {
+    const { t, practice } = await world();
+    await approved(t, practice.id, 'Lead');
+    await runOutbox(t.tenantId);
+    const bad = await seed(t, [practice.id]);
+    await runOutbox(t.tenantId);
+    failing.add(bad.accountId);
+    const { runId } = await t.run((ctx) => requestRescore(ctx, { practiceId: practice.id }));
+    await expect(runOutbox(t.tenantId)).rejects.toThrow('boom');
+    const { updatedAt } = await runOf(t, runId);
+    const at = (minutes: number) => new Date(updatedAt.getTime() + minutes * 60_000);
+    expect(await t.run((ctx) => latestRescore(ctx, at(14)))).toMatchObject({ id: runId, finishedAt: null, stalled: false });
+    expect(await t.run((ctx) => latestRescore(ctx, at(16)))).toMatchObject({ id: runId, finishedAt: null, stalled: true });
+    // Still paging: not stalled, however long since the last count.
+    await t.run((ctx) => ctx.tx.update(rescoreRun).set({ pagingDone: false }).where(eq(rescoreRun.id, runId)));
+    expect(await t.run((ctx) => latestRescore(ctx, at(16)))).toMatchObject({ stalled: false });
   });
 
   it('an empty filter finishes at once with nothing to do; a message without a run id still scores', async () => {

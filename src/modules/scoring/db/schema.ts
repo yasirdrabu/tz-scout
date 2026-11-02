@@ -129,6 +129,7 @@ export const rescoreRun = scoring.table(
     pagingDone: boolean('paging_done').notNull().default(false),
     startedAt: at('started_at').notNull().defaultNow(),
     finishedAt: at('finished_at'),
+    updatedAt: at('updated_at').notNull().defaultNow(), // bumped on every count, so a run that stopped counting can be seen
   },
   (t) => [index('rescore_run_started_idx').on(t.tenantId, sql`${t.startedAt} desc`)],
 );

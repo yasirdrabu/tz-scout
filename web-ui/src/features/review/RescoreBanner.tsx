@@ -40,7 +40,8 @@ export function RescoreBanner({ tenant }: { tenant: string }) {
   const { data: run } = useQuery(rescoreQuery(tenant));
   const { data: me } = useQuery(meQuery(tenant));
   const [dismissed, setDismissed] = useState<string | null>(null);
-  const running = !!run && !run.finished_at;
+  // A run that has found no accounts yet, or has stalled, shows the summary instead.
+  const running = !!run && !run.finished_at && !run.stalled && run.total > 0;
   const wasRunning = useRef(false);
   useEffect(() => {
     if (wasRunning.current && !running) void qc.invalidateQueries({ queryKey: lastRescoreQuery(tenant).queryKey });
@@ -51,7 +52,7 @@ export function RescoreBanner({ tenant }: { tenant: string }) {
     return (
       <div className={styles.banner} role="region" aria-label="Rescore progress">
         <span className={styles.grow}>
-          <strong>{`Rescoring ${f.number(run.total)} accounts`}</strong>
+          <strong>{`Rescoring ${run.total === 1 ? '1 account' : `${f.number(run.total)} accounts`}`}</strong>
           <span>{`${f.number(run.done)} of ${f.number(run.total)} rescored`}</span>
         </span>
       </div>

@@ -21,9 +21,10 @@ const AGEING_MIN_AGE_MS = 20 * 3_600_000;
 /**
  * Scores each account in its own savepoint, with the profile and approved offers loaded once. An account that is
  * gone is skipped. Any other failure is logged and that account is queued again on its own, so one bad account
- * does not undo the other scores; a lone account that fails fails the message, and the normal retries apply.
- * With `runId` the message counts the accounts it settled (scored or gone) into the run, once; the accounts it
- * queued again are left out, and each counts itself when its own message runs.
+ * does not undo the other scores; a lone account that fails fails the message, and the normal retries apply,
+ * except when it is refused (a 4xx): retrying will not help, so it is logged and settled.
+ * With `runId` the message counts the accounts it settled (scored, gone or refused) into the run, once; the
+ * accounts it queued again are left out, and each counts itself when its own message runs.
  */
 export async function rescoreAccounts(ctx: ModuleContext, accountIds: string[], cause: ScoreCause, runId?: string): Promise<void> {
   const profile = await getProfile(ctx);
@@ -34,7 +35,11 @@ export async function rescoreAccounts(ctx: ModuleContext, accountIds: string[], 
       await ctx.tx.transaction((tx) => scoreAccount({ ...ctx, tx }, id, cause, undefined, { profile, offers }));
     } catch (e) {
       if (e instanceof ScoutError && e.status === 404) continue;
-      if (accountIds.length === 1) throw e;
+      if (accountIds.length === 1) {
+        if (!(e instanceof ScoutError && e.status < 500)) throw e;
+        log.error({ accountId: id, err: e.message }, 'rescore: account refused, settled without a score');
+        continue;
+      }
       log.error({ accountId: id, err: (e as Error).message }, 'rescore: account failed, queued again alone');
       failed.push(id);
     }

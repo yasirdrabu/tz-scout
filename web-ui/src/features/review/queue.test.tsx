@@ -4,6 +4,7 @@ import { delay, http, HttpResponse } from 'msw';
 import { problem } from '../../test/http';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
+import type { RescoreRun } from './api';
 import { COASTLINE, COLUMNS, FACETS, MIAMI, PINEGATE, RESCORE, row, serveQueue } from './testing';
 
 const params = (href: string) => new URL(href, 'http://app').searchParams;
@@ -125,10 +126,29 @@ describe('Review queue', () => {
     );
   });
 
+  const run: RescoreRun = { id: 'rsr_1', cause: 'rules_changed', total: 450, done: 120, started_at: new Date().toISOString(), finished_at: null, stalled: false };
+
+  it.each([
+    ['has found no accounts yet', { total: 0, done: 0 }],
+    ['has stalled', { stalled: true }],
+  ])('a run that %s shows the last-rescore summary, not progress', async (_, over) => {
+    serveQueue({ rescore: RESCORE, run: { ...run, ...over } });
+    renderApp('/t/taazaa/queue');
+    expect(await screen.findByRole('region', { name: 'Scoring change' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Rescore progress' })).toBeNull();
+    expect(screen.queryByText(/^Rescoring/)).toBeNull();
+  });
+
+  it('says "1 account" for a run of one', async () => {
+    serveQueue({ run: { ...run, total: 1, done: 0 } });
+    renderApp('/t/taazaa/queue');
+    const progress = await screen.findByRole('region', { name: 'Rescore progress' });
+    expect(progress).toHaveTextContent(/^Rescoring 1 account0 of 1 rescored$/);
+  });
+
   it('shows a running rescore with its progress every 3 seconds, then the last-rescore summary once it finishes', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      const run = { id: 'rsr_1', cause: 'rules_changed', total: 450, done: 120, started_at: new Date().toISOString(), finished_at: null };
       const seen = serveQueue({ rescore: null, run });
       renderApp('/t/taazaa/queue');
       const progress = await screen.findByRole('region', { name: 'Rescore progress' });

@@ -412,7 +412,7 @@ describe('GET /api/v1/scoring/rescores/latest (Ruling 12)', () => {
     expect(started.status).toBe(202);
     const { rescore_id } = await json(started);
     const running = (await json(await w.as(leader, getLatestRescore, 'scoring/rescores/latest'))).data;
-    expect(running).toEqual({ id: rescore_id, cause: 'manual_rescore', total: 0, done: 0, started_at: expect.any(String), finished_at: null });
+    expect(running).toEqual({ id: rescore_id, cause: 'manual_rescore', total: 0, done: 0, started_at: expect.any(String), finished_at: null, stalled: false });
 
     await w.deliver();
     const manage = await keyFor(w.tenant, ['scoring:manage'], ALL);
