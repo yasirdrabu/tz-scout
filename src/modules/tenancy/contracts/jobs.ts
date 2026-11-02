@@ -10,3 +10,11 @@ export const memberActivatedAuditJob = defineJob(
   'tenancy.member_activated_audit',
   z.object({ membershipId: z.string(), role: z.string() }),
 );
+
+/**
+ * Makes a new workspace's own database (`per_workspace` mode, D35): create, migrate, seed, active. Runs
+ * under `t_platform` (the workspace is not open yet). Each step is safe to run again, so a retry resumes.
+ */
+export const workspaceProvisionJob = defineJob('tenancy.workspace_provision', z.object({ tenantId: z.string() }), {
+  timeoutMs: 300_000,
+});

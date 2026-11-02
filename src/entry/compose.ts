@@ -8,10 +8,10 @@ import { registerOwnershipPreflight, routingFunnelStages, routingOfferUsage, rou
 import { scoringOfferUsage } from '@/modules/scoring';
 import { crmMergeGuard, crmOwnershipPreflight, registerHandoffPackageProvider, registerHubspotAdapter } from '@/modules/crm';
 import { playbooksHandoffPackage } from '@/modules/playbooks';
-import { registerSourceValidator, workspaceInfo } from '@/modules/tenancy';
+import { registerSourceValidator, workspaceInfo, workspaceList } from '@/modules/tenancy';
 import { registerWorkspaceLookup } from '@/platform/db/doors';
 
-registerWorkspaceLookup(workspaceInfo);
+registerWorkspaceLookup(workspaceInfo, workspaceList);
 registerSourceValidator(intakeSourceValidator);
 registerSourceInfoProvider(intakeSourceInfo);
 registerSourceAccessProvider(intakeSourceAccess);

@@ -10,9 +10,10 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { tenantCreated } from '../contracts/events';
 import { displayNameFromEmail } from '../domain/display-name';
-import { membership, tenant, user } from '../db/schema';
+import { membership, tenant, user, workspaceInfra } from '../db/schema';
 import { onControl } from './control';
 import { forgetAccess } from './principal';
+import { enqueueProvisioning } from './provisioning';
 import { registerWorkspace } from './workspace-infra';
 
 export type CreateTenantInput = {
@@ -34,13 +35,14 @@ const isUniqueViolation = (e: unknown): boolean => {
 /**
  * Creates a tenant with its first owner (status invited). Platform admins only. Runs in one
  * `controlAdminDb` transaction (a savepoint of `outer` when given); the creation is written to the platform
- * audit log, not the tenant's.
+ * audit log, not the tenant's. In `per_workspace` mode the workspace is `provisioning` when this returns:
+ * the provisioning job, enqueued in the same transaction, makes its database (`provisionWorkspace`).
  */
 export async function createTenant(
   actor: Actor,
   input: CreateTenantInput,
   outer?: Tx,
-): Promise<{ tenantId: string; ownerMembershipId: string }> {
+): Promise<{ tenantId: string; ownerMembershipId: string; status: 'active' | 'provisioning' }> {
   const slug = input.slug.trim().toLowerCase();
   const email = input.ownerEmail.trim().toLowerCase();
   if (!SLUG.test(slug)) {
@@ -72,7 +74,7 @@ export async function createTenant(
         currency: input.currency.trim().toUpperCase(),
         timezone: input.timezone,
       });
-      await registerWorkspace(tx, tenantId);
+      const status = await registerWorkspace(tx, tenantId);
 
       await tx
         .insert(user)
@@ -103,7 +105,8 @@ export async function createTenant(
         },
         tx,
       );
-      return { tenantId, ownerMembershipId };
+      if (status === 'provisioning') await enqueueProvisioning(tx, { actor, correlationId }, tenantId);
+      return { tenantId, ownerMembershipId, status };
     });
     // A lookup before the row existed may be cached as "no row"; drop it now the row is written.
     forgetWorkspace(created.tenantId);
@@ -202,6 +205,8 @@ export type AdminTenantRow = TenantRow & {
   memberCount: number;
   /** The first owner by invite date, or null. */
   owner: { name: string; email: string } | null;
+  /** Its workspace's state (D35): `provisioning`, `active`, `failed` with the step and error, …; null with no registry row. */
+  workspace: { status: string; failedStep: string | null; failedError: string | null } | null;
 };
 
 /** Every tenant for the admin Tenants screen, newest first, with member count and owner. Platform admins only. */
@@ -222,6 +227,7 @@ export async function adminTenants(tx?: Tx): Promise<AdminTenantRow[]> {
       createdAt: tenant.createdAt,
       memberCount: counted,
       owner,
+      workspace: sql<AdminTenantRow['workspace']>`(select json_build_object('status', w.status, 'failedStep', w.failed_step, 'failedError', w.failed_error) from ${workspaceInfra} w where w.tenant_id = tenancy.tenant.id)`,
     })
     .from(tenant)
     .orderBy(desc(tenant.createdAt), desc(tenant.id));

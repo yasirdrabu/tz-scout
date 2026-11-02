@@ -1,6 +1,7 @@
 import { audit } from '@/platform/audit';
 import { defineJobHandler } from '@/platform/runtime/jobs';
-import { memberActivatedAuditJob } from './contracts/jobs';
+import { memberActivatedAuditJob, workspaceProvisionJob } from './contracts/jobs';
+import { provisionWorkspace } from './services/provisioning';
 
 export const memberActivatedAuditHandler = defineJobHandler(memberActivatedAuditJob, (e, ctx) =>
   audit(ctx, {
@@ -10,3 +11,7 @@ export const memberActivatedAuditHandler = defineJobHandler(memberActivatedAudit
     after: { status: 'active', role: e.data.role },
   }),
 );
+
+export const workspaceProvisionHandler = defineJobHandler(workspaceProvisionJob, async (e) => {
+  await provisionWorkspace(e.data.tenantId);
+});

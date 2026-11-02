@@ -202,6 +202,8 @@ export const workspaceInfra = tenancy.table('workspace_infra', {
   lastBackupAt: timestamp('last_backup_at', { withTimezone: true }),
   supportAccessUntil: timestamp('support_access_until', { withTimezone: true }),
   supportAccessBy: text('support_access_by'),
+  failedStep: text('failed_step'), // provisioning or migrating: the step that failed, while status is failed
+  failedError: text('failed_error'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

@@ -16,18 +16,23 @@ import { playbooksConsumers, playbooksJobHandlers } from '@/modules/playbooks';
 import { credentialsCleanupHandler } from '@/modules/integrations';
 import { autoAcceptHandler, routingConsumers } from '@/modules/routing';
 import { ageingHandler, rescoreAccountsHandler, rescorePageHandler, scoringConsumers } from '@/modules/scoring';
-import { memberActivatedAuditHandler } from '@/modules/tenancy';
+import { memberActivatedAuditHandler, registerWorkspaceSeeder, workspaceProvisionHandler } from '@/modules/tenancy';
 import { pingHandler } from '@/platform/diagnostics';
 import { log } from '@/platform/log';
 import type { ConsumerDef } from '@/platform/runtime/consumers';
 import type { JobHandlerDef } from '@/platform/runtime/jobs';
-import { startWorker } from '@/platform/runtime/worker';
+import { deliverOnce, startWorker } from '@/platform/runtime/worker';
 
 /** Every consumer in the app. Modules add theirs here as they land. */
 export const consumers: ConsumerDef[] = [accountsTenantDefaults, accountsSummaryOnReviewChanged, accountsSummaryOnScored, ...accountsCrmStatusConsumers, intakeTenantDefaults, intakeAccountMerged, intakeStatusFeedback, intakeSellerDeclineFeedback, intakeLeadQualified, ...scoringConsumers, ...routingConsumers, ...crmConsumers, ...playbooksConsumers];
 
 /** Every job handler in the app. */
-export const jobs: JobHandlerDef[] = [pingHandler, memberActivatedAuditHandler, credentialsCleanupHandler, exclusionsRecheckHandler, resolveHandler, waitingExpireHandler, importRunHandler, qualifiedLeadsPollHandler, rescoreAccountsHandler, rescorePageHandler, ageingHandler, autoAcceptHandler, ...crmJobHandlers, ...playbooksJobHandlers];
+export const jobs: JobHandlerDef[] = [pingHandler, memberActivatedAuditHandler, workspaceProvisionHandler, credentialsCleanupHandler, exclusionsRecheckHandler, resolveHandler, waitingExpireHandler, importRunHandler, qualifiedLeadsPollHandler, rescoreAccountsHandler, rescorePageHandler, ageingHandler, autoAcceptHandler, ...crmJobHandlers, ...playbooksJobHandlers];
+
+// Provisioning seeds a new workspace by running the consumers of its tenancy.tenant.created event against it (D35).
+registerWorkspaceSeeder(async (event) => {
+  for (const c of consumers) if (c.event.type === event.type) await deliverOnce(c, event, { provisioning: true });
+});
 
 /** Worker role: consumers and job handlers. Runs until SIGINT or SIGTERM. */
 export async function main(): Promise<void> {

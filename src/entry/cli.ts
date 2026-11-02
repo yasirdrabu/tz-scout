@@ -2,7 +2,9 @@ import './registry';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { bootstrapDatabase, migrateAll } from '@/platform/db/migrate';
+import { config } from '@/platform/config';
+import { bootstrapDatabase, databaseExists, migrateAll, migrateControlPlane, migrateWorkspaceDatabase } from '@/platform/db/migrate';
+import { urlForDatabase } from '@/platform/db/workspace-pools';
 import { closeDbs } from '@/platform/db/client';
 import { closeHealthConnections } from '@/platform/health';
 import { log } from '@/platform/log';
@@ -24,7 +26,11 @@ Long-running roles (stop with SIGTERM or SIGINT)
   all-background      Worker, scheduler and relay in one process (single-VM setups)
 
 One-shot commands
-  migrate             Bootstrap (when DATABASE_SUPERUSER_URL is set), then apply migrations
+  migrate [--tenant <slug>]
+                      Bootstrap (when DATABASE_SUPERUSER_URL is set), then apply migrations. With
+                      SCOUT_WORKSPACE_DATABASES=per_workspace: the control plane, the template
+                      workspace database, then every workspace database 4 at a time (or one, --tenant);
+                      exits 1 when a workspace fails (it is marked failed, the others go on)
   seed                Local development data (refuses production)
   import <slug> <file>  Import a CSV or XLSX list into a workspace, as the platform admin's person source
   backfill-r1b <slug>   Give a workspace built before R1b its scoring and routing defaults, a review row for each account, and a rescore
@@ -86,13 +92,32 @@ async function web(): Promise<number> {
   return 0;
 }
 
-async function migrate(): Promise<void> {
+async function migrate(tenantSlug?: string): Promise<number> {
   if (process.env.DATABASE_SUPERUSER_URL) {
     await bootstrapDatabase();
     console.log('Database roles and schemas are ready.');
   }
-  const { applied } = await migrateAll();
-  console.log(`Applied ${applied} migration${applied === 1 ? '' : 's'}.`);
+  const plural = (n: number) => `${n} migration${n === 1 ? '' : 's'}`;
+  if (config.workspaceDatabases === 'shared') {
+    const { applied } = await migrateAll();
+    console.log(`Applied ${plural(applied)}.`);
+    return 0;
+  }
+  const { listTenants, migrateWorkspaces } = await import('@/modules/tenancy');
+  if (!tenantSlug) {
+    console.log(`Control plane: applied ${plural((await migrateControlPlane()).applied)}.`);
+    if (await databaseExists(config.workspaceTemplateDatabase)) {
+      const { applied } = await migrateWorkspaceDatabase(urlForDatabase(config.databaseAdminUrl, config.workspaceTemplateDatabase));
+      console.log(`Template workspace database: applied ${plural(applied)}.`);
+    }
+  }
+  const tenant = tenantSlug ? (await listTenants()).find((t) => t.slug === tenantSlug) : undefined;
+  if (tenantSlug && !tenant) throw new Error(`No workspace with the slug "${tenantSlug}".`);
+  const results = await migrateWorkspaces(tenant ? { tenantId: tenant.id } : {});
+  for (const r of results) {
+    console.log('error' in r ? `Workspace ${r.tenantId} (${r.database}): FAILED, ${r.error}` : `Workspace ${r.tenantId} (${r.database}): applied ${plural(r.applied)}.`);
+  }
+  return results.some((r) => 'error' in r) ? 1 : 0;
 }
 
 function need(values: Record<string, string | boolean | undefined>, name: string): string {
@@ -185,9 +210,10 @@ export async function run(argv: string[]): Promise<number> {
     case 'all-background':
       await runRoles(['worker', 'scheduler', 'relay']);
       return 0;
-    case 'migrate':
-      await migrate();
-      return 0;
+    case 'migrate': {
+      const { values } = parseArgs({ args: rest, options: { tenant: { type: 'string' } } });
+      return migrate(values.tenant);
+    }
     case 'seed': {
       const { seed } = await import('./seed');
       const { devApiKey } = await seed();
