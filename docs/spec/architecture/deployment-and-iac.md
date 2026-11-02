@@ -29,8 +29,8 @@ with no hand-made servers.
 ## Single VM (where R1 runs)
 
 - `infra/compose/docker-compose.vm.yml`: the same services plus Caddy for HTTPS on
-  `scout.taazaa.ai`, with Postgres either on the VM (nightly `pg_dump` to object storage, 14 days
-  kept) or a managed database via `DATABASE_URL`.
+  `scout.taazaa.ai`, with Postgres either on the VM (nightly `pg_dump` of the control plane and
+  each workspace database to object storage, 14 days kept) or a managed database via `DATABASE_URL`.
 - Provisioned by OpenTofu: `infra/tofu/vm-<provider>` creates the VM, firewall (443 and SSH from
   allowed IPs only), object storage bucket for backups, and a cloud-init that installs Docker and
   starts the compose stack. Providers written first: Hetzner and Azure; AWS Lightsail after.
@@ -89,9 +89,12 @@ Moving an existing install (every workspace in one database):
    its messages and schedules wait. A split that stops part way finishes when run again.
 3. Check the Tenants screen (every workspace in `scout_t_…`).
 
-Backups: the nightly job (`infra/backup`) dumps only `scout` today. Per-workspace backups come with
-D35 plan 3; until they do, do not split an install whose data needs the nightly backup, or add each
-`scout_t_…` database to the backup by hand.
+Backups: the nightly job (`infra/backup`) dumps the control plane to `scout-<time>.dump` and every
+workspace database (each `scout_t_…` in `pg_database` but the template `scout_t_template`) to a file
+of its own, `scout_t_<tenant id>-<time>.dump`, kept 14 days locally and offsite. A database that
+fails to dump does not stop the others; the job then exits 1. Each dump is restored on its own, so a
+single workspace can be restored without touching the rest. Encrypting each workspace's backup with
+a key of its own comes with D35 plan 3.
 
 `SCOUT_WORKSPACE_DATABASES=shared` keeps everything in one database. It exists for the move: an
 install that has not split yet, and the CLI tests that start from one.
