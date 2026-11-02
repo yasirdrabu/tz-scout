@@ -24,7 +24,7 @@
 10. There is no backfill. Detection runs when facts arrive or are edited from this release on.
 11. The queue count is `accounts.account_summary.open_conflict_count`, written in the same transaction as detect and resolve. `flag=conflicts` filters on it.
 12. Rescore progress is tenant-wide: a count, no account data. The latest run is shown.
-13. The estimated value is the best offer's `revenue_potential_cents` in USD (offers store USD cents). It shows only when the account has no won or open deal. The CSV value kind is `estimated`.
+13. The estimated value is the best offer's `revenue_potential_cents` in USD (offers store USD cents). It shows only when the account has no won or open deal. The CSV value kind is "Estimated".
 14. Warm-intro R2 items (Confirm flow, introducer rules screen, rescore on points change) are not in R2a. They become their own plan after R2a, because screens.md has no section for them yet.
 
 ## Global Constraints
