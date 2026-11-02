@@ -5,7 +5,7 @@ export type Opened = { db: Db; end: () => Promise<void>; inUse: () => number };
 
 /** How the pools of `per_workspace` mode are sized (config: SCOUT_WORKSPACE_POOL_MAX, SCOUT_WORKSPACE_POOL_CAP). */
 export type PoolLimits = {
-  /** Connections in a workspace's `app` pool. Its `admin` pool has one. */
+  /** Connections in a workspace's `app` pool. Its `admin` pool has one. 0: admin pools only (the relay). */
   max: number;
   /** Workspace connections this process may hold across every pool. */
   cap: number;
@@ -16,7 +16,7 @@ export type PoolLimits = {
 /** A pool handed out this recently is not closed: its caller may not have started its first query yet. */
 const HANDED_OUT_MS = 1_000;
 
-type Entry = { app: Opened; admin: Opened; lastUsed: number };
+type Entry = { app?: Opened; admin: Opened; lastUsed: number };
 
 /**
  * The per-workspace pools of one process (D35): opened lazily, one `app` pool of `max` connections and
@@ -45,15 +45,26 @@ export class WorkspacePools {
 
   /** The pools of `database`, opened when needed. */
   get(database: string): { app: Db; admin: Db } {
+    const e = this.entry(database);
+    if (!e.app) throw new Error('These workspace pools have no app pools (max 0).');
+    return { app: e.app.db, admin: e.admin.db };
+  }
+
+  /** Only the admin pool of `database`, opened when needed. */
+  admin(database: string): Db {
+    return this.entry(database).admin.db;
+  }
+
+  private entry(database: string): Entry {
     let e = this.entries.get(database);
     if (!e) {
       this.makeRoom();
       const { max } = this.limits();
-      e = { app: this.open(database, 'app', max), admin: this.open(database, 'admin', 1), lastUsed: 0 };
+      e = { ...(max > 0 ? { app: this.open(database, 'app', max) } : {}), admin: this.open(database, 'admin', 1), lastUsed: 0 };
       this.entries.set(database, e);
     }
     e.lastUsed = this.now();
-    return { app: e.app.db, admin: e.admin.db };
+    return e;
   }
 
   private makeRoom(): void {
@@ -70,14 +81,14 @@ export class WorkspacePools {
   }
 
   private idle(e: Entry, unusedFor: number): boolean {
-    return e.app.inUse() + e.admin.inUse() === 0 && this.now() - e.lastUsed >= unusedFor;
+    return (e.app?.inUse() ?? 0) + e.admin.inUse() === 0 && this.now() - e.lastUsed >= unusedFor;
   }
 
   private close(database: string): Promise<unknown> {
     const e = this.entries.get(database);
     if (!e) return Promise.resolve();
     this.entries.delete(database);
-    return Promise.allSettled([e.app.end(), e.admin.end()]);
+    return Promise.allSettled([e.app?.end(), e.admin.end()]);
   }
 
   /** Closes the pools unused for `idleMs`. */

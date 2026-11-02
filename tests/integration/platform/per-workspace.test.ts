@@ -136,7 +136,7 @@ describe('a database per workspace (D35)', () => {
     const b = await activeTenant();
     const probe = defineEvent('platform.split_probe.relayed', 1, z.object({}));
     const sent = await withTenant(a.tenantId, (tx) => publish({ tenantId: a.tenantId, actor: { kind: 'system', id: 'test' }, correlationId: newId('cor'), tx }, probe, {}));
-    const databases = await platformDatabases();
+    const databases = await platformDatabases({ relay: true });
     expect(databases.map((d) => d.name)).toEqual(expect.arrayContaining(['control', workspaceDatabaseName(a.tenantId), workspaceDatabaseName(b.tenantId)]));
     const published: OutboxRow[] = [];
     await relayTurn(databases.map(outboxSource), new Map(), async (row) => void published.push(row), { batchSize: 1000 });

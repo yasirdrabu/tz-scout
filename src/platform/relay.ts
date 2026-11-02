@@ -251,7 +251,7 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
           await ensureStreams(nats.jsm);
           streamsReady = true;
         }
-        const sources = (await platformDatabases()).map(outboxSource);
+        const sources = (await platformDatabases({ relay: true })).map(outboxSource);
         ({ sentAny, full } = await relayTurn(
           sources,
           health,

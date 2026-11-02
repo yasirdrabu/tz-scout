@@ -19,6 +19,11 @@ export type Config = {
   workspacePoolMax: number;
   /** Workspace connections per process across every pool (`per_workspace`); over it the least recently used pool closes. */
   workspacePoolCap: number;
+  /**
+   * The relay's own workspace connections (`per_workspace`), apart from the workspace pools: one per
+   * workspace database it polls. Set it to the number of active workspaces or more, or its pools churn.
+   */
+  relayPoolCap: number;
   /** The migrated, empty workspace database new workspaces are copied from when it exists (`scout migrate` keeps it current). */
   workspaceTemplateDatabase: string;
   natsUrl: string;
@@ -56,6 +61,7 @@ const schema = z.object({
   SCOUT_WORKSPACE_DATABASES: z.enum(['shared', 'per_workspace']).default('shared'),
   SCOUT_WORKSPACE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(3),
   SCOUT_WORKSPACE_POOL_CAP: z.coerce.number().int().min(1).max(5000).default(60),
+  SCOUT_RELAY_POOL_CAP: z.coerce.number().int().min(1).max(5000).default(30),
   SCOUT_WORKSPACE_TEMPLATE_DATABASE: z.string().regex(/^[a-z0-9_]{1,63}$/).default('scout_t_template'),
   NATS_URL: z.string().min(1).optional(),
   SCOUT_MASTER_KEY: z.string().optional(),
@@ -143,6 +149,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     workspaceDatabases: e.SCOUT_WORKSPACE_DATABASES,
     workspacePoolMax: e.SCOUT_WORKSPACE_POOL_MAX,
     workspacePoolCap: e.SCOUT_WORKSPACE_POOL_CAP,
+    relayPoolCap: e.SCOUT_RELAY_POOL_CAP,
     workspaceTemplateDatabase: e.SCOUT_WORKSPACE_TEMPLATE_DATABASE,
     natsUrl: e.NATS_URL ?? 'nats://localhost:4222',
     masterKey,

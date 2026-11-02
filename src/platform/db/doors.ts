@@ -73,18 +73,29 @@ const workspacePools = new WorkspacePools(
   Date.now,
   (open, allowed) => log.warn({ open, allowed }, 'workspace pools: over SCOUT_WORKSPACE_POOL_CAP, every pool is in use'),
 );
+// The relay's own budget (SCOUT_RELAY_POOL_CAP): one admin connection per workspace database it polls,
+// so polling every workspace does not churn the request and worker pools above.
+const relayPools = new WorkspacePools(
+  (database) => connect(urlForDatabase(config.databaseAdminUrl, database), 1, IDLE_MS / 1000),
+  () => ({ max: 0, cap: config.relayPoolCap, idleMs: IDLE_MS }),
+  Date.now,
+  (open, allowed) => log.warn({ open, allowed }, 'relay pools: over SCOUT_RELAY_POOL_CAP, every pool is in use'),
+);
 let idleTimer: ReturnType<typeof setInterval> | undefined;
 onCloseDbs(async () => {
   if (idleTimer) clearInterval(idleTimer);
   idleTimer = undefined;
-  await workspacePools.closeAll();
+  await Promise.all([workspacePools.closeAll(), relayPools.closeAll()]);
 });
 
+function startIdleTimer(): void {
+  if (idleTimer) return;
+  idleTimer = setInterval(() => void Promise.all([workspacePools.closeIdle(), relayPools.closeIdle()]), 60_000);
+  idleTimer.unref?.();
+}
+
 function poolsOf(database: string): { app: Db; admin: Db } {
-  if (!idleTimer) {
-    idleTimer = setInterval(() => void workspacePools.closeIdle(), 60_000);
-    idleTimer.unref?.();
-  }
+  startIdleTimer();
   return workspacePools.get(database);
 }
 
@@ -195,9 +206,10 @@ export type PlatformDatabase = { name: string; admin: Db; control: boolean };
 /**
  * Every database with an outbox, for the relay, the scheduler and dead jobs: the control plane
  * (tenancy events, `t_platform` jobs), then each workspace database that is not the control plane's.
- * `shared` mode: the control plane alone, since every workspace lives in it.
+ * `shared` mode: the control plane alone, since every workspace lives in it. `relay`: on the relay's own
+ * connections (`SCOUT_RELAY_POOL_CAP`), not the workspace pools.
  */
-export async function platformDatabases(): Promise<PlatformDatabase[]> {
+export async function platformDatabases(opts: { relay?: boolean } = {}): Promise<PlatformDatabase[]> {
   const control: PlatformDatabase = { name: 'control', admin: controlAdminDb, control: true };
   if (config.workspaceDatabases === 'shared') return [control];
   // A workspace still in the control plane's database is read as the control plane.
@@ -208,7 +220,9 @@ export async function platformDatabases(): Promise<PlatformDatabase[]> {
       name: w.database,
       control: false,
       get admin() {
-        return w.admin;
+        if (!opts.relay) return w.admin;
+        startIdleTimer();
+        return relayPools.admin(w.database);
       },
     })),
   ];

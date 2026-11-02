@@ -84,6 +84,14 @@ describe('per-workspace pools (D35)', () => {
     expect(f.ended).toEqual(['a/app', 'a/admin']);
   });
 
+  it('with max 0 (the relay): one admin connection per database, cap databases at once, no app pools', () => {
+    const f = fixture({ max: 0, cap: 2, idleMs: 600_000 });
+    expect(f.pools.allowed()).toBe(2);
+    f.pools.admin('a');
+    expect(f.opened).toEqual(['a/admin/1']);
+    expect(() => f.pools.get('a')).toThrow('no app pools');
+  });
+
   it('puts the workspace database in a connection URL', () => {
     expect(urlForDatabase('postgres://scout_app:pw@db.local:5432/scout?sslmode=require', 'scout_t_01abc')).toBe(
       'postgres://scout_app:pw@db.local:5432/scout_t_01abc?sslmode=require',

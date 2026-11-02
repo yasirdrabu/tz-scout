@@ -47,18 +47,26 @@ Each process holds, at most:
 | Control plane, admin role (postgres.js default) | 10 | 10 |
 | Workspace pools | 30 (one app pool of `DATABASE_POOL_MAX`, one admin of 10) | `SCOUT_WORKSPACE_POOL_CAP`, 60 (a workspace takes `SCOUT_WORKSPACE_POOL_MAX` + 1 = 4, so 15 open at once) |
 | Relay lock and `LISTEN` (relay role only) | 1 | 1 |
-| **Total** | **61** | **91** |
+| Relay's workspace connections (relay role only, `SCOUT_RELAY_POOL_CAP`) | 0 | 30 (one per workspace database it polls) |
+| **Total, web or worker** | **60** | **90** |
+| **Total, relay** | **61** | **121** |
 
-The cap can be passed for a moment when every open workspace pool was used in the last 10 seconds
-(logged). Pools close after 10 minutes idle. `migrate` adds one connection at a time per database it
-works on (4 workspaces at once).
+A workspace pool is closed only when nothing runs on it (every transaction and query on it is
+counted) and it was not handed out in the last second; when every pool is busy the cap is passed for
+a while, logged, rather than break a transaction. Pools close after 10 minutes idle. `migrate` adds
+one connection at a time per database it works on (4 at once).
+
+The relay polls every active workspace database about once a second, so it has its own budget, one
+admin connection per workspace database, apart from the request and worker pools: set
+`SCOUT_RELAY_POOL_CAP` to the number of active workspaces or more, or its connections are opened and
+closed as it goes round. Over the cap it still works, more slowly.
 
 Postgres' default `max_connections` is 100, so the four background and web roles of the compose stack
-(web, worker, scheduler, relay: up to 4 × 91) need either a larger `max_connections` or smaller limits
-for the roles that do little workspace work. A workable single-VM setting for `per_workspace`: web and
-worker as above (182); scheduler and relay with `DATABASE_POOL_MAX=5`, `SCOUT_WORKSPACE_POOL_CAP=20`
-(at most 36 each, 72); `max_connections = 300` leaves room for `migrate`, backups and an operator
-session. Managed Postgres limits connections by tier: size the tier, or the caps, to the sum. A pooler
+need either a larger `max_connections` or smaller limits for the roles that do little workspace work.
+A workable single-VM setting for `per_workspace` with up to 30 workspaces: web and worker as above
+(180); the scheduler with `DATABASE_POOL_MAX=5`, `SCOUT_WORKSPACE_POOL_CAP=20` (35); the relay with
+`DATABASE_POOL_MAX=5`, `SCOUT_WORKSPACE_POOL_CAP=4` and `SCOUT_RELAY_POOL_CAP=30` (50);
+`max_connections = 300` leaves room for `migrate`, backups and an operator session. Managed Postgres limits connections by tier: size the tier, or the caps, to the sum. A pooler
 in transaction mode (PgBouncer) suits web and worker, not the relay, which needs a session for its
 advisory lock and `LISTEN`.
 
