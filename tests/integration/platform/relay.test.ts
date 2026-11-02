@@ -67,10 +67,10 @@ function startRelay(opts: { natsUrl?: string; listenUrl?: (database: string) => 
 
 /** A TCP proxy to Postgres whose connections can be made to go silent (open, but passing nothing). */
 async function silentProxy(target: URL) {
-  const open: { silent: boolean; client: net.Socket; upstream: net.Socket }[] = [];
+  const open: { silent: boolean; at: number; client: net.Socket; upstream: net.Socket }[] = [];
   const server = net.createServer((client) => {
     const upstream = net.connect(Number(target.port || 5432), target.hostname);
-    const c = { silent: false, client, upstream };
+    const c = { silent: false, at: Date.now(), client, upstream };
     open.push(c);
     client.on('data', (d) => void (c.silent || upstream.write(d)));
     upstream.on('data', (d) => void (c.silent || client.write(d)));
@@ -85,6 +85,8 @@ async function silentProxy(target: URL) {
   return {
     url: url.toString(),
     connections: () => open.filter((c) => !c.client.destroyed).length,
+    /** Connections still open and passing data that were opened after `since`. */
+    liveSince: (since: number) => open.filter((c) => !c.client.destroyed && !c.silent && c.at > since).length,
     /** Every connection open now goes silent; later ones pass as usual. */
     silence: () => open.forEach((c) => (c.silent = true)),
     close: async () => {
@@ -210,8 +212,11 @@ describe('relay', () => {
       await waitFor(() => got.length > 0, 3000);
       await waitFor(() => proxy.connections() > 0, 3000);
       proxy.silence();
-      // The relay finds out (its ping goes unheard) and listens again: events are prompt once more.
+      const silencedAt = Date.now();
+      // The relay finds out (its ping goes unheard) and listens again on a new connection: events are
+      // prompt once more.
       await sleep(12_000);
+      expect(proxy.liveSince(silencedAt)).toBeGreaterThan(0);
       const committed = new Map<number, number>();
       for (let i = 1; i <= 5; i++) {
         await sleep(1100);

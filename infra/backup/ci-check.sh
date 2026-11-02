@@ -28,8 +28,10 @@ if [ "$rows" -eq 0 ]; then
   exit 1
 fi
 
-# A workspace database (D35) is dumped to a file of its own; the template is not dumped.
-for db in scout_t_ci_check scout_t_template; do
+# A workspace database (D35) is dumped to a file of its own; the template is not dumped (named by
+# SCOUT_WORKSPACE_TEMPLATE_DATABASE: a name of the check's own here, so the variable is honoured).
+export SCOUT_WORKSPACE_TEMPLATE_DATABASE=scout_t_ci_template
+for db in scout_t_ci_check scout_t_ci_template; do
   if [ "$(psql -X -At -c "select count(*) from pg_database where datname = '$db'")" -eq 0 ]; then
     psql -X -q -c "create database $db"
     made="$made $db"
@@ -44,7 +46,7 @@ if ! pg_restore -l "$ws_dump" | grep -q "TABLE public ci_rows"; then
   echo "ci-check: the workspace database's dump has no ci_rows table" >&2
   exit 1
 fi
-if ls "$BACKUP_DIR"/scout_t_template-*.dump >/dev/null 2>&1; then
+if ls "$BACKUP_DIR"/scout_t_ci_template-*.dump >/dev/null 2>&1; then
   echo "ci-check: the template database was backed up" >&2
   exit 1
 fi

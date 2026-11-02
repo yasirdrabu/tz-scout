@@ -5,7 +5,7 @@
 #
 # Connection: standard libpq variables (PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE). PGDATABASE
 # is the control plane; the workspace databases are every scout_t_* database on the same server but
-# the template (scout_t_template), listed from pg_database.
+# the template (SCOUT_WORKSPACE_TEMPLATE_DATABASE, default scout_t_template), listed from pg_database.
 # BACKUP_DIR     where dumps are kept (default /backups)
 # BACKUP_REMOTE  optional rclone destination such as r2:scout-backups. Unset means local only.
 # Retention is 14 days, local and remote. A database that fails to dump does not stop the others;
@@ -18,10 +18,14 @@ stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
 mkdir -p "$BACKUP_DIR"
 control="$(psql -X -v ON_ERROR_STOP=1 -At -c 'select current_database()')"
-workspaces="$(psql -X -v ON_ERROR_STOP=1 -At -c "
-  select datname from pg_database
-  where datname like 'scout\_t\_%' and datname <> 'scout_t_template' and not datistemplate
-  order by 1")"
+template="${SCOUT_WORKSPACE_TEMPLATE_DATABASE:-scout_t_template}"
+# psql does not expand variables inside -c, so the query goes in on stdin.
+workspaces="$(psql -X -v ON_ERROR_STOP=1 -At -v template="$template" <<'SQL'
+select datname from pg_database
+where datname like 'scout\_t\_%' and datname <> :'template' and not datistemplate
+order by 1
+SQL
+)"
 
 partial=""
 # Write to a partial name so a failed dump is never mistaken for a backup.
