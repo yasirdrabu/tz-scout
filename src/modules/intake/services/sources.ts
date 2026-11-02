@@ -546,6 +546,7 @@ export const intakeSourceInfo: SourceInfoProvider = {
     const total = levels.reduce((s, k) => s + LEVEL_WEIGHTS[k], 0);
     return levels.reduce((s, k) => s + LEVEL_WEIGHTS[k] * (trust.get(chain[k]!) ?? NEW_SOURCE_TRUST), 0) / total;
   },
+  sourceNames,
   /** Every source in the chain of an arrival that resolved to the account. */
   sourcesForAccount: async (ctx, accountId) => {
     const rows = await ctx.tx

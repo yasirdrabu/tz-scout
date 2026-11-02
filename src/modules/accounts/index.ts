@@ -51,7 +51,8 @@ export {
   type FloorBasics,
   type ScoringView,
 } from './services/read';
-export { exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';
+export { conflictExplainHandler, exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';
+export { conflictExplainJob } from './contracts/jobs';
 export { mergeAccounts } from './services/merge';
 export { countAccounts, countAccountsBy, oldestCreatedAt, search, type FacetKey, type SearchQuery, type SearchRow, type SearchSort } from './services/search';
 export { listExclusionLists, listExclusionRules, setExclusionList, setExclusionRule, type ExclusionRuleView } from './services/settings';

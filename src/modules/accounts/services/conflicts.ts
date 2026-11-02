@@ -2,8 +2,9 @@ import { and, asc, desc, eq, gte, inArray, or, sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
-import { publish } from '@/platform/events/outbox';
+import { enqueueJob, publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
+import { conflictExplainJob } from '../contracts/jobs';
 import { accountUpdated, conflictDetected, conflictResolved, personUpdated } from '../contracts/events';
 import { sourceInfoProvider } from '../contracts/ports';
 import type { FactView, SourceChain } from '../contracts/types';
@@ -83,6 +84,8 @@ async function conflictChanged(
     { conflictId: c.id, accountId: c.accountId, ...(c.personId ? { personId: c.personId } : {}), key: c.key, factIds: c.factIds, sourceIds },
     { type: 'account', id: c.accountId },
   );
+  // Claude runs later, in a job, and explains the facts the conflict has by then.
+  await enqueueJob(ctx, conflictExplainJob, { conflictId: c.id });
 }
 
 /** Writes `account_summary.open_conflict_count` from the conflict table. */
