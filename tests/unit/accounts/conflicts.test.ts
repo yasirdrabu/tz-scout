@@ -55,6 +55,15 @@ describe('differs', () => {
     expect(differs('revenue_cents', 100, 'lots')).toBe(false);
     expect(differs('budget_cents', undefined, 5)).toBe(false);
   });
+  it('review edge cases', () => {
+    expect(differs('industry_key', 'Transit', 'transit')).toBe(true);
+    expect(differs('phone', 'n/a', 'none')).toBe(false);
+    expect(differs('employees', 0, 5)).toBe(true);
+    expect(differs('revenue_cents', 75, 100)).toBe(false); // exactly 25%
+    expect(differs('employees', '3000', 5000)).toBe(false);
+    expect(differs('email', null, 'a@x.gov')).toBe(false);
+    expect(differs('employees', -100, -200)).toBe(true);
+  });
   it('keys that never conflict never differ', () => {
     expect(differs('description', 'a', 'b')).toBe(false);
     expect(differs('employees_min', 1, 100)).toBe(false);

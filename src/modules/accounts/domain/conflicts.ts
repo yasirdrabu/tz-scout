@@ -32,11 +32,14 @@ export const differs = (key: string, a: unknown, b: unknown): boolean => {
   const tol = toleranceFor(key);
   if (!tol) return false;
   if (tol.kind === 'count' || tol.kind === 'money') {
-    if (typeof a !== 'number' || typeof b !== 'number') return false;
-    const larger = Math.max(Math.abs(a), Math.abs(b));
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+    const [x, y] = [a as number, b as number];
+    const larger = Math.max(Math.abs(x), Math.abs(y));
     if (larger === 0) return false;
-    return (Math.abs(a - b) / larger) * 100 > tol.percent!;
+    return (Math.abs(x - y) / larger) * 100 > tol.percent!;
   }
   if (a == null || b == null) return false;
-  return normalise(key, a) !== normalise(key, b);
+  if (tol.kind === 'category') return a !== b;
+  const [na, nb] = [normalise(key, a), normalise(key, b)];
+  return na !== '' && nb !== '' && na !== nb;
 };
