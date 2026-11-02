@@ -25,6 +25,7 @@ export const DEFAULT_DATA_LIMIT: Record<Role, DataLimit> = {
   leader: { kind: 'all' },
   seller: { kind: 'own_accounts' },
   operator: { kind: 'all' },
+  viewer: { kind: 'all' },
 };
 
 /** Default limit: by role for people, `own_source` for keys and OAuth grants. */

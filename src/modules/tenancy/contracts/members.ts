@@ -1,7 +1,7 @@
 import type { DataLimit } from '@/platform/access';
 import type { Permission } from '../domain/permissions';
 
-export const ROLES = ['owner', 'leader', 'seller', 'operator'] as const;
+export const ROLES = ['owner', 'leader', 'seller', 'operator', 'viewer'] as const;
 export type Role = (typeof ROLES)[number];
 
 export type MembershipStatus = 'invited' | 'active' | 'suspended' | 'removed';

@@ -8,6 +8,7 @@ const ROLE_NAMES: Record<string, { label: string; about: string }> = {
   operator: { label: 'Operator', about: 'Runs sources, batches, imports and the review queue.' },
   leader: { label: 'Sales leader', about: 'Sees every seller, assigns accounts, edits offers and playbooks.' },
   seller: { label: 'Account executive', about: 'Works their own accounts and playbook steps.' },
+  viewer: { label: 'Viewer', about: 'Read-only pipeline and scorecard.' },
 };
 
 export const roleLabel = (role: string) => ROLE_NAMES[role]?.label ?? role.charAt(0).toUpperCase() + role.slice(1);

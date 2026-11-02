@@ -97,7 +97,7 @@ describe('Roles and permissions tab', () => {
   }
 
   it('shows the read-only matrix with the API labels and groups', async () => {
-    serve();
+    serve(undefined, ['members:read']);
     await openRoles();
     const table = await screen.findByRole('table');
     expect(within(table).getByRole('columnheader', { name: 'Sales leader' })).toBeInTheDocument();

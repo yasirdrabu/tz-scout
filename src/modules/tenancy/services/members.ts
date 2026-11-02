@@ -10,9 +10,10 @@ import { ROLES, CRM_OWNER_TAKEN, type DataLimit, type Member, type MembershipSta
 import { DEFAULT_DATA_LIMIT, DataLimitSchema, isWithin } from '../domain/data-limit';
 import { displayNameFromEmail } from '../domain/display-name';
 import { memberActionRefusal, type MemberAction, type MemberActor, type MemberRefusal } from '../domain/member-rules';
-import { PERMISSIONS, isPermission, permissionsFor, type Permission } from '../domain/permissions';
+import { PERMISSIONS, isPermission, permissionsFor, type Permission, type RoleSets } from '../domain/permissions';
 import { membership, tenant, user } from '../db/schema';
 import { endSessions, signInFacts, type SignInMethod } from './sessions';
+import { loadRoleSets } from './role-sets';
 
 const LAST_OWNER = 'A tenant needs at least one owner.';
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That member was not found.' });
@@ -68,17 +69,24 @@ async function assertAllowed(ctx: ModuleContext, action: MemberAction, m: typeof
  * What the actor may hand out: owners and platform admins (and the platform itself) may make owners
  * and give any role. `dataLimit` is the actor's own (null: nothing can be given).
  */
-type Powers = { makesOwners: boolean; platformAdmin: boolean; permissions: readonly Permission[]; dataLimit: DataLimit | null };
+type Powers = {
+  makesOwners: boolean;
+  platformAdmin: boolean;
+  permissions: readonly Permission[];
+  dataLimit: DataLimit | null;
+  /** The workspace's saved role lists, for judging which roles the actor may give. */
+  roleSets: RoleSets;
+};
 
 const EVERYTHING: DataLimit = { kind: 'all' };
 
 /** The actor's own powers in this tenant, read fresh: nobody grants more than they hold. */
 async function actorPowers(ctx: ModuleContext): Promise<Powers> {
-  const none: Powers = { makesOwners: false, platformAdmin: false, permissions: [], dataLimit: null };
-  if (ctx.actor.kind === 'system') return { makesOwners: true, platformAdmin: true, permissions: PERMISSIONS, dataLimit: EVERYTHING };
+  const none: Powers = { makesOwners: false, platformAdmin: false, permissions: [], dataLimit: null, roleSets: {} };
+  if (ctx.actor.kind === 'system') return { makesOwners: true, platformAdmin: true, permissions: PERMISSIONS, dataLimit: EVERYTHING, roleSets: {} };
   if (ctx.actor.kind !== 'user') return none;
   const [u] = await ctx.tx.select({ platformAdmin: user.platformAdmin }).from(user).where(eq(user.id, ctx.actor.id));
-  if (u?.platformAdmin) return { makesOwners: true, platformAdmin: true, permissions: PERMISSIONS, dataLimit: EVERYTHING };
+  if (u?.platformAdmin) return { makesOwners: true, platformAdmin: true, permissions: PERMISSIONS, dataLimit: EVERYTHING, roleSets: {} };
   // Invited counts too: no request reaches here from an invited membership (a principal needs an
   // active one), but in-process callers such as a new tenant's invited owner still act.
   const [m] = await ctx.tx
@@ -92,13 +100,20 @@ async function actorPowers(ctx: ModuleContext): Promise<Powers> {
       ),
     );
   if (!m) return none;
+  const roleSets = await loadRoleSets(ctx);
   const role = m.role as Role;
   return {
     makesOwners: role === 'owner',
     platformAdmin: false,
-    permissions: permissionsFor(role, (m.extra ?? []).filter(isPermission), false),
+    permissions: permissionsFor(role, (m.extra ?? []).filter(isPermission), false, roleSets),
     dataLimit: effectiveLimit(role, m.dataLimit),
+    roleSets,
   };
+}
+
+/** The actor's permissions in this tenant, read fresh (not from the up to 60 s old request principal). */
+export async function actorPermissions(ctx: ModuleContext): Promise<readonly Permission[]> {
+  return (await actorPowers(ctx)).permissions;
 }
 
 /** The limit a membership works under: its own, else the role default. null when the stored one is invalid. */
@@ -129,7 +144,7 @@ function assertGrantable(powers: Powers, perms: readonly Permission[]): void {
 
 /** Nobody but an owner or platform admin gives a role holding a permission they lack. */
 function assertRoleGrantable(powers: Powers, role: Role): void {
-  if (!powers.makesOwners) assertGrantable(powers, permissionsFor(role, [], false));
+  if (!powers.makesOwners) assertGrantable(powers, permissionsFor(role, [], false, powers.roleSets));
 }
 
 /** Nobody gives practice access (data limit) wider than their own. */
@@ -493,10 +508,11 @@ export async function members(
       ),
     )
     .orderBy(asc(user.name), asc(user.email));
+  const roleSets = await loadRoleSets(ctx);
   const out: Member[] = rows.map(({ extra, ...r }) => {
     const role = r.role as Role;
     const extras = (extra ?? []).filter(isPermission);
-    return { ...r, role, status: r.status as Member['status'], permissions: permissionsFor(role, extras, false) };
+    return { ...r, role, status: r.status as Member['status'], permissions: permissionsFor(role, extras, false, roleSets) };
   });
   const wanted = opts.permission;
   return wanted ? out.filter((m) => m.permissions.includes(wanted)) : out;
@@ -740,8 +756,9 @@ export async function assignableMembers(ctx: ModuleContext): Promise<AssignableM
     .innerJoin(user, eq(user.id, membership.userId))
     .where(and(eq(membership.tenantId, ctx.tenantId), eq(membership.status, 'active')))
     .orderBy(asc(user.name), asc(user.email));
+  const roleSets = await loadRoleSets(ctx);
   return rows
-    .filter((r) => permissionsFor(r.role as Role, (r.extra ?? []).filter(isPermission), false).includes('assignments:respond'))
+    .filter((r) => permissionsFor(r.role as Role, (r.extra ?? []).filter(isPermission), false, roleSets).includes('assignments:respond'))
     .map((r) => ({
       userId: r.userId,
       name: r.name,

@@ -14,7 +14,7 @@ export {
   userForCrmOwner,
 } from './services/members';
 export { ROLES, type Role, type Member, type DataLimit } from './contracts/members';
-export { PERMISSIONS, ROLE_PERMISSIONS, isPermission, permissionsFor, type Permission } from './domain/permissions';
+export { PERMISSIONS, ROLE_PERMISSIONS, isPermission, permissionsFor, roleSet, type Permission, type RoleSets } from './domain/permissions';
 export { PERMISSION_LABELS, permissionLabel } from './domain/permission-labels';
 export { DEFAULT_DATA_LIMIT, DataLimitSchema, defaultDataLimit, describeLimit, isWithin } from './domain/data-limit';
 export { actorFor, can, describeAccess, requirePermission, type Principal } from './contracts/principal';
@@ -64,3 +64,5 @@ export { clientIp } from './services/principal';
 export { clearPreference, getPreference, setPreference } from './services/preferences';
 export { adminTenants, setTenantStatus, type AdminActor, type AdminTenantRow } from './services/tenants';
 export { addPlatformAdmin, platformAdmins, removePlatformAdmin, type PlatformAdmin } from './services/platform-admins';
+export { listRoles, loadRoleSets, setRolePermissions, type RoleView } from './services/roles';
+export { forgetAccess } from './services/principal';

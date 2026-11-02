@@ -640,7 +640,7 @@ playbook when an AE accepts them." Offer, tier checkboxes with "Already uses thi
 
 ### 21a. Members
 
-**Tag** R1 (editable roles and permissions and the Viewer role: Redesign, roles plan; Google sign-in
+**Tag** R1 (editable roles and permissions and the Viewer role since the roles plan, 2026-11-01; Google sign-in
 and allowed domains later) · **Who** `members:read`; changes `members:manage`
 
 Inner tabs `Members ({n})`, `Roles and permissions`, `Login history`.
@@ -668,8 +668,8 @@ Inner tabs `Members ({n})`, `Roles and permissions`, `Login history`.
   invite` come when Scout can send email.
 - **Roles and permissions**: matrix of roles by permissions with the API's labels, grouped Accounts,
   Review and sources, Offers and playbooks, Pipeline and money, Workspace (the "Ask Scout" row is left
-  out with the assistant). Read only until the roles plan lands (Decision 17); then editable per
-  workspace, with the Viewer role as in the mockup. Owner column locked. Platform admin is not a
+  out with the assistant). Editable per workspace since the roles plan (Decision 17), read only without `members:manage`,
+  with the Viewer role as in the mockup. Owner column locked. Platform admin is not a
   column: "Taazaa platform admins can act in every workspace. They aren't a role here." (W8).
   `Restore defaults`, `Discard`, `Save permissions` (toast "Permissions saved. They apply the next
   time each member loads a page.").

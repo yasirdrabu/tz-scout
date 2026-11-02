@@ -4,9 +4,11 @@ import {
   PERMISSIONS,
   ROLE_PERMISSIONS,
   can,
+  defaultDataLimit,
   describeAccess,
   permissionsFor,
   requirePermission,
+  roleSet,
   type Permission,
   type Principal,
 } from '@/modules/tenancy';
@@ -52,6 +54,22 @@ describe('permissions', () => {
     expect(p).toContain('review:act');
     expect(p.filter((x) => x === 'accounts:read')).toHaveLength(1);
     expect(permissionsFor('operator', [], true).length).toBe(35);
+  });
+
+  it('the Viewer role holds exactly the four read permissions', () => {
+    expect([...ROLE_PERMISSIONS.viewer].sort()).toEqual(['accounts:read', 'analytics:read', 'offers:read', 'status:read']);
+    expect(defaultDataLimit('user', 'viewer')).toEqual({ kind: 'all' });
+  });
+
+  it('roleSet: owner is always everything, a saved set drops unknown strings, no row means the default', () => {
+    expect(roleSet('owner', { owner: [] })).toEqual([...PERMISSIONS]);
+    expect(roleSet('seller', { seller: ['accounts:read', 'nope' as never] })).toEqual(['accounts:read']);
+    expect(roleSet('seller', {})).toEqual(ROLE_PERMISSIONS.seller);
+    expect(roleSet('seller', { seller: [] })).toEqual([]);
+  });
+
+  it('permissionsFor uses the workspace set plus extras, in PERMISSIONS order', () => {
+    expect(permissionsFor('seller', ['review:act'], false, { seller: ['accounts:read'] })).toEqual(['accounts:read', 'review:act']);
   });
 
   const principal = (over: Partial<Principal>): Principal => ({
