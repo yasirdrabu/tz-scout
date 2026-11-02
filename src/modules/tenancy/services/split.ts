@@ -2,9 +2,9 @@ import { and, eq } from 'drizzle-orm';
 import postgres from 'postgres';
 import { config } from '@/platform/config';
 import { controlAdminDb } from '@/platform/db/client';
-import { closeWorkspacePools, forgetWorkspace } from '@/platform/db/doors';
+import { closeWorkspacePools, forgetWorkspace, moveLockKey } from '@/platform/db/doors';
 import { createDatabase, databaseExists, migrateWorkspaceDatabase } from '@/platform/db/migrate';
-import { copyTenantRows, deleteTenantRows, type TableCount } from '@/platform/db/move';
+import { copyTenantRows, countTenantRows, deleteTenantRows, type TableCount } from '@/platform/db/move';
 import { urlForDatabase } from '@/platform/db/workspace-pools';
 import { log } from '@/platform/log';
 import { workspaceInfra } from '../db/schema';
@@ -56,23 +56,33 @@ export async function splitWorkspace(tenantId: string, opts: { settleMs?: number
     const shared = controlDatabase();
     const own = workspaceDatabaseName(tenantId);
 
-    // Moved before, but its rows were not all deleted from the shared database: finish that.
-    if (row.database === own && row.status === 'active') {
-      const deleted = await deleteTenantRows(adminUrl(shared), tenantId);
-      return { tenantId, outcome: 'cleaned', database: own, deleted };
+    if (row.database !== shared) {
+      // Moved before, but its rows were not all deleted from the shared database: finish that. A
+      // workspace made in its own database has none there, and is left alone.
+      if (row.database === own && row.status === 'active' && (await countTenantRows(adminUrl(shared), tenantId)).some((c) => c.rows > 0)) {
+        const deleted = await deleteTenantRows(adminUrl(shared), tenantId);
+        return { tenantId, outcome: 'cleaned', database: own, deleted };
+      }
+      return { tenantId, outcome: 'skipped', reason: `it is already in its own database (${row.database})` };
     }
     // A split that stopped part way leaves it `moving` in the shared database: start again from there.
-    const resuming = row.status === 'moving' && row.database === shared;
-    if (row.database !== shared || (row.status !== 'active' && !resuming)) {
-      return { tenantId, outcome: 'skipped', reason: `it is ${row.status} in ${row.database}` };
-    }
+    const resuming = row.status === 'moving';
+    if (row.status !== 'active' && !resuming) return { tenantId, outcome: 'skipped', reason: `it is ${row.status}` };
 
     const inShared = and(eq(workspaceInfra.tenantId, tenantId), eq(workspaceInfra.database, shared));
     if (!resuming) {
-      await controlAdminDb.update(workspaceInfra).set({ status: 'moving', updatedAt: new Date() }).where(and(inShared, eq(workspaceInfra.status, 'active')));
+      const marked = await controlAdminDb
+        .update(workspaceInfra)
+        .set({ status: 'moving', updatedAt: new Date() })
+        .where(and(inShared, eq(workspaceInfra.status, 'active')))
+        .returning({ tenantId: workspaceInfra.tenantId });
       forgetWorkspace(tenantId);
+      if (marked.length === 0) return { tenantId, outcome: 'skipped', reason: 'its status changed as the split started' };
     }
     await new Promise((r) => setTimeout(r, opts.settleMs ?? SPLIT_SETTLE_MS));
+    // Work that began before `moving` reached every instance holds the move lock shared until it
+    // commits: wait for it, then hold the lock until the switch, so nothing more is written there.
+    await lock`select pg_advisory_lock(hashtext(${moveLockKey(tenantId)}))`;
 
     let copied: TableCount[];
     let versions: Awaited<ReturnType<typeof migrateWorkspaceDatabase>>['versions'];
@@ -82,16 +92,22 @@ export async function splitWorkspace(tenantId: string, opts: { settleMs?: number
       await createDatabase(own, template);
       ({ versions } = await migrateWorkspaceDatabase(adminUrl(own)));
       copied = await copyTenantRows(adminUrl(shared), adminUrl(own), tenantId);
-      await controlAdminDb
+      const switched = await controlAdminDb
         .update(workspaceInfra)
         .set({ database: own, status: 'active', schemaVersions: versions, updatedAt: new Date() })
-        .where(and(inShared, eq(workspaceInfra.status, 'moving')));
+        .where(and(inShared, eq(workspaceInfra.status, 'moving')))
+        .returning({ tenantId: workspaceInfra.tenantId });
+      // Something changed the row meanwhile (scout migrate marking it failed, say): it is still served
+      // from the shared database, so nothing there may be deleted.
+      if (switched.length === 0) throw new Error('Its registry row changed during the move; nothing was switched.');
       forgetWorkspace(tenantId);
     } catch (e) {
       await dropDatabase(own).catch(() => undefined);
       await controlAdminDb.update(workspaceInfra).set({ status: 'active', updatedAt: new Date() }).where(and(inShared, eq(workspaceInfra.status, 'moving')));
       forgetWorkspace(tenantId);
       throw e;
+    } finally {
+      await lock`select pg_advisory_unlock(hashtext(${moveLockKey(tenantId)}))`;
     }
     let deleted: TableCount[] = [];
     try {

@@ -16,14 +16,15 @@ describe('doors in shared mode (D35)', () => {
   it('resolves every workspace to the same pools, on the control plane database', async () => {
     const a = await workspaceDb('t_door_a');
     const b = await workspaceDb('t_door_b');
-    expect(a).toBe(b);
+    expect(a.app).toBe(b.app);
+    expect(a.admin).toBe(b.admin);
     expect(await dbName(a.app)).toBe(await dbName(controlDb));
     expect(await dbName(a.admin)).toBe(await dbName(controlAdminDb));
     expect(await listWorkspaceDatabases()).toEqual([{ tenantId: '*', database: await dbName(controlDb), admin: a.admin }]);
   });
 
   it('sends t_platform to the control plane and every other tenant to its workspace', async () => {
-    expect(await workspaceDb(PLATFORM_TENANT)).toEqual({ app: controlDb, admin: controlAdminDb });
+    expect(await workspaceDb(PLATFORM_TENANT)).toEqual({ app: controlDb, admin: controlAdminDb, inShared: false });
     expect(await withTenant(PLATFORM_TENANT, async (tx) => isControlTx(tx))).toBe(true);
     expect(await withTenant('t_door_a', async (tx) => isControlTx(tx))).toBe(false);
   });

@@ -302,7 +302,12 @@ ${USAGE}`);
       const [sub, ...args] = rest;
       if (sub !== 'split') throw new Error(`Unknown command: tenant ${sub ?? ''}\n\n${USAGE}`);
       const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { all: { type: 'boolean' }, 'settle-seconds': { type: 'string' } } });
-      return splitTenants(values.all ? undefined : positionals[0], values.all === true, Number(values['settle-seconds'] ?? 65) * 1000);
+      const settle = values['settle-seconds'] ?? '65';
+      if (!/^\d+$/.test(settle)) throw new Error(`--settle-seconds takes a whole number of seconds, 0 or more (not "${settle}").`);
+      if (Number(settle) < 65) {
+        console.warn(`--settle-seconds ${settle}: under 65, another instance may still serve the workspace from its cache while it is copied. Only for a single instance.`);
+      }
+      return splitTenants(values.all ? undefined : positionals[0], values.all === true, Number(settle) * 1000);
     }
     case 'tenants:create': {
       const { values } = parseArgs({

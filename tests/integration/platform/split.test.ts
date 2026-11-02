@@ -6,14 +6,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { run } from '@/entry/cli';
 import { GET as buyingRoles } from '@/http/routes/v1/buying-roles/route';
 import { GET as stages } from '@/http/routes/v1/stages/route';
-import { createTenant, splitWorkspace, workspaceDatabaseName } from '@/modules/tenancy';
+import { createTenant, provisionWorkspace, splitWorkspace, workspaceDatabaseName } from '@/modules/tenancy';
+import postgres from 'postgres';
 import { tenant, workspaceInfra } from '@/modules/tenancy/db/schema';
 import { config } from '@/platform/config';
 import { adminDb } from '@/platform/db/client';
-import { forgetWorkspace } from '@/platform/db/doors';
+import { forgetWorkspace, withWorkspaceAdmin } from '@/platform/db/doors';
+import { discardDeadJob, retryDeadJob } from '@/platform/dead-jobs';
 import { createDatabase, databaseExists, migrateWorkspaceDatabase } from '@/platform/db/migrate';
-import { schedule } from '@/platform/db/schema';
-import { schedulerTick } from '@/platform/scheduler';
+import { deadJob, schedule } from '@/platform/db/schema';
+import { pauseSchedule, runNow, schedulerTick } from '@/platform/scheduler';
 import { copyTenantRows, countTenantRows, deleteTenantRows, type TableCount } from '@/platform/db/move';
 import { withTenant } from '@/platform/db/tenant';
 import { urlForDatabase } from '@/platform/db/workspace-pools';
@@ -88,7 +90,7 @@ describe('tenant split (D35 "Moving existing workspaces")', () => {
     // The sequence goes on after the copied rows: a new event is written fine.
     await withTenant(t.tenantId, (tx) => publish({ tenantId: t.tenantId, actor: { kind: 'system', id: 'test' }, correlationId: newId('cor'), tx }, probe, { n: 9 }));
     // Again: nothing left to do.
-    expect(await splitWorkspace(t.tenantId, { settleMs: 0 })).toMatchObject({ outcome: 'cleaned', deleted: expect.any(Array) });
+    expect(await splitWorkspace(t.tenantId, { settleMs: 0 })).toMatchObject({ outcome: 'skipped', reason: expect.stringContaining('already in its own database') });
   });
 
   it('while it moves its requests get 503 with Retry-After', async () => {
@@ -208,8 +210,113 @@ describe('a split that stopped part way is finished by running it again', () => 
       out.mockRestore();
     }
     expect(lines[0]).toMatch(new RegExp(`^Workspace ${t.slug}: moved to ${own(t.tenantId)}, \\d+ rows in \\d+ tables\\.$`));
-    expect(lines[1]).toBe(`Workspace ${t.slug}: its last rows deleted from the shared database.`);
+    expect(lines[1]).toBe(`Workspace ${t.slug}: left as it is, it is already in its own database (${own(t.tenantId)}).`);
     await expect(run(['tenant', 'split', 'no-such-workspace', '--settle-seconds', '0'])).rejects.toThrow('No workspace with the slug "no-such-workspace"');
     await expect(run(['tenant', 'split'])).rejects.toThrow('Name a workspace or pass --all.');
+  });
+});
+
+describe('tenant split: no write is lost (Task 6 review)', () => {
+  const ownUrl = (tenantId: string) => urlForDatabase(config.databaseAdminUrl, workspaceDatabaseName(tenantId));
+  const setRow = async (tenantId: string, set: Partial<typeof workspaceInfra.$inferInsert>) => {
+    await adminDb.update(workspaceInfra).set(set).where(eq(workspaceInfra.tenantId, tenantId));
+    forgetWorkspace(tenantId);
+  };
+  const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it('waits for a transaction already running in the shared database, and its writes arrive in the new one', async () => {
+    const t = await sharedWorkspace();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let written = '';
+    // Began before the split: it holds the move lock shared until it commits.
+    const work = withTenant(t.tenantId, async (tx) => {
+      written = (await publish({ tenantId: t.tenantId, actor: { kind: 'system', id: 'test' }, correlationId: newId('cor'), tx }, probe, { n: 42 })).id;
+      await gate;
+    });
+    await tick(100);
+    let finished = false;
+    const split = splitWorkspace(t.tenantId, { settleMs: 0 }).finally(() => (finished = true));
+    // Longer than a whole split takes: without the lock it would have copied (missing the uncommitted
+    // row), switched and deleted by now.
+    await tick(6000);
+    expect(finished).toBe(false);
+    expect(await infra(t.tenantId)).toMatchObject({ status: 'moving', database: shared });
+    release();
+    await work;
+    expect(await split).toMatchObject({ outcome: 'moved' });
+    const moved = postgres(ownUrl(t.tenantId), { max: 1, onnotice: () => {} });
+    try {
+      expect(await moved`select id from platform.outbox where id = ${written}`).toHaveLength(1);
+    } finally {
+      await moved.end();
+    }
+  });
+
+  it('a request that reaches the shared database while a split holds the workspace is 503, not written', async () => {
+    const t = await sharedWorkspace();
+    const held = postgres(config.databaseAdminUrl, { max: 1, onnotice: () => {} });
+    try {
+      await held`select pg_advisory_lock(hashtext(${`ws:${t.tenantId}`}))`;
+      // This instance's cache still says active: the lock refuses it.
+      await expect(withTenant(t.tenantId, async () => 'in')).rejects.toMatchObject({ slug: 'workspace-unavailable', status: 503 });
+    } finally {
+      await held.end();
+    }
+    expect(await withTenant(t.tenantId, async () => 'in')).toBe('in');
+  });
+
+  it('admin actions on its schedules and dead jobs are refused while it moves', async () => {
+    const t = await sharedWorkspace();
+    const deadId = newId('dead');
+    await withWorkspaceAdmin(t.tenantId, (tx) =>
+      tx.insert(deadJob).values({ id: deadId, tenantId: t.tenantId, consumerOrJob: 'test.consumer', envelope: { id: deadId }, lastError: 'boom', attempts: 3 }),
+    );
+    const [sch] = await adminDb.select().from(schedule).where(eq(schedule.tenantId, t.tenantId)).limit(1);
+    await setRow(t.tenantId, { status: 'moving' });
+    const admin = { actor: { kind: 'user', id: 'usr_admin' } as const };
+    const refused = { slug: 'workspace-unavailable' };
+    await expect(retryDeadJob(admin, deadId)).rejects.toMatchObject(refused);
+    await expect(discardDeadJob(admin, deadId)).rejects.toMatchObject(refused);
+    await expect(pauseSchedule(admin, sch!.id)).rejects.toMatchObject(refused);
+    await expect(runNow(admin, sch!.id)).rejects.toMatchObject(refused);
+    expect(await adminDb.select().from(deadJob).where(eq(deadJob.id, deadId))).toHaveLength(1);
+    await setRow(t.tenantId, { status: 'active' });
+  });
+
+  it('when its row changes during the move (scout migrate marks it failed), nothing is switched or deleted', async () => {
+    const t = await sharedWorkspace();
+    const counts = nonEmpty(await countTenantRows(sharedUrl, t.tenantId));
+    const split = splitWorkspace(t.tenantId, { settleMs: 400 });
+    await tick(150);
+    await adminDb.update(workspaceInfra).set({ status: 'failed', failedStep: 'migrate' }).where(eq(workspaceInfra.tenantId, t.tenantId));
+    await expect(split).rejects.toThrow('Its registry row changed during the move');
+    expect(await infra(t.tenantId)).toMatchObject({ status: 'failed', database: shared });
+    expect(nonEmpty(await countTenantRows(sharedUrl, t.tenantId))).toEqual(counts);
+    expect(await databaseExists(workspaceDatabaseName(t.tenantId))).toBe(false);
+  });
+
+  it('leaves a workspace made in its own database alone, and the control plane rows under its id', async () => {
+    const admin = await seedUser({ admin: true });
+    const owner = await seedUser({ signedIn: true });
+    const t = await createTenant(admin.actor, { slug: uniqueSlug(), name: 'Own from the start', currency: 'USD', timezone: 'UTC', ownerEmail: owner.email });
+    dropAfter(workspaceDatabaseName(t.tenantId));
+    expect(await provisionWorkspace(t.tenantId)).toBe('active');
+    const before = await countTenantRows(sharedUrl, t.tenantId);
+    expect(await splitWorkspace(t.tenantId, { settleMs: 0 })).toMatchObject({ outcome: 'skipped', reason: expect.stringContaining('already in its own database') });
+    expect(await countTenantRows(sharedUrl, t.tenantId)).toEqual(before);
+  });
+
+  it('--settle-seconds takes a whole number; under 65 it warns', async () => {
+    await expect(run(['tenant', 'split', 'x', '--settle-seconds', 'soon'])).rejects.toThrow('--settle-seconds takes a whole number');
+    await expect(run(['tenant', 'split', 'x', '--settle-seconds=-5'])).rejects.toThrow('--settle-seconds takes a whole number');
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => void warned.push(a.join(' ')));
+    try {
+      await expect(run(['tenant', 'split', 'no-such-workspace', '--settle-seconds', '5'])).rejects.toThrow('No workspace');
+    } finally {
+      warn.mockRestore();
+    }
+    expect(warned[0]).toContain('under 65');
   });
 });

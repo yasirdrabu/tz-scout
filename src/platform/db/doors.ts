@@ -153,11 +153,38 @@ export type WorkspaceOpen = { provisioning?: boolean };
  * The connections for one workspace: `app` (row level security applies) and `admin` (bypasses it).
  * `t_platform` is the control plane; every other tenant goes where `workspaceRoute` says.
  */
-export async function workspaceDb(tenantId: string, opts: WorkspaceOpen = {}): Promise<{ app: Db; admin: Db }> {
-  if (tenantId === PLATFORM_TENANT) return { app: controlDb, admin: controlAdminDb };
+export async function workspaceDb(tenantId: string, opts: WorkspaceOpen = {}): Promise<{ app: Db; admin: Db; inShared: boolean }> {
+  if (tenantId === PLATFORM_TENANT) return { app: controlDb, admin: controlAdminDb, inShared: false };
   // Provisioning reads the row fresh: a cached one may still say `failed` from before a retry.
   const route = workspaceRoute(tenantId, await infoFor(tenantId, opts.provisioning), config.workspaceDatabases, opts.provisioning);
-  return 'database' in route ? poolsOf(route.database) : sharedWorkspace;
+  if (!('database' in route)) return { ...sharedWorkspace, inShared: false };
+  return { ...poolsOf(route.database), inShared: route.database === controlDatabase() };
+}
+
+/** The advisory lock key a split of `tenantId` holds exclusively while it copies (D35). */
+export const moveLockKey = (tenantId: string) => `ws:${tenantId}`;
+
+/**
+ * In a transaction on the shared database (a workspace not moved out yet, `per_workspace` mode): take
+ * the workspace's move lock shared, for the rest of the transaction, so a split waits for this work to
+ * commit before it copies. Never waits: while a split holds the lock the workspace is moving, so it
+ * is 503 (a stale cache may still have let the request this far).
+ */
+export async function holdAgainstMove(tx: Tx, tenantId: string): Promise<void> {
+  const [row] = await tx.execute<{ ok: boolean }>(sql`select pg_try_advisory_xact_lock_shared(hashtext(${moveLockKey(tenantId)})) as ok`);
+  if (!row?.ok) throw unavailable('moving');
+}
+
+/**
+ * For platform-admin work on a workspace's row found by id (a schedule, a dead job), in `tx` on the
+ * database holding it: 503 `workspace-unavailable` unless the workspace is open, reading the registry
+ * fresh, and held against a move like any workspace transaction.
+ */
+export async function assertWorkspaceOpen(tx: Tx, tenantId: string): Promise<void> {
+  if (tenantId === PLATFORM_TENANT) return;
+  const info = await infoFor(tenantId, true);
+  if (info && info.status !== 'active') throw unavailable(info.status);
+  if (config.workspaceDatabases === 'per_workspace' && (!info || info.database === controlDatabase())) await holdAgainstMove(tx, tenantId);
 }
 
 /**
@@ -313,6 +340,9 @@ export function workspaceTx(tx: Tx): Tx {
 /** Runs `fn` in a transaction on one workspace's database as `scout_admin`, for work across row level security there. */
 export async function withWorkspaceAdmin<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
   if (tenantId === PLATFORM_TENANT) return withControlAdmin(fn);
-  const { admin } = await workspaceDb(tenantId);
-  return admin.transaction((tx) => fn(workspaceTx(tx)));
+  const { admin, inShared } = await workspaceDb(tenantId);
+  return admin.transaction(async (tx) => {
+    if (inShared) await holdAgainstMove(tx, tenantId);
+    return fn(workspaceTx(tx));
+  });
 }

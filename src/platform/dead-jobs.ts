@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { scrubError } from '@/platform/scrub-error';
 import { platformAudit } from './audit';
 import { controlAdminDb } from './db/client';
-import { inDatabaseHolding, mapPlatformDatabases, withWorkspaceAdmin } from './db/doors';
+import { assertWorkspaceOpen, inDatabaseHolding, mapPlatformDatabases, withWorkspaceAdmin } from './db/doors';
 import type { Tx } from './db/tenant';
 import { deadJob, outbox } from './db/schema';
 import { ScoutError } from './errors';
@@ -112,6 +112,8 @@ export async function retryDeadJob(adminCtx: AdminCtx, deadJobId: string): Promi
   const found = await inDatabaseHolding(adminCtx.tx, async (tx, db) => {
     const [row] = await tx.select().from(deadJob).where(eq(deadJob.id, deadJobId)).for('update');
     if (!row) return undefined;
+    // A workspace being made, moved or suspended is not changed under it (D35).
+    await assertWorkspaceOpen(tx, row.tenantId);
     const original = EnvelopeSchema.parse(row.envelope) as Envelope;
     let sentId: string;
     if (original.type.startsWith(JOB_PREFIX)) {
@@ -154,6 +156,9 @@ export async function retryDeadJob(adminCtx: AdminCtx, deadJobId: string): Promi
 /** Deletes a dead job without running it again. */
 export async function discardDeadJob(adminCtx: AdminCtx, deadJobId: string): Promise<void> {
   const found = await inDatabaseHolding(adminCtx.tx, async (tx, db) => {
+    const [found] = await tx.select({ tenantId: deadJob.tenantId }).from(deadJob).where(eq(deadJob.id, deadJobId)).for('update');
+    if (!found) return undefined;
+    await assertWorkspaceOpen(tx, found.tenantId);
     const [row] = await tx.delete(deadJob).where(eq(deadJob.id, deadJobId)).returning();
     if (!row) return undefined;
     await platformAudit(

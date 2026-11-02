@@ -1,7 +1,7 @@
 import { and, eq, lte } from 'drizzle-orm';
 import { CronExpressionParser } from 'cron-parser';
 import type { controlAdminDb } from './db/client';
-import { inDatabaseHolding, platformDatabases, withControlAdmin, withWorkspaceAdmin, workspaceOpen, type PlatformDatabase } from './db/doors';
+import { assertWorkspaceOpen, inDatabaseHolding, platformDatabases, withControlAdmin, withWorkspaceAdmin, workspaceOpen, type PlatformDatabase } from './db/doors';
 import { schedule } from './db/schema';
 import { PLATFORM_TENANT, platformAudit, type AuditEntry } from './audit';
 import type { AdminCtx } from './dead-jobs';
@@ -142,7 +142,10 @@ async function onScheduleRow<T>(
 ): Promise<T> {
   const found = await inDatabaseHolding(adminCtx.tx, async (tx, db) => {
     const [row] = await tx.select().from(schedule).where(eq(schedule.id, id)).for('update');
-    return row ? { value: await fn(tx, row, db) } : undefined;
+    if (!row) return undefined;
+    // A workspace being made, moved or suspended is not changed under it (D35).
+    await assertWorkspaceOpen(tx, row.tenantId);
+    return { value: await fn(tx, row, db) };
   });
   if (!found) throw notFound(id);
   return found.value;
