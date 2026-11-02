@@ -19,6 +19,7 @@ status. People decide (D6).
 | `offer_match` | `id`, `tenant_id`, `account_id`, `offer_id`, `fit`, `intent`, `match_total`, `tier`, `fit_parts` (json), `rule_hits` (json), `disqualified_reason`, `profile_version`, `computed_at` | One row per account per approved offer. Replaced on each scoring. |
 | `account_score` | `account_id` (pk with tenant), `version`, `best_offer_id`, `practice_id`, `fit`, `intent`, `match_total`, `warm_points`, `warm_introducer_id`, `trust`, `trust_modifier`, `priority`, `tier`, `tier_reason` (`computed` or `research_floor` or `warm_intro_floor`), `revenue_potential_cents`, `revenue_band` (`low`, `medium`, `high`), `explanation` (json, see explain-score.md), `inputs_hash`, `profile_version`, `computed_at` | Current score for the account. The one every other module reads. |
 | `score_change` | `id`, `tenant_id`, `account_id`, `from_priority`, `to_priority`, `from_tier`, `to_tier`, `from_offer_id`, `to_offer_id`, `cause` (`new_signal`, `new_fact`, `rules_changed`, `offer_changed`, `trust_changed`, `warm_intro`, `manual_rescore`, `ageing`), `cause_event_id`, `at` | History, so "why did this move" has an answer. Kept 2 years. A row is written only when priority, tier or best offer moved. `ageing` is the nightly time-only rescore. |
+| `rescore_run` (`rsr_`) | `id`, `tenant_id`, `cause`, `filter` (json), `requested_by`, `total`, `done`, `paging_done`, `started_at`, `finished_at`, `updated_at` | One row per tenant-wide rescore (R2a): each page of accounts adds to `total`, each accounts message to `done` (guarded by `rescore_run_part`, so a retried message counts once). Stalled after 15 minutes with no progress. |
 
 Signal rules are owned by Offers and practices (they are per offer). Warm-intro points and source trust
 are owned by Sources and intake. Scoring reads them through those modules' public interfaces.
@@ -78,7 +79,8 @@ JSON field names are snake_case (data-conventions.md).
 | `GET /api/v1/accounts/{id}/score/history` | `accounts:read` | Score changes with causes |
 | `GET /api/v1/scoring/profile`, `PUT /api/v1/scoring/profile` | `scoring:manage` | Read or update weights and thresholds, with validation, ranges and an audit entry; PUT returns 202, rescoring runs in the background. The weights screen and preview are R2 |
 | `POST /api/v1/scoring/profile/reset` | `scoring:manage` | Back to the defaults; 202, it starts a rescore |
-| `POST /api/v1/rescore` | `scoring:manage` | Rescore the tenant or a filter (practice, source); 202 with job id. Progress is visible from R2 (SCO-E5-S4-AC1) |
+| `POST /api/v1/rescore` | `scoring:manage` | Rescore the tenant or a filter (practice, source); 202 with job id and `rescore_id`. Progress is visible from R2a (SCO-E5-S4-AC1) |
+| `GET /api/v1/scoring/rescores/latest` | `review:act` or `scoring:manage` | The tenant's latest rescore run: `{id, cause, total, done, started_at, finished_at, stalled}` or null; a count, no account data (R2a) |
 
 ## MCP tools
 

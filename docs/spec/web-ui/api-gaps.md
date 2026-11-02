@@ -506,7 +506,8 @@ Files: `src/http/routes/v1/review-queue/**`, `src/http/routes/v1/accounts/[id]/{
 | 2 | "Oldest arrived {age} ago"; empty footnote "Last account reviewed {when}" | SMALL GAP | `GET /api/v1/review-queue/count` | Add `oldest_arrived_at` (min `created_at` of the counted set) and `last_reviewed_at` (max `routing.status_change.at` to a counts-as-reviewed status). |
 | 2 | Review status list (labels, tone) for dots, filter and inline select | SMALL GAP | `GET /api/v1/settings/review` | Needs `settings:manage` (owner only); leaders and sellers cannot read it. Allow `review:act` or `assignments:respond` to read, or add `GET /api/v1/review-settings`. `getReviewSettings` returns `statuses[]` and `decline_reasons[]`. |
 | 2 | Flags the spec lacks: `declined_by_seller` (seller, reason, when), `new_from`, `handoff_needs_decision`, `handoff_failed` | READY | `QueueRow.flags` | SPA needs chips for them. |
-| 2 | Flags "{n} conflicts", "Enrichment requested" | LATER (R2) | none | Conflicts and enrichment requests are R2. |
+| 2 | Flag "{n} conflicts" | READY | `GET /api/v1/review-queue` `conflict_count` on the row; `flag=conflicts` | From `account_summary.open_conflict_count`, written with detect and resolve (R2a). |
+| 2 | Flag "Enrichment requested" | LATER (R2) | none | Enrichment requests are R2. |
 | 2 | Bulk assign (up to 50) | READY | `POST /api/v1/review-queue/bulk` `{account_ids, action:'assign', seller_user_id, notes, lead_offer_id, ownership_decision}` (`review:act` + `assign:act`) | `MAX_BULK` 50: "select all visible" with pages up to 200 must cap. `results[]` per account `{ok}` or `{ok:false,status,message}`; a `stop` preflight is a per-account 409 unless that account is kept: `ownership_decisions:{[account_id]:'keep'}` per account (or `ownership_decision` for all). Uses the stored CRM check (`fresh:false`). |
 | 2, 6 | Bulk assign warning listing each affected account | READY | `POST /api/v1/review-queue/assign-preview` `{account_ids[1..50], seller_user_id}` (`assign:act`, people only) | `{data[{account_id, ok:true, preflight, approves_to, replaces} | {account_id, ok:false, status, message}]}` in the order asked; uses the stored check (`fresh:false`), each account in its own savepoint (Ruling 17). |
 | 2, 5 | Bulk send back with one reason | SMALL GAP | `POST /api/v1/review-queue/bulk` `{action:'status', to, note, reason_key}` | Needs a `returns_to_source` status (none seeded); requires a note, not a reason. Decision 1. |
@@ -608,7 +609,7 @@ Files: `src/http/routes/v1/accounts/**`, `src/http/routes/v1/people/**`; service
 | 4 | Error "Batch B-1042 is still matching facts" | SMALL GAP | none | An unresolved arrival has no account, so the page is a 404. Arrival state lives at `GET /api/v1/arrivals/{id}`. Drop the state (Spec corrections). |
 | 4a | Why now: dated signals, newest first | READY | `GET /api/v1/accounts/{id}` `signals[]` | `title, detail, url, occurred_at, kind, type, source_chain`, `source_name` (nearest of vendor, agent, person) and `source_names{person,agent,vendor}`, no `arrivals:read` needed. Filter `occurred_at != null` for the two in the drawer (§3). |
 | 4a | Account facts with source and date | READY | `GET /api/v1/accounts/{id}/facts[?field][&include=history]` (`accounts:read`) | `FactView`: key, value, status (current, candidate, superseded), source_chain, observed_at, url, note, pinned_by. Source names need `GET /api/v1/sources` (`arrivals:read`, sellers cannot): resolve names in the response. |
-| 4a | Conflict badge, side by side, `Keep this one` | LATER (R2) | none | Candidate facts exist; no conflict list or pin endpoint. |
+| 4a | Conflict badge, side by side, `Keep this one` | READY | `GET /api/v1/accounts/{id}/conflicts` (`accounts:read`), `POST /api/v1/conflicts/{id}:resolve` `{kept_fact_id, note?}` (`review:act`, people only) | Open and resolved in the last 30 days, each with `label`, `facts[]` (value, source names, observed_at), `kept_fact_id`, `resolved_by_name`, `resolution`, `explanation`; person contact conflicts need `people:read`. Resolve is 400 for a fact not in the conflict, 409 for a replaced value; on a resolved conflict it switches the kept value (R2a, ACC-E3). |
 | 4a | Buying committee: people, titles, roles, notes | READY | `GET /api/v1/accounts/{id}/people` (`accounts:read`; contact fields need `people:read`) | `PersonView.roles[{key,origin}]`, `decision_note`, `is_primary`. Role labels need a lookup. |
 | 4a | Role labels | READY | `roles[].label` on the account read and `GET /api/v1/accounts/{id}/people`; `GET /api/v1/buying-roles` (`accounts:read`) `{data[{key,label}]}`, active ones by sort | |
 | 4a | `Add a person` | READY | `POST /api/v1/accounts/{id}/people` (`people:write`) | Inline arrival; returns `{arrival_id, person_id, already_known}`; roles in `role_keys`. Edit with `PATCH /api/v1/people/{id}`. |
@@ -621,7 +622,8 @@ Files: `src/http/routes/v1/accounts/**`, `src/http/routes/v1/people/**`; service
 | 8 | Owner filter, "Unassigned" | SMALL GAP | `GET /api/v1/accounts` `owner_user_id` (accepts `me`), `unassigned=true` | Service supports both; route does not read them. |
 | 8 | Sort by stage, then priority | SMALL GAP | `GET /api/v1/accounts` `sort=stage_priority` | No `sort` today. |
 | 8 | Row: owner name, source, location, last activity, value | SMALL GAP | `GET /api/v1/accounts` | Add `owner_name`, `sources[]`, `hq_city`, `hq_state`, `last_activity_at`, `value{amount_cents, kind:open_deal\|won}` (`crm.deal`). Activity text: only kind and time are stored (`crm.activity.kind`). |
-| 8 | Row: estimated value, next step | LATER (R2) | none | |
+| 8 | Row: estimated value | READY | `GET /api/v1/accounts` `value{amount_cents, currency:'USD', kind:'estimated', deal_name:null}` | With no won or open deal: the best offer's `revenue_potential_cents` (scoring). The CSV value kind is "Estimated" (R2a). |
+| 8 | Row: next step | LATER (R2) | none | |
 | 8 | Stage tab counts incl. All and Other; "{won} won this year" | NEW ENDPOINT | `GET /api/v1/accounts/facets?<filters>` (`accounts:read`) | `{stage:{arrived:n,...}, owner:{}, practice:{}, source:{}, total, won_this_year}` via `countAccounts` grouped by `account_summary.stage`; won this year from `routing.stage_change` to `won` since the start of year in the tenant timezone, data-limited. |
 | 8 | "Other" tab (sent back, not pursued, lost) | SMALL GAP | `GET /api/v1/accounts` multi `stage`, `review_status` | `stage` is single-valued; a sent-back account keeps stage `arrived`, so also filter `review_status` (service has `reviewStatusKeys`). |
 | 8 | `Export CSV` | NEW ENDPOINT | `GET /api/v1/accounts/export?<filters>` (`accounts:read`) -> `text/csv` | Streams the same query under the data limit. Alternative: SPA pages (200 max) and builds it, which breaks C8 only for formatting. |
@@ -647,7 +649,7 @@ Files: `src/http/routes/v1/accounts/**`, `src/http/routes/v1/people/**`; service
 
 ### Release
 
-All R1 except committee gaps, conflicts and estimated value (R2). Items 1, 2, 3 and 8 come with the
+All R1 except committee gaps (R2); conflicts and estimated value came in R2a. Items 1, 2, 3 and 8 come with the
 first plan (queue, account page, My accounts, All accounts); 4 with the shell; 7 with Sources and Batches.
 
 ## scoring
@@ -669,7 +671,7 @@ Files: `src/http/routes/v1/accounts/[id]/{score,matches}/**`, `src/http/routes/v
 | 4a | Source trust tile | READY | `/score` `tiles[]` `source_trust` | Value null, note "Not enough data yet" until R3. |
 | 4a | "6 won of 41 sent" on the trust tile | LATER (R3) | none | Trust from outcomes is R3. |
 | 4a | Warm intro line | READY | `/score` `warm_intro{introducer_name, points}` or null | |
-| 4a | Revenue potential tile | LATER (R2) | none | `revenue_potential_cents`, `revenue_band` null until R2. |
+| 4a | Revenue potential tile | READY | `/score` `tiles[]` `revenue_potential` | From the four-weight model (SCO-E6); `revenue_potential_cents` and `revenue_band` are on `scoring.account_score`. |
 | 21f | Read weights and cutoffs | READY | `GET /api/v1/scoring/profile` (`scoring:manage`) | `weights`, `tier_cutoffs` and `defaults` (SCO-E6, done 2026-11-01, `docs/plans/2026-11-01-scoring-four-weights.md`). |
 | 21f | Sliders summing to 100, `Balance to 100` | READY | `PUT /api/v1/scoring/profile` | Four weights 0 to 60 in steps of 5 adding to 100 (SCO-E6); `Balance to 100` is client side. |
 | 21f | Cutoffs per tier, ordering rule | READY | `PUT /api/v1/scoring/profile` | `tier_cutoffs` Act now, Good fit, Watch; Nurture below; Not a fit = excluded only (SCO-E6). |
@@ -678,7 +680,7 @@ Files: `src/http/routes/v1/accounts/[id]/{score,matches}/**`, `src/http/routes/v
 | 21f | `Restore defaults` | READY | `POST /api/v1/scoring/profile/reset` (`scoring:manage`) | 202. |
 | 21f | `Discard` | READY | client | |
 | 21f | "What changes": tier counts before and after, 8 sample accounts | READY | `POST /api/v1/scoring/profile:preview` (`scoring:manage`, no writes) | Same functions and floors as a rescore (SCO-E6). |
-| 21f | Rescore progress | LATER (R2) | job status endpoint | Toast "Rescoring started". |
+| 2, 21f | Rescore progress | READY | `GET /api/v1/scoring/rescores/latest` (`review:act` or `scoring:manage`); `POST /api/v1/rescore` returns `rescore_id` | `{data:{id, cause, total, done, started_at, finished_at, stalled} \| null}`, the tenant's latest run: a count, no account data. `stalled` after 15 minutes with no progress. Banner "Rescoring {total} accounts" and "{done} of {total} rescored" (R2a). |
 
 ### Proposed changes
 
@@ -692,12 +694,12 @@ Files: `src/http/routes/v1/accounts/[id]/{score,matches}/**`, `src/http/routes/v
    tier_after}] x 8}`, biggest tier movers first, as a scoring read over stored `offer_match` rows.
 5. If Decision 4 picks an override: `PUT /api/v1/accounts/{id}/tier` `{tier|null, note}` with
    `tier_override` honoured by `applyScore`, audited.
-6. R2: rescore job status.
+6. R2: rescore job status. Done in R2a as item 2.
 
 ### Release
 
 R1: items 1 to 3; item 4 if the screen keeps "What changes" in R1 (else R2 per the scoring spec);
-item 5 only on Decision 4. R2: revenue potential, rescore progress. R3: trust from outcomes.
+item 5 only on Decision 4. R2: revenue potential (done with SCO-E6), rescore progress (done in R2a). R3: trust from outcomes.
 
 ## intake
 

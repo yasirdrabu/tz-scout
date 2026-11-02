@@ -7,6 +7,9 @@ Release split (spec's call, D24): **R1** ships declaring a warm intro with an ar
 strongest-intro-counts, and points as a scoring input (SRC-E5-S1-AC1, SRC-E5-S2-AC2, SRC-E5-S3).
 **R2** ships the Confirm flow (SRC-E5-S1-AC2) and the Settings screen for relationship defaults and
 per-introducer rules (SRC-E5-S2-AC1). In R1 defaults are seeded and editable only by a platform admin.
+These R2 items (the Confirm flow, the introducer rules screen, and a rescore when points change) are
+not in R2a. They get their own plan after R2a, because screens.md has no section for them yet
+(Claude's call, 2026-11-02).
 This model is canonical; Scoring reads its result and keeps no points of its own.
 
 ## Why

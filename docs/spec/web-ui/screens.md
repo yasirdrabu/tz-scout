@@ -48,7 +48,7 @@ the app goes to the return path or the landing screen of the last used workspace
 
 ## 2. Review queue
 
-**Tag** R1 (flags for conflicts and enrichment requests are R2) · **Route**
+**Tag** R1 (the conflicts flag is R2a, enrichment requests R2) · **Route**
 `/t/:tenant/queue?tier=&practice=&offer=&source=&status=&peek=:accountId` · **Who** `review:act`
 (owners, leaders and operators by default, W6)
 
@@ -76,7 +76,7 @@ columns / Show, hide and reorder. Saved for you only." with `Reset`; the choice 
 | Tier | chip: Act now (plum), Good fit (light plum), Watch (gray), lowest tier (white); "Was {old}" after a rescore, "Changed by {name}" when someone set it by hand (Decision 4) | Act now |
 | Source | source name; "via" line underneath | RFP Watch / Marcus Lee · GovSpend |
 | Review status | colored dot and name from Settings > Review statuses; "{status} by {name}" for a status a reviewer set (C13) | Ready for review |
-| Flags | chips: "Declined by {AE}" amber (reason and date on hover and in the peek), "New from {source}" gray, "Warm intro" green, the handoff chip when the row is assigned; R2: "{n} conflict(s)" amber, "Enrichment requested" gray | Warm intro |
+| Flags | chips: "Declined by {AE}" amber (reason and date on hover and in the peek), "New from {source}" gray, "Warm intro" green, the handoff chip when the row is assigned; R2a: "{n} conflicts" or "1 conflict" amber (the API filter `flag=conflicts` lists only those rows); R2: "Enrichment requested" gray | Warm intro |
 | Notes | comment icon and count | 1 |
 | Arrived | date | Oct 24 |
 
@@ -93,7 +93,8 @@ Sorted by priority, highest first (the mockup has no sortable headers; none in t
   required (C5, Decision 1).
 - Banner after scoring settings change: "{summary} · {when} by {name}" with "Priorities were
   recalculated with {weights as the API lists them}. {n} accounts changed tier." and `Open settings`
-  (with `scoring:manage`). Shown when the API reports a recent rescore.
+  (with `scoring:manage`). Shown when the API reports a recent rescore. While a rescore runs (R2a)
+  it shows the progress instead (§21f).
 
 **States.**
 - Empty: "The queue is clear" / "New accounts land here when a source sends them or someone imports
@@ -174,9 +175,11 @@ step.
 1. **Scout's recommendation** (sparkle): one line and a paragraph from the API (Playbooks minimum).
    "Approve and assign to someone with public sector experience." / "The cancelled transit software
    RFP is being re-issued in December..."
-2. **Before you approve** checklist, each a dot, text and link: unresolved conflicts (R2; "Resolve 1
-   conflicting fact: annual technology budget." `Resolve` jumps to the fact; after: "Facts agree.
-   Technology budget set to $18.4M."), committee gaps (R2; "Buying committee has no IT, security or
+2. **Before you approve** checklist, each a dot, text and link: unresolved conflicts (R2a; "Resolve 1
+   conflicting fact: {label}." or "Resolve {n} conflicting facts.", for example "Resolve 1
+   conflicting fact: Contract value." `Resolve` jumps to the fact; after: "Facts agree. {label} set to
+   {value}.", for example "Facts agree. Contract value set to $18,400,000."; money shows the full
+   amount, not "$18.4M"), committee gaps (R2; "Buying committee has no IT, security or
    technical buyer." `Find with Enrich`), warm intros ("Warm intro available through Ash Patel.").
 3. **Score strip**, five tiles with bar and a note, as the scoring model returns them: Priority (note
    from the API's tier cutoffs, for example "Act now tier starts at 75"), Fit ("County transit agency
@@ -186,10 +189,15 @@ step.
    sentence. Source trust is the same for every source until R3, when its note becomes "RFP Watch:
    6 won of 41 sent".
 4. **Why now**: "{n} signals · newest first"; each date, text and source link.
-5. **Account facts** with badge "{n} conflicts to resolve" or "All facts agree". Rows label and
-   value. A conflict (R2) shows both values side by side with source and date and `Keep this one`;
+5. **Account facts** with badge "{n} conflicts to resolve", "1 conflict to resolve" or "All facts
+   agree". Rows label and value. A conflict (R2a) is marked "Sources disagree" and shows the values
+   side by side with source and date, `Keep this one` under each value other than the kept one (with
+   `review:act`), and the one-line explanation when Claude wrote one (none in rules or mock mode);
    after: "Kept by {name} · Change", the other dimmed, toast "Kept {value} from {source}. Scout will
-   use it in the brief and HubSpot."
+   use it in the brief and HubSpot.", for example "Kept $18,400,000 from Apollo. ...". `Change`
+   reopens the choice and keeping another value switches it (Claude's call, 2026-11-02). A conflict a
+   person settled by editing the value reads as any fact. A value replaced since the page loaded shows
+   the API's message and the latest values.
 6. **Brief** ("Last drafted {when}", from Playbooks minimum): Overview, Approach, Value angle, Risks,
    each tagged "Written by Claude", "Assembled from rules" or "Edited by {name}". `Edit` opens a
    textarea with `Save` and `Cancel`, hint "Saving marks this section as edited by you."; toast
@@ -329,7 +337,8 @@ Filter: Owner (sellers and "Unassigned"), Practice, Source.
 
 Columns: Account (name, "{industry} · {location}"), Stage chip, Owner (initials and name or
 "Unassigned"), Best offer (and practice), Priority, Source, Next step (and due; R2), Last activity
-(and when), Value (amount and "Open deal" or "Won"; "Estimated" R2). Footer "Sorted by stage, then
+(and when), Value (amount and "Open deal" or "Won"; with no won or open deal, the best offer's
+revenue potential in USD with "Estimated", R2a; the CSV value kind is "Estimated" too). Footer "Sorted by stage, then
 priority". Every row opens its account page. Filtered empty: "No accounts match these filters" / "Try
 another stage or owner, or clear the filters to see every account in this workspace." `Clear filters`.
 
@@ -772,7 +781,11 @@ the warning with `Balance to 100`. Tier cutoffs, one each for Act now, Good fit,
 below ("Each tier has to start higher than the one below it, and Act now at 100 or less."). "What
 changes": tier counts before and after for the accounts scored in the last 90 days, and 8 sample
 accounts with their parts, score, change and tier, all from an API preview (C8). `Restore defaults`,
-`Discard`, `Save and rescore` (toast "Rescoring started."; no progress bar in R1). Footnote (Decision
+`Discard`, `Save and rescore` (toast "Rescoring started."). From R2a the review queue banner (§2)
+shows the run's progress: "Rescoring {total} accounts" ("Rescoring 1 account") and "{done} of
+{total} rescored", checked every 3 seconds. The progress is tenant-wide, a count with no account
+data, for the latest run; a run with no progress for 15 minutes counts as stalled and the banner
+goes back to the summary (Claude's call, 2026-11-02). Footnote (Decision
 22) "Saving rescores every account in this workspace, so accounts already with a seller can change
 tier too. Tiers someone set by hand stay as they are, and running playbooks keep going."
 
