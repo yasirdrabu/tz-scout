@@ -248,6 +248,27 @@ describe('validateStages', () => {
     ok[3]!.quarterTarget = 0;
     expect(validateStages(ok, DEFAULT_STAGES)).toEqual([]);
   });
+  it('That stage is in the list twice.', () => {
+    const next = toInput(DEFAULT_STAGES);
+    next.splice(4, 0, { ...next[3]!, name: 'Talking again', trigger: 'by_hand' });
+    expect(validateStages(next, DEFAULT_STAGES)).toEqual([{ path: 'stages.4.key', message: 'That stage is in the list twice.' }]);
+    const firstAgain = toInput(DEFAULT_STAGES);
+    firstAgain.splice(1, 0, { ...firstAgain[0]!, name: 'Sent twice' });
+    expect(messages(firstAgain)).toContain('That stage is in the list twice.');
+    const wonAgain = toInput(DEFAULT_STAGES);
+    wonAgain.splice(5, 0, { ...wonAgain[5]!, name: 'Won twice' });
+    expect(messages(wonAgain)).toContain('That stage is in the list twice.');
+  });
+  it('treats a missing quarter target as none, on a stage and on an exit', () => {
+    const next = toInput(DEFAULT_STAGES);
+    for (const s of next) delete (s as { quarterTarget?: number | null }).quarterTarget;
+    expect(validateStages(next, DEFAULT_STAGES)).toEqual([]);
+  });
+  it('accepts a deleted default stage coming back under its key', () => {
+    const prev = DEFAULT_STAGES.filter((s) => s.key !== 'engaged');
+    expect(validateStages(toInput(DEFAULT_STAGES), prev, ['engaged'])).toEqual([]);
+    expect(validateStages(toInput(DEFAULT_STAGES), prev)).toEqual([{ path: 'stages.3.key', message: "That stage doesn't exist." }]);
+  });
   it('allows many stages on "Set by hand"', () => {
     const next = toInput(DEFAULT_STAGES);
     next.splice(5, 0, { ...NEW, name: 'Proposal' }, { ...NEW, name: 'Contract' });

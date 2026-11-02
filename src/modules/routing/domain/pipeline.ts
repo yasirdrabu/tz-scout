@@ -115,10 +115,12 @@ const inSentence = (label: string) => label.replace(/^(?!HubSpot)([A-Z])/, (c) =
 export const FIRST_AND_WON_SENTENCE = 'The first stage and the won stage can be renamed but not deleted.';
 
 /** The problems with a saved list, each with the field it belongs to; empty when the list is fine (REV-E5 "Editing"). */
-export function validateStages(next: PipelineStageInput[], prev: PipelineStage[]): { path: string; message: string }[] {
+export function validateStages(next: PipelineStageInput[], prev: PipelineStage[], archivedKeys: string[] = []): { path: string; message: string }[] {
   const errors: { path: string; message: string }[] = [];
   const add = (path: string, message: string) => errors.push({ path, message });
-  const prevKeys = new Set(prev.map((s) => s.key));
+  // A deleted stage may come back under its key (Restore defaults); a key is listed once.
+  const prevKeys = new Set([...prev.map((s) => s.key), ...archivedKeys]);
+  const seenKeys = new Set<string>();
 
   const names = new Set<string>();
   next.forEach((s, i) => {
@@ -127,9 +129,11 @@ export function validateStages(next: PipelineStageInput[], prev: PipelineStage[]
     else if (names.has(name)) add(`stages.${i}.name`, "Two stages can't share a name.");
     names.add(name);
     if (s.key && !prevKeys.has(s.key)) add(`stages.${i}.key`, "That stage doesn't exist.");
+    else if (s.key && seenKeys.has(s.key)) add(`stages.${i}.key`, 'That stage is in the list twice.');
+    if (s.key) seenKeys.add(s.key);
     if (s.trigger === 'deal_reaches_stage' && !s.hubspotStage?.trim()) add(`stages.${i}.hubspotStage`, 'A stage that moves on a HubSpot deal stage needs that HubSpot stage.');
-    if (s.kind === 'exit' && s.quarterTarget !== null) add(`stages.${i}.quarterTarget`, "Exits don't have a quarter target.");
-    else if (s.quarterTarget !== null && !(Number.isInteger(s.quarterTarget) && s.quarterTarget >= 0)) add(`stages.${i}.quarterTarget`, 'Quarter targets are whole numbers, 0 or more.');
+    if (s.kind === 'exit' && s.quarterTarget != null) add(`stages.${i}.quarterTarget`, "Exits don't have a quarter target.");
+    else if (s.quarterTarget != null && !(Number.isInteger(s.quarterTarget) && s.quarterTarget >= 0)) add(`stages.${i}.quarterTarget`, 'Quarter targets are whole numbers, 0 or more.');
   });
 
   for (const t of TRIGGERS) {
