@@ -40,9 +40,11 @@ One-shot commands
   keys:create         --tenant <slug> --name <name> --scopes a,b [--test]
   tenants:create      --slug <s> --name <n> --currency <USD> --timezone <zone> --owner-email <email>
                       Operator command: run it on the server. It acts as a system platform admin.
-  tenant split <slug> | --all  [--settle-seconds 65]
+  tenant split <slug> | --all  [--settle-seconds 65] [--force-cleanup]
                       Move a workspace (or every one still there) out of the shared database into its own
                       (SCOUT_WORKSPACE_DATABASES=per_workspace). Its requests get 503 while it moves.
+                      --force-cleanup (one workspace, already moved): delete its rows left in the shared
+                      database even though its own database fails the check; only once checked by hand.
 `;
 
 /** Aborts when the process is told to stop: SIGTERM, SIGINT, or an IPC "shutdown" message (Windows has no SIGTERM). */
@@ -179,15 +181,26 @@ async function backfillTenant(slug: string, release: 'r1b' | 'r1c' | 'review-flo
 }
 
 /** Moves one workspace, or every active one still in the shared database, into its own database (D35). */
-async function splitTenants(slug: string | undefined, all: boolean, settleMs: number): Promise<number> {
+async function splitTenants(slug: string | undefined, all: boolean, settleMs: number, forceCleanup = false): Promise<number> {
   if (!slug && !all) throw new Error(`Name a workspace or pass --all.\n\n${USAGE}`);
+  if (forceCleanup && all) throw new Error('--force-cleanup is for one workspace at a time: name it, not --all.');
   const { listTenants, splitWorkspace } = await import('@/modules/tenancy');
   const tenants = (await listTenants()).filter((t) => (slug ? t.slug === slug : true));
   if (slug && tenants.length === 0) throw new Error(`No workspace with the slug "${slug}".`);
   let failed = 0;
   for (const t of tenants) {
     try {
-      const r = await splitWorkspace(t.id, { settleMs });
+      const r = await splitWorkspace(t.id, {
+        settleMs,
+        ...(forceCleanup
+          ? {
+              forceCleanup: (left: { table: string; rows: number }[]) =>
+                console.log(
+                  `Workspace ${t.slug}: --force-cleanup, deleting from the shared database without checking its own: ${left.map((c) => `${c.table} (${c.rows})`).join(', ')}.`,
+                ),
+            }
+          : {}),
+      });
       if (r.outcome === 'skipped') console.log(`Workspace ${t.slug}: left as it is, ${r.reason}.`);
       else if (r.outcome === 'cleaned') console.log(`Workspace ${t.slug}: its last rows deleted from the shared database.`);
       else console.log(`Workspace ${t.slug}: moved to ${r.database}, ${r.copied.reduce((n, c) => n + c.rows, 0)} rows in ${r.copied.length} tables.`);
@@ -301,13 +314,13 @@ ${USAGE}`);
     case 'tenant': {
       const [sub, ...args] = rest;
       if (sub !== 'split') throw new Error(`Unknown command: tenant ${sub ?? ''}\n\n${USAGE}`);
-      const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { all: { type: 'boolean' }, 'settle-seconds': { type: 'string' } } });
+      const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { all: { type: 'boolean' }, 'settle-seconds': { type: 'string' }, 'force-cleanup': { type: 'boolean' } } });
       const settle = values['settle-seconds'] ?? '65';
       if (!/^\d+$/.test(settle)) throw new Error(`--settle-seconds takes a whole number of seconds, 0 or more (not "${settle}").`);
       if (Number(settle) < 65) {
         console.warn(`--settle-seconds ${settle}: under 65, a running API or worker may still serve the workspace from its cache while it is copied. Only safe when no API or worker is running.`);
       }
-      return splitTenants(values.all ? undefined : positionals[0], values.all === true, Number(settle) * 1000);
+      return splitTenants(values.all ? undefined : positionals[0], values.all === true, Number(settle) * 1000, values['force-cleanup'] === true);
     }
     case 'tenants:create': {
       const { values } = parseArgs({

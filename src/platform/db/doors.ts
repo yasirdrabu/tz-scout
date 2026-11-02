@@ -135,16 +135,17 @@ export function workspaceRoute(
 ): { shared: true } | { database: string } {
   if (info && info.status !== 'active' && !(opening && info.status === 'provisioning')) throw unavailable(info.status);
   if (mode === 'shared') return { shared: true };
-  if (!info) {
-    throw new ScoutError({
-      slug: 'workspace-unknown',
-      status: 404,
-      title: 'That workspace was not found.',
-      detail: `Tenant ${tenantId} has no workspace registry row (tenancy.workspace_infra).`,
-    });
-  }
+  if (!info) throw unknownWorkspace(tenantId);
   return { database: info.database };
 }
+
+const unknownWorkspace = (tenantId: string) =>
+  new ScoutError({
+    slug: 'workspace-unknown',
+    status: 404,
+    title: 'That workspace was not found.',
+    detail: `Tenant ${tenantId} has no workspace registry row (tenancy.workspace_infra).`,
+  });
 
 /** True when `tenantId`'s workspace takes work now (`t_platform` always does). */
 export async function workspaceOpen(tenantId: string): Promise<boolean> {
@@ -191,6 +192,7 @@ export const moveLockKey = (tenantId: string) => `ws:${tenantId}`;
  * clear another process's cache), so with the lock held the row itself is read here, in the same
  * database: unless it still says `active` in this database, the workspace is moving or has moved, and
  * the transaction is refused (503) with the cached row dropped, so a retry goes where the row says.
+ * A tenant with no row at all is 404 `workspace-unknown`: retrying will not help.
  */
 export async function holdAgainstMove(tx: Tx, tenantId: string): Promise<void> {
   const [row] = await tx.execute<{ ok: boolean }>(sql`select pg_try_advisory_xact_lock_shared(hashtext(${moveLockKey(tenantId)})) as ok`);
@@ -198,7 +200,11 @@ export async function holdAgainstMove(tx: Tx, tenantId: string): Promise<void> {
   const [here] = await tx.execute<{ ok: boolean }>(
     sql`select status = 'active' and database = current_database() as ok from tenancy.workspace_infra where tenant_id = ${tenantId}`,
   );
-  if (!here?.ok) {
+  if (!here) {
+    forgetWorkspace(tenantId);
+    throw unknownWorkspace(tenantId);
+  }
+  if (!here.ok) {
     forgetWorkspace(tenantId);
     throw unavailable('moving');
   }

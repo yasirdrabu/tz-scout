@@ -87,7 +87,13 @@ Moving an existing install (every workspace in one database):
 2. Run `scout tenant split --all` (or `scout tenant split <slug>` one at a time). Each workspace
    answers 503 with Retry-After while it moves, for about a minute and the time its rows take to copy;
    its messages and schedules wait. A split that stops part way finishes when run again.
+   Run without an API or worker, `--settle-seconds` under 65 is safe; otherwise keep the default.
 3. Check the Tenants screen (every workspace in `scout_t_…`).
+
+Finishing a split deletes the workspace's rows left in the shared database only once its own database
+holds at least as many, table by table; otherwise it refuses and keeps them. If an operator has checked
+the workspace's own database by hand, `scout tenant split <slug> --force-cleanup` deletes them without
+that check (one workspace at a time; it prints each table and row count it deletes).
 
 Backups: the nightly job (`infra/backup`) dumps the control plane to `scout-<time>.dump` and every
 workspace database (each `scout_t_…` in `pg_database` but the template `scout_t_template`) to a file

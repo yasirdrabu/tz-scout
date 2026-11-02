@@ -244,6 +244,24 @@ describe('a split that stopped part way is finished by running it again', () => 
     await expect(splitWorkspace(t.tenantId, { settleMs: 0 })).rejects.toThrow(/has fewer rows in .+ than the shared database still holds/);
     expect(nonEmpty(await countTenantRows(sharedUrl, t.tenantId))).toEqual(counts);
   });
+
+  it('--force-cleanup deletes what is left in the shared database without the check, saying what it deletes', async () => {
+    const t = await sharedWorkspace();
+    await setRow(t.tenantId, { database: own(t.tenantId) });
+    await createDatabase(own(t.tenantId));
+    await migrateWorkspaceDatabase(ownUrl(t.tenantId));
+    await expect(run(['tenant', 'split', '--all', '--force-cleanup'])).rejects.toThrow('--force-cleanup is for one workspace at a time');
+    const lines: string[] = [];
+    const out = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void lines.push(a.join(' ')));
+    try {
+      expect(await run(['tenant', 'split', t.slug, '--settle-seconds', '0', '--force-cleanup'])).toBe(0);
+    } finally {
+      out.mockRestore();
+    }
+    expect(lines[0]).toMatch(new RegExp(`^Workspace ${t.slug}: --force-cleanup, deleting from the shared database without checking its own: .*routing\\.review_status_def \\(\\d+\\)`));
+    expect(lines[1]).toBe(`Workspace ${t.slug}: its last rows deleted from the shared database.`);
+    expect(nonEmpty(await countTenantRows(sharedUrl, t.tenantId))).toEqual({});
+  });
 });
 
 describe('tenant split: no write is lost (Task 6 review)', () => {
@@ -312,6 +330,15 @@ describe('tenant split: no write is lost (Task 6 review)', () => {
     // With the real row, the retry goes to its own database.
     await write(78);
     expect(nonEmpty(await countTenantRows(sharedUrl, t.tenantId))).toEqual({});
+  });
+
+  it('an admin action on a row of a tenant with no registry row is 404 workspace-unknown, not 503 for ever', async () => {
+    const tenantId = newId('t');
+    const deadId = newId('dead');
+    await adminDb.insert(deadJob).values({ id: deadId, tenantId, consumerOrJob: 'test.consumer', envelope: { id: deadId }, lastError: 'boom', attempts: 3 });
+    const admin = { actor: { kind: 'user', id: 'usr_admin' } as const };
+    await expect(retryDeadJob(admin, deadId)).rejects.toMatchObject({ slug: 'workspace-unknown', status: 404 });
+    await adminDb.delete(deadJob).where(eq(deadJob.id, deadId));
   });
 
   it('workspaces not moved out yet use the shared pools at full size, not a small workspace pool', async () => {
