@@ -81,7 +81,47 @@ export const factsQuery = (tenant: string, id: string) =>
     queryFn: () => apiFetch<{ data: Fact[]; next_cursor: string | null }>(path(id, '/facts'), { tenant }),
   });
 
-export type WrittenBy = 'claude' | 'sample' | 'rules' | 'person';
+export type ConflictFact = {
+  id: string;
+  value: unknown;
+  observed_at: string;
+  source_names: Fact['source_names'];
+  trust: number;
+  status: string;
+};
+
+/** Sources that disagree on one fact (Rulings 4 to 7): open, or resolved in the last 30 days. */
+export type Conflict = {
+  id: string;
+  key: string;
+  label: string;
+  person_id: string | null;
+  status: 'open' | 'resolved';
+  resolution: 'kept' | 'edited' | null;
+  kept_fact_id: string | null;
+  resolved_by_name: string | null;
+  resolved_at: string | null;
+  note: string | null;
+  /** One line on why the sources may differ, or null (none in rules or mock mode). */
+  explanation: string | null;
+  facts: ConflictFact[];
+};
+
+export const conflictsQuery = (tenant: string, id: string) =>
+  queryOptions({
+    queryKey: ['account', tenant, id, 'conflicts'],
+    queryFn: () => apiFetch<{ data: Conflict[]; next_cursor: string | null }>(path(id, '/conflicts'), { tenant }),
+  });
+
+/** Keeps one value; on a resolved conflict it changes the kept value (Ruling 6). */
+export const resolveConflict = (tenant: string, conflictId: string, keptFactId: string, note?: string) =>
+  apiFetch<Conflict>(`/conflicts/${encodeURIComponent(conflictId)}:resolve`, {
+    tenant,
+    method: 'POST',
+    body: { kept_fact_id: keptFactId, ...(note ? { note } : {}) },
+  });
+
+export type WrittenBy ='claude' | 'sample' | 'rules' | 'person';
 
 export type BriefSection = {
   key: string;

@@ -298,6 +298,38 @@
   background: var(--good);
 }
 
+.dotWarn::before {
+  background: var(--near);
+}
+
+/* A fact sources disagree on: the values side by side, the one not kept dimmed. */
+.disagree {
+  color: var(--near);
+  font-weight: 500;
+}
+
+.sides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+}
+
+.dim {
+  opacity: 0.5;
+}
+
+.fact:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .tiles {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
