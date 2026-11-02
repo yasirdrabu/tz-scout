@@ -1,7 +1,7 @@
 import type { Db } from './client';
 
-/** One opened pool and how to close it. */
-export type Opened = { db: Db; end: () => Promise<void> };
+/** One opened pool, how to close it, and how many transactions and queries are running on it. */
+export type Opened = { db: Db; end: () => Promise<void>; inUse: () => number };
 
 /** How the pools of `per_workspace` mode are sized (config: SCOUT_WORKSPACE_POOL_MAX, SCOUT_WORKSPACE_POOL_CAP). */
 export type PoolLimits = {
@@ -13,8 +13,8 @@ export type PoolLimits = {
   idleMs: number;
 };
 
-/** A pool used within this long is never closed to make room: something may still hold it. */
-const IN_USE_MS = 10_000;
+/** A pool handed out this recently is not closed: its caller may not have started its first query yet. */
+const HANDED_OUT_MS = 1_000;
 
 type Entry = { app: Opened; admin: Opened; lastUsed: number };
 
@@ -22,9 +22,10 @@ type Entry = { app: Opened; admin: Opened; lastUsed: number };
  * The per-workspace pools of one process (D35): opened lazily, one `app` pool of `max` connections and
  * one `admin` pool of 1 per workspace database, so each workspace may hold `max + 1` connections and
  * at most `floor(cap / (max + 1))` workspaces have pools at once. Opening one more closes the least
- * recently used pool not used in the last 10 seconds; when every pool is that recent the cap is
- * exceeded for a while rather than closing a pool something holds (logged by the caller through
- * `overCap`). Pools unused for `idleMs` close on `closeIdle`.
+ * recently used idle pool: nothing running on it (no transaction or query, counted by `connect`) and
+ * not handed out in the last second. When none is idle the cap is exceeded for a while rather than
+ * break a transaction (logged by the caller through `overCap`). Idle pools unused for `idleMs` close
+ * on `closeIdle`.
  */
 export class WorkspacePools {
   private entries = new Map<string, Entry>();
@@ -58,7 +59,7 @@ export class WorkspacePools {
   private makeRoom(): void {
     const allowed = this.allowed();
     while (this.entries.size >= allowed) {
-      const idle = [...this.entries].filter(([, e]) => this.now() - e.lastUsed >= IN_USE_MS).sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+      const idle = [...this.entries].filter(([, e]) => this.idle(e, HANDED_OUT_MS)).sort((a, b) => a[1].lastUsed - b[1].lastUsed);
       const oldest = idle[0];
       if (!oldest) {
         this.overCap(this.entries.size + 1, allowed);
@@ -66,6 +67,10 @@ export class WorkspacePools {
       }
       this.close(oldest[0]);
     }
+  }
+
+  private idle(e: Entry, unusedFor: number): boolean {
+    return e.app.inUse() + e.admin.inUse() === 0 && this.now() - e.lastUsed >= unusedFor;
   }
 
   private close(database: string): Promise<unknown> {
@@ -78,7 +83,7 @@ export class WorkspacePools {
   /** Closes the pools unused for `idleMs`. */
   async closeIdle(): Promise<void> {
     const { idleMs } = this.limits();
-    const stale = [...this.entries].filter(([, e]) => this.now() - e.lastUsed >= idleMs).map(([d]) => d);
+    const stale = [...this.entries].filter(([, e]) => this.idle(e, idleMs)).map(([d]) => d);
     await Promise.all(stale.map((d) => this.close(d)));
   }
 
