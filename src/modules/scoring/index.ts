@@ -22,7 +22,7 @@ export { lastRescore, type LastRescoreView } from './services/last-rescore';
 export { requestRescore } from './services/rescore';
 export { latestRescore, type RescoreRunView } from './services/rescore-runs';
 export { scoreAccount, type AccountScore, type ScoreOptions } from './services/score';
-export { getMatches, getScore, getScoreHistory, tierDetails, type OfferMatchView, type ScoreChangeView, type TierDetail } from './services/read';
+export { getMatches, getScore, getScoreHistory, revenuePotentials, tierDetails, type OfferMatchView, type ScoreChangeView, type TierDetail } from './services/read';
 export { explainScore, type ScoreExplanation } from './services/explain';
 export { setTierOverride, type TierView } from './services/tier';
 export { causeInWords } from './domain/explain';

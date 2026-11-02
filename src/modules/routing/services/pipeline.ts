@@ -2,7 +2,7 @@ import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import { countAccounts, countAccountsBy, filterVisibleAccountIds, search, type SearchQuery, type SearchRow, type SearchSort } from '@/modules/accounts';
 import { crmFacts, type AccountCrmFacts } from '@/modules/crm';
 import { firstSources, sourceNames } from '@/modules/intake';
-import { TIER_NAMES, type Tier } from '@/modules/scoring';
+import { revenuePotentials, TIER_NAMES, type Tier } from '@/modules/scoring';
 import { members, tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -42,7 +42,7 @@ export type AccountListRow = SearchRow & {
   leadOffer: { offerId: string; name: string | null; practiceId: string | null; practiceName: string | null; chosen: boolean } | null;
   source: { sourceId: string; name: string; kind: string; via: string | null } | null;
   lastActivity: AccountCrmFacts['lastActivity'];
-  value: AccountCrmFacts['value'];
+  value: { amountCents: number | null; currency: string | null; kind: 'won' | 'open_deal' | 'estimated'; dealName: string | null } | null;
   /** Playbook steps are R2. */
   nextStep: null;
 };
@@ -84,6 +84,9 @@ function queryFor(ctx: ModuleContext, f: AccountListFilters, statuses: StatusDef
   return q;
 }
 
+/** No deal: the best offer's deal size, as an estimate (Ruling 13; offers store USD cents). */
+const estimate = (cents: number | undefined): AccountListRow['value'] => (cents === undefined ? null : { amountCents: cents, currency: 'USD', kind: 'estimated', dealName: null });
+
 /** All accounts (screens.md §8): rows under the data limit, with names, CRM facts and the page's total. */
 export async function listAccounts(ctx: ModuleContext, f: AccountListFilters = {}): Promise<{ data: AccountListRow[]; nextCursor: string | null; total: number }> {
   const statuses = await loadStatuses(ctx);
@@ -106,6 +109,7 @@ export async function listAccounts(ctx: ModuleContext, f: AccountListFilters = {
     : new Map<string, string | null>();
   const sources = await firstSources(ctx, ids);
   const crm = await crmFacts(ctx, ids);
+  const potentials = await revenuePotentials(ctx, ids);
   return {
     data: page.data.map((r) => {
       const source = sources.get(r.accountId);
@@ -120,7 +124,7 @@ export async function listAccounts(ctx: ModuleContext, f: AccountListFilters = {
         leadOffer: leadOffer(names, overrides.get(r.accountId) ?? null, r.bestOfferId),
         source: source ? { sourceId: source.sourceId, name: source.name, kind: source.kind, via: source.via } : null,
         lastActivity: facts?.lastActivity ?? null,
-        value: facts?.value ?? null,
+        value: facts?.value ?? estimate(potentials.get(r.accountId)?.cents),
         nextStep: null,
       };
     }),
@@ -228,7 +232,7 @@ export async function exportAccounts(ctx: ModuleContext, f: AccountListFilters =
       r.lastActivity?.at.toISOString(),
       r.value?.amountCents === null || r.value?.amountCents === undefined ? null : (r.value.amountCents / 100).toFixed(2),
       r.value?.currency,
-      r.value ? (r.value.kind === 'won' ? 'Won' : 'Open deal') : null,
+      r.value ? { won: 'Won', open_deal: 'Open deal', estimated: 'estimated' }[r.value.kind] : null,
     ]),
   );
   return { csv, count: kept.length };

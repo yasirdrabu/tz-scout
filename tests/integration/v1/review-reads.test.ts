@@ -1,3 +1,4 @@
+import { inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as exportRoute } from '@/http/routes/v1/accounts/export/route';
 import { GET as accountFacetsRoute } from '@/http/routes/v1/accounts/facets/route';
@@ -13,6 +14,7 @@ import { GET as conflictsRoute } from '@/http/routes/v1/accounts/[id]/conflicts/
 import { POST as conflictAction } from '@/http/routes/v1/conflicts/[id]/route';
 import { activity, deal } from '@/modules/crm/db/schema';
 import { stageChange } from '@/modules/routing/db/schema';
+import { accountScore } from '@/modules/scoring/db/schema';
 import { setPrincipalCacheTtl } from '@/modules/tenancy';
 import { closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
@@ -341,5 +343,54 @@ describe('All accounts: GET /accounts, /accounts/facets, /accounts/export (scree
     expect((await call(exportRoute, await keyFor(w.tenant, ['review:act']), 'accounts/export')).status).toBe(403);
     const theirs = await other.as(other.owner, exportRoute, `accounts/export?source_id=${src.agentId}`);
     expect(theirs.headers.get('x-scout-row-count')).toBe('0');
+  });
+});
+
+describe('All accounts: estimated value (Ruling 13)', () => {
+  let src: { personId: string; agentId: string };
+  let estimated: string;
+  let withDeal: string;
+  let noPotential: string;
+
+  const score = (tenantId: string, accountId: string, revenuePotentialCents: number | null) => ({
+    tenantId,
+    accountId,
+    fit: 50,
+    intent: 50,
+    matchTotal: 50,
+    priority: 50,
+    tier: 'warm',
+    tierReason: 'computed',
+    scoredTier: 'warm',
+    revenuePotentialCents,
+    revenueBand: revenuePotentialCents === null ? null : 'medium',
+    explanation: {},
+    inputsHash: 'h',
+    profileVersion: 1,
+  });
+
+  beforeAll(async () => {
+    src = await personAndAgent(w.tenant, 'Estimator');
+    estimated = await w.sent({ name: 'Estimated Co' }, src.agentId);
+    withDeal = await w.sent({ name: 'Deal Co' }, src.agentId);
+    noPotential = await w.sent({ name: 'No Size Co' }, src.agentId);
+    await w.run(async (ctx) => {
+      await ctx.tx.delete(accountScore).where(inArray(accountScore.accountId, [estimated, withDeal, noPotential]));
+      await ctx.tx.insert(accountScore).values([score(ctx.tenantId, estimated, 7_500_000), score(ctx.tenantId, withDeal, 9_900_000), score(ctx.tenantId, noPotential, null)]);
+      await ctx.tx.insert(deal).values({ id: newId('dea'), tenantId: ctx.tenantId, accountId: withDeal, system: 'hubspot', externalId: newId('evt'), name: 'Real deal', status: 'open', amountCents: 1_200_000, currency: 'USD', openedAt: new Date() });
+    });
+  });
+
+  it('a row with no deal shows the best offer deal size as an estimate; a deal wins; no deal size shows nothing', async () => {
+    const body = await json(w.as(leader, accountsRoute, `accounts?source_id=${src.agentId}`));
+    const by = (id: string) => body.data.find((r: Row) => r.account_id === id);
+    expect(by(estimated).value).toEqual({ amount_cents: 7_500_000, currency: 'USD', kind: 'estimated', deal_name: null });
+    expect(by(withDeal).value).toMatchObject({ amount_cents: 1_200_000, kind: 'open_deal' });
+    expect(by(noPotential).value).toBeNull();
+  });
+
+  it('the CSV value kind is estimated', async () => {
+    const lines = (await (await w.as(leader, exportRoute, `accounts/export?source_id=${src.agentId}`)).text()).trim().split('\r\n');
+    expect(lines.find((l) => l.includes('Estimated Co'))).toContain('75000.00,USD,estimated');
   });
 });

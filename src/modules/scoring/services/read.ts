@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import { getAccount } from '@/modules/accounts';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -113,4 +113,14 @@ export async function tierDetails(ctx: ModuleContext, accountIds: string[]): Pro
       },
     ]),
   );
+}
+
+/** The best offer's deal size for each account that has one (All accounts' estimated value). The caller has already limited `accountIds` to accounts the principal can see. */
+export async function revenuePotentials(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, { cents: number; band: 'low' | 'medium' | 'high' }>> {
+  if (accountIds.length === 0) return new Map();
+  const rows = await ctx.tx
+    .select({ accountId: accountScore.accountId, cents: accountScore.revenuePotentialCents, band: accountScore.revenueBand })
+    .from(accountScore)
+    .where(and(eq(accountScore.tenantId, ctx.tenantId), inArray(accountScore.accountId, accountIds), isNotNull(accountScore.revenuePotentialCents)));
+  return new Map(rows.map((r) => [r.accountId, { cents: r.cents!, band: r.band as 'low' | 'medium' | 'high' }]));
 }

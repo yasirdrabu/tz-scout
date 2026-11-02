@@ -212,7 +212,7 @@ function Table({ tenant, rows }: { tenant: string; rows: AccountRow[] }) {
               {r.value && r.value.amount_cents !== null ? (
                 <>
                   {r.value.currency ? formatMoney(r.value.amount_cents, r.value.currency) : f.money(r.value.amount_cents)}
-                  <div className={styles.sub}>{r.value.kind === 'won' ? 'Won' : 'Open deal'}</div>
+                  <div className={styles.sub}>{{ won: 'Won', open_deal: 'Open deal', estimated: 'Estimated' }[r.value.kind]}</div>
                 </>
               ) : null}
             </td>
