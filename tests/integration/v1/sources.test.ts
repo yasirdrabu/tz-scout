@@ -336,6 +336,27 @@ describe('keys under a source (Decision 14, Ruling 7)', () => {
     expect(await json(w.as(operator, getSource, `sources/${agent.id}`))).toMatchObject({ method: 'api_key', method_label: 'API key', active_key: { id: rotated.id, prefix: rotated.prefix } });
   });
 
+  it('a rotate whose request does not commit leaves the old key working and the new one revoked (D35)', async () => {
+    const partner = await json(w.as(operator, postSource, 'sources', 'POST', { kind: 'partner', name: 'Doomed rotate' }), 201);
+    const old = await newKey(partner.id);
+    // Fails the workspace transaction at commit, after the rotation committed on the control plane.
+    await adminDb.execute(sql`create or replace function platform.test_doomed_rotate() returns trigger language plpgsql as $$
+      begin if new.action = 'tenancy.api_key.rotated' then raise exception 'doomed'; end if; return new; end $$`);
+    await adminDb.execute(sql`create constraint trigger test_doomed_rotate after insert on platform.audit_log deferrable initially deferred for each row execute function platform.test_doomed_rotate()`);
+    try {
+      const res = await w.as(operator, keyAction, `sources/${partner.id}/keys/${old.id}:rotate`, 'POST');
+      expect(res.status).toBe(500);
+    } finally {
+      await adminDb.execute(sql`drop trigger if exists test_doomed_rotate on platform.audit_log`);
+      await adminDb.execute(sql`drop function if exists platform.test_doomed_rotate()`);
+    }
+    const keys = await adminDb.select().from(apiKey).where(and(eq(apiKey.tenantId, w.tenantId), eq(apiKey.sourceId, partner.id)));
+    expect(keys).toHaveLength(2);
+    expect(keys.find((k) => k.id === old.id)!.revokedAt).toBeNull();
+    expect(keys.find((k) => k.id !== old.id)!.revokedAt).not.toBeNull();
+    expect(await authenticateKey(old.secret, null)).toMatchObject({ id: old.id });
+  });
+
   it("is 404 for a key of another source, and the rotate response is never stored for a replay", async () => {
     const a = await json(w.as(operator, postSource, 'sources', 'POST', { kind: 'partner', name: 'Partner A' }), 201);
     const b = await json(w.as(operator, postSource, 'sources', 'POST', { kind: 'partner', name: 'Partner B' }), 201);

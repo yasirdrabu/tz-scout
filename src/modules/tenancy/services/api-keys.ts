@@ -192,12 +192,30 @@ async function revokeOrphan(ws: ModuleContext, id: string): Promise<void> {
   }
 }
 
-/** Revokes a key. Requests with it fail within 60 seconds on every instance (the cache lifetime). */
+/**
+ * Puts back a key revoked by a request that then failed (its revoke committed on the control plane, the
+ * rest did not), unless something revoked it again since. The `tenancy.api_key.revoked` event already
+ * sent stays sent.
+ */
+async function restoreRevoked(ws: ModuleContext, id: string, revokedAt: Date): Promise<void> {
+  await withControlTenant(ws.tenantId, (tx) =>
+    tx
+      .update(apiKey)
+      .set({ revokedAt: null })
+      .where(and(eq(apiKey.id, id), eq(apiKey.tenantId, ws.tenantId), eq(apiKey.revokedAt, revokedAt))),
+  );
+}
+
+/**
+ * Revokes a key. Requests with it fail within 60 seconds on every instance (the cache lifetime). When
+ * the request's workspace transaction then fails, the key is put back (`onRollback`).
+ */
 export async function revokeApiKey(ws: ModuleContext, id: string, reason: string): Promise<void> {
   return onControl(ws, async (ctx) => {
+    const revokedAt = new Date();
     const rows = await ctx.tx
       .update(apiKey)
-      .set({ revokedAt: new Date() })
+      .set({ revokedAt })
       .where(and(eq(apiKey.id, id), eq(apiKey.tenantId, ctx.tenantId), isNull(apiKey.revokedAt)))
       .returning({ id: apiKey.id, prefix: apiKey.prefix });
     if (rows.length === 0) {
@@ -207,6 +225,7 @@ export async function revokeApiKey(ws: ModuleContext, id: string, reason: string
         title: 'That key was not found.',
       });
     }
+    ws.onRollback?.(() => restoreRevoked(ws, id, revokedAt));
     evictPrefix(rows[0]!.prefix);
     await publish(ctx, apiKeyRevoked, { keyId: id, reason, revokedBy: ctx.actor.id }, { type: 'api_key', id });
     await audit(ws, {
@@ -361,8 +380,10 @@ async function sourceKey(ctx: ModuleContext, sourceId: string, keyId: string) {
 
 /**
  * Rotates one key of a source (Decision 14, Ruling 7): a new key with the old one's name, scopes, data limit,
- * environment, expiry and limits, within what `grantor` (the caller) holds, then the old one revoked as `Rotated`, in the caller's transaction, so a failed
- * create leaves the old key working. Calls with the old key fail within 60 seconds (at once on this instance).
+ * environment, expiry and limits, within what `grantor` (the caller) holds, then the old one revoked as `Rotated`, in
+ * one control-plane transaction, so a failed create leaves the old key working. When the request's workspace
+ * transaction fails after that commits, the request's undo steps revoke the new key and put the old one back.
+ * Calls with the old key fail within 60 seconds (at once on this instance).
  */
 export async function rotateSourceKey(
   ws: ModuleContext,
