@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import net from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,7 +9,9 @@ import { z } from 'zod';
 import type { JetStreamClient, JetStreamManager } from '@nats-io/jetstream';
 import { connect, type NatsConnection } from '@nats-io/transport-node';
 import type { ModuleContext } from '@/platform/context';
+import { config } from '@/platform/config';
 import { adminDb, closeDbs } from '@/platform/db/client';
+import { urlForDatabase } from '@/platform/db/workspace-pools';
 import { withTenant } from '@/platform/db/tenant';
 import { publish } from '@/platform/events/outbox';
 import { defineEvent } from '@/platform/events/registry';
@@ -51,13 +54,42 @@ const ctxOf = (tenantId: string, tx: ModuleContext['tx']): ModuleContext => ({
 const emit = (tenantId: string, n: number) =>
   withTenant(tenantId, (tx) => publish(ctxOf(tenantId, tx), memberAdded, { n }));
 
-function startRelay(opts: { natsUrl?: string } = {}) {
+function startRelay(opts: { natsUrl?: string; listenUrl?: (database: string) => string } = {}) {
   const ac = new AbortController();
   const done = runRelay({ signal: ac.signal, ...opts });
   return {
     stop: async () => {
       ac.abort();
       await done;
+    },
+  };
+}
+
+/** A TCP proxy to Postgres whose connections can be made to go silent (open, but passing nothing). */
+async function silentProxy(target: URL) {
+  const open: { silent: boolean; client: net.Socket; upstream: net.Socket }[] = [];
+  const server = net.createServer((client) => {
+    const upstream = net.connect(Number(target.port || 5432), target.hostname);
+    const c = { silent: false, client, upstream };
+    open.push(c);
+    client.on('data', (d) => void (c.silent || upstream.write(d)));
+    upstream.on('data', (d) => void (c.silent || client.write(d)));
+    client.on('close', () => upstream.destroy());
+    upstream.on('close', () => client.destroy());
+    client.on('error', () => {});
+    upstream.on('error', () => {});
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const url = new URL(target);
+  url.host = `127.0.0.1:${(server.address() as net.AddressInfo).port}`;
+  return {
+    url: url.toString(),
+    connections: () => open.filter((c) => !c.client.destroyed).length,
+    /** Every connection open now goes silent; later ones pass as usual. */
+    silence: () => open.forEach((c) => (c.silent = true)),
+    close: async () => {
+      for (const c of open) c.client.destroy();
+      await new Promise<void>((r) => server.close(() => r()));
     },
   };
 }
@@ -162,6 +194,39 @@ describe('relay', () => {
       await stopListen();
     }
   }, 20000);
+
+  it('listens again on a workspace database whose LISTEN connection went silent (D35 review)', async () => {
+    await clear();
+    const t = newId('t');
+    const got: Got[] = [];
+    const stopListen = await listen(js, t, got);
+    // The workspace LISTEN goes through a proxy that can go silent: the socket stays open, nothing
+    // comes back (a half-open connection postgres.js never notices, so never listens again by itself).
+    const proxy = await silentProxy(new URL(config.databaseAdminUrl));
+    const relay = startRelay({ listenUrl: (database) => urlForDatabase(proxy.url, database) });
+    try {
+      await sleep(300);
+      await emit(t, 0);
+      await waitFor(() => got.length > 0, 3000);
+      await waitFor(() => proxy.connections() > 0, 3000);
+      proxy.silence();
+      // The relay finds out (its ping goes unheard) and listens again: events are prompt once more.
+      await sleep(12_000);
+      const committed = new Map<number, number>();
+      for (let i = 1; i <= 5; i++) {
+        await sleep(1100);
+        await emit(t, i);
+        committed.set(i, Date.now());
+        await waitFor(() => got.some((g) => g.n === i), 3000);
+      }
+      const late = got.filter((g) => g.n > 0).map((g) => g.at - (committed.get(g.n) as number));
+      expect(Math.max(...late)).toBeLessThan(400);
+    } finally {
+      await relay.stop();
+      await stopListen();
+      await proxy.close();
+    }
+  }, 40000);
 
   it('only one of two relays holds the lock and every event arrives once (PLT-E1-S2-AC1, AC3)', async () => {
     await clear();

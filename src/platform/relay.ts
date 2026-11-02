@@ -15,6 +15,8 @@ export type RelayOptions = {
   idleMs?: number;
   /** Defaults to NATS_URL. */
   natsUrl?: string;
+  /** Where each workspace database's `LISTEN` connects. Defaults to DATABASE_ADMIN_URL on that database; tests pass a proxy. */
+  listenUrl?: (database: string) => string;
 };
 
 export type OutboxRow = { seq: number; id: string; nats_subject: string; payload: unknown };
@@ -22,36 +24,51 @@ export type OutboxRow = { seq: number; id: string; nats_subject: string; payload
 /**
  * `LISTEN`s for new outbox rows in each workspace database (the trigger `platform.notify_outbox` fires
  * there too), on a connection of its own per database, up to `cap` of them (SCOUT_RELAY_POOL_CAP): one
- * past the cap is only polled. A connection that fails is dropped and opened again on a later turn.
+ * past the cap is only polled. postgres.js listens again by itself when that connection closes, but
+ * says nothing when that fails, and cannot tell a connection that went silent (half open). So each
+ * listener is pinged (a NOTIFY on its channel, sent through the relay's pool every `LISTEN_PING_MS`):
+ * one that has not heard its ping within `LISTEN_PING_MS` is closed and opened again on a later turn.
  */
 class WorkspaceListeners {
-  private open = new Map<string, postgres.Sql>();
-  constructor(private notified: (database: string) => void) {}
+  private open = new Map<string, { sql: postgres.Sql; pingedAt?: number; heardAt: number }>();
+  constructor(
+    private notified: (database: string) => void,
+    private urlFor: (database: string) => string = (database) => urlForDatabase(config.databaseAdminUrl, database),
+  ) {}
 
-  async sync(databases: string[], cap: number): Promise<void> {
-    for (const [d, sql] of this.open) {
-      if (!databases.includes(d)) {
+  async sync(databases: PlatformDatabase[], cap: number, now = Date.now()): Promise<void> {
+    const names = new Set(databases.map((d) => d.name));
+    for (const [d, l] of this.open) {
+      const dead = l.pingedAt !== undefined && l.heardAt < l.pingedAt && now - l.pingedAt > LISTEN_PING_MS;
+      if (dead) log.warn({ database: d }, 'relay: a workspace LISTEN stopped answering, listening again');
+      if (dead || !names.has(d)) {
         this.open.delete(d);
-        await sql.end({ timeout: 2 }).catch(() => {});
+        await l.sql.end({ timeout: 2 }).catch(() => {});
       }
     }
-    for (const d of databases) {
-      if (this.open.has(d) || this.open.size >= cap) continue;
-      const sql = postgres(urlForDatabase(config.databaseAdminUrl, d), {
-        max: 1,
-        idle_timeout: 0,
-        max_lifetime: 0,
-        onnotice: () => {},
-        onclose: () => {
-          if (this.open.get(d) === sql) this.open.delete(d);
-        },
-      });
+    for (const db of databases) {
+      const d = db.name;
+      const l = this.open.get(d);
+      if (l) {
+        // Ping once the last ping was heard and is old enough.
+        if (l.pingedAt === undefined || (l.heardAt >= l.pingedAt && now - l.pingedAt >= LISTEN_PING_MS)) {
+          l.pingedAt = now;
+          await db.admin.execute(sql`select pg_notify('scout_outbox', ${LISTEN_PING})`).catch(() => {});
+        }
+        continue;
+      }
+      if (this.open.size >= cap) continue;
+      const listenSql = postgres(this.urlFor(d), { max: 1, idle_timeout: 0, max_lifetime: 0, onnotice: () => {} });
+      const entry = { sql: listenSql, heardAt: now };
       try {
-        await sql.listen('scout_outbox', () => this.notified(d));
-        this.open.set(d, sql);
+        await listenSql.listen('scout_outbox', (payload) => {
+          entry.heardAt = Date.now();
+          if (payload !== LISTEN_PING) this.notified(d);
+        });
+        this.open.set(d, entry);
       } catch (e) {
         log.warn({ err: errorText(e), database: d }, 'relay: could not listen on a workspace database, polling it');
-        await sql.end({ timeout: 2 }).catch(() => {});
+        await listenSql.end({ timeout: 2 }).catch(() => {});
       }
     }
   }
@@ -59,9 +76,13 @@ class WorkspaceListeners {
   async closeAll(): Promise<void> {
     const all = [...this.open.values()];
     this.open.clear();
-    await Promise.allSettled(all.map((sql) => sql.end({ timeout: 2 })));
+    await Promise.allSettled(all.map((l) => l.sql.end({ timeout: 2 })));
   }
 }
+
+/** How often each workspace `LISTEN` is pinged, and how long its ping may take to come back. */
+const LISTEN_PING_MS = 5_000;
+const LISTEN_PING = 'relay-ping';
 
 /** One outbox the relay reads: the control plane's or a workspace database's. */
 export type OutboxSource = {
@@ -290,7 +311,7 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
     const listeners = new WorkspaceListeners((database) => {
       quiet.delete(database);
       poke();
-    });
+    }, opts.listenUrl);
     stopListening = () => listeners.closeAll();
 
     while (!signal.aborted) {
@@ -303,7 +324,7 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
           streamsReady = true;
         }
         const databases = await platformDatabases({ relay: true });
-        await listeners.sync(databases.filter((d) => !d.control).map((d) => d.name), config.relayPoolCap);
+        await listeners.sync(databases.filter((d) => !d.control), config.relayPoolCap);
         const sources = databases.map(outboxSource);
         ({ sentAny, full } = await relayTurn(
           sources,
