@@ -73,7 +73,6 @@ A stage move's `cause_event_id` is suffixed by the action (`<id>:accepted`, `:de
 | `tenancy.tenant.created` | seed review statuses, decline reasons, the auto-accept setting and the hourly `routing.assignments.auto_accept` schedule | no |
 | `intake.arrival.resolved` | create `account_review` with the initial status (if new; the source's status when it names an active one, else `unvetted`) and stage `arrived`; on an account with an open assignment set `newFrom`, which ends with the assignment | yes |
 | `scoring.account.scored` | refresh queue sort fields; flag `low_trust` | yes |
-| `accounts.conflict.detected` / `.resolved` | set or clear the conflicts flag | yes |
 | `enrichment.request.flagged` / `.completed` | set or clear the enrichment flag | yes |
 | `crm.handoff.completed` / `.failed` / `.needs_decision` / `.cancelled` | set the handoff flag (`sending` on assignment, then `in_crm`, `failed`, `needs_decision` or `cancelled`); `needs_decision` and `failed` also go to the review summary as `handoff_needs_decision` and `handoff_failed` | yes |
 | `crm.activity.observed` | an activity by the open pending assignment's seller accepts it (`acceptedHow` `crm_activity`); a reply or meeting from anyone moves the stage to Engaged | yes |
@@ -82,6 +81,10 @@ A stage move's `cause_event_id` is suffixed by the action (`<id>:accepted`, `:de
 | `accounts.account.merged` | move review, assignments and history to the survivor | yes |
 | `tenancy.member.removed` | open assignments of that seller go back to the assigner as `withdrawn` | no |
 | `jobs.history.republish` | re-publish stored status, assignment and stage events with `replay: true` (events-and-async.md) | no |
+
+Routing does not consume the conflict events. The queue's conflict count and `flag=conflicts` read
+`accounts.account_summary.open_conflict_count`, which Accounts writes in the same transaction as it
+detects or resolves a conflict (Claude's call, 2026-11-02).
 
 ## API endpoints
 

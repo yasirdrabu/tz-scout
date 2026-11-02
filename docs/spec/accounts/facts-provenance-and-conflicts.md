@@ -80,6 +80,11 @@ beyond the key's tolerance:
   2026-11-02).
 - Resolving a resolved conflict switches the kept value ("Kept by {name} · Change"): the archived fact
   becomes the pinned one and the old pin is archived (Claude's call, 2026-11-02).
+- Only the key's newest conflict can be changed. Changing an older one is `409` "A newer disagreement
+  about this value has been settled since. Change that one instead.", and the page offers `Change` on
+  the newest only (Claude's call, 2026-11-02).
+- (Claude's call, 2026-11-02) A conflict stays open until a person keeps a value, even if the sources
+  later agree.
 - A person editing a key that has an open conflict closes it with `resolution: 'edited'`. The edit's
   fact is kept and the conflict's facts are archived. No source lost, so no source is penalised
   (Claude's call, 2026-11-02).
