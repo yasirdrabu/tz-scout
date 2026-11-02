@@ -149,6 +149,20 @@ describe('deals (CRM-E5-S3)', () => {
     expect(await stageOf()).toBe('stg_proposal'); // never back
   });
 
+  it('REV-E5: a mapped stage wins over the created-deal stage, even when it sits before it (forward only)', async () => {
+    await t.run(async (ctx) => {
+      await ctx.tx.update(pipelineStage).set({ position: 7 }).where(eq(pipelineStage.key, 'won'));
+      await ctx.tx.update(pipelineStage).set({ position: 6 }).where(eq(pipelineStage.key, 'opportunity'));
+      await ctx.tx.insert(pipelineStage).values({ id: newId('pst'), tenantId: ctx.tenantId, key: 'stg_early', name: 'Early deal', kind: 'flow', position: 4, trigger: 'deal_reaches_stage', hubspotStage: 'appointmentscheduled' });
+    });
+    const { accountId, company } = await linked();
+    await t.run((ctx) => ctx.tx.insert(accountReview).values({ tenantId: ctx.tenantId, accountId, statusKey: 'reviewed', stage: 'engaged' }));
+    await t.run((ctx) => mockAddDeal(ctx, { companyExternalId: company, name: 'Early', stage: 'appointmentscheduled' }));
+    await poll();
+    await runOutbox(t.tenantId);
+    expect((await t.run((ctx) => ctx.tx.select().from(accountReview).where(eq(accountReview.accountId, accountId))))[0]!.stage).toBe('stg_early');
+  });
+
   it('a deal on an unlinked company is ignored', async () => {
     const co = await t.run((ctx) => hubspotMock(ctx).upsertCompany({ domain: domain(), name: 'x', ownerExternalId: null, replaceableOwner: true, properties: {} }));
     const ext = await t.run((ctx) => mockAddDeal(ctx, { companyExternalId: co.externalId, name: 'Stranger' }));

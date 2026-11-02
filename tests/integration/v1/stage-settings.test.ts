@@ -135,15 +135,25 @@ describe('PUT /settings/stages (REV-E5-S1)', () => {
     expect(await stageOf(a)).toBe('assigned');
   });
 
+  it('refuses a key that was never a stage of this workspace', async () => {
+    const res = await save([...(await current()), { ...NEW, key: 'stg_nope', name: 'Ghost' }]);
+    expect(res.status).toBe(400);
+  });
+
   it('Restore defaults puts deleted defaults back under their keys and deletes the added stages', async () => {
     expect(await keysOf()).not.toContain('engaged');
     const added = (await current()).find((s) => s.name === 'Proposal')!;
     const a = await w.account('Restore Co');
     await moveTo(a, added.key!);
-    const { restoreDefaults } = await import('@/modules/routing');
-    const view = await w.run((ctx) => restoreDefaults({ ...ctx, access: { userId: w.owner } } as never));
-    expect(view.stages.map((s) => s.key)).toEqual(['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity', 'won', 'declined', 'back_to_nurture', 'lost']);
-    expect(view.stages.map((s) => s.name)).toEqual(['Sent', 'Reviewed', 'Assigned', 'Engaged', 'Opportunity', 'Won', 'Disqualified', 'Back to nurture', 'Lost']);
+    const got = await json(w.as(w.owner, getStages, 'settings/stages'));
+    const defaults = got.defaults.map(({ key, name, description, kind, trigger, hubspot_stage, quarter_target }: S) => ({ key, name, description, kind, trigger, hubspot_stage, quarter_target }));
+    expect(defaults.map((s: S) => s.key)).toEqual(['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity', 'won', 'declined', 'back_to_nurture', 'lost']);
+    expect(got.defaults[0]).toMatchObject({ trigger_label: 'A source or import creates it', locked: 'first' });
+    const res = await save(defaults);
+    expect(res.status).toBe(200);
+    const view = await res.json();
+    expect(view.stages.map((s: { key: string }) => s.key)).toEqual(['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity', 'won', 'declined', 'back_to_nurture', 'lost']);
+    expect(view.stages.map((s: { name: string }) => s.name)).toEqual(['Sent', 'Reviewed', 'Assigned', 'Engaged', 'Opportunity', 'Won', 'Disqualified', 'Back to nurture', 'Lost']);
     expect(await stageOf(a)).toBe('opportunity');
   });
 

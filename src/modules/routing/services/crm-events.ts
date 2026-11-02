@@ -10,6 +10,7 @@ import { eventSignals, type StageEvent } from '../domain/stages';
 import { lockRow, openAssignment } from './review';
 import { acceptLocked } from './respond';
 import { publishReviewSnapshot } from './snapshot';
+import { loadStages } from './pipeline-stages';
 import { moveStage } from './stage';
 
 type EventOf<T> = T extends EventDef<infer D> ? Envelope<D> : never;
@@ -38,14 +39,17 @@ const DEAL_STAGE: Record<'open' | 'won' | 'lost', StageEvent> = { open: 'opportu
 
 /**
  * `crm.deal.changed`: a won deal moves the stage to the Closed won one, a lost deal to the Closed lost one, and an open
- * deal to the stage mapped to its HubSpot stage (`deal_reaches_stage`) or the one for a created deal; furthest forward wins.
+ * deal to the stage mapped to its HubSpot stage (`deal_reaches_stage`), else the one for a created deal; forward only.
  */
 export async function onCrmDeal(e: EventOf<typeof dealChanged>, ctx: ModuleContext): Promise<void> {
   const { accountId, status } = e.data;
   const row = await lockRow(ctx, accountId);
   if (!row || row.mergedInto) return;
-  const signals: StageSignal[] = eventSignals(DEAL_STAGE[status]);
-  if (status === 'open' && e.data.stage) signals.push({ trigger: 'deal_reaches_stage', hubspotStage: e.data.stage });
+  let signals: StageSignal[] = eventSignals(DEAL_STAGE[status]);
+  if (status === 'open' && e.data.stage) {
+    const mapped = (await loadStages(ctx)).some((s) => s.trigger === 'deal_reaches_stage' && s.hubspotStage === e.data.stage);
+    if (mapped) signals = [{ trigger: 'deal_reaches_stage', hubspotStage: e.data.stage }];
+  }
   if (await moveStage(ctx, accountId, signals, e.id)) await publishReviewSnapshot(ctx, accountId);
 }
 

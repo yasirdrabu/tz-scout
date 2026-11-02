@@ -52,6 +52,8 @@ export const routingFunnelStages: FunnelStages = {
 
 export type StagesView = {
   stages: (PipelineStage & { triggerLabel: string })[];
+  /** The default stages, for Restore defaults: the editor fills its draft from them and the person saves. */
+  defaults: (PipelineStage & { triggerLabel: string })[];
   triggers: { key: string; label: string; limit: string }[];
 };
 
@@ -60,6 +62,7 @@ export async function listStages(ctx: ModuleContext): Promise<StagesView> {
   const label = new Map<string, string>(TRIGGERS.map((t) => [t.key, t.label]));
   return {
     stages: (await loadStages(ctx)).map((s) => ({ ...s, triggerLabel: label.get(s.trigger)! })),
+    defaults: DEFAULT_STAGES.map((s) => ({ ...s, triggerLabel: label.get(s.trigger)! })),
     triggers: TRIGGERS.map((t) => ({ ...t })),
   };
 }

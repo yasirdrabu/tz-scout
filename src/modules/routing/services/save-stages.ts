@@ -6,21 +6,11 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { stagesChanged } from '../contracts/events';
 import { accountReview, pipelineStage, routingSetting, stageChange } from '../db/schema';
-import { DEFAULT_STAGES, planDeletion, validateStages, type PipelineStage, type PipelineStageInput } from '../domain/pipeline';
+import { DEFAULT_STAGES, planDeletion, validateStages, type PipelineStageInput } from '../domain/pipeline';
 import { listStages, loadStages, type StagesView } from './pipeline-stages';
 import { requirePerson } from './review';
 import { publishReviewSnapshot } from './snapshot';
 import { moveStage } from './stage';
-
-const inputOf = (s: PipelineStage): PipelineStageInput => ({
-  key: s.key,
-  name: s.name,
-  description: s.description,
-  kind: s.kind,
-  trigger: s.trigger,
-  hubspotStage: s.hubspotStage,
-  quarterTarget: s.quarterTarget,
-});
 
 const brief = (s: { key: string; name: string; kind: string; trigger: string; hubspotStage: string | null; quarterTarget: number | null }) => ({
   key: s.key,
@@ -35,7 +25,7 @@ const brief = (s: { key: string; name: string; kind: string; trigger: string; hu
  * Saves the workspace's whole stage list (REV-E5 "Editing"): validates it (400 with each field's sentence,
  * nothing saved), archives the stages left out and moves their accounts (cause `stage_deleted`), then
  * upserts the rest in order. Existing stages are named by key, new ones have none; a deleted stage listed
- * again comes back. Audits `routing.stages.changed` with before and after and publishes the event.
+ * again comes back (Restore defaults: the editor sends the defaults list). Audits `routing.stages.changed` with before and after and publishes the event.
  */
 export async function saveStages(ctx: ModuleContext, input: PipelineStageInput[]): Promise<StagesView> {
   const by = requirePerson(ctx);
@@ -113,6 +103,3 @@ export async function saveStages(ctx: ModuleContext, input: PipelineStageInput[]
   await publish(ctx, stagesChanged, { by, stages: after.stages.map((s) => ({ key: s.key, name: s.name, kind: s.kind })), archived: plan.archived });
   return after;
 }
-
-/** `Restore defaults` (REV-E5): the default list again; deleted defaults come back under their keys, added stages go by the deletion rules. */
-export const restoreDefaults = (ctx: ModuleContext): Promise<StagesView> => saveStages(ctx, DEFAULT_STAGES.map(inputOf));

@@ -40,7 +40,7 @@ export { backfillLeadOffers, backfillReviews } from './services/backfill';
 export { publishReviewSnapshot } from './services/snapshot';
 export { moveStage } from './services/stage';
 export { moveToStage } from './services/move-stage';
-export { restoreDefaults, saveStages } from './services/save-stages';
+export { saveStages } from './services/save-stages';
 export { TRIGGERS, type PipelineStageInput, type Trigger } from './domain/pipeline';
 export { routingReviewStatusValidator } from './services/status-validator';
 export { routingOfferUsage } from './services/offer-usage';
