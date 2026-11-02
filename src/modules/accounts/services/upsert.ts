@@ -28,6 +28,8 @@ export type UpsertResult = {
   signalIds: string[];
   existingSignalIds: string[];
   factIds: string[];
+  /** Conflicts this arrival's facts opened or extended. */
+  conflictIds: string[];
   excluded: Exclusion | null;
 };
 
@@ -263,7 +265,7 @@ export async function upsertFromArrival(
     .where(and(eq(account.tenantId, ctx.tenantId), eq(account.id, id)));
   // 1, 2. Facts about the account, then the current values.
   const factIds = await recordFacts(ctx, id, null, accountFacts(opts.personId ? { ...a, facts: [] } : a, target.isShell), chain, a.arrivalId);
-  await reproject(ctx, id);
+  const conflictIds = await reproject(ctx, id, undefined, { detectFor: factIds });
   // 3. Aliases.
   const addedAccountIds = await addAliases(ctx, id, a, before?.domain ?? null);
   // 4. People.
@@ -314,6 +316,7 @@ export async function upsertFromArrival(
     signalIds: signals.map((s) => s.signalId),
     existingSignalIds: signals.filter((s) => s.existing).map((s) => s.signalId),
     factIds,
+    conflictIds: [...new Set([...conflictIds, ...people.flatMap((p) => p.conflictIds)])],
     excluded,
   };
 }

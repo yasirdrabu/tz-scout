@@ -6,6 +6,7 @@ import { isKnownFactKey, type FactKind, type SourceChain } from '../contracts/ty
 import { account, accountAlias, fact, person } from '../db/schema';
 import { pickCurrent, type PickFact } from '../domain/current-value';
 import { matchName, regionKey } from '../domain/names';
+import { detectConflicts, disagreeingIds, type ConflictGroup } from './conflicts';
 
 type AccountRow = typeof account.$inferInsert;
 type PersonRow = typeof person.$inferInsert;
@@ -88,6 +89,8 @@ function valueTypeOf(value: unknown): string {
  * Stores what a source said, as `candidate` facts; `reproject` decides which are current.
  * A fact this chain already said (same key, same value, still live) is not stored again.
  * `pinnedBy` (a user id) stores them pinned; only an already pinned fact counts as said then.
+ * An unpinned value this chain already lost (equal to one of its `archived` facts for the key) is stored
+ * `archived`: it stays in the history and takes no part in picking or conflicts (Ruling 5).
  * Returns the ids of the facts it stored.
  */
 export async function recordFacts(
@@ -110,11 +113,13 @@ export async function recordFacts(
         eq(fact.accountId, accountId),
         personId ? eq(fact.personId, personId) : isNull(fact.personId),
         inArray(fact.key, given.map((f) => f.key)),
-        inArray(fact.status, LIVE),
+        inArray(fact.status, [...LIVE, 'archived']),
       ),
     );
-  const said = new Set(live.filter((f) => !!f.pinnedAt === !!pinnedBy).map((f) => `${f.key}\n${chainKey(chainOf(f))}\n${stableJson(f.value)}`));
-  const fresh = given.filter((f) => !said.has(`${f.key}\n${chainKey(chain)}\n${stableJson(f.value)}`));
+  const sig = (f: { key: string; value: unknown }, c: SourceChain) => `${f.key}\n${chainKey(c)}\n${stableJson(f.value)}`;
+  const said = new Set(live.filter((f) => f.status !== 'archived' && !!f.pinnedAt === !!pinnedBy).map((f) => sig(f, chainOf(f))));
+  const lost = new Set(pinnedBy ? [] : live.filter((f) => f.status === 'archived').map((f) => sig(f, chainOf(f))));
+  const fresh = given.filter((f) => !said.has(sig(f, chain)));
   if (fresh.length === 0) return [];
   const inserted = await ctx.tx
     .insert(fact)
@@ -135,7 +140,7 @@ export async function recordFacts(
         url: f.url ?? null,
         note: f.note ?? null,
         observedAt: f.observedAt ?? new Date(),
-        status: 'candidate',
+        status: lost.has(sig(f, chain)) ? 'archived' : 'candidate',
         ...(pinnedBy ? { pinnedBy, pinnedAt: new Date() } : {}),
       })),
     )
@@ -147,8 +152,10 @@ export async function recordFacts(
  * Re-picks the current value of each key (all keys, or `keys`) for the account and its people,
  * sets fact statuses, and writes the projected columns plus `match_name` and `hq_state_key`.
  * Trust is read once per distinct source chain.
+ * `detectFor`: the facts just recorded. Only the keys they touch are checked for conflicts; without it (a merge,
+ * an edit) nothing is. Returns the ids of the conflicts opened or extended.
  */
-export async function reproject(ctx: ModuleContext, accountId: string, keys?: string[]): Promise<void> {
+export async function reproject(ctx: ModuleContext, accountId: string, keys?: string[], opts: { detectFor?: string[] } = {}): Promise<string[]> {
   const rows = await ctx.tx
     .select()
     .from(fact)
@@ -160,7 +167,7 @@ export async function reproject(ctx: ModuleContext, accountId: string, keys?: st
         keys ? inArray(fact.key, keys) : undefined,
       ),
     );
-  if (rows.length === 0) return;
+  if (rows.length === 0) return [];
 
   const trust = new Map<string, number>();
   for (const r of rows) {
@@ -194,13 +201,17 @@ export async function reproject(ctx: ModuleContext, accountId: string, keys?: st
   const status = new Map<string, string>();
   const accountSet: Partial<AccountRow> = {};
   const personSets = new Map<string, Partial<PersonRow>>();
+  const touched = new Set(opts.detectFor ?? []);
+  const disagreeing: ConflictGroup[] = [];
   for (const facts of groups.values()) {
     const { personId, key } = facts[0]!;
-    const pick = pickCurrent(
-      facts.map<PickFact>((f) => ({ id: f.id, key: f.key, value: f.value, observedAt: f.observedAt, pinned: !!f.pinnedAt, sourceChain: chainOf(f) })),
-      (f) => trust.get(chainKey(f.sourceChain)) ?? 0,
-    );
+    const picks = facts.map<PickFact>((f) => ({ id: f.id, key: f.key, value: f.value, observedAt: f.observedAt, pinned: !!f.pinnedAt, sourceChain: chainOf(f) }));
+    const pick = pickCurrent(picks, (f) => trust.get(chainKey(f.sourceChain)) ?? 0);
     const superseded = new Set(pick.supersededIds);
+    if (pick.currentId && facts.some((f) => touched.has(f.id))) {
+      const group = { personId, key, currentId: pick.currentId, live: picks.filter((f) => !superseded.has(f.id)) };
+      if (disagreeingIds(group).length) disagreeing.push(group);
+    }
     for (const f of facts) {
       const next = f.id === pick.currentId ? 'current' : superseded.has(f.id) ? 'superseded' : 'candidate';
       if (next !== f.status) status.set(f.id, next);
@@ -223,6 +234,7 @@ export async function reproject(ctx: ModuleContext, accountId: string, keys?: st
     const changed = before && changedOnly(before, set);
     if (changed) await ctx.tx.update(person).set({ ...changed, updatedAt: new Date() }).where(where);
   }
+  return disagreeing.length ? detectConflicts(ctx, accountId, disagreeing) : [];
 }
 
 /** The entries of `set` that differ from `before`, or null when nothing changes. */

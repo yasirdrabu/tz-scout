@@ -102,3 +102,35 @@ export const signalRecorded = defineEvent(
     arrivalId: z.string().optional(),
   }),
 );
+
+/** A live fact from another source chain differs from the current value beyond tolerance: the conflict opened or gained a fact. */
+export const conflictDetected = defineEvent(
+  'accounts.conflict.detected',
+  1,
+  z.object({
+    conflictId: z.string(),
+    accountId: z.string(),
+    personId: z.string().optional(),
+    key: z.string(),
+    factIds: z.array(z.string()),
+    sourceIds: z.array(z.string()),
+  }),
+);
+
+/** A person settled a conflict: kept one fact, or edited the value (`edited`, no losing sources). */
+export const conflictResolved = defineEvent(
+  'accounts.conflict.resolved',
+  1,
+  z.object({
+    conflictId: z.string(),
+    accountId: z.string(),
+    key: z.string(),
+    keptFactId: z.string(),
+    archivedFactIds: z.array(z.string()),
+    winningSourceIds: z.array(z.string()),
+    losingSourceIds: z.array(z.string()),
+    resolvedBy: z.string(),
+    resolution: z.enum(['kept', 'edited']),
+    note: z.string().optional(),
+  }),
+);

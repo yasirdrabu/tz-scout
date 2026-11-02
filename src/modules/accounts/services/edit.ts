@@ -81,9 +81,9 @@ function isUniqueViolation(e: unknown, constraint: string): boolean {
 }
 
 /** Re-picks values; a person's email that another person at the account already has is a 409. */
-export async function reprojectPerson(ctx: ModuleContext, accountId: string, keys: string[]): Promise<void> {
+export async function reprojectPerson(ctx: ModuleContext, accountId: string, keys: string[], opts: { detectFor?: string[] } = {}): Promise<string[]> {
   try {
-    await ctx.tx.transaction((tx) => reproject({ ...ctx, tx }, accountId, keys));
+    return await ctx.tx.transaction((tx) => reproject({ ...ctx, tx }, accountId, keys, opts));
   } catch (e) {
     if (isUniqueViolation(e, 'person_tenant_account_email_uq')) {
       throw new ScoutError({ slug: 'conflict', status: 409, title: 'That email is already on another person at this account.' });

@@ -50,6 +50,13 @@
       "when": 1793484224708,
       "tag": "0006_notes_and_lead_offer",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793650668947,
+      "tag": "0007_conflicts",
+      "breakpoints": true
     }
   ]
 }

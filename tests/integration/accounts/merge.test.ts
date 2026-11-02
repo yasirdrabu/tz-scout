@@ -10,7 +10,7 @@ import {
   type ArrivalForAccounts,
 } from '@/modules/accounts';
 import { recordFacts } from '@/modules/accounts/services/facts';
-import { account, accountAlias, accountSummary, person, personAlias } from '@/modules/accounts/db/schema';
+import { account, accountAlias, accountSummary, conflict, person, personAlias } from '@/modules/accounts/db/schema';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
@@ -241,6 +241,47 @@ describe('mergeAccounts', () => {
     await expect(t.run((ctx) => upsertFromArrival(ctx, arrival({ account: { employees: 1 } }), c.accountId))).rejects.toMatchObject({
       status: 404,
       message: 'That account was not found.',
+    });
+  });
+
+  describe('conflicts (Review Focus 1)', () => {
+    const value = (source: string, cents: number, at: string) => ({
+      sourceChain: { vendorSourceId: source },
+      receivedAt: new Date(at),
+      research: { contract_value_cents: cents },
+    });
+    const openConflicts = (accountId: string) =>
+      t.run((ctx) => ctx.tx.select().from(conflict).where(and(eq(conflict.accountId, accountId), eq(conflict.status, 'open'))));
+    const count = async (accountId: string) =>
+      (await t.run((ctx) => ctx.tx.select({ n: accountSummary.openConflictCount }).from(accountSummary).where(eq(accountSummary.accountId, accountId))))[0]!.n;
+
+    it("the merged account's conflict follows the survivor, and both counts are right", async () => {
+      const a = await seed({ sourceChain: { personSourceId: 'src_a' }, account: { name: 'Conflict Survivor', domain: domain() } });
+      const b = await seed({ account: { name: 'Conflict Merged', domain: domain() }, ...value('src_x', 2_090_000_000, '2026-10-01T00:00:00Z') });
+      const second = await t.run((ctx) => upsertFromArrival(ctx, arrival(value('src_y', 1_840_000_000, '2026-10-02T00:00:00Z')), b.accountId));
+      expect(second.conflictIds).toHaveLength(1);
+      expect(await count(b.accountId)).toBe(1);
+
+      await asPerson((ctx) => mergeAccounts(ctx, a.accountId, b.accountId));
+      const moved = await openConflicts(a.accountId);
+      expect(moved.map((c) => c.id)).toEqual(second.conflictIds);
+      expect(await count(a.accountId)).toBe(1);
+      expect(await count(b.accountId)).toBe(0);
+    });
+
+    it('two open conflicts on the same key become one on the survivor', async () => {
+      const a = await seed({ account: { name: 'Both Survivor', domain: domain() }, ...value('src_x', 2_090_000_000, '2026-10-01T00:00:00Z') });
+      await t.run((ctx) => upsertFromArrival(ctx, arrival(value('src_y', 1_840_000_000, '2026-10-02T00:00:00Z')), a.accountId));
+      const b = await seed({ account: { name: 'Both Merged', domain: domain() }, ...value('src_z', 1_500_000_000, '2026-10-03T00:00:00Z') });
+      await t.run((ctx) => upsertFromArrival(ctx, arrival(value('src_w', 1_000_000_000, '2026-10-04T00:00:00Z')), b.accountId));
+
+      await asPerson((ctx) => mergeAccounts(ctx, a.accountId, b.accountId));
+      const open = await openConflicts(a.accountId);
+      expect(open).toHaveLength(1);
+      expect(open[0]!.factIds).toHaveLength(4);
+      expect(await count(a.accountId)).toBe(1);
+      expect(await count(b.accountId)).toBe(0);
+      expect(await openConflicts(b.accountId)).toHaveLength(0);
     });
   });
 });
