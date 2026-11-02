@@ -9,6 +9,8 @@ import { GET as accountsRoute } from '@/http/routes/v1/accounts/route';
 import { DELETE as resetColumns, GET as getColumns, PUT as putColumns } from '@/http/routes/v1/me/preferences/review-queue-columns/route';
 import { GET as facetsRoute } from '@/http/routes/v1/review-queue/facets/route';
 import { GET as queueRoute } from '@/http/routes/v1/review-queue/route';
+import { GET as conflictsRoute } from '@/http/routes/v1/accounts/[id]/conflicts/route';
+import { POST as conflictAction } from '@/http/routes/v1/conflicts/[id]/route';
 import { activity, deal } from '@/modules/crm/db/schema';
 import { stageChange } from '@/modules/routing/db/schema';
 import { setPrincipalCacheTtl } from '@/modules/tenancy';
@@ -69,6 +71,22 @@ describe('GET /review-queue rows (screens.md §2)', () => {
     await w.deliver();
     row = (await json(w.as(leader, queueRoute, 'review-queue'))).data.find((r: Row) => r.account_id === a);
     expect(row).toMatchObject({ review_status_label: 'In review', review_status_color: 'amber', status_changed_by_name: 'Dana Leader' });
+  });
+
+  it('counts open conflicts, filters by flag=conflicts, and drops to 0 once resolved', async () => {
+    const domain = `${newId('acc').slice(-10).toLowerCase()}-example.com`;
+    const second = await personAndAgent(w.tenant, 'Disputer');
+    const a = await w.sent({ name: 'Disputed Co', domain, employees: 1000 });
+    expect(await w.sent({ name: 'Disputed Co', domain, employees: 2000 }, second.agentId)).toBe(a);
+    const calm = await w.sent({ name: 'Calm Co' });
+    const rowsOf = async (qs = '') => (await json(w.as(leader, queueRoute, `review-queue${qs}`))).data as Row[];
+    expect((await rowsOf()).find((r) => r.account_id === a)).toMatchObject({ conflict_count: 1 });
+    expect((await rowsOf()).find((r) => r.account_id === calm)).toMatchObject({ conflict_count: 0 });
+    expect((await rowsOf('?flag=conflicts')).map((r) => r.account_id)).toEqual([a]);
+    const [c] = (await json(w.as(leader, conflictsRoute, `accounts/${a}/conflicts`))).data as { id: string; facts: { id: string }[] }[];
+    expect((await w.as(leader, conflictAction, `conflicts/${c!.id}:resolve`, 'POST', { kept_fact_id: c!.facts[0]!.id })).status).toBe(200);
+    expect((await rowsOf()).find((r) => r.account_id === a)).toMatchObject({ conflict_count: 0 });
+    expect(await rowsOf('?flag=conflicts')).toEqual([]);
   });
 
   it('updated_since narrows to rows that changed; a bad value is a 400', async () => {
