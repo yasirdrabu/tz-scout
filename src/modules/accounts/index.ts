@@ -58,6 +58,7 @@ export { listExclusionLists, listExclusionRules, setExclusionList, setExclusionR
 export { filterVisibleAccountIds, visibleAccounts } from './services/visibility';
 export { setPractices } from './services/practices';
 export { stageCountsBySource, type SourceGroup } from './services/source-stats';
+export { getConflict, listConflicts, resolveConflict, type ConflictFactView, type ConflictView } from './services/conflicts';
 export { addNote, listNotes, MAX_NOTE, type NoteView } from './services/notes';
 export { upsertFromArrival, type UpsertResult } from './services/upsert';
 export type {

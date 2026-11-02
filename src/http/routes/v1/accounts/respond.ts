@@ -1,5 +1,6 @@
-import { getAccount, getSignals, type PersonView } from '@/modules/accounts';
+import { factLabel, getAccount, getSignals, type ConflictView, type PersonView } from '@/modules/accounts';
 import { getArrival, sourceNames, type InlineResult, type SubmitResult } from '@/modules/intake';
+import { can, userNames, type Principal } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { notFound } from '../_lib/path';
@@ -39,6 +40,39 @@ export async function accountOf(ctx: ModuleContext, id: string, canReadPeople: b
   const account = await getAccount(ctx, id);
   if (!account) throw notFound();
   return { ...account, mergedInto: account.mergedInto ?? null, people: account.people.map((p) => personFor(p, canReadPeople)), signals: await namedSignals(ctx, account.id) };
+}
+
+/** A person's contact conflict needs people:read too, as their contact facts do. */
+export const hidesConflict = (principal: Principal, c: Pick<ConflictView, 'personId' | 'key'>) =>
+  !!c.personId && CONTACT_KEYS.has(c.key) && !can(principal, 'people:read');
+
+/** Conflicts as the account page shows them: each value's sources by name, and who settled it by name. */
+export async function conflictReplies(ctx: ModuleContext, conflicts: ConflictView[]) {
+  const chain = (f: ConflictView['facts'][number]) => [f.sourceChain.personSourceId, f.sourceChain.agentSourceId, f.sourceChain.vendorSourceId];
+  const names = await sourceNames(ctx, [...new Set(conflicts.flatMap((c) => c.facts.flatMap(chain)).filter((x): x is string => !!x))]);
+  const name = (id: string | undefined) => (id ? (names.get(id) ?? null) : null);
+  const people = await userNames(ctx, conflicts.map((c) => c.resolvedBy).filter((x): x is string => !!x));
+  return conflicts.map((c) => ({
+    id: c.id,
+    key: c.key,
+    label: factLabel(c.key),
+    personId: c.personId,
+    status: c.status,
+    resolution: c.resolution,
+    keptFactId: c.keptFactId,
+    resolvedByName: c.resolvedBy ? (people.get(c.resolvedBy) ?? null) : null,
+    resolvedAt: c.resolvedAt,
+    note: c.note,
+    explanation: c.explanation,
+    facts: c.facts.map((f) => ({
+      id: f.id,
+      value: f.value,
+      observedAt: f.observedAt,
+      sourceNames: { person: name(f.sourceChain.personSourceId), agent: name(f.sourceChain.agentSourceId), vendor: name(f.sourceChain.vendorSourceId) },
+      trust: f.trust,
+      status: f.status,
+    })),
+  }));
 }
 
 /** Live signals, each with its sources by name (no arrivals:read needed) and `sourceName`, the nearest of vendor, agent and person. */
