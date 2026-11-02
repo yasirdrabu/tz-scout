@@ -4,7 +4,7 @@ import { config } from '@/platform/config';
 import { controlAdminDb } from '@/platform/db/client';
 import { closeWorkspacePools, forgetWorkspace, moveLockKey } from '@/platform/db/doors';
 import { createDatabase, databaseExists, migrateWorkspaceDatabase } from '@/platform/db/migrate';
-import { copyTenantRows, countTenantRows, deleteTenantRows, type TableCount } from '@/platform/db/move';
+import { copyTenantRows, countedByEvent, countTenantRows, deleteTenantRows, type TableCount } from '@/platform/db/move';
 import { urlForDatabase } from '@/platform/db/workspace-pools';
 import { log } from '@/platform/log';
 import { workspaceInfra } from '../db/schema';
@@ -32,6 +32,25 @@ async function dropDatabase(name: string): Promise<void> {
 }
 
 /**
+ * Before the shared database's rows of a moved workspace are deleted: its own database exists and holds,
+ * table by table, at least as many of its rows as are left in the shared database (more once it has
+ * been written to since the switch). Otherwise the rows are kept and the split refuses. The per-event
+ * tables (`countedByEvent`) are left out: their rows for tenancy's events cannot be counted there.
+ */
+async function assertHoldsCopy(own: string, tenantId: string, left: TableCount[]): Promise<void> {
+  if (!(await databaseExists(own))) {
+    throw new Error(`Its registry row points at ${own}, which does not exist; its rows in the shared database are kept.`);
+  }
+  const there = new Map((await countTenantRows(adminUrl(own), tenantId)).map((c) => [c.table, c.rows]));
+  const short = left.find((c) => !countedByEvent(c.table) && (there.get(c.table) ?? 0) < c.rows);
+  if (short) {
+    throw new Error(
+      `${own} has fewer rows in ${short.table} (${there.get(short.table) ?? 0}) than the shared database still holds (${short.rows}); its rows in the shared database are kept.`,
+    );
+  }
+}
+
+/**
  * `scout tenant split <slug>` (D35 "Moving existing workspaces"): moves an active workspace out of the
  * shared database (the control plane's) into its own.
  * 1. The workspace is `moving`: requests get 503 with Retry-After, the worker puts its messages back.
@@ -42,10 +61,12 @@ async function dropDatabase(name: string): Promise<void> {
  * 4. The registry points at the new database and the workspace is `active` again.
  * 5. Its rows are deleted from the shared database.
  * A failure before 4 drops the new database and puts the workspace back to `active` where it was,
- * untouched. A failure in 5 leaves rows behind in the shared database, unused; running the split again
- * finishes it (`cleaned`). One split per workspace at a time (a session advisory lock).
+ * untouched (unless the registry already points at the new database: a switch whose acknowledgement
+ * was lost keeps it). A failure in 5 leaves rows behind in the shared database, unused; running the
+ * split again finishes it (`cleaned`), once the new database is checked to hold them. One split per
+ * workspace at a time (a session advisory lock). `afterSwitch` is a test hook.
  */
-export async function splitWorkspace(tenantId: string, opts: { settleMs?: number } = {}): Promise<SplitResult> {
+export async function splitWorkspace(tenantId: string, opts: { settleMs?: number; afterSwitch?: () => void } = {}): Promise<SplitResult> {
   if (config.workspaceDatabases !== 'per_workspace') throw new Error('Moving a workspace needs SCOUT_WORKSPACE_DATABASES=per_workspace.');
   const lock = postgres(config.databaseAdminUrl, { max: 1, onnotice: () => {} });
   try {
@@ -59,7 +80,9 @@ export async function splitWorkspace(tenantId: string, opts: { settleMs?: number
     if (row.database !== shared) {
       // Moved before, but its rows were not all deleted from the shared database: finish that. A
       // workspace made in its own database has none there, and is left alone.
-      if (row.database === own && row.status === 'active' && (await countTenantRows(adminUrl(shared), tenantId)).some((c) => c.rows > 0)) {
+      const left = row.database === own && row.status === 'active' ? await countTenantRows(adminUrl(shared), tenantId) : [];
+      if (left.some((c) => c.rows > 0)) {
+        await assertHoldsCopy(own, tenantId, left);
         const deleted = await deleteTenantRows(adminUrl(shared), tenantId);
         return { tenantId, outcome: 'cleaned', database: own, deleted };
       }
@@ -100,10 +123,23 @@ export async function splitWorkspace(tenantId: string, opts: { settleMs?: number
       // Something changed the row meanwhile (scout migrate marking it failed, say): it is still served
       // from the shared database, so nothing there may be deleted.
       if (switched.length === 0) throw new Error('Its registry row changed during the move; nothing was switched.');
+      opts.afterSwitch?.();
       forgetWorkspace(tenantId);
     } catch (e) {
-      await dropDatabase(own).catch(() => undefined);
-      await controlAdminDb.update(workspaceInfra).set({ status: 'active', updatedAt: new Date() }).where(and(inShared, eq(workspaceInfra.status, 'moving')));
+      // The switch may have committed with its acknowledgement lost: then the workspace is served from
+      // its own database, which must stay. Only a row still in the shared database is undone; when the
+      // row cannot be read, nothing is dropped.
+      const [now] = await controlAdminDb
+        .select({ database: workspaceInfra.database })
+        .from(workspaceInfra)
+        .where(eq(workspaceInfra.tenantId, tenantId))
+        .catch(() => [{ database: own }]);
+      if (now?.database === shared) {
+        await dropDatabase(own).catch(() => undefined);
+        await controlAdminDb.update(workspaceInfra).set({ status: 'active', updatedAt: new Date() }).where(and(inShared, eq(workspaceInfra.status, 'moving')));
+      } else {
+        log.error({ tenantId, err: e }, 'split: the switch went through but reported an error; its database is kept, run the split again to finish');
+      }
       forgetWorkspace(tenantId);
       throw e;
     } finally {

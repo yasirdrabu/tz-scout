@@ -217,6 +217,33 @@ describe('a split that stopped part way is finished by running it again', () => 
     await expect(run(['tenant', 'split', 'no-such-workspace', '--settle-seconds', '0'])).rejects.toThrow('No workspace with the slug "no-such-workspace"');
     await expect(run(['tenant', 'split'])).rejects.toThrow('Name a workspace or pass --all.');
   });
+
+  it('a switch that went through but reported an error keeps the new database, and running again finishes', async () => {
+    const t = await sharedWorkspace();
+    const counts = nonEmpty(await countTenantRows(sharedUrl, t.tenantId));
+    // The switch's update committed, then the acknowledgement was lost.
+    const lost = () => {
+      throw new Error('connection lost');
+    };
+    await expect(splitWorkspace(t.tenantId, { settleMs: 0, afterSwitch: lost })).rejects.toThrow('connection lost');
+    expect(await infra(t.tenantId)).toMatchObject({ status: 'active', database: own(t.tenantId) });
+    expect(await databaseExists(own(t.tenantId))).toBe(true);
+    expect(await splitWorkspace(t.tenantId, { settleMs: 0 })).toMatchObject({ outcome: 'cleaned' });
+    await movedCleanly(t.tenantId, counts);
+  });
+
+  it('cleaning up refuses, keeping the shared rows, when its own database is missing or holds fewer rows', async () => {
+    const t = await sharedWorkspace();
+    const counts = nonEmpty(await countTenantRows(sharedUrl, t.tenantId));
+    await setRow(t.tenantId, { database: own(t.tenantId) });
+    await expect(splitWorkspace(t.tenantId, { settleMs: 0 })).rejects.toThrow(`which does not exist; its rows in the shared database are kept`);
+    expect(nonEmpty(await countTenantRows(sharedUrl, t.tenantId))).toEqual(counts);
+    // Made, but nothing copied into it.
+    await createDatabase(own(t.tenantId));
+    await migrateWorkspaceDatabase(ownUrl(t.tenantId));
+    await expect(splitWorkspace(t.tenantId, { settleMs: 0 })).rejects.toThrow(/has fewer rows in .+ than the shared database still holds/);
+    expect(nonEmpty(await countTenantRows(sharedUrl, t.tenantId))).toEqual(counts);
+  });
 });
 
 describe('tenant split: no write is lost (Task 6 review)', () => {

@@ -13,9 +13,13 @@ const STAYS = new Set(['platform.ping_result']);
 
 /**
  * Tables without `tenant_id` whose rows belong to a tenant through its outbox: what its consumers and
- * jobs have handled (by event or job id).
+ * jobs have handled (by event or job id). In a workspace's own database their rows for tenancy's
+ * events (which stay in the control plane's outbox) are not counted: there is no outbox row to find.
  */
 const BY_EVENT = new Set(['platform.processed_event', 'platform.delivery_attempt']);
+
+/** True for a table whose rows are found through the outbox (`BY_EVENT`), not by `tenant_id`. */
+export const countedByEvent = (table: string): boolean => BY_EVENT.has(table);
 
 /** Tenancy's events stay in the control plane's outbox, where tenancy publishes them. */
 const CONTROL_EVENTS = `(payload->>'type' like 'tenancy.%' or payload->>'type' like 'jobs.tenancy.%')`;
