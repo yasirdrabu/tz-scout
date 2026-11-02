@@ -1,0 +1,132 @@
+import { sql } from 'drizzle-orm';
+import { PLATFORM_TENANT } from '../audit';
+import { config } from '../config';
+import { ScoutError } from '../errors';
+import { controlAdminDb, controlDb, pool, type Db } from './client';
+import type { Tx } from './tenant';
+
+/**
+ * The doors to the databases (D35). The control plane holds tenancy and the platform-wide tables;
+ * each workspace's data is reached through `workspaceDb(tenantId)`. With
+ * `SCOUT_WORKSPACE_DATABASES=shared` (the default) every workspace is the control plane's database,
+ * on pools of their own so a request holding a workspace connection never waits for its own pool to
+ * open a control-plane transaction.
+ */
+
+/** The workspace registry's row for a tenant (`tenancy.workspace_infra`). */
+export type WorkspaceInfo = { status: string; database: string };
+
+/** Reads a tenant's registry row; null when it has none. Registered by tenancy (inverted dependency). */
+export type WorkspaceLookup = (tenantId: string) => Promise<WorkspaceInfo | null>;
+
+let lookup: WorkspaceLookup | undefined;
+const CACHE_MS = 60_000;
+const cache = new Map<string, { at: number; info: WorkspaceInfo | null }>();
+
+export function registerWorkspaceLookup(fn: WorkspaceLookup): void {
+  lookup = fn;
+  cache.clear();
+}
+
+/** Drops this instance's cached registry row for a tenant, or every one. Other instances catch up within 60 seconds. */
+export function forgetWorkspace(tenantId?: string): void {
+  if (tenantId) cache.delete(tenantId);
+  else cache.clear();
+}
+
+async function infoFor(tenantId: string): Promise<WorkspaceInfo | null> {
+  if (!lookup) return null;
+  const hit = cache.get(tenantId);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.info;
+  const info = await lookup(tenantId);
+  if (cache.size >= 10_000) cache.clear();
+  cache.set(tenantId, { at: Date.now(), info });
+  return info;
+}
+
+const sharedWorkspace = {
+  app: pool(() => config.databaseUrl, () => config.databasePoolMax),
+  admin: pool(() => config.databaseAdminUrl),
+};
+
+const unavailable = () =>
+  new ScoutError({ slug: 'workspace-unavailable', status: 503, title: 'This workspace is not available right now.' });
+
+/**
+ * The connections for one workspace: `app` (row level security applies) and `admin` (bypasses it).
+ * `t_platform` is the control plane. 503 `workspace-unavailable` when the registry says the workspace
+ * is not `active`; a tenant with no registry row (written before the registry, or by hand) is the
+ * shared database.
+ */
+export async function workspaceDb(tenantId: string): Promise<{ app: Db; admin: Db }> {
+  if (tenantId === PLATFORM_TENANT) return { app: controlDb, admin: controlAdminDb };
+  const info = await infoFor(tenantId);
+  if (info && info.status !== 'active') throw unavailable();
+  if (config.workspaceDatabases === 'per_workspace') {
+    throw new Error('SCOUT_WORKSPACE_DATABASES=per_workspace is not available yet.');
+  }
+  return sharedWorkspace;
+}
+
+/** Every workspace database, for cross-workspace jobs. `shared` mode: one entry standing for all tenants. */
+export async function listWorkspaceDatabases(): Promise<Array<{ tenantId: string; admin: Db }>> {
+  return [{ tenantId: '*', admin: sharedWorkspace.admin }];
+}
+
+// Control-plane transactions, with the tenant `app.tenant_id` is set to (null for the admin role, which sees every tenant).
+const controlTxs = new WeakMap<Tx, { tenantId: string | null }>();
+
+/** True when `tx` is a control-plane transaction (from `withControl`, `withControlAdmin` or `withControlTenant`). */
+export function isControlTx(tx: Tx): boolean {
+  return controlTxs.has(tx);
+}
+
+/** True when `tx` is a control-plane transaction that sees `tenantId`'s rows: the admin role's, or one set to that tenant. */
+export function controlTxServes(tx: Tx, tenantId: string): boolean {
+  const mark = controlTxs.get(tx);
+  return mark !== undefined && (mark.tenantId === null || mark.tenantId === tenantId);
+}
+
+/** Runs `fn` in a control-plane transaction as `scout_app` (row level security applies; no tenant set). */
+export function withControl<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return controlDb.transaction((tx) => {
+    controlTxs.set(tx, { tenantId: '' });
+    return fn(tx);
+  });
+}
+
+/** Runs `fn` in a control-plane transaction as `scout_app` with `app.tenant_id` set: a tenant's tenancy rows. */
+export function withControlTenant<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return controlDb.transaction(async (tx) => {
+    await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+    controlTxs.set(tx, { tenantId });
+    return fn(tx);
+  });
+}
+
+/** Runs `fn` in a control-plane transaction as `scout_admin` (bypasses row level security). Platform work only. */
+export function withControlAdmin<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return controlAdminDb.transaction((tx) => {
+    controlTxs.set(tx, { tenantId: null });
+    return fn(tx);
+  });
+}
+
+let wrapWorkspaceTx: ((tx: Tx) => Tx) | undefined;
+
+/** Test hook: wraps every workspace transaction (the tenancy guard test refuses tenancy SQL through it). */
+export function setWorkspaceTxWrapper(wrap: ((tx: Tx) => Tx) | undefined): void {
+  wrapWorkspaceTx = wrap;
+}
+
+/** The transaction workspace code gets: `tx`, or the test hook's wrapper of it. */
+export function workspaceTx(tx: Tx): Tx {
+  return wrapWorkspaceTx ? wrapWorkspaceTx(tx) : tx;
+}
+
+/** Runs `fn` in a transaction on one workspace's database as `scout_admin`, for work across row level security there. */
+export async function withWorkspaceAdmin<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  if (tenantId === PLATFORM_TENANT) return withControlAdmin(fn);
+  const { admin } = await workspaceDb(tenantId);
+  return admin.transaction((tx) => fn(workspaceTx(tx)));
+}

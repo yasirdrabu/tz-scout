@@ -18,20 +18,33 @@ function lazy(connect: () => Db): Db {
   });
 }
 
-/**
- * Runtime connection as `scout_app`. Subject to row level security: tenant data is
- * only visible inside `withTenant`.
- */
-export const appDb: Db = lazy(() =>
-  drizzle(postgres(config.databaseUrl, { max: config.databasePoolMax, onnotice: () => {} })),
-);
+const pools: Db[] = [];
+
+/** A lazily connected pool, closed by `closeDbs`. `max` unset is the postgres.js default (10). */
+export function pool(url: () => string, max?: () => number): Db {
+  const db = lazy(() => drizzle(postgres(url(), { ...(max ? { max: max() } : {}), onnotice: () => {} })));
+  pools.push(db);
+  return db;
+}
 
 /**
- * Connection as `scout_admin` (bypasses row level security). For migrations,
- * platform-admin work and cross-tenant jobs only. Never use it on a request path
- * that serves one tenant.
+ * Control plane connection as `scout_app` (D35): tenancy and the platform-wide tables. Subject to row
+ * level security: tenant rows are only visible with `app.tenant_id` set (`withControlTenant`).
  */
-export const adminDb: Db = lazy(() => drizzle(postgres(config.databaseAdminUrl, { onnotice: () => {} })));
+export const controlDb: Db = pool(() => config.databaseUrl, () => config.databasePoolMax);
+
+/**
+ * Control plane connection as `scout_admin` (bypasses row level security). For migrations,
+ * platform-admin work and cross-tenant jobs only. Never use it on a request path that serves one
+ * tenant.
+ */
+export const controlAdminDb: Db = pool(() => config.databaseAdminUrl);
+
+/** @deprecated The control plane's `controlDb`; workspace work goes through `withTenant`. */
+export const appDb: Db = controlDb;
+
+/** @deprecated The control plane's `controlAdminDb`; one workspace's admin work goes through `withWorkspaceAdmin`. */
+export const adminDb: Db = controlAdminDb;
 
 /**
  * Runs `fn` in a savepoint of `tx` when one is given (a platform admin request's `adminDb`
@@ -41,10 +54,7 @@ export function adminTransaction<T>(tx: Tx | undefined, fn: (tx: Tx) => Promise<
   return tx ? tx.transaction(fn) : adminDb.transaction(fn);
 }
 
-/** Close both pools. Only needed by scripts and tests. Safe to call when never used. */
+/** Close every pool. Only needed by scripts and tests. Safe to call when never used. */
 export async function closeDbs(): Promise<void> {
-  await Promise.allSettled([
-    (appDb as unknown as { $client: postgres.Sql }).$client.end(),
-    (adminDb as unknown as { $client: postgres.Sql }).$client.end(),
-  ]);
+  await Promise.allSettled(pools.map((db) => (db as unknown as { $client: postgres.Sql }).$client.end()));
 }

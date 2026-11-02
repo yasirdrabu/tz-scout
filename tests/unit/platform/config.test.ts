@@ -92,3 +92,18 @@ describe('SCOUT_ENV', () => {
     expect(loadConfig({}).isProduction).toBe(false);
   });
 });
+
+describe('workspace databases (D35)', () => {
+  it('defaults to one shared database, 3 connections per workspace pool and 60 in all', () => {
+    const c = loadConfig({});
+    expect(c.workspaceDatabases).toBe('shared');
+    expect(c.workspacePoolMax).toBe(3);
+    expect(c.workspacePoolCap).toBe(60);
+  });
+  it('takes per_workspace and the pool sizes, and refuses anything else', () => {
+    const c = loadConfig({ SCOUT_WORKSPACE_DATABASES: 'per_workspace', SCOUT_WORKSPACE_POOL_MAX: '5', SCOUT_WORKSPACE_POOL_CAP: '100' });
+    expect([c.workspaceDatabases, c.workspacePoolMax, c.workspacePoolCap]).toEqual(['per_workspace', 5, 100]);
+    expect(() => loadConfig({ SCOUT_WORKSPACE_DATABASES: 'many' })).toThrow('SCOUT_WORKSPACE_DATABASES');
+    expect(() => loadConfig({ SCOUT_WORKSPACE_POOL_MAX: '0' })).toThrow('SCOUT_WORKSPACE_POOL_MAX');
+  });
+});

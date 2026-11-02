@@ -11,6 +11,7 @@ import { tenantCreated } from '../contracts/events';
 import { displayNameFromEmail } from '../domain/display-name';
 import { membership, tenant, user } from '../db/schema';
 import { forgetAccess } from './principal';
+import { registerWorkspace } from './workspace-infra';
 
 export type CreateTenantInput = {
   slug: string;
@@ -69,6 +70,7 @@ export async function createTenant(
         currency: input.currency.trim().toUpperCase(),
         timezone: input.timezone,
       });
+      await registerWorkspace(tx, tenantId);
 
       await tx
         .insert(user)

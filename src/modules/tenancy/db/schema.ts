@@ -8,7 +8,7 @@ import { boolean, index, integer, jsonb, pgSchema, primaryKey, text, timestamp, 
  * tenants): `tenant` (written through `adminDb`), `user`, and the better-auth tables `session`,
  * `account` and `verification` (read and written by better-auth through `adminDb`).
  *
- * Tenant tables (`membership`, `invite`, `api_key`, `member_preference`, `role_permission`) carry `tenant_id` and have row level security
+ * Tenant tables (`membership`, `invite`, `api_key`, `member_preference`, `role_permission`, `workspace_infra`) carry `tenant_id` and have row level security
  * enabled and forced with the standard `tenant_isolation` policy (added by hand in the migration).
  */
 export const tenancy = pgSchema('tenancy');
@@ -184,3 +184,24 @@ export const rolePermission = tenancy.table(
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.role] })],
 );
+
+/**
+ * The workspace registry (D35): where each tenant's workspace data lives and its state. One row per
+ * tenant, written with the tenant; read through `adminDb` by the database doors. Data key columns
+ * come with the keys plan.
+ */
+export const workspaceInfra = tenancy.table('workspace_infra', {
+  tenantId: text('tenant_id').primaryKey(),
+  region: text('region').notNull(),
+  database: text('database').notNull(),
+  status: text('status').notNull(), // provisioning | active | suspended | exporting | deleting | deleted | failed
+  schemaVersions: jsonb('schema_versions').notNull().default(sql`'{}'::jsonb`), // { module: version }
+  seats: integer('seats'),
+  quotas: jsonb('quotas').notNull().default(sql`'{}'::jsonb`),
+  test: boolean('test').notNull().default(false),
+  lastBackupAt: timestamp('last_backup_at', { withTimezone: true }),
+  supportAccessUntil: timestamp('support_access_until', { withTimezone: true }),
+  supportAccessBy: text('support_access_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

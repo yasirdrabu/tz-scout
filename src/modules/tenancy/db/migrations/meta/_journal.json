@@ -43,6 +43,13 @@
       "when": 1793564868457,
       "tag": "0005_role_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793593324432,
+      "tag": "0006_workspace_infra",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,12 @@ export type Config = {
   databaseSuperuserUrl: string;
   /** Connections in the appDb pool. The worker caps messages in flight below this. */
   databasePoolMax: number;
+  /** `shared`: every workspace in the control plane's database; `per_workspace`: one database each (D35). */
+  workspaceDatabases: 'shared' | 'per_workspace';
+  /** Connections in each workspace's pool (`per_workspace`). */
+  workspacePoolMax: number;
+  /** Workspace connections per process across every pool (`per_workspace`); over it the least recently used pool closes. */
+  workspacePoolCap: number;
   natsUrl: string;
   masterKey?: Buffer;
   masterKeyPrevious?: Buffer;
@@ -45,6 +51,9 @@ const schema = z.object({
   DATABASE_ADMIN_URL: z.string().min(1).optional(),
   DATABASE_SUPERUSER_URL: z.string().min(1).optional(),
   DATABASE_POOL_MAX: z.coerce.number().int().min(2).max(500).default(20),
+  SCOUT_WORKSPACE_DATABASES: z.enum(['shared', 'per_workspace']).default('shared'),
+  SCOUT_WORKSPACE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(3),
+  SCOUT_WORKSPACE_POOL_CAP: z.coerce.number().int().min(1).max(5000).default(60),
   NATS_URL: z.string().min(1).optional(),
   SCOUT_MASTER_KEY: z.string().optional(),
   SCOUT_MASTER_KEY_PREVIOUS: z.string().optional(),
@@ -128,6 +137,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     databaseAdminUrl: e.DATABASE_ADMIN_URL ?? 'postgres://scout_admin:scout_admin@localhost:5432/scout',
     databaseSuperuserUrl: e.DATABASE_SUPERUSER_URL ?? 'postgres://postgres:postgres@localhost:5432/postgres',
     databasePoolMax: e.DATABASE_POOL_MAX,
+    workspaceDatabases: e.SCOUT_WORKSPACE_DATABASES,
+    workspacePoolMax: e.SCOUT_WORKSPACE_POOL_MAX,
+    workspacePoolCap: e.SCOUT_WORKSPACE_POOL_CAP,
     natsUrl: e.NATS_URL ?? 'nats://localhost:4222',
     masterKey,
     masterKeyPrevious,
