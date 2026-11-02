@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
+import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { sourceInfoProvider } from '../contracts/ports';
 import { isKnownFactKey, type FactKind, type SourceChain } from '../contracts/types';
@@ -238,6 +239,24 @@ export async function reproject(ctx: ModuleContext, accountId: string, keys?: st
     if (changed) await ctx.tx.update(person).set({ ...changed, updatedAt: new Date() }).where(where);
   }
   return disagreeing.length ? detectConflicts(ctx, accountId, disagreeing) : [];
+}
+
+/** SQLSTATE 23505 on the named index, whether the driver error is wrapped or not. */
+function isUniqueViolation(e: unknown, constraint: string): boolean {
+  const err = e as { code?: string; constraint_name?: string; cause?: { code?: string; constraint_name?: string } } | null;
+  return [err, err?.cause].some((x) => x?.code === '23505' && x.constraint_name === constraint);
+}
+
+/** Re-picks values in a savepoint; a person's email that another person at the account already has is a 409. */
+export async function reprojectPerson(ctx: ModuleContext, accountId: string, keys: string[], opts: { detectFor?: string[] } = {}): Promise<string[]> {
+  try {
+    return await ctx.tx.transaction((tx) => reproject({ ...ctx, tx }, accountId, keys, opts));
+  } catch (e) {
+    if (isUniqueViolation(e, 'person_tenant_account_email_uq')) {
+      throw new ScoutError({ slug: 'conflict', status: 409, title: 'That email is already on another person at this account.' });
+    }
+    throw e;
+  }
 }
 
 /** The entries of `set` that differ from `before`, or null when nothing changes. */

@@ -76,6 +76,7 @@ export const intakeConflictFeedback = defineConsumer({
   handle: async ({ id, data }, ctx) => {
     if (data.losingSourceIds.length === 0) return;
     const conflict = await getConflict(ctx, data.conflictId);
+    // Gone when a merge folded it into the survivor's open conflict on the same key: no feedback is written then.
     if (!conflict) return;
     const facts = new Map(conflict.facts.map((f) => [f.id, f]));
     const winner = facts.get(data.keptFactId)?.sourceChain ?? {};

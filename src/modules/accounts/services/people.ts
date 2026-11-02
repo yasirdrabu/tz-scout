@@ -4,8 +4,7 @@ import { newId } from '@/platform/ids';
 import type { ArrivalPerson, SourceChain } from '../contracts/types';
 import { fact, person, personRole } from '../db/schema';
 import { ScoutError } from '@/platform/errors';
-import { reprojectPerson } from './edit';
-import { PERSON_COLUMNS, recordFacts, reproject, type FactInput } from './facts';
+import { PERSON_COLUMNS, recordFacts, reproject, reprojectPerson, type FactInput } from './facts';
 
 type PersonRow = typeof person.$inferSelect;
 

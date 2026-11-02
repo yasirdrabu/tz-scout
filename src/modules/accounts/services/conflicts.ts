@@ -4,13 +4,13 @@ import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
-import { accountUpdated, conflictDetected, conflictResolved } from '../contracts/events';
+import { accountUpdated, conflictDetected, conflictResolved, personUpdated } from '../contracts/events';
 import { sourceInfoProvider } from '../contracts/ports';
 import type { FactView, SourceChain } from '../contracts/types';
-import { accountSummary, conflict, fact } from '../db/schema';
+import { accountSummary, conflict, fact, personRole } from '../db/schema';
 import { differs, toleranceFor } from '../domain/conflicts';
 import type { PickFact } from '../domain/current-value';
-import { reproject } from './facts';
+import { reproject, reprojectPerson } from './facts';
 import { lockAccount } from './lock';
 import { resolveAccountId } from './match';
 import { filterVisibleAccountIds } from './visibility';
@@ -291,7 +291,13 @@ export async function resolveConflict(ctx: ModuleContext, id: string, keptFactId
   const seen = await visibleRow(ctx, id);
   if (!seen) throw notFound();
   await lockAccount(ctx, seen.accountId);
-  const [c] = await ctx.tx.select().from(conflict).where(and(eq(conflict.tenantId, ctx.tenantId), eq(conflict.id, id)));
+  const read = async () => (await ctx.tx.select().from(conflict).where(and(eq(conflict.tenantId, ctx.tenantId), eq(conflict.id, id))))[0];
+  let c = await read();
+  // A merge that committed while we waited moved the conflict to the survivor: lock that account too and read again.
+  if (c && c.accountId !== seen.accountId) {
+    await lockAccount(ctx, c.accountId);
+    c = await read();
+  }
   if (!c) throw notFound();
   if (!c.factIds.includes(keptFactId)) {
     const message = 'That value is not part of this conflict.';
@@ -316,11 +322,24 @@ export async function resolveConflict(ctx: ModuleContext, id: string, keptFactId
     .set({ status: 'resolved', resolution: 'kept', keptFactId, resolvedBy: userId, resolvedAt: now, note: note ?? null })
     .where(and(eq(conflict.tenantId, ctx.tenantId), eq(conflict.id, id)))
     .returning();
-  await reproject(ctx, c.accountId, [c.key]);
+  const subject = { type: 'account', id: c.accountId };
+  if (c.personId) {
+    // A kept email another person at the account already has is a 409, as it is for an edit.
+    await reprojectPerson(ctx, c.accountId, [c.key]);
+  } else {
+    await reproject(ctx, c.accountId, [c.key]);
+  }
 
   const archivedFactIds = archived.map((f) => f.id);
   await audit(ctx, { action: 'accounts.conflict.resolve', subject: { type: 'conflict', id }, after: { keptFactId, archivedFactIds, note } });
-  await publish(ctx, accountUpdated, { accountId: c.accountId, changedKeys: [c.key] }, { type: 'account', id: c.accountId });
+  await publish(ctx, accountUpdated, { accountId: c.accountId, changedKeys: [c.key] }, subject);
+  if (c.personId) {
+    const roles = await ctx.tx
+      .select({ roleKey: personRole.roleKey })
+      .from(personRole)
+      .where(and(eq(personRole.tenantId, ctx.tenantId), eq(personRole.personId, c.personId)));
+    await publish(ctx, personUpdated, { accountId: c.accountId, personId: c.personId, changedKeys: [c.key], roleKeys: roles.map((r) => r.roleKey).sort() }, subject);
+  }
   await settled(ctx, c, { kept, archived, resolution: 'kept', by: userId, note });
   return (await views(ctx, [row!]))[0]!;
 }

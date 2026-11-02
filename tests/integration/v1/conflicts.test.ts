@@ -3,7 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as getConflicts } from '@/http/routes/v1/accounts/[id]/conflicts/route';
 import { POST as conflictAction } from '@/http/routes/v1/conflicts/[id]/route';
-import { editAccount } from '@/modules/accounts';
+import { editAccount, editPerson } from '@/modules/accounts';
 import { account, accountSummary, conflict, fact, person } from '@/modules/accounts/db/schema';
 import { setPrincipalCacheTtl } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
@@ -74,6 +74,81 @@ const resolvedEvents = async (conflictId: string) =>
 const audits = (conflictId: string) =>
   w.run((ctx) => ctx.tx.select().from(auditLog).where(and(eq(auditLog.action, 'accounts.conflict.resolve'), eq(auditLog.subjectId, conflictId))));
 
+/**
+ * Pat's email, pat@a.gov (current) vs pat@b.gov (candidate) from two vendors, in an open conflict. With `taken`,
+ * another person at the account already has pat@b.gov.
+ */
+async function emailConflict(opts: { taken?: boolean } = {}) {
+  const domain = `${newId('acc').slice(-10).toLowerCase()}-example.com`;
+  const accountId = await w.sent({ name: 'Mail Co', domain, employees: 10 });
+  const personId = newId('per');
+  const [a, b] = [newId('fct'), newId('fct')];
+  const conflictId = newId('cfl');
+  await w.run(async (ctx) => {
+    await ctx.tx.insert(person).values({ id: personId, tenantId: ctx.tenantId, accountId, firstName: 'Pat', lastName: 'Lee', email: 'pat@a.gov' });
+    if (opts.taken) await ctx.tx.insert(person).values({ id: newId('per'), tenantId: ctx.tenantId, accountId, firstName: 'Pat', lastName: 'Other', email: 'pat@b.gov' });
+    await ctx.tx.insert(fact).values(
+      [a, b].map((id, i) => ({
+        id,
+        tenantId: ctx.tenantId,
+        accountId,
+        personId,
+        key: 'email',
+        value: i ? 'pat@b.gov' : 'pat@a.gov',
+        valueType: 'string',
+        kind: 'contact',
+        vendorSourceId: i ? 'src_b' : 'src_a',
+        observedAt: new Date(),
+        status: i ? 'candidate' : 'current',
+      })),
+    );
+    await ctx.tx.insert(conflict).values({ id: conflictId, tenantId: ctx.tenantId, accountId, personId, key: 'email', factIds: [a, b] });
+  });
+  return { accountId, personId, conflictId, a, b };
+}
+const outboxOf = async (type: string, accountId: string) =>
+  (
+    (await adminDb.execute(
+      sql`select payload from platform.outbox where tenant_id = ${w.tenantId} and payload->>'type' = ${type}
+          and payload->'data'->>'accountId' = ${accountId} order by seq`,
+    )) as unknown as { payload: { data: Record<string, unknown> } }[]
+  ).map((r) => r.payload.data);
+
+describe('person conflicts', () => {
+  it('keeping a person value re-picks the person and tells person consumers', async () => {
+    const { accountId, personId, conflictId, b } = await emailConflict();
+    const res = await resolve(conflictId, { kept_fact_id: b });
+    expect(res.status).toBe(200);
+    const [p] = await w.run((ctx) => ctx.tx.select({ email: person.email }).from(person).where(eq(person.id, personId)));
+    expect(p!.email).toBe('pat@b.gov');
+    expect(await outboxOf('accounts.person.updated', accountId)).toEqual([expect.objectContaining({ accountId, personId, changedKeys: ['email'], roleKeys: [] })]);
+  });
+
+  it('keeping an email another person at the account already has is a 409', async () => {
+    const { accountId, conflictId, b } = await emailConflict({ taken: true });
+    const res = await resolve(conflictId, { kept_fact_id: b });
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain('That email is already on another person at this account.');
+    expect((await list(accountId))[0]!.status).toBe('open');
+  });
+
+  it('a caller without people:read cannot settle a contact conflict: 404', async () => {
+    const viewer = await w.person('viewer' as never, { extra: ['review:act'] });
+    const { conflictId, b } = await emailConflict();
+    expect((await resolve(conflictId, { kept_fact_id: b }, viewer)).status).toBe(404);
+  });
+
+  it("editing the person's email closes the conflict as edited", async () => {
+    const { conflictId, personId, a, b } = await emailConflict();
+    await w.run((ctx) => editPerson({ ...ctx, access: { userId: leader, dataLimit: { kind: 'all' } } }, personId, { email: 'pat@c.gov' }));
+    const [row] = await w.run((ctx) => ctx.tx.select().from(conflict).where(eq(conflict.id, conflictId)));
+    expect(row).toMatchObject({ status: 'resolved', resolution: 'edited' });
+    expect(await factRow(row!.keptFactId!)).toMatchObject({ value: 'pat@c.gov', status: 'current' });
+    expect((await factRow(a)).status).toBe('archived');
+    expect((await factRow(b)).status).toBe('archived');
+  });
+});
+
 describe('GET /accounts/{id}/conflicts', () => {
   it('shows the open conflict with each value, its sources by name and trust', async () => {
     const { accountId, conflictId } = await pair();
@@ -94,29 +169,7 @@ describe('GET /accounts/{id}/conflicts', () => {
   });
 
   it("a person's email conflict needs people:read", async () => {
-    const domain = `${newId('acc').slice(-10).toLowerCase()}-example.com`;
-    const accountId = await w.sent({ name: 'Mail Co', domain, employees: 10 });
-    const personId = newId('per');
-    const ids = [newId('fct'), newId('fct')];
-    await w.run(async (ctx) => {
-      await ctx.tx.insert(person).values({ id: personId, tenantId: ctx.tenantId, accountId, firstName: 'Pat', lastName: 'Lee', email: 'pat@a.gov' });
-      await ctx.tx.insert(fact).values(
-        ids.map((id, i) => ({
-          id,
-          tenantId: ctx.tenantId,
-          accountId,
-          personId,
-          key: 'email',
-          value: i ? 'pat@b.gov' : 'pat@a.gov',
-          valueType: 'string',
-          kind: 'contact',
-          vendorSourceId: i ? 'src_b' : 'src_a',
-          observedAt: new Date(),
-          status: i ? 'candidate' : 'current',
-        })),
-      );
-      await ctx.tx.insert(conflict).values({ id: newId('cfl'), tenantId: ctx.tenantId, accountId, personId, key: 'email', factIds: ids });
-    });
+    const { accountId } = await emailConflict();
     expect((await list(accountId)).map((c) => c.key)).toEqual(['email']);
     const key = await keyFor(w.tenant, ['accounts:read'], { dataLimit: { kind: 'all' } });
     const res = await call(getConflicts, key, `accounts/${accountId}/conflicts`);
