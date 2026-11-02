@@ -3,6 +3,7 @@ import postgres from 'postgres';
 import { config } from '@/platform/config';
 import { controlAdminDb } from '@/platform/db/client';
 import { platformDatabases, type PlatformDatabase } from '@/platform/db/doors';
+import { urlForDatabase } from '@/platform/db/workspace-pools';
 import { log } from '@/platform/log';
 import { errorText } from '@/platform/scrub-error';
 import { connectNats, type Nats } from '@/platform/nats/connection';
@@ -18,6 +19,50 @@ export type RelayOptions = {
 
 export type OutboxRow = { seq: number; id: string; nats_subject: string; payload: unknown };
 
+/**
+ * `LISTEN`s for new outbox rows in each workspace database (the trigger `platform.notify_outbox` fires
+ * there too), on a connection of its own per database, up to `cap` of them (SCOUT_RELAY_POOL_CAP): one
+ * past the cap is only polled. A connection that fails is dropped and opened again on a later turn.
+ */
+class WorkspaceListeners {
+  private open = new Map<string, postgres.Sql>();
+  constructor(private notified: (database: string) => void) {}
+
+  async sync(databases: string[], cap: number): Promise<void> {
+    for (const [d, sql] of this.open) {
+      if (!databases.includes(d)) {
+        this.open.delete(d);
+        await sql.end({ timeout: 2 }).catch(() => {});
+      }
+    }
+    for (const d of databases) {
+      if (this.open.has(d) || this.open.size >= cap) continue;
+      const sql = postgres(urlForDatabase(config.databaseAdminUrl, d), {
+        max: 1,
+        idle_timeout: 0,
+        max_lifetime: 0,
+        onnotice: () => {},
+        onclose: () => {
+          if (this.open.get(d) === sql) this.open.delete(d);
+        },
+      });
+      try {
+        await sql.listen('scout_outbox', () => this.notified(d));
+        this.open.set(d, sql);
+      } catch (e) {
+        log.warn({ err: errorText(e), database: d }, 'relay: could not listen on a workspace database, polling it');
+        await sql.end({ timeout: 2 }).catch(() => {});
+      }
+    }
+  }
+
+  async closeAll(): Promise<void> {
+    const all = [...this.open.values()];
+    this.open.clear();
+    await Promise.allSettled(all.map((sql) => sql.end({ timeout: 2 })));
+  }
+}
+
 /** One outbox the relay reads: the control plane's or a workspace database's. */
 export type OutboxSource = {
   name: string;
@@ -29,9 +74,8 @@ export type OutboxSource = {
 };
 
 /**
- * How often an empty workspace outbox is polled. Only the control plane is LISTENed to (its lock
- * connection); a workspace database would need a connection of its own, outside the pool cap. So a
- * workspace event waits up to this long before it is relayed.
+ * How often an empty workspace outbox is polled. A notification (`WorkspaceListeners`) asks it at once;
+ * the poll catches what a notification missed, and serves the databases past the listener cap.
  */
 export const WORKSPACE_POLL_MS = 1000;
 
@@ -151,8 +195,8 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 /**
  * Moves rows from every database's `platform.outbox` (`platformDatabases`: the control plane and each
  * workspace database) into JetStream, oldest first per database, one relay at a time (Postgres advisory
- * lock on the control plane, which also `LISTEN`s for new rows there; workspace databases are polled
- * every `idleMs`). Each message carries the envelope id as its NATS message id,
+ * lock on the control plane, which also `LISTEN`s for new rows there; each workspace database is
+ * `LISTEN`ed to on a connection of its own, and polled as well). Each message carries the envelope id as its NATS message id,
  * so a crash between publish and `sent_at` only causes a deduplicated re-publish.
  * Runs until `signal` aborts.
  */
@@ -197,6 +241,7 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
   };
   let nats: Nats | undefined;
   let unlisten: (() => Promise<void>) | undefined;
+  let stopListening: (() => Promise<void>) | undefined;
   let pendingWake = false;
   const poke = () => {
     pendingWake = true;
@@ -241,6 +286,12 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
     const health: SourceHealth = new Map();
     const quiet = new Map<string, number>();
     const js = nats.js;
+    // A notification from a workspace database: ask its outbox now, not after its poll wait.
+    const listeners = new WorkspaceListeners((database) => {
+      quiet.delete(database);
+      poke();
+    });
+    stopListening = () => listeners.closeAll();
 
     while (!signal.aborted) {
       if (!(await holdsLock())) return;
@@ -251,7 +302,9 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
           await ensureStreams(nats.jsm);
           streamsReady = true;
         }
-        const sources = (await platformDatabases({ relay: true })).map(outboxSource);
+        const databases = await platformDatabases({ relay: true });
+        await listeners.sync(databases.filter((d) => !d.control).map((d) => d.name), config.relayPoolCap);
+        const sources = databases.map(outboxSource);
         ({ sentAny, full } = await relayTurn(
           sources,
           health,
@@ -283,6 +336,7 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
   } finally {
     signal.removeEventListener('abort', onAbort);
     await unlisten?.().catch(() => {});
+    await stopListening?.().catch(() => {});
     await nats?.nc.drain().catch(() => {});
     await lockSql.end({ timeout: 2 }).catch(() => {});
   }

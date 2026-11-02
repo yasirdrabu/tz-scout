@@ -74,11 +74,12 @@ one database; it can't give a per-workspace backup, restore, export, key or dele
 - Each workspace database has its own outbox. The relay polls active workspaces round-robin (one
   batch each per turn) and publishes to the same NATS subjects, which already carry `tenantId`.
   One relay is active: it holds the advisory lock on the control plane (leader election) and
-  `LISTEN`s there. Workspace outboxes are polled, not listened to (a `LISTEN` per workspace would
-  hold a connection each, outside the pool cap): an empty one is asked again after at most a second,
-  so a workspace event may wait up to that long. A row that will not publish, or a database that is
-  down, backs off its own outbox only. The relay polls on connections of its own, one per workspace
-  database (`SCOUT_RELAY_POOL_CAP`), so it does not crowd out request and worker pools.
+  `LISTEN`s there, and on each workspace database too, on a connection of its own per database (up
+  to `SCOUT_RELAY_POOL_CAP`), so an event is relayed as soon as it commits. Each outbox is also
+  polled (an empty one about once a second), for a notification missed or a database past the cap.
+  A row that will not publish, or a database that is down, backs off its own outbox only. The relay
+  reads on connections of its own, one per workspace database (`SCOUT_RELAY_POOL_CAP`), so it does
+  not crowd out request and worker pools.
 - Consumers resolve the database from `tenantId` through `withTenant`. `processed_event` moves with the
   workspace, so idempotency stays per workspace.
 

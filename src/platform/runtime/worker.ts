@@ -36,7 +36,7 @@ import {
  * connections, at least 1:
  * - across the worker, half the workspace connections it may hold: `DATABASE_POOL_MAX` in `shared`
  *   mode (one pool for every workspace), `SCOUT_WORKSPACE_POOL_CAP` in `per_workspace` mode;
- * - per workspace database (`per_workspace` only), half its pool (`workspaceInFlightCap`).
+ * - per workspace database (`per_workspace` only), one less than its pool (`workspaceInFlightCap`).
  * Tenancy calls use the control plane's own pool and do not count.
  */
 type PoolConfig = Pick<Config, 'workspaceDatabases' | 'databasePoolMax' | 'workspacePoolMax' | 'workspacePoolCap'>;
@@ -48,13 +48,14 @@ export function inFlightCap(requested?: number, c: PoolConfig = config): number 
 }
 
 /**
- * Messages in flight for one workspace database: half of `SCOUT_WORKSPACE_POOL_MAX`, at least 1 (the
- * default pool of 3 runs one message at a time per workspace). null in `shared` mode, where every
- * workspace shares the one pool `inFlightCap` already bounds.
+ * Messages in flight for one workspace database: one less than `SCOUT_WORKSPACE_POOL_MAX`, at least 1 (the
+ * default pool of 3 runs two at a time). Each holds a connection and may want one more for a moment; with
+ * fewer messages than connections one is always free, so they cannot all wait on each other. null in
+ * `shared` mode, where every workspace shares the one pool `inFlightCap` already bounds.
  */
 export function workspaceInFlightCap(c: PoolConfig = config): number | null {
   if (c.workspaceDatabases !== 'per_workspace') return null;
-  return Math.max(1, Math.floor(c.workspacePoolMax / 2));
+  return Math.max(1, c.workspacePoolMax - 1);
 }
 
 /** What happened to a message just before it is acked. */
@@ -171,29 +172,64 @@ class Semaphore {
   }
 }
 
+/** How many messages may wait for a free slot in one workspace, and for how long (`KeyedSlots.acquire`). */
+const WORKSPACE_QUEUE = 16;
+const WORKSPACE_SLOT_WAIT_MS = 1000;
+/** How long a message whose workspace has no free slot is put back for before it comes again. */
+const WORKSPACE_FULL_RETRY_MS = 500;
+
 /**
- * At most `size` messages at once per key (a workspace). Never waits: a message whose workspace is full
- * is put back for a moment instead, so one workspace's burst does not fill the consumer's concurrency
- * and hold up every other workspace's messages.
+ * At most `size` messages at once per key (a workspace). When the workspace is full, up to `queue` more
+ * wait a moment for a slot (`acquire`), in order, so the burst of events one action makes (a handful,
+ * one per consumer) is handled within milliseconds; the rest are put back for a moment instead. So one
+ * workspace's burst holds at most `size + queue` of the consumers' concurrency (and only `size` of the
+ * worker's slots) and does not hold up every other workspace's messages.
  */
 export class KeyedSlots {
   private used = new Map<string, number>();
-  constructor(private size: number) {}
+  private waiting = new Map<string, (() => void)[]>();
+  constructor(
+    private size: number,
+    private queue = WORKSPACE_QUEUE,
+  ) {}
   tryAcquire(key: string): boolean {
     const n = this.used.get(key) ?? 0;
     if (n >= this.size) return false;
     this.used.set(key, n + 1);
     return true;
   }
+  /** A slot, waiting up to `ms` for one behind at most `queue` others; false if none came. */
+  async acquire(key: string, ms: number): Promise<boolean> {
+    if (this.tryAcquire(key)) return true;
+    const queue = this.waiting.get(key) ?? [];
+    if (queue.length >= this.queue) return false;
+    this.waiting.set(key, queue);
+    return new Promise<boolean>((resolve) => {
+      const take = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        queue.splice(queue.indexOf(take), 1);
+        if (queue.length === 0 && this.waiting.get(key) === queue) this.waiting.delete(key);
+        resolve(false);
+      }, ms);
+      queue.push(take);
+    });
+  }
   release(key: string): void {
+    // A waiting message takes the slot over.
+    const queue = this.waiting.get(key);
+    const next = queue?.shift();
+    if (next) {
+      if (queue!.length === 0) this.waiting.delete(key);
+      return next();
+    }
     const n = (this.used.get(key) ?? 1) - 1;
     if (n <= 0) this.used.delete(key);
     else this.used.set(key, n);
   }
 }
-
-/** How long a message whose workspace has no free slot waits before it comes again. */
-const WORKSPACE_FULL_RETRY_MS = 500;
 
 /** The tenant a message is for, from its envelope, without validating it (`processMessage` does). */
 function tenantOf(m: JsMsg): string | undefined {
@@ -208,7 +244,7 @@ function tenantOf(m: JsMsg): string | undefined {
 type Runtime = {
   hooks: WorkerOptions['hooks'];
   slots: Semaphore;
-  /** Per workspace database (`per_workspace` only); taken before `slots`, without waiting (see `KeyedSlots`). */
+  /** Per workspace database (`per_workspace` only); taken before `slots`, waiting briefly at most (see `KeyedSlots`). */
   workspaceSlots?: KeyedSlots;
   busyLockTimeoutMs: number;
   busyRetryMs: number;
@@ -458,6 +494,13 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
     if (outcome === 'duplicate') lg.debug('worker: already processed, skipped');
   } catch (caught) {
     const e = timedOut ?? caught;
+    // A workspace that does not exist (no registry row: deleted, or from another installation) will never
+    // take this message, and there is no database to keep it in as a dead job: it is dropped, and logged.
+    if (e instanceof ScoutError && e.slug === 'workspace-unknown') {
+      lg.error({ err: e.detail }, 'worker: the message is for a workspace that does not exist, dropped');
+      m.term('no such workspace');
+      return;
+    }
     // A workspace not open (provisioning, suspended, failed: D35) is waited out like a busy one: put
     // back with backoff, the handler never ran, and it costs no run, so it is not dead-lettered meanwhile.
     const closed = e instanceof ScoutError && e.slug === 'workspace-unavailable';
@@ -508,14 +551,14 @@ async function runSub(nats: Nats, s: Sub, opts: WorkerOptions, rt: Runtime): Pro
     for await (const m of messages) {
       const workspace = rt.workspaceSlots ? tenantOf(m) : undefined;
       const perWorkspace = workspace !== undefined && workspace !== PLATFORM_TENANT;
-      if (perWorkspace && !rt.workspaceSlots!.tryAcquire(workspace)) {
-        m.nak(WORKSPACE_FULL_RETRY_MS);
-        continue;
-      }
       // Keep the delivery ours while it waits for a slot and runs; every step is time-bounded.
       const heartbeat = setInterval(() => m.working(), heartbeatMs);
       while (inFlight.size >= concurrency) await Promise.race(inFlight);
       const p: Promise<void> = (async () => {
+        if (perWorkspace && !(await rt.workspaceSlots!.acquire(workspace, WORKSPACE_SLOT_WAIT_MS))) {
+          m.nak(WORKSPACE_FULL_RETRY_MS);
+          return;
+        }
         try {
           await rt.slots.acquire();
           try {

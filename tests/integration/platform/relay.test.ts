@@ -138,6 +138,31 @@ describe('relay', () => {
     }
   }, 40000);
 
+  it('relays a workspace event at once while its outbox is quiet: it LISTENs there, not only polls (D35)', async () => {
+    await clear();
+    const t = newId('t');
+    const got: Got[] = [];
+    const stopListen = await listen(js, t, got);
+    const relay = startRelay();
+    const committed = new Map<number, number>();
+    try {
+      await sleep(300);
+      // Each event comes after the outbox went quiet (polled about once a second); five at most
+      // 400 ms late would be a 1% chance by polling alone.
+      for (let i = 0; i < 5; i++) {
+        await sleep(1100);
+        await emit(t, i);
+        committed.set(i, Date.now());
+        await waitFor(() => got.length > i, 3000);
+      }
+      const late = got.map((g) => g.at - (committed.get(g.n) as number));
+      expect(Math.max(...late)).toBeLessThan(400);
+    } finally {
+      await relay.stop();
+      await stopListen();
+    }
+  }, 20000);
+
   it('only one of two relays holds the lock and every event arrives once (PLT-E1-S2-AC1, AC3)', async () => {
     await clear();
     const t = newId('t');
@@ -212,11 +237,12 @@ describe('relay', () => {
   });
 
   it('reports lag for the oldest unsent row', async () => {
+    // On adminDb: the event is in its workspace database's outbox, not the control plane's (D35).
     await clear();
-    expect(await relayLagMs()).toBe(0);
+    expect(await relayLagMs(adminDb)).toBe(0);
     await emit(newId('t'), 1);
     await sleep(50);
-    expect(await relayLagMs()).toBeGreaterThanOrEqual(40);
+    expect(await relayLagMs(adminDb)).toBeGreaterThanOrEqual(40);
   });
 });
 
