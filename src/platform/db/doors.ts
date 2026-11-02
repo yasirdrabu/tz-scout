@@ -50,10 +50,10 @@ export function forgetWorkspace(tenantId?: string): void {
   listed = undefined;
 }
 
-async function infoFor(tenantId: string): Promise<WorkspaceInfo | null> {
+async function infoFor(tenantId: string, fresh = false): Promise<WorkspaceInfo | null> {
   if (!lookup) return null;
   const hit = cache.get(tenantId);
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit.info;
+  if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit.info;
   const info = await lookup(tenantId);
   if (cache.size >= 10_000) cache.clear();
   cache.set(tenantId, { at: Date.now(), info });
@@ -129,7 +129,8 @@ export type WorkspaceOpen = { provisioning?: boolean };
  */
 export async function workspaceDb(tenantId: string, opts: WorkspaceOpen = {}): Promise<{ app: Db; admin: Db }> {
   if (tenantId === PLATFORM_TENANT) return { app: controlDb, admin: controlAdminDb };
-  const route = workspaceRoute(tenantId, await infoFor(tenantId), config.workspaceDatabases, opts.provisioning);
+  // Provisioning reads the row fresh: a cached one may still say `failed` from before a retry.
+  const route = workspaceRoute(tenantId, await infoFor(tenantId, opts.provisioning), config.workspaceDatabases, opts.provisioning);
   return 'database' in route ? poolsOf(route.database) : sharedWorkspace;
 }
 

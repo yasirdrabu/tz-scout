@@ -12,6 +12,6 @@ export const memberActivatedAuditHandler = defineJobHandler(memberActivatedAudit
   }),
 );
 
-export const workspaceProvisionHandler = defineJobHandler(workspaceProvisionJob, async (e) => {
-  await provisionWorkspace(e.data.tenantId);
+export const workspaceProvisionHandler = defineJobHandler(workspaceProvisionJob, async (e, ctx) => {
+  await provisionWorkspace(e.data.tenantId, ctx.signal);
 });

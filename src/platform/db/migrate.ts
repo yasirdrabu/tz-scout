@@ -77,6 +77,8 @@ async function migrateModules(
   let applied = 0;
   const versions: SchemaVersions = {};
   try {
+    // One migrator per database at a time (two workspaces in one database, two migrate commands).
+    await client.unsafe("select pg_advisory_lock(hashtext('scout_migrate'))");
     for (const m of MODULE_ORDER.filter((x) => modules.includes(x))) {
       const folder = folders[m] ?? migrationsFolder(m);
       const journal = path.join(folder, 'meta', '_journal.json');
@@ -135,15 +137,22 @@ export async function migrateWorkspaceDatabase(adminUrl: string): Promise<{ appl
 
 /**
  * Creates database `name` as `scout_admin` (so it owns it) when it does not exist yet, copied from
- * `template` when given. Returns false when it was already there. Runs outside any transaction (as
- * CREATE DATABASE must) on its own connection to the control plane.
+ * `template` when given; when the template cannot be copied (someone is connected to it, 55006) it is
+ * created empty, for the caller to migrate. Returns false when it was already there. Runs outside any
+ * transaction (as CREATE DATABASE must) on its own connection to the control plane.
  */
 export async function createDatabase(name: string, template?: string, adminUrl: string = config.databaseAdminUrl): Promise<boolean> {
   const sql = postgres(adminUrl, { max: 1, onnotice: () => {} });
   try {
     const [found] = await sql`select 1 from pg_database where datname = ${name}`;
     if (found) return false;
-    await sql.unsafe(`create database "${name.replace(/"/g, '""')}"${template ? ` template "${template.replace(/"/g, '""')}"` : ''}`);
+    const quoted = (n: string) => `"${n.replace(/"/g, '""')}"`;
+    try {
+      await sql.unsafe(`create database ${quoted(name)}${template ? ` template ${quoted(template)}` : ''}`);
+    } catch (e) {
+      if (!template || (e as { code?: string }).code !== '55006') throw e;
+      await sql.unsafe(`create database ${quoted(name)}`);
+    }
     return true;
   } catch (e) {
     // Two creators at once: the other one made it.

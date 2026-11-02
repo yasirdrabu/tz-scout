@@ -22,7 +22,9 @@ import { newId } from '@/platform/ids';
 import { outboxSource, relayTurn, type OutboxRow } from '@/platform/relay';
 import { deliverOnce } from '@/platform/runtime/worker';
 import { z } from 'zod';
+import { POST as tenantAction } from '@/http/routes/v1/admin/tenants/[id]/route';
 import { seedUser, uniqueSlug } from '../tenancy/helpers';
+import { signedIn, v1Req } from '../v1/session-helpers';
 
 // D35 Phase B: SCOUT_WORKSPACE_DATABASES=per_workspace for this file (helpers/per-workspace.ts).
 
@@ -100,7 +102,7 @@ describe('a database per workspace (D35)', () => {
     await createDatabase(database);
     await inDatabase(database, 'create schema platform; create table platform.outbox (x int)');
     expect(await provisionWorkspace(t.tenantId)).toBe('failed');
-    expect(await infra(t.tenantId)).toMatchObject({ status: 'failed', failedStep: 'migrate', failedError: expect.stringContaining('already exists') });
+    expect(await infra(t.tenantId)).toMatchObject({ status: 'failed', failedStep: 'provision:migrate', failedError: expect.stringContaining('already exists') });
     await expect(withTenant(t.tenantId, async () => 1)).rejects.toMatchObject({ slug: 'workspace-unavailable' });
     expect(await provisionWorkspace(t.tenantId)).toBe('skipped'); // a failed one waits for an admin
 
@@ -156,18 +158,92 @@ describe('a database per workspace (D35)', () => {
   it('scout migrate migrates each workspace database, records its versions, and marks one that fails', async () => {
     const t = await activeTenant();
     const database = workspaceDatabaseName(t.tenantId);
-    expect(await migrateWorkspaces({ tenantId: t.tenantId })).toEqual([{ tenantId: t.tenantId, database, applied: 0 }]);
+    expect(await migrateWorkspaces({ tenantId: t.tenantId })).toEqual([{ database, tenantIds: [t.tenantId], applied: 0 }]);
     // Forget the platform migrations: they run again and find their tables there.
     await inDatabase(database, 'drop table platform.__migrations');
     const [failed] = await migrateWorkspaces({ tenantId: t.tenantId });
-    expect(failed).toMatchObject({ tenantId: t.tenantId, error: expect.stringContaining('already exists') });
+    expect(failed).toMatchObject({ tenantIds: [t.tenantId], error: expect.stringContaining('already exists') });
     expect(await infra(t.tenantId)).toMatchObject({ status: 'failed', failedStep: 'migrate' });
     await expect(withTenant(t.tenantId, async () => 1)).rejects.toMatchObject({ slug: 'workspace-unavailable' });
     // Put right, the next migrate brings it back.
     await inDatabase(database, 'drop schema platform cascade');
     const [again] = await migrateWorkspaces({ tenantId: t.tenantId });
-    expect(again).toMatchObject({ tenantId: t.tenantId, applied: codeSchemaVersions(['platform']).platform });
+    expect(again).toMatchObject({ tenantIds: [t.tenantId], applied: codeSchemaVersions(['platform']).platform });
     expect(await infra(t.tenantId)).toMatchObject({ status: 'active', failedStep: null, schemaVersions: codeSchemaVersions(WORKSPACE_MODULES) });
     expect(await withTenant(t.tenantId, async () => 'open')).toBe('open');
+  });
+});
+
+describe('provisioning and migrating safely (D35 review)', () => {
+  const setRow = (tenantId: string, set: Partial<typeof workspaceInfra.$inferInsert>) =>
+    adminDb.update(workspaceInfra).set(set).where(eq(workspaceInfra.tenantId, tenantId));
+
+  it('a retry provisions even where this instance still has the failed row cached', async () => {
+    const t = await newTenant();
+    await setRow(t.tenantId, { status: 'failed', failedStep: 'provision:seed' });
+    await expect(withTenant(t.tenantId, async () => 1)).rejects.toMatchObject({ slug: 'workspace-unavailable' }); // cached: failed
+    // Another instance retried it: this one was not told, so its cache still says failed.
+    await setRow(t.tenantId, { status: 'provisioning', failedStep: null });
+    expect(await provisionWorkspace(t.tenantId)).toBe('active');
+    expect((await withTenant(t.tenantId, (tx) => tx.select().from(reviewStatusDef))).length).toBeGreaterThan(0);
+  });
+
+  it('runs one provisioning per workspace at a time; the other run steps aside', async () => {
+    const t = await newTenant();
+    const results = await Promise.all([provisionWorkspace(t.tenantId), provisionWorkspace(t.tenantId)]);
+    expect(results.sort()).toEqual(['active', 'skipped']);
+    expect((await infra(t.tenantId)).status).toBe('active');
+  });
+
+  it('stops between steps when its job runs out of time, leaving it provisioning for the redelivery', async () => {
+    const t = await newTenant();
+    const ac = new AbortController();
+    ac.abort();
+    await expect(provisionWorkspace(t.tenantId, ac.signal)).rejects.toThrow('stopped before provision:database');
+    expect((await infra(t.tenantId)).status).toBe('provisioning');
+    expect(await provisionWorkspace(t.tenantId)).toBe('active');
+  });
+
+  it('makes the database empty and migrates it when the template is in use', async () => {
+    await createDatabase(TEST_TEMPLATE);
+    await migrateWorkspaceDatabase(urlForDatabase(config.databaseAdminUrl, TEST_TEMPLATE));
+    const holder = postgres(urlForDatabase(config.databaseAdminUrl, TEST_TEMPLATE), { max: 1, onnotice: () => {} });
+    try {
+      await holder`select 1`; // someone connected to the template: CREATE DATABASE ... TEMPLATE fails with 55006
+      const t = await newTenant();
+      expect(await provisionWorkspace(t.tenantId)).toBe('active');
+      expect((await infra(t.tenantId)).schemaVersions).toEqual(codeSchemaVersions(WORKSPACE_MODULES));
+    } finally {
+      await holder.end();
+    }
+  });
+
+  it('scout migrate migrates a database several workspaces share once, and leaves a failed provisioning alone', async () => {
+    const a = await activeTenant();
+    const b = await activeTenant();
+    await setRow(b.tenantId, { database: workspaceDatabaseName(a.tenantId) });
+    const failed = await newTenant();
+    await setRow(failed.tenantId, { status: 'failed', failedStep: 'provision:migrate' });
+    const results = await migrateWorkspaces();
+    const shared = results.find((r) => r.database === workspaceDatabaseName(a.tenantId))!;
+    expect(shared).toMatchObject({ tenantIds: [a.tenantId, b.tenantId].sort(), applied: 0 });
+    expect(results.flatMap((r) => r.tenantIds)).not.toContain(failed.tenantId);
+    expect(await infra(failed.tenantId)).toMatchObject({ status: 'failed', failedStep: 'provision:migrate' });
+    expect((await infra(b.tenantId)).status).toBe('active');
+  });
+
+  it('POST /api/v1/admin/tenants/{id}:retry-provisioning: a failed workspace goes back to provisioning; 409 otherwise; admins only', async () => {
+    const t = await newTenant();
+    await setRow(t.tenantId, { status: 'failed', failedStep: 'provision:migrate', failedError: 'boom' });
+    const admin = await seedUser({ admin: true, signedIn: true });
+    const cookies = await signedIn(admin.id);
+    const retry = (c: Headers) => tenantAction(v1Req(`/admin/tenants/${t.tenantId}:retry-provisioning`, { cookies: c, method: 'POST' }));
+    const res = await retry(cookies);
+    expect(res.status).toBe(200);
+    expect((await res.json()).workspace).toEqual({ status: 'provisioning', failed_step: null, failed_error: null });
+    expect((await retry(cookies)).status).toBe(409);
+    // The tenant's own owner is not a platform admin.
+    expect((await retry(await signedIn(t.owner.id))).status).toBe(403);
+    expect(await provisionWorkspace(t.tenantId)).toBe('active');
   });
 });
