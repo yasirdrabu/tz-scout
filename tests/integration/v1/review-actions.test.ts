@@ -403,6 +403,14 @@ describe('Move to stage (REV-E5-S4)', () => {
     expect(await stageOf(a)).toBe('opportunity');
     const [row] = await w.run((ctx) => ctx.tx.select().from(stageChange).where(eq(stageChange.accountId, a)));
     expect(row).toMatchObject({ fromStage: 'lost', toStage: 'opportunity', fromName: 'Lost', toName: 'Opportunity', by: leader, note: 'Deal reopened by phone.' });
+    // The change log the account page shows carries who and the note too.
+    const changes = await json(w.as(leader, changesRoute, `accounts/${a}/changes`));
+    expect(changes.data.find((c: { kind: string }) => c.kind === 'stage')).toMatchObject({
+      from: 'Lost',
+      to: 'Opportunity',
+      by_name: 'Dana Leader',
+      note: 'Deal reopened by phone.',
+    });
   });
 
   it('moves back as well as forward, and writes nothing for the stage it is already in', async () => {

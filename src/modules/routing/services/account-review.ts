@@ -190,7 +190,18 @@ export async function listChanges(ctx: ModuleContext, accountId: string, opts: {
       reason: s.reasonKey ? (reasons.get(s.reasonKey) ?? s.reasonKey) : null,
     });
   }
-  for (const s of stageRows) add({ id: s.id, at: s.at, kind: 'stage', field: 'stage', from: s.fromName ?? stageNames.get(s.fromStage) ?? s.fromStage, to: s.toName ?? stageNames.get(s.toStage) ?? s.toStage });
+  for (const s of stageRows) {
+    add({
+      id: s.id,
+      at: s.at,
+      kind: 'stage',
+      field: 'stage',
+      from: s.fromName ?? stageNames.get(s.fromStage) ?? s.fromStage,
+      to: s.toName ?? stageNames.get(s.toStage) ?? s.toStage,
+      byName: names.person(s.by),
+      note: s.note,
+    });
+  }
   for (const a of assignments) {
     add({ id: a.id, at: a.assignedAt, kind: 'assigned', field: 'owner', to: names.person(a.sellerUserId), byName: names.person(a.assignedBy), note: a.notes });
     if (!a.respondedAt) continue;
