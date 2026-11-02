@@ -13,6 +13,7 @@ Cross-cutting rules every module follows. Module specs reference these instead o
 | [design-and-copy.md](design-and-copy.md) | Palette, tokens, type, copy rules, value formatting |
 | [event-catalog.md](event-catalog.md) | Every event type, funnel stage triggers, every MCP tool |
 | [platform-stories.md](platform-stories.md) | Platform module epics and stories (outbox, scheduler, audit, health) |
+| [tenant-infrastructure.md](tenant-infrastructure.md) | Per-workspace database, keys, backups, export, delete, seats and support access (D35) |
 
 Platform module (code PLT, schema `platform`) owns the outbox, processed-event records, scheduled job
 definitions and the audit log. Its stories live in [platform-stories.md](platform-stories.md).
