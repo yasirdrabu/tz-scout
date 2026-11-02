@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
+import { retryTransient } from '@/platform/db/retry';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
@@ -28,6 +29,12 @@ const brief = (s: { key: string; name: string; kind: string; trigger: string; hu
  * again comes back (Restore defaults: the editor sends the defaults list). Audits `routing.stages.changed` with before and after and publishes the event.
  */
 export async function saveStages(ctx: ModuleContext, input: PipelineStageInput[]): Promise<StagesView> {
+  requirePerson(ctx);
+  // A save can lose a deadlock to a move that holds an account first; it runs again whole, up to three times.
+  return retryTransient(ctx.tx, (tx) => saveOnce({ ...ctx, tx }, input));
+}
+
+async function saveOnce(ctx: ModuleContext, input: PipelineStageInput[]): Promise<StagesView> {
   const by = requirePerson(ctx);
   // The tenant's setting row is the stage lock: taken here, exclusively, so two saves cannot both audit the same "before",
   // and shared by every `moveStage`, so a move waits for a save and never lands on a stage the save just archived.
