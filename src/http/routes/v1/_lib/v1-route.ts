@@ -14,7 +14,7 @@ import { accessWithSources } from '@/platform/access';
 import { PLATFORM_TENANT } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { config } from '@/platform/config';
-import { adminDb } from '@/platform/db/client';
+import { withControlAdmin } from '@/platform/db/doors';
 import { withTenant, type Tx } from '@/platform/db/tenant';
 import type { Actor } from '@/platform/events/envelope';
 import { ScoutError, toProblem } from '@/platform/errors';
@@ -285,7 +285,7 @@ function personRoute(opts: SessionOptions & { admin: boolean }, handler: Session
       req,
       opts,
       { tenantId: PLATFORM_TENANT, principalId: person.userId },
-      opts.admin ? (fn) => adminDb.transaction(fn) : (fn) => withTenant(PLATFORM_TENANT, fn),
+      opts.admin ? (fn) => withControlAdmin(fn) : (fn) => withTenant(PLATFORM_TENANT, fn),
       correlationId,
       (r, tx) => handler(r, person, { actor, correlationId, tx }),
     );
@@ -302,7 +302,7 @@ export function sessionRoute(opts: SessionOptions, handler: SessionHandler): (re
   return personRoute({ ...opts, admin: false }, handler);
 }
 
-/** `sessionRoute` for platform admins only (403 for anyone else); the transaction is on `adminDb`. */
+/** `sessionRoute` for platform admins only (403 for anyone else); the transaction is the control plane's, as `scout_admin`. */
 export function adminRoute(opts: SessionOptions, handler: SessionHandler): (req: Request) => Promise<Response> {
   return personRoute({ ...opts, admin: true }, handler);
 }

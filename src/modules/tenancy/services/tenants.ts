@@ -1,7 +1,7 @@
 import { asc, desc, eq, sql } from 'drizzle-orm';
 import { platformAudit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
-import { adminDb, adminTransaction } from '@/platform/db/client';
+import { controlAdminDb, adminTransaction } from '@/platform/db/client';
 import type { Tx } from '@/platform/db/tenant';
 import { ScoutError } from '@/platform/errors';
 import type { Actor } from '@/platform/events/envelope';
@@ -10,6 +10,7 @@ import { newId } from '@/platform/ids';
 import { tenantCreated } from '../contracts/events';
 import { displayNameFromEmail } from '../domain/display-name';
 import { membership, tenant, user } from '../db/schema';
+import { onControl } from './control';
 import { forgetAccess } from './principal';
 import { registerWorkspace } from './workspace-infra';
 
@@ -31,7 +32,7 @@ const isUniqueViolation = (e: unknown): boolean => {
 
 /**
  * Creates a tenant with its first owner (status invited). Platform admins only. Runs in one
- * `adminDb` transaction (a savepoint of `outer` when given); the creation is written to the platform
+ * `controlAdminDb` transaction (a savepoint of `outer` when given); the creation is written to the platform
  * audit log, not the tenant's.
  */
 export async function createTenant(
@@ -111,28 +112,32 @@ export async function createTenant(
 
 /** The id, slug, name, currency and timezone of the context's tenant. */
 export async function tenantSummary(
-  ctx: ModuleContext,
+  ws: ModuleContext,
 ): Promise<{ id: string; slug: string; name: string; currency: string; timezone: string }> {
-  const [t] = await ctx.tx
-    .select({ id: tenant.id, slug: tenant.slug, name: tenant.name, currency: tenant.currency, timezone: tenant.timezone })
-    .from(tenant)
-    .where(eq(tenant.id, ctx.tenantId));
-  if (!t) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That workspace was not found.' });
-  return t;
+  return onControl(ws, async (ctx) => {
+    const [t] = await ctx.tx
+      .select({ id: tenant.id, slug: tenant.slug, name: tenant.name, currency: tenant.currency, timezone: tenant.timezone })
+      .from(tenant)
+      .where(eq(tenant.id, ctx.tenantId));
+    if (!t) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That workspace was not found.' });
+    return t;
+  });
 }
 
 /** The context tenant's IANA timezone, for example `America/New_York`. */
-export async function tenantTimezone(ctx: ModuleContext): Promise<string> {
-  const [t] = await ctx.tx.select({ timezone: tenant.timezone }).from(tenant).where(eq(tenant.id, ctx.tenantId));
-  if (!t) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That workspace was not found.' });
-  return t.timezone;
+export async function tenantTimezone(ws: ModuleContext): Promise<string> {
+  return onControl(ws, async (ctx) => {
+    const [t] = await ctx.tx.select({ timezone: tenant.timezone }).from(tenant).where(eq(tenant.id, ctx.tenantId));
+    if (!t) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That workspace was not found.' });
+    return t.timezone;
+  });
 }
 
 export type TenantRow = { id: string; slug: string; name: string; currency: string; timezone: string; status: string };
 
-/** Every tenant, newest last. Platform-wide, so it uses `adminDb`; callers must be platform admins. */
+/** Every tenant, newest last. Platform-wide, so it uses `controlAdminDb`; callers must be platform admins. */
 export async function listTenants(tx?: Tx): Promise<TenantRow[]> {
-  return (tx ?? adminDb)
+  return (tx ?? controlAdminDb)
     .select({
       id: tenant.id,
       slug: tenant.slug,
@@ -148,17 +153,17 @@ export async function listTenants(tx?: Tx): Promise<TenantRow[]> {
 /** Makes (or finds) a platform admin by email. For seeding local data. Returns the user id. */
 export async function ensurePlatformAdmin(email: string): Promise<string> {
   const e = email.trim().toLowerCase();
-  await adminDb
+  await controlAdminDb
     .insert(user)
     .values({ id: newId('usr'), name: displayNameFromEmail(e), email: e, platformAdmin: true })
     .onConflictDoUpdate({ target: user.email, set: { platformAdmin: true } });
-  const [u] = await adminDb.select({ id: user.id }).from(user).where(eq(user.email, e));
+  const [u] = await controlAdminDb.select({ id: user.id }).from(user).where(eq(user.email, e));
   return u!.id;
 }
 
 /** The user id for an email, or null. */
 export async function userIdForEmail(email: string): Promise<string | null> {
-  const [u] = await adminDb
+  const [u] = await controlAdminDb
     .select({ id: user.id })
     .from(user)
     .where(eq(user.email, email.trim().toLowerCase()));
@@ -174,14 +179,14 @@ export type DisplayNameRow = { userId: string; email: string; name: string; stal
  * Safe to run again. Returns every user with the names that are now stale, so callers can rename what used them.
  */
 export async function renameHandleUsers(explicit: Readonly<Record<string, string>> = {}): Promise<DisplayNameRow[]> {
-  const rows = await adminDb.select({ id: user.id, email: user.email, name: user.name }).from(user);
+  const rows = await controlAdminDb.select({ id: user.id, email: user.email, name: user.name }).from(user);
   const out: DisplayNameRow[] = [];
   for (const r of rows) {
     const handle = r.email.split('@')[0] ?? r.email;
     const derived = displayNameFromEmail(r.email);
     const given = explicit[r.email];
     const target = given && (r.name === handle || r.name === derived) ? given : r.name === handle ? derived : r.name;
-    if (target !== r.name) await adminDb.update(user).set({ name: target, updatedAt: new Date() }).where(eq(user.id, r.id));
+    if (target !== r.name) await controlAdminDb.update(user).set({ name: target, updatedAt: new Date() }).where(eq(user.id, r.id));
     out.push({ userId: r.id, email: r.email, name: target, staleNames: [...new Set([handle, derived])].filter((n) => n !== target) });
   }
   return out;
@@ -202,7 +207,7 @@ export async function adminTenants(tx?: Tx): Promise<AdminTenantRow[]> {
     select json_build_object('name', u.name, 'email', u.email) from ${membership} m join ${user} u on u.id = m.user_id
     where m.tenant_id = tenancy.tenant.id and m.role = 'owner' and m.status in ('invited', 'active')
     order by m.created_at, m.id limit 1)`;
-  return (tx ?? adminDb)
+  return (tx ?? controlAdminDb)
     .select({
       id: tenant.id,
       slug: tenant.slug,
@@ -218,7 +223,7 @@ export async function adminTenants(tx?: Tx): Promise<AdminTenantRow[]> {
     .orderBy(desc(tenant.createdAt), desc(tenant.id));
 }
 
-/** A platform admin acting outside any tenant: who, the request's correlation id and its `adminDb` transaction, to work in. */
+/** A platform admin acting outside any tenant: who, the request's correlation id and its `controlAdminDb` transaction, to work in. */
 export type AdminActor = { actor: Actor; correlationId: string; tx?: Tx };
 
 /**
