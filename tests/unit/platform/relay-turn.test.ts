@@ -66,15 +66,38 @@ describe('relayTurn: one turn over every database outbox (D35)', () => {
     expect(health.get('t_broken')!.retryAt - now).toBe(60_000);
   });
 
-  it('a publish failure marks what was sent, stops the turn and is thrown', async () => {
+  it('with NATS down, a publish failure marks what was sent, stops the turn and is thrown', async () => {
     const a = fakeOutbox('control', ['a1', 'a2']);
     const b = fakeOutbox('t_1', ['b1']);
     let calls = 0;
     const publish = async () => {
       if (++calls === 2) throw new Error('nats down');
     };
-    await expect(relayTurn([a.source, b.source], new Map(), publish, { batchSize: 5 })).rejects.toThrow('nats down');
+    await expect(relayTurn([a.source, b.source], new Map(), publish, { batchSize: 5, natsDown: () => true })).rejects.toThrow('nats down');
     expect([...a.sent]).toEqual(['a1']);
     expect(b.sent.size).toBe(0);
+  });
+
+  it('a row that never publishes holds back only its own database, with a backoff', async () => {
+    const a = fakeOutbox('control', ['bad', 'a2']);
+    const b = fakeOutbox('t_1', ['b1', 'b2']);
+    const health: SourceHealth = new Map();
+    const published: string[] = [];
+    const publish = async (r: OutboxRow) => {
+      if (r.id === 'bad') throw new Error('no stream matches subject');
+      published.push(r.id);
+    };
+    for (const now of [0, 1, 2]) await relayTurn([a.source, b.source], health, publish, { batchSize: 1, now, natsDown: () => false });
+    expect(published).toEqual(['b1', 'b2']);
+    expect(a.sent.size).toBe(0);
+    expect(health.get('control')).toEqual({ failures: 1, retryAt: 1000 });
+  });
+
+  it('publishing failing in three sources in a row ends the turn: NATS is probably the problem', async () => {
+    const sources = ['s1', 's2', 's3', 's4'].map((n) => fakeOutbox(n, [`${n}-1`]));
+    const publish = async () => {
+      throw new Error('timeout');
+    };
+    await expect(relayTurn(sources.map((s) => s.source), new Map(), publish, { batchSize: 1, natsDown: () => false })).rejects.toThrow('timeout');
   });
 });

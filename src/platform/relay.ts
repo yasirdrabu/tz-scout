@@ -31,6 +31,8 @@ export type SourceHealth = Map<string, { failures: number; retryAt: number }>;
 
 const SOURCE_BACKOFF_MS = 1000;
 const SOURCE_BACKOFF_CAP_MS = 60_000;
+/** Publishing failed in this many sources in a row: NATS is probably the problem, so the turn ends. */
+const PUBLISH_FAILURES_TO_STOP = 3;
 
 /** The outbox of one database. */
 export function outboxSource(db: PlatformDatabase): OutboxSource {
@@ -49,23 +51,27 @@ export function outboxSource(db: PlatformDatabase): OutboxSource {
 /**
  * One relay turn: a batch from each source in turn (round-robin, so a busy database cannot starve the
  * others), oldest first within each, so each database's order holds. A source whose database fails is
- * logged and skipped, with a backoff doubling up to a minute, while the others go on. A publish failure
- * (NATS) ends the turn and is thrown once what was sent is marked. `full`: some source had a full batch.
+ * logged and skipped, with a backoff doubling up to a minute, while the others go on. A row that will
+ * not publish (no stream for its subject, too large) is that source's failure too, so one bad row holds
+ * back only its own database. The turn ends, thrown once what was sent is marked, only when NATS itself
+ * is down (`natsDown`) or publishing failed in `PUBLISH_FAILURES_TO_STOP` sources in a row.
+ * `full`: some source had a full batch.
  */
 export async function relayTurn(
   sources: OutboxSource[],
   health: SourceHealth,
   publish: (row: OutboxRow) => Promise<unknown>,
-  opts: { batchSize: number; now?: number; stopped?: () => boolean },
+  opts: { batchSize: number; now?: number; stopped?: () => boolean; natsDown?: () => boolean },
 ): Promise<{ sentAny: boolean; full: boolean }> {
   const now = opts.now ?? Date.now();
   let sentAny = false;
   let full = false;
+  let publishFailuresInARow = 0;
   const failed = (src: OutboxSource, e: unknown) => {
     const failures = (health.get(src.name)?.failures ?? 0) + 1;
     const wait = Math.min(SOURCE_BACKOFF_CAP_MS, SOURCE_BACKOFF_MS * 2 ** (failures - 1));
     health.set(src.name, { failures, retryAt: now + wait });
-    log.warn({ err: errorText(e), source: src.name, retryInMs: wait }, 'relay: could not read or mark an outbox, skipping it');
+    log.warn({ err: errorText(e), source: src.name, retryInMs: wait }, 'relay: could not read, publish or mark an outbox, skipping it');
   };
   for (const src of sources) {
     if (opts.stopped?.()) break;
@@ -101,7 +107,13 @@ export async function relayTurn(
         continue;
       }
     }
-    if (failure) throw failure;
+    if (failure) {
+      publishFailuresInARow++;
+      if (opts.natsDown?.() || publishFailuresInARow >= PUBLISH_FAILURES_TO_STOP) throw failure;
+      failed(src, failure);
+      continue;
+    }
+    if (sent.length > 0) publishFailuresInARow = 0;
     health.delete(src.name);
   }
   return { sentAny, full };
@@ -230,7 +242,7 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
           sources,
           health,
           (row) => js.publish(row.nats_subject, JSON.stringify(row.payload), { msgID: row.id }),
-          { batchSize, stopped: () => signal.aborted || lost },
+          { batchSize, stopped: () => signal.aborted || lost, natsDown: () => nats!.nc.isClosed() },
         ));
       } catch (e) {
         log.warn({ err: errorText(e) }, 'relay: publish failed, retrying');
