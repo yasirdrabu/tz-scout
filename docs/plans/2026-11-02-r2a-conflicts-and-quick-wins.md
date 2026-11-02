@@ -58,7 +58,7 @@
 - [ ] **Step 1: Write the failing tests.** Cover every key in Ruling 2, plus:
   - `differs('employees', 3000, 3500) === false`
   - `differs('contract_value_cents', 2_090_000_000, 1_840_000_000) === true`
-  - `differs('revenue_cents', 100, 124) === false` and `differs('revenue_cents', 100, 126) === true`
+  - `differs('revenue_cents', 100, 133) === false` and `differs('revenue_cents', 100, 134) === true`
   - `differs('industry_key','transit','transit') === false`
   - `differs('email','A@x.gov ','a@x.gov') === false`
   - `differs('phone','(305) 555-0100','305.555.0100') === false`
