@@ -20,10 +20,11 @@ it('per_workspace: half the workspace connection cap across the worker, one less
   expect(workspaceInFlightCap(per(1))).toBe(1);
 });
 
-it("a burst from one workspace is put back, never waited on, so another workspace's messages still get in", () => {
+it("a full workspace is told so at once (tryAcquire), holding nothing, while another workspace's messages still get in", () => {
   const slots = new KeyedSlots(1);
   expect(slots.tryAcquire('t_a')).toBe(true);
-  // The rest of t_a's burst: refused at once (the worker naks them for 500 ms), holding nothing.
+  // The rest of t_a's burst: refused at once; runSub sets them aside to wait (acquire, below) outside
+  // the consumer's concurrency (worker-fairness.test.ts).
   for (let i = 0; i < 20; i++) expect(slots.tryAcquire('t_a')).toBe(false);
   expect(slots.tryAcquire('t_b')).toBe(true);
   slots.release('t_a');

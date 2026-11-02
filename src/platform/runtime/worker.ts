@@ -181,9 +181,10 @@ const WORKSPACE_FULL_RETRY_MS = 500;
 /**
  * At most `size` messages at once per key (a workspace). When the workspace is full, up to `queue` more
  * wait a moment for a slot (`acquire`), in order, so the burst of events one action makes (a handful,
- * one per consumer) is handled within milliseconds; the rest are put back for a moment instead. So one
- * workspace's burst holds at most `size + queue` of the consumers' concurrency (and only `size` of the
- * worker's slots) and does not hold up every other workspace's messages.
+ * one per consumer) is handled within milliseconds; the rest are put back for a moment instead. A
+ * waiting message holds none of its consumer's concurrency (`runSub` sets it aside), so one busy
+ * workspace holds at most `size` of a consumer's concurrency and of the worker's slots, and does not
+ * hold up every other workspace's messages.
  */
 export class KeyedSlots {
   private used = new Map<string, number>();
@@ -546,41 +547,58 @@ async function runSub(nats: Nats, s: Sub, opts: WorkerOptions, rt: Runtime): Pro
   const consumer = await nats.js.consumers.get(s.stream, s.durable);
   const messages = await consumer.consume({ max_messages: concurrency });
   const inFlight = new Set<Promise<void>>();
+  // Messages waiting for their workspace's slot. They do not count toward `concurrency`: one busy
+  // workspace runs at most its own slots' worth of this consumer's messages, and the rest of the
+  // consumer's concurrency stays free for every other workspace.
+  const waiting = new Set<Promise<void>>();
   const heartbeatMs = Math.max(50, Math.min(Math.floor(s.timeoutMs / 3), 10_000));
+  /** Runs `m`, its workspace slot (if any) already held. */
+  const run = (m: JsMsg, workspace: string | undefined, heartbeat: ReturnType<typeof setInterval>) => {
+    const p: Promise<void> = (async () => {
+      try {
+        await rt.slots.acquire();
+        try {
+          await processMessage(m, s, rt);
+        } finally {
+          rt.slots.release();
+        }
+      } finally {
+        if (workspace !== undefined) rt.workspaceSlots!.release(workspace);
+      }
+    })()
+      .catch((e) => log.error({ consumer: s.processedName, err: errorText(e) }, 'worker: unexpected error'))
+      .finally(() => {
+        clearInterval(heartbeat);
+        inFlight.delete(p);
+      });
+    inFlight.add(p);
+  };
   const loop = (async () => {
     for await (const m of messages) {
-      const workspace = rt.workspaceSlots ? tenantOf(m) : undefined;
-      const perWorkspace = workspace !== undefined && workspace !== PLATFORM_TENANT;
+      const tenant = rt.workspaceSlots ? tenantOf(m) : undefined;
+      const workspace = tenant !== undefined && tenant !== PLATFORM_TENANT ? tenant : undefined;
       // Keep the delivery ours while it waits for a slot and runs; every step is time-bounded.
       const heartbeat = setInterval(() => m.working(), heartbeatMs);
       while (inFlight.size >= concurrency) await Promise.race(inFlight);
-      const p: Promise<void> = (async () => {
-        if (perWorkspace && !(await rt.workspaceSlots!.acquire(workspace, WORKSPACE_SLOT_WAIT_MS))) {
-          m.nak(WORKSPACE_FULL_RETRY_MS);
-          return;
-        }
-        try {
-          await rt.slots.acquire();
-          try {
-            await processMessage(m, s, rt);
-          } finally {
-            rt.slots.release();
-          }
-        } finally {
-          if (perWorkspace) rt.workspaceSlots!.release(workspace);
-        }
-      })()
-        .catch((e) => log.error({ consumer: s.processedName, err: errorText(e) }, 'worker: unexpected error'))
-        .finally(() => {
-          clearInterval(heartbeat);
-          inFlight.delete(p);
-        });
-      inFlight.add(p);
+      if (workspace === undefined || rt.workspaceSlots!.tryAcquire(workspace)) {
+        run(m, workspace, heartbeat);
+        continue;
+      }
+      // Its workspace is full: wait a moment for a slot, aside from the consumer's concurrency.
+      const w: Promise<void> = rt.workspaceSlots!.acquire(workspace, WORKSPACE_SLOT_WAIT_MS).then((ok) => {
+        waiting.delete(w);
+        if (ok) return run(m, workspace, heartbeat);
+        clearInterval(heartbeat);
+        m.nak(WORKSPACE_FULL_RETRY_MS);
+      });
+      waiting.add(w);
     }
   })();
   return async () => {
     await messages.close().catch(() => {});
     await loop.catch(() => {});
+    // A waiting message may start running when its wait ends.
+    await Promise.allSettled([...waiting]);
     await Promise.allSettled([...inFlight]);
   };
 }
