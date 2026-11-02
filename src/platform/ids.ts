@@ -40,6 +40,7 @@ export type IdPrefix =
   | 'rsc'
   | 'stc'
   | 'pst'
+  | 'stg'
   | 'drd'
   | 'fb'
   | 'blob'

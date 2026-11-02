@@ -6,6 +6,7 @@ export {
   assignmentWithdrawn,
   reviewChanged,
   stageChanged,
+  stagesChanged,
   statusChanged,
 } from './contracts/events';
 export { autoAcceptJob } from './contracts/jobs';
@@ -39,6 +40,8 @@ export { backfillLeadOffers, backfillReviews } from './services/backfill';
 export { publishReviewSnapshot } from './services/snapshot';
 export { moveStage } from './services/stage';
 export { moveToStage } from './services/move-stage';
+export { restoreDefaults, saveStages } from './services/save-stages';
+export { TRIGGERS, type PipelineStageInput, type Trigger } from './domain/pipeline';
 export { routingReviewStatusValidator } from './services/status-validator';
 export { routingOfferUsage } from './services/offer-usage';
 export { assign, bulk, MAX_BULK, previewAssign, previewBulkAssign, setLeadOffer, type BulkPreviewRow, type LeadOfferView, type AssignInput, type AssignmentView, type AssignPreview, type BulkAction, type BulkResult } from './services/assign';

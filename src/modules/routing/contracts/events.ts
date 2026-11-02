@@ -92,3 +92,14 @@ export const stageChanged = defineEvent(
     causeEventId: z.string(),
   }),
 );
+
+/** A workspace saved its pipeline stages (REV-E5). Carries the live stages in order and the keys it deleted. */
+export const stagesChanged = defineEvent(
+  'routing.stages.changed',
+  1,
+  z.object({
+    by: z.string(),
+    stages: z.array(z.object({ key: z.string(), name: z.string(), kind: z.enum(['flow', 'exit']) })),
+    archived: z.array(z.string()),
+  }),
+);

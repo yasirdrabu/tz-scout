@@ -71,9 +71,11 @@ stages are `stg_` ids. The locked first and won stages keep their keys forever, 
 - **Exits** are entered from any flow stage except the won stage. An account in an exit moves only
   by: reopening (a declined review status changed back: to the first stage), a new open deal (from the
   `deal_closed_lost` exit to the `deal_created` stage, as today), or by hand.
-- **An assignment declined or withdrawn** moves an account at or past the `ae_accepts` stage (but
-  before any deal stage) back to the `reviewer_sets_tier` stage, else the first stage (today's
-  assigned → reviewed).
+- **An assignment declined or withdrawn** moves an account back to the `reviewer_sets_tier` stage, else
+  the first stage (today's assigned → reviewed), when it is at a flow stage from the `ae_accepts` stage
+  up to, not including, the first stage triggered by a reply, a meeting or a deal (`reply_or_meeting`,
+  `meeting_booked`, `deal_created`, `deal_reaches_stage`, `deal_closed_won`). With the default stages that
+  is the Assigned stage only: an account that has engaged stays put.
 - **Move to stage** (`POST /api/v1/accounts/{id}:move-stage` `{stage, note?}`, `review:act`, people
   only) moves to any live stage, forward or back, into or out of an exit. It writes history with who
   and the note.
