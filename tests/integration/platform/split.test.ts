@@ -2,7 +2,7 @@ import { dropAfter } from '../helpers/per-workspace';
 import '@/entry/compose';
 import { consumers } from '@/entry/worker';
 import { and, eq, sql } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { run } from '@/entry/cli';
 import { GET as buyingRoles } from '@/http/routes/v1/buying-roles/route';
 import { GET as stages } from '@/http/routes/v1/stages/route';
@@ -34,6 +34,9 @@ import { signedIn, v1Req } from '../v1/session-helpers';
 const shared = decodeURIComponent(new URL(config.databaseAdminUrl).pathname.slice(1));
 const sharedUrl = urlForDatabase(config.databaseAdminUrl, shared);
 const probe = defineEvent('platform.split_probe.moved', 1, z.object({ n: z.number() }));
+
+// An install from before D35: the shared database (the control plane's) holds every module's tables.
+beforeAll(() => migrateWorkspaceDatabase(sharedUrl));
 
 const infra = async (tenantId: string) => (await adminDb.select().from(workspaceInfra).where(eq(workspaceInfra.tenantId, tenantId)))[0]!;
 const nonEmpty = (counts: TableCount[]) => Object.fromEntries(counts.filter((c) => c.rows > 0).map((c) => [c.table, c.rows]));

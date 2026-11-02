@@ -4,6 +4,7 @@ import { accepted, created, v1Route } from '@/http/routes/v1/_lib/v1-route';
 import { SYSTEM_GRANTOR, createApiKey, createTenant, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
 import { adminDb } from '@/platform/db/client';
+import { withWorkspaceAdmin } from '@/platform/db/doors';
 import { outbox } from '@/platform/db/schema';
 import { pingResult, sendPing } from '@/platform/diagnostics';
 import { runOutbox } from '../helpers/run-outbox';
@@ -145,7 +146,8 @@ describe('runOutbox', () => {
   it('runs the matching job handler once and marks the row sent', async () => {
     const id = await inTenant(tenantId, owner.actor, (ctx) => sendPing(ctx));
     await runOutbox(tenantId);
-    expect(await pingResult(id)).not.toBeNull();
+    // A ping sent in a workspace is answered there (D35); the platform's own pings are on the control plane.
+    expect(await withWorkspaceAdmin(tenantId, (tx) => pingResult(id, tx))).not.toBeNull();
     const [row] = await adminDb.select().from(outbox).where(eq(outbox.id, id));
     expect(row?.sentAt).not.toBeNull();
     await runOutbox(tenantId);

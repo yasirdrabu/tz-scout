@@ -3,7 +3,12 @@
 ## Rules
 
 1. **A module owns its schema.** Only the module's own code reads or writes tables in its Postgres
-   schema. No other module queries them, joins them, or holds a foreign key into them.
+   schema. No other module queries them, joins them, or holds a foreign key into them. With a
+   database per workspace (D35) this is also physical: tenancy's schema is only in the control plane
+   database, every other module's in each workspace database, so a call across that line is a call
+   through tenancy's public interface, which works on the control plane, never a join or a query on
+   the caller's transaction. A module that needs to find a workspace from the control plane (an
+   inbound webhook's tenant) asks tenancy for an index it keeps there.
 2. **Cross-module references are ids, not foreign keys.** `playbooks.account_plan.account_id` is a
    plain id column. The owning module is responsible for keeping referenced ids valid and publishing
    an event when something is deleted or merged (`accounts.account.merged`), and dependants react.

@@ -15,6 +15,9 @@ x-scout: &scout
     SCOUT_ENV: production
     DATABASE_URL: postgres://scout_app:${SCOUT_APP_DB_PASSWORD:?set in /opt/scout/.env}@postgres:5432/scout
     DATABASE_ADMIN_URL: postgres://scout_admin:${SCOUT_ADMIN_DB_PASSWORD:?set in /opt/scout/.env}@postgres:5432/scout
+    # A database per workspace (D35): scout is the control plane, scout_t_<tenant id> each workspace.
+    # An install from before D35 runs `scout migrate`, then `scout tenant split --all` (deployment spec).
+    SCOUT_WORKSPACE_DATABASES: per_workspace
     NATS_URL: nats://nats:4222
     SCOUT_BIND_HOST: 0.0.0.0
 
@@ -22,6 +25,8 @@ services:
   postgres:
     image: postgres:17
     restart: unless-stopped
+    # Room for a database per workspace: see "Postgres connections" in docs/spec/architecture/deployment-and-iac.md.
+    command: ["postgres", "-c", "max_connections=350"]
     environment:
       POSTGRES_USER: scout
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in /opt/scout/.env}

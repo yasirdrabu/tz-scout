@@ -135,7 +135,14 @@ export function workspaceRoute(
 ): { shared: true } | { database: string } {
   if (info && info.status !== 'active' && !(opening && info.status === 'provisioning')) throw unavailable(info.status);
   if (mode === 'shared') return { shared: true };
-  if (!info) throw new Error(`Tenant ${tenantId} has no workspace registry row (tenancy.workspace_infra).`);
+  if (!info) {
+    throw new ScoutError({
+      slug: 'workspace-unknown',
+      status: 404,
+      title: 'That workspace was not found.',
+      detail: `Tenant ${tenantId} has no workspace registry row (tenancy.workspace_infra).`,
+    });
+  }
   return { database: info.database };
 }
 
@@ -153,12 +160,20 @@ export type WorkspaceOpen = { provisioning?: boolean };
  * The connections for one workspace: `app` (row level security applies) and `admin` (bypasses it).
  * `t_platform` is the control plane; every other tenant goes where `workspaceRoute` says.
  */
-export async function workspaceDb(tenantId: string, opts: WorkspaceOpen = {}): Promise<{ app: Db; admin: Db; inShared: boolean }> {
-  if (tenantId === PLATFORM_TENANT) return { app: controlDb, admin: controlAdminDb, inShared: false };
+/** What a workspace's pools are and where it is: `pool` and `poolSize` name its app pool, for `admitted`. */
+export type WorkspaceDbs = { app: Db; admin: Db; inShared: boolean; pool: string; poolSize: number };
+
+export async function workspaceDb(tenantId: string, opts: WorkspaceOpen = {}): Promise<WorkspaceDbs> {
+  if (tenantId === PLATFORM_TENANT) return { app: controlDb, admin: controlAdminDb, inShared: false, pool: 'control', poolSize: config.databasePoolMax };
   // Provisioning reads the row fresh: a cached one may still say `failed` from before a retry.
   const route = workspaceRoute(tenantId, await infoFor(tenantId, opts.provisioning), config.workspaceDatabases, opts.provisioning);
-  if (!('database' in route)) return { ...sharedWorkspace, inShared: false };
-  return { ...poolsOf(route.database), inShared: route.database === controlDatabase() };
+  if (!('database' in route)) return { ...sharedWorkspace, inShared: false, pool: 'shared', poolSize: config.databasePoolMax };
+  return {
+    ...poolsOf(route.database),
+    inShared: route.database === controlDatabase(),
+    pool: route.database,
+    poolSize: config.workspacePoolMax,
+  };
 }
 
 /** The advisory lock key a split of `tenantId` holds exclusively while it copies (D35). */

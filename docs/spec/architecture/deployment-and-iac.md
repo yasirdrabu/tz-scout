@@ -47,28 +47,54 @@ Each process holds, at most:
 | Control plane, admin role (postgres.js default) | 10 | 10 |
 | Workspace pools | 30 (one app pool of `DATABASE_POOL_MAX`, one admin of 10) | `SCOUT_WORKSPACE_POOL_CAP`, 60 (a workspace takes `SCOUT_WORKSPACE_POOL_MAX` + 1 = 4, so 15 open at once) |
 | Relay lock and `LISTEN` (relay role only) | 1 | 1 |
-| Relay's workspace connections (relay role only, `SCOUT_RELAY_POOL_CAP`) | 0 | 30 (one per workspace database it polls) |
+| Relay's workspace connections (relay role only, `SCOUT_RELAY_POOL_CAP`) | 0 | 60 (per workspace database, one to read its outbox and one to `LISTEN`, for up to 30) |
 | **Total, web or worker** | **60** | **90** |
-| **Total, relay** | **61** | **121** |
+| **Total, relay** | **61** | **151** |
 
 A workspace pool is closed only when nothing runs on it (every transaction and query on it is
 counted) and it was not handed out in the last second; when every pool is busy the cap is passed for
 a while, logged, rather than break a transaction. Pools close after 10 minutes idle. `migrate` adds
 one connection at a time per database it works on (4 at once).
 
-The relay polls every active workspace database about once a second, so it has its own budget, one
-admin connection per workspace database, apart from the request and worker pools: set
-`SCOUT_RELAY_POOL_CAP` to the number of active workspaces or more, or its connections are opened and
-closed as it goes round. Over the cap it still works, more slowly.
+The relay listens on every active workspace database and reads its outbox, so it has its own budget,
+two connections per workspace database, apart from the request and worker pools: set
+`SCOUT_RELAY_POOL_CAP` to the number of active workspaces or more. Past the cap it polls those
+databases (about once a second) and opens and closes their connections as it goes round.
 
 Postgres' default `max_connections` is 100, so the four background and web roles of the compose stack
 need either a larger `max_connections` or smaller limits for the roles that do little workspace work.
 A workable single-VM setting for `per_workspace` with up to 30 workspaces: web and worker as above
 (180); the scheduler with `DATABASE_POOL_MAX=5`, `SCOUT_WORKSPACE_POOL_CAP=20` (35); the relay with
-`DATABASE_POOL_MAX=5`, `SCOUT_WORKSPACE_POOL_CAP=4` and `SCOUT_RELAY_POOL_CAP=30` (50);
-`max_connections = 300` leaves room for `migrate`, backups and an operator session. Managed Postgres limits connections by tier: size the tier, or the caps, to the sum. A pooler
-in transaction mode (PgBouncer) suits web and worker, not the relay, which needs a session for its
+`DATABASE_POOL_MAX=5`, `SCOUT_WORKSPACE_POOL_CAP=4` and `SCOUT_RELAY_POOL_CAP=30` (80). That is 295
+in all, so `max_connections = 350` leaves room for `migrate`, backups and an operator session.
+Managed Postgres limits connections by tier: size the tier, or the caps, to the sum. A pooler in
+transaction mode (PgBouncer) suits web and worker, not the relay, which needs a session for its
 advisory lock and `LISTEN`.
+
+## A database per workspace (D35)
+
+`SCOUT_WORKSPACE_DATABASES=per_workspace` is the default: the database `DATABASE_URL` names is the
+control plane (users, sign-in, the workspace list), and each workspace has its own database,
+`scout_t_<tenant id>`, made when the workspace is created (from the template database
+`SCOUT_WORKSPACE_TEMPLATE_DATABASE`, default `scout_t_template`). `scout migrate` migrates the control
+plane, then every workspace database 4 at a time (`--tenant <slug>` for one), then refreshes the
+template; a workspace that fails is marked `failed` and the command exits 1.
+
+Moving an existing install (every workspace in one database):
+
+1. Deploy the release and run `scout migrate`. The install keeps working as it was: every workspace's
+   registry row points at the one database, which is now also the control plane.
+2. Run `scout tenant split --all` (or `scout tenant split <slug>` one at a time). Each workspace
+   answers 503 with Retry-After while it moves, for about a minute and the time its rows take to copy;
+   its messages and schedules wait. A split that stops part way finishes when run again.
+3. Check the Tenants screen (every workspace in `scout_t_…`).
+
+Backups: the nightly job (`infra/backup`) dumps only `scout` today. Per-workspace backups come with
+D35 plan 3; until they do, do not split an install whose data needs the nightly backup, or add each
+`scout_t_…` database to the backup by hand.
+
+`SCOUT_WORKSPACE_DATABASES=shared` keeps everything in one database. It exists for the move: an
+install that has not split yet, and the CLI tests that start from one.
 
 ## Hosting options (decision open, owner: Yasir)
 

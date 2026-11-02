@@ -58,7 +58,7 @@ const schema = z.object({
   DATABASE_ADMIN_URL: z.string().min(1).optional(),
   DATABASE_SUPERUSER_URL: z.string().min(1).optional(),
   DATABASE_POOL_MAX: z.coerce.number().int().min(2).max(500).default(20),
-  SCOUT_WORKSPACE_DATABASES: z.enum(['shared', 'per_workspace']).default('shared'),
+  SCOUT_WORKSPACE_DATABASES: z.enum(['shared', 'per_workspace']).default('per_workspace'),
   SCOUT_WORKSPACE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(3),
   SCOUT_WORKSPACE_POOL_CAP: z.coerce.number().int().min(1).max(5000).default(60),
   SCOUT_RELAY_POOL_CAP: z.coerce.number().int().min(1).max(5000).default(30),

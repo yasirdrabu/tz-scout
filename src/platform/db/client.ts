@@ -18,6 +18,17 @@ function lazy(connect: () => Db): Db {
   });
 }
 
+/** A Db that stands for whatever `target` returns at each use. */
+function delegate(target: () => Db): Db {
+  return new Proxy({} as Db, {
+    get: (_t, prop) => {
+      const db = target();
+      const value = Reflect.get(db, prop, db);
+      return typeof value === 'function' && prop !== '$client' ? value.bind(db) : value;
+    },
+  });
+}
+
 const pools: Db[] = [];
 
 /** A lazily connected pool, closed by `closeDbs`. `max` unset is the postgres.js default (10). */
@@ -103,17 +114,27 @@ export const controlDb: Db = pool(() => config.databaseUrl, () => config.databas
 export const controlAdminDb: Db = pool(() => config.databaseAdminUrl);
 
 /** @deprecated The control plane's `controlDb`; workspace work goes through `withTenant`. */
-export const appDb: Db = controlDb;
+export const appDb: Db = delegate(() => testDbs.app ?? controlDb);
 
 /** @deprecated The control plane's `controlAdminDb`; one workspace's admin work goes through `withWorkspaceAdmin`. */
-export const adminDb: Db = controlAdminDb;
+export const adminDb: Db = delegate(() => testDbs.admin ?? controlAdminDb);
+
+// What the deprecated aliases stand for. Nothing in src uses them any more: they are the tests' way
+// to reach "the database", which with a database per workspace is more than one (tests route them).
+const testDbs: { app?: Db; admin?: Db } = {};
+
+/** Test hook: what `appDb` and `adminDb` run on (the integration tests' router across databases). */
+export function setTestDbs(dbs: { app?: Db; admin?: Db }): void {
+  testDbs.app = dbs.app;
+  testDbs.admin = dbs.admin;
+}
 
 /**
- * Runs `fn` in a savepoint of `tx` when one is given (a platform admin request's `adminDb`
- * transaction, so the request holds one connection), else in a new `adminDb` transaction.
+ * Runs `fn` in a savepoint of `tx` when one is given (a platform admin request's control plane
+ * transaction, so the request holds one connection), else in a new control plane admin transaction.
  */
 export function adminTransaction<T>(tx: Tx | undefined, fn: (tx: Tx) => Promise<T>): Promise<T> {
-  return tx ? tx.transaction(fn) : adminDb.transaction(fn);
+  return tx ? tx.transaction(fn) : controlAdminDb.transaction(fn);
 }
 
 /** Close every pool. Only needed by scripts and tests. Safe to call when never used. */

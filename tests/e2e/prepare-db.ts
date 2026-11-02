@@ -58,6 +58,23 @@ async function main() {
     '../integration/helpers/db'
   );
   if (process.argv[2] === 'drop') {
+    // The workspace databases the run made (D35), then its template and control plane.
+    const su = superuserSql();
+    try {
+      const [found] = await su`select 1 from pg_database where datname = ${E2E_DB}`;
+      if (found) {
+        const control = superuserSql(E2E_DB);
+        try {
+          const rows = await control<{ d: string }[]>`select distinct database as d from tenancy.workspace_infra where database <> ${E2E_DB}`.catch(() => []);
+          for (const r of rows) await dropScratchDatabase(r.d);
+        } finally {
+          await control.end({ timeout: 1 });
+        }
+      }
+    } finally {
+      await su.end({ timeout: 1 });
+    }
+    await dropScratchDatabase(`${E2E_DB}_template`);
     await dropScratchDatabase(E2E_DB);
     return;
   }
@@ -76,8 +93,14 @@ async function main() {
     await probe.end({ timeout: 1 });
   }
   const db = await freshDatabase(E2E_DB);
-  const { migrateAll } = await import('@/platform/db/migrate');
-  await migrateAll({ adminUrl: db.adminUrl });
+  // The control plane, and the template every workspace database is copied from (D35).
+  const { createDatabase, migrateControlPlane, migrateWorkspaceDatabase } = await import('@/platform/db/migrate');
+  const { urlForDatabase } = await import('@/platform/db/workspace-pools');
+  await migrateControlPlane({ adminUrl: db.adminUrl });
+  const template = `${E2E_DB}_template`;
+  await dropScratchDatabase(template);
+  await createDatabase(template, undefined, db.adminUrl);
+  await migrateWorkspaceDatabase(urlForDatabase(db.adminUrl, template));
 
   const { seed } = await import('@/entry/seed');
   await seed();

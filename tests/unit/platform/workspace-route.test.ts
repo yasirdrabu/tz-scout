@@ -11,7 +11,7 @@ describe('workspaceRoute: where a tenant works, from its registry row (D35)', ()
 
   it('per_workspace mode: the row names the database; no row is an error', () => {
     expect(workspaceRoute('t_a', row('active'), 'per_workspace')).toEqual({ database: 'scout_t_01abc' });
-    expect(() => workspaceRoute('t_a', null, 'per_workspace')).toThrow('Tenant t_a has no workspace registry row');
+    expect(() => workspaceRoute('t_a', null, 'per_workspace')).toThrow(expect.objectContaining({ slug: 'workspace-unknown', status: 404, detail: expect.stringContaining('Tenant t_a has no workspace registry row') }));
   });
 
   it('refuses every workspace not active, suspended included, in either mode', () => {

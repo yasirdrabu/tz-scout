@@ -438,11 +438,13 @@ Includes auth and the HTTP layer. Files: `src/http/routes/v1/me/route.ts`, `src/
 | 21c | Errors "{n} of last {total}"; access log drawer | LATER (unscheduled) | `GET /api/v1/api-keys/{id}/calls` | No per-key call log. Decision 20. |
 | 22 | List tenants: name, slug, status, currency, timezone | SERVER ACTION ONLY | `GET /api/v1/admin/tenants` (`adminRoute`) | `listTenants()` behind `adminContext()`. Statuses `active\|suspended`. |
 | 22 | Tiles "n active · n suspended"; member count per tenant | SMALL GAP | `GET /api/v1/admin/tenants` `summary`, `member_count` | Server side (C8). |
-| 22 | New tenant | SERVER ACTION ONLY | `POST /api/v1/admin/tenants` `{name, slug, owner_email, currency, timezone}` -> 201 `{tenant_id, owner_membership_id}` | `createTenant(actor,input)`: one transaction, instant, 409 `slug-taken`, owner invited. The live checklist is done at once. Does not seed per-tenant defaults (`seedCrmDefaults` and others): check that tenants made here work. |
+| 22 | New tenant | READY | `POST /api/v1/admin/tenants` `{name, slug, owner_email, currency, timezone}` -> 201, the row with `workspace: {status: "provisioning"}` | D35: `createTenant` returns at once; a job makes the workspace database (from the template), migrates it, seeds its defaults (the `tenancy.tenant.created` consumers) and opens it (`active`). 409 `slug-taken`, owner invited. Poll `GET /api/v1/admin/tenants/{id}` for `workspace.status`. |
 | 22 | Tenant drawer: owner, created | SMALL GAP | `GET /api/v1/admin/tenants/{id}` | `tenant.created_at`; owner via membership role owner. |
+| 22 | Retry a failed workspace | READY | `POST /api/v1/admin/tenants/{id}:retry-provisioning` -> the row | D35: a workspace whose making failed shows `workspace: {status: "failed", failed_step, failed_error}`; this sends it through provisioning again (each step resumes). 409 `not-failed` otherwise. |
 | 22 | Suspend, Resume tenant | SMALL GAP | `POST /api/v1/admin/tenants/{id}:suspend`, `:resume` | `tenant.status` is honoured (`sessionPrincipal`, `authenticateKey`) but no service sets it. Add `setTenantStatus` + `platformAudit`; drop cached principals. |
 | 22 | Platform admins list, add, remove | NEW ENDPOINT | `GET/POST /api/v1/admin/platform-admins`, `DELETE /api/v1/admin/platform-admins/{user_id}` | `ensurePlatformAdmin(email)` is seed only: add audit, the `@taazaa.com` rule, refuse removing the last one or yourself. Entra sign-in already needs the home tenant (`mayLinkByEmail`). |
-| 22 | Seats, test flag, host, region, database, storage, schema, backups, migrations, restore, rotate key, limits, export, delete | LATER (Platform) | none | Decision 23. |
+| 22 | Database, region, schema versions (migrations) | SMALL GAP | `tenancy.workspace_infra` (`database`, `region`, `schema_versions`) | D35 plan 1 records them; the Tenants screen fields need them on `GET /api/v1/admin/tenants`. `scout migrate` keeps `schema_versions`. |
+| 22 | Seats, test flag, host, storage, backups, restore, rotate key, limits, export, delete | LATER (Platform) | none | Decision 23; D35 plans 2 to 4. |
 | 22 | Support access request and end | LATER (Platform) | none | Admins always have access today. Decision 23. |
 | 25 | Name, email, role, practice access, permissions | SMALL GAP | `GET /api/v1/me` + `GET /api/v1/permissions` | Old page used `describeAccess()` (server-side sentences). Return `access_summary[]` from it (C8). |
 | 25 | Sign-in method | SMALL GAP | `GET /api/v1/me` `sign_in_method` | From `account.provider_id`, or "Developer sign-in". |
@@ -1155,7 +1157,9 @@ decisions above say.
 33. **Tenant host (§22).** `.scout.taazaa.com` per tenant contradicts W7 (path-based tenant). Fix to
     `scout.taazaa.ai/t/<slug>`. **Applied.**
 34. **Tenant creation (§22).** Creation is one synchronous transaction; the provisioning checklist is
-    done at once and the 2 s polling in C14 does not apply. **Applied.**
+    done at once and the 2 s polling in C14 does not apply. **Applied.** Superseded by D35: the
+    workspace's database is made by a job after the tenant row, so the screen polls
+    `workspace.status` (`provisioning` → `active`, or `failed` with Retry).
 35. **Admin role (§21a matrix).** Platform admin is a user flag (W8) with every permission in every
     active tenant, always; it is not a role in a workspace matrix. Fix the matrix. **Applied.**
 36. **System health (§24).** "Relay, queue and webhook all answered": the ping does not touch webhooks.

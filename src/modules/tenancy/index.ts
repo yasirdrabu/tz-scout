@@ -67,7 +67,7 @@ export { adminTenants, setTenantStatus, type AdminActor, type AdminTenantRow } f
 export { addPlatformAdmin, platformAdmins, removePlatformAdmin, type PlatformAdmin } from './services/platform-admins';
 export { listRoles, loadRoleSets, setRolePermissions, type RoleView } from './services/roles';
 export { forgetAccess } from './services/principal';
-export { workspaceInfo, workspaceList } from './services/workspace-infra';
+export { placeNewWorkspaces, workspaceInfo, workspaceList } from './services/workspace-infra';
 export { memberActivatedAuditJob } from './contracts/jobs';
 export { memberActivatedAuditHandler } from './jobs';
 export { inboundRouteTenant, registerInboundRoute } from './services/inbound-routes';

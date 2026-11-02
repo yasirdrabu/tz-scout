@@ -1,9 +1,11 @@
+import '../helpers/shared-mode';
 import '@/entry/compose';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { createTenant } from '@/modules/tenancy';
 import { workspaceInfra } from '@/modules/tenancy/db/schema';
 import { PLATFORM_TENANT } from '@/platform/audit';
+import { config } from '@/platform/config';
 import { adminDb, controlAdminDb, controlDb } from '@/platform/db/client';
 import { isControlTx, listWorkspaceDatabases, withWorkspaceAdmin, workspaceDb } from '@/platform/db/doors';
 import { withTenant } from '@/platform/db/tenant';
@@ -24,7 +26,7 @@ describe('doors in shared mode (D35)', () => {
   });
 
   it('sends t_platform to the control plane and every other tenant to its workspace', async () => {
-    expect(await workspaceDb(PLATFORM_TENANT)).toEqual({ app: controlDb, admin: controlAdminDb, inShared: false });
+    expect(await workspaceDb(PLATFORM_TENANT)).toEqual({ app: controlDb, admin: controlAdminDb, inShared: false, pool: 'control', poolSize: config.databasePoolMax });
     expect(await withTenant(PLATFORM_TENANT, async (tx) => isControlTx(tx))).toBe(true);
     expect(await withTenant('t_door_a', async (tx) => isControlTx(tx))).toBe(false);
   });
