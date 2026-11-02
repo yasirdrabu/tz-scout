@@ -4,7 +4,8 @@ import { http, HttpResponse } from 'msw';
 import { exactly, problem } from '../../test/http';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
-import { ASSIGNED, HANDOFFS, REVIEW, SELLER, serveAccount } from './testing';
+import type { Conflict } from './api';
+import { ASSIGNED, CONFLICT, CONTRACT_FACT, FACTS, HANDOFFS, REVIEW, SELLER, serveAccount } from './testing';
 
 const header = async () => (await screen.findByRole('heading', { level: 1, name: 'Miami-Dade County DTPW' })).closest('div[class]')!.parentElement!.parentElement!;
 
@@ -175,6 +176,19 @@ describe('Account page after assignment', () => {
     expect(await within(brief).findByText('Miami-Dade County runs the transit system. It has 3,800 staff.')).toBeInTheDocument();
     expect(within(brief).queryByRole('button', { name: /^Edit / })).toBeNull();
     expect(within(record).getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('the review record shows conflicting facts read only, even to a reviewer', async () => {
+    const kept: Conflict = { ...CONFLICT, id: 'cfl_2', key: 'employees', label: 'Staff', status: 'resolved', resolution: 'kept', kept_fact_id: 'fct_cv1', resolved_by_name: 'Dana Whitfield', resolved_at: '2026-11-01T12:00:00Z' };
+    serveAccount({ review: ASSIGNED, facts: [...FACTS, CONTRACT_FACT], conflicts: [CONFLICT, kept] });
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const record = await screen.findByRole('region', { name: 'Review record' });
+    await userEvent.click(within(record).getByRole('button', { name: 'Show the full brief, signals and facts' }));
+    const facts = within(record).getByRole('region', { name: 'Account facts' });
+    expect(await within(facts).findByText('Sources disagree')).toBeInTheDocument();
+    expect(facts).toHaveTextContent('Kept by Dana Whitfield');
+    expect(within(facts).queryByRole('button', { name: /^Keep / })).toBeNull();
+    expect(within(facts).queryByRole('button', { name: 'Change' })).toBeNull();
   });
 
   it('the assignment card: waiting, accepted, accepted automatically, the quoted note and the handoff chip', async () => {

@@ -121,7 +121,7 @@ export const resolveConflict = (tenant: string, conflictId: string, keptFactId: 
     body: { kept_fact_id: keptFactId, ...(note ? { note } : {}) },
   });
 
-export type WrittenBy ='claude' | 'sample' | 'rules' | 'person';
+export type WrittenBy = 'claude' | 'sample' | 'rules' | 'person';
 
 export type BriefSection = {
   key: string;

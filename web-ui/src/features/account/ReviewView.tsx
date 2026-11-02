@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../api/errors';
 import { hasScope, meQuery, type Me } from '../../api/me';
 import { cx } from '../../lib/cx';
@@ -144,6 +144,19 @@ function ConflictRow({ tenant, id, conflict: c, canAct }: { tenant: string; id: 
   const [changing, setChanging] = useState(false);
   const [busy, setBusy] = useState(false);
   const choosing = c.status === 'open' || changing;
+  // Where focus goes once Change or Cancel has rendered: the first `Keep this one`, or `Change`.
+  const focusNext = useRef<'keep' | 'change' | null>(null);
+  const row = () => document.getElementById(anchorOf(c));
+  useEffect(() => {
+    const want = focusNext.current;
+    if (!want) return;
+    focusNext.current = null;
+    row()?.querySelector<HTMLElement>(`[data-focus="${want}"]`)?.focus();
+  });
+  const change = (to: boolean, focus: 'keep' | 'change') => {
+    focusNext.current = focus;
+    setChanging(to);
+  };
 
   async function keep(x: ConflictFact) {
     setBusy(true);
@@ -152,11 +165,13 @@ function ConflictRow({ tenant, id, conflict: c, canAct }: { tenant: string; id: 
       toast.show(`Kept ${value(x.value, c.key)} from ${sourceOf(x) ?? 'a source'}. Scout will use it in the brief and HubSpot.`);
       setChanging(false);
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['account', tenant, id] }), queryClient.invalidateQueries({ queryKey: ['review-queue', tenant] })]);
+      // The Keep button is gone; focus stays on the fact.
+      row()?.focus();
     } catch (e) {
       // 409: the value was replaced since the page loaded, so show the latest values.
       if (e instanceof ApiError && e.status === 409) {
         toast.show(e.title);
-        await queryClient.invalidateQueries({ queryKey: conflictsQuery(tenant, id).queryKey });
+        await queryClient.invalidateQueries({ queryKey: ['account', tenant, id] });
       } else toast.show(errorText(e));
     } finally {
       setBusy(false);
@@ -168,14 +183,24 @@ function ConflictRow({ tenant, id, conflict: c, canAct }: { tenant: string; id: 
       <dt className={styles.factLabel}>{c.label}</dt>
       <dd className={cx(styles.stack, styles.grow)}>
         {choosing ? (
-          <span className={cx(styles.disagree, styles.small)}>Sources disagree</span>
+          <span className={cx(styles.disagree, styles.small)}>
+            Sources disagree
+            {changing && (
+              <>
+                {' · '}
+                <button type="button" className={styles.textButton} onClick={() => change(false, 'change')}>
+                  Cancel
+                </button>
+              </>
+            )}
+          </span>
         ) : (
           <span className={cx(styles.muted, styles.small)}>
             {`Kept by ${c.resolved_by_name ?? 'someone'}`}
             {canAct && (
               <>
                 {' · '}
-                <button type="button" className={styles.textButton} onClick={() => setChanging(true)}>
+                <button type="button" className={styles.textButton} data-focus="change" onClick={() => change(true, 'keep')}>
                   Change
                 </button>
               </>
@@ -185,11 +210,21 @@ function ConflictRow({ tenant, id, conflict: c, canAct }: { tenant: string; id: 
         <span className={styles.sides}>
           {c.facts.map((x) => (
             <span key={x.id} className={cx(styles.side, !choosing && x.id !== c.kept_fact_id && styles.dim)}>
-              <span>{value(x.value, c.key)}</span>
+              <span>
+                {value(x.value, c.key)}
+                {!choosing && x.id === c.kept_fact_id && <span className="sr-only"> (kept)</span>}
+              </span>
               <span className={cx(styles.muted, styles.small)}>{[sourceOf(x), f.day(x.observed_at)].filter(Boolean).join(' · ')}</span>
               {choosing && canAct && x.id !== c.kept_fact_id && (
                 <span>
-                  <Button variant="secondary" size="sm" disabled={busy} onClick={() => void keep(x)}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy}
+                    data-focus="keep"
+                    aria-label={`Keep ${value(x.value, c.key)} from ${sourceOf(x) ?? 'a source'}`}
+                    onClick={() => void keep(x)}
+                  >
                     Keep this one
                   </Button>
                 </span>
@@ -204,23 +239,25 @@ function ConflictRow({ tenant, id, conflict: c, canAct }: { tenant: string; id: 
 }
 
 /** §4a 5. Account facts: label, value and "{source} · {date}"; a fact sources disagree on shows both values. */
-export function AccountFacts({ tenant, id }: { tenant: string; id: string }) {
+export function AccountFacts({ tenant, id, readOnly = false }: { tenant: string; id: string; readOnly?: boolean }) {
   const f = useFormat();
   const value = useFactValue();
   const { data: me } = useQuery(meQuery(tenant));
-  const canAct = !!me && hasScope(me, 'review:act');
+  const canAct = !readOnly && !!me && hasScope(me, 'review:act');
   const facts = useQuery(factsQuery(tenant, id));
   const { conflicts, list, open } = useAccountConflicts(tenant, id);
   const rows = (facts.data?.data ?? []).filter((x) => x.person_id === null);
-  // Per key, the open conflict, else the latest kept one. An edit settled its conflict, so that row reads as any fact.
-  const byKey = new Map<string, Conflict>();
-  for (const c of list) if (!byKey.has(c.key) && c.resolution !== 'edited') byKey.set(c.key, c);
-  const extra = [...byKey.values()].filter((c) => !rows.some((x) => x.key === c.key));
+  // Per key, the open conflict, else the latest resolved one. An edit settled its conflict (null), so that
+  // row reads as any fact and an older "Kept by" for the key stays hidden.
+  const byKey = new Map<string, Conflict | null>();
+  for (const c of list) if (!byKey.has(c.key)) byKey.set(c.key, c.resolution === 'edited' ? null : c);
+  const extra = [...byKey.values()].filter((c): c is Conflict => !!c && !rows.some((x) => x.key === c.key));
   const badge = conflicts.isSuccess ? (
     <Flag tone={open.length > 0 ? 'amber' : 'green'}>{open.length === 0 ? 'All facts agree' : open.length === 1 ? '1 conflict to resolve' : `${open.length} conflicts to resolve`}</Flag>
   ) : undefined;
   return (
     <Card title="Account facts" actions={badge}>
+      {conflicts.isError && <p className={cx(styles.muted, styles.small)} role="alert">{`Conflicts didn't load. ${errorText(conflicts.error)}`}</p>}
       {facts.isPending ? (
         <p className={styles.note}>Loading facts</p>
       ) : facts.isError ? (
