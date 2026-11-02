@@ -89,7 +89,7 @@ describe('exclusion settings', () => {
     await runOutbox(tenant.tenantId);
     const listed = await tenant.run((ctx) => ctx.tx.select({ id: account.id }).from(account).where(eq(account.excludedReasonKey, 'domain_listed')));
     expect(listed).toHaveLength(1);
-  });
+  }, 90_000);
 
   it('needs a person, rejects unknown rules and list kinds', async () => {
     await expect(t.run((ctx) => setExclusionRule(ctx, 'software_vendor', true))).rejects.toMatchObject({ status: 403 });

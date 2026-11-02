@@ -64,9 +64,12 @@ test('the AE declines with a reason and the account is back in the leader’s qu
   await panel.getByRole('button', { name: /^Decline and return to / }).click();
   await shows(ae, new RegExp(`^Declined\\. ${name} is back with .+, with your reason\\.$`));
 
-  await page.goto('/t/taazaa/queue');
+  // The queue shows the decline once the worker has handled its event; reload until it does.
   const row = page.getByRole('row').filter({ has: page.getByRole('button', { name, exact: true }) });
-  await expect(row).toContainText('Declined by');
+  await expect(async () => {
+    await page.goto('/t/taazaa/queue');
+    await expect(row).toContainText('Declined by', { timeout: 3_000 });
+  }).toPass({ timeout: 30_000 });
 });
 
 test('send back with a reason takes the account out of the queue', async ({ page }) => {

@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { platformAudit } from '@/platform/audit';
-import { adminDb, adminTransaction } from '@/platform/db/client';
+import { controlAdminDb, adminTransaction } from '@/platform/db/client';
 import type { Tx } from '@/platform/db/tenant';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
@@ -17,7 +17,7 @@ const active = and(eq(user.platformAdmin, true), isNull(user.disabledAt));
 
 /** Platform admins who are not turned off, by email. */
 export async function platformAdmins(tx?: Tx): Promise<PlatformAdmin[]> {
-  return (tx ?? adminDb).select(cols).from(user).where(active).orderBy(asc(user.email));
+  return (tx ?? controlAdminDb).select(cols).from(user).where(active).orderBy(asc(user.email));
 }
 
 /**

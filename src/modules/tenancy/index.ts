@@ -10,6 +10,7 @@ export {
   removeMember,
   setCrmOwnerId,
   setCrmOwnerIds,
+  updateMember,
   tenantsFor,
   userForCrmOwner,
 } from './services/members';
@@ -66,3 +67,14 @@ export { adminTenants, setTenantStatus, type AdminActor, type AdminTenantRow } f
 export { addPlatformAdmin, platformAdmins, removePlatformAdmin, type PlatformAdmin } from './services/platform-admins';
 export { listRoles, loadRoleSets, setRolePermissions, type RoleView } from './services/roles';
 export { forgetAccess } from './services/principal';
+export { placeNewWorkspaces, workspaceInfo, workspaceList } from './services/workspace-infra';
+export { memberActivatedAuditJob } from './contracts/jobs';
+export { memberActivatedAuditHandler } from './jobs';
+export { inboundRouteTenant, registerInboundRoute } from './services/inbound-routes';
+export { workspaceProvisionJob } from './contracts/jobs';
+export { workspaceProvisionHandler } from './jobs';
+export { registerWorkspaceSeeder, type WorkspaceSeeder } from './contracts/workspace-seeder';
+export { provisionWorkspace, retryProvisioning, type ProvisionStep } from './services/provisioning';
+export { workspaceDatabaseName } from './services/workspace-infra';
+export { migrateWorkspaces, type WorkspaceMigration } from './services/workspace-migrate';
+export { SPLIT_SETTLE_MS, splitWorkspace, type SplitResult } from './services/split';

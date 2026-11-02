@@ -17,7 +17,8 @@ beforeAll(async () => {
   await migrateAll({ adminUrl: db.adminUrl });
   client = postgres(db.adminUrl, { max: 1, onnotice: () => {} });
   adminDb = drizzle(client);
-  dbEnv = { DATABASE_URL: db.appUrl, DATABASE_ADMIN_URL: db.adminUrl };
+  // One database holding everything, as an install from before D35: the CLI runs in shared mode on it.
+  dbEnv = { DATABASE_URL: db.appUrl, DATABASE_ADMIN_URL: db.adminUrl, SCOUT_WORKSPACE_DATABASES: 'shared' };
 }, 60_000);
 
 afterAll(async () => {

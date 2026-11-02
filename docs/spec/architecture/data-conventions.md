@@ -5,10 +5,18 @@
 - Every table in every module schema has `tenant_id` (not null), and every query filters by it.
 - Services get the tenant from `ModuleContext`, built from the signed-in user's membership or the API
   key / OAuth grant. Never from a request body.
-- Postgres row-level security is turned on for every tenant table as a second line of defence: the
-  connection sets `app.tenant_id` per transaction and policies compare against it. Platform-admin and
-  cross-tenant jobs use a separate role that bypasses RLS and is logged.
+- Each workspace's data is in a database of its own, `scout_t_<tenant id>`, on the shared Postgres
+  server; users, sign-in and the workspace list are in the control plane database, `scout` (D35,
+  tenant-infrastructure.md). `tenancy.workspace_infra` says where each workspace is. Code reaches a
+  workspace only through `withTenant` (or `withWorkspaceAdmin`), which picks its database; tenancy
+  works only on the control plane, never on a workspace transaction.
+- Postgres row-level security is turned on for every tenant table, inside each database, as a second
+  line of defence: the connection sets `app.tenant_id` per transaction and policies compare against
+  it. Platform-admin and cross-tenant jobs use a separate role that bypasses RLS and is logged; they
+  go over the workspace databases one by one (a few at a time).
 - An integration test per module proves a row from tenant A cannot be read or written as tenant B.
+- `SCOUT_WORKSPACE_DATABASES=shared` keeps every workspace in one database: an install from before
+  D35, until `scout tenant split --all` has moved them out.
 
 ## Ids
 

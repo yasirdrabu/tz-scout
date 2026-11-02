@@ -10,6 +10,7 @@ import {
   completeSignIn,
   createApiKey,
   createTenant,
+  provisionWorkspace,
   ensurePlatformAdmin,
   listTenants,
   members,
@@ -137,13 +138,17 @@ export async function seed(): Promise<{ devApiKey: string }> {
   for (const t of TENANTS) {
     let row = (await listTenants()).find((x) => x.slug === t.slug);
     if (!row) {
-      await createTenant(actor, {
+      const made = await createTenant(actor, {
         slug: t.slug,
         name: t.name,
         currency: t.currency,
         timezone: t.timezone,
         ownerEmail: t.ownerEmail,
       });
+      // A database of its own (D35): made here, not left to the worker, so the rest of the seed can use it.
+      if (made.status === 'provisioning' && (await provisionWorkspace(made.tenantId)) !== 'active') {
+        throw new Error(`Could not make the workspace database for ${t.slug}; see the log.`);
+      }
       row = (await listTenants()).find((x) => x.slug === t.slug)!;
     }
     // The owner has signed in before, so their membership is active.

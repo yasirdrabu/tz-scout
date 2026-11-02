@@ -2,7 +2,9 @@ import './registry';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { bootstrapDatabase, migrateAll } from '@/platform/db/migrate';
+import { config } from '@/platform/config';
+import { bootstrapDatabase, createDatabase, migrateAll, migrateControlPlane, migrateWorkspaceDatabase } from '@/platform/db/migrate';
+import { urlForDatabase } from '@/platform/db/workspace-pools';
 import { closeDbs } from '@/platform/db/client';
 import { closeHealthConnections } from '@/platform/health';
 import { log } from '@/platform/log';
@@ -24,7 +26,11 @@ Long-running roles (stop with SIGTERM or SIGINT)
   all-background      Worker, scheduler and relay in one process (single-VM setups)
 
 One-shot commands
-  migrate             Bootstrap (when DATABASE_SUPERUSER_URL is set), then apply migrations
+  migrate [--tenant <slug>]
+                      Bootstrap (when DATABASE_SUPERUSER_URL is set), then apply migrations. With
+                      SCOUT_WORKSPACE_DATABASES=per_workspace: the control plane, every workspace
+                      database 4 at a time (or one, --tenant), then the template workspace database;
+                      exits 1 when a workspace fails (it is marked failed, the others go on)
   seed                Local development data (refuses production)
   import <slug> <file>  Import a CSV or XLSX list into a workspace, as the platform admin's person source
   backfill-r1b <slug>   Give a workspace built before R1b its scoring and routing defaults, a review row for each account, and a rescore
@@ -34,6 +40,11 @@ One-shot commands
   keys:create         --tenant <slug> --name <name> --scopes a,b [--test]
   tenants:create      --slug <s> --name <n> --currency <USD> --timezone <zone> --owner-email <email>
                       Operator command: run it on the server. It acts as a system platform admin.
+  tenant split <slug> | --all  [--settle-seconds 65] [--force-cleanup]
+                      Move a workspace (or every one still there) out of the shared database into its own
+                      (SCOUT_WORKSPACE_DATABASES=per_workspace). Its requests get 503 while it moves.
+                      --force-cleanup (one workspace, already moved): delete its rows left in the shared
+                      database even though its own database fails the check; only once checked by hand.
 `;
 
 /** Aborts when the process is told to stop: SIGTERM, SIGINT, or an IPC "shutdown" message (Windows has no SIGTERM). */
@@ -86,13 +97,34 @@ async function web(): Promise<number> {
   return 0;
 }
 
-async function migrate(): Promise<void> {
+async function migrate(tenantSlug?: string): Promise<number> {
   if (process.env.DATABASE_SUPERUSER_URL) {
     await bootstrapDatabase();
     console.log('Database roles and schemas are ready.');
   }
-  const { applied } = await migrateAll();
-  console.log(`Applied ${applied} migration${applied === 1 ? '' : 's'}.`);
+  const plural = (n: number) => `${n} migration${n === 1 ? '' : 's'}`;
+  if (config.workspaceDatabases === 'shared') {
+    const { applied } = await migrateAll();
+    console.log(`Applied ${plural(applied)}.`);
+    return 0;
+  }
+  const { listTenants, migrateWorkspaces } = await import('@/modules/tenancy');
+  if (!tenantSlug) console.log(`Control plane: applied ${plural((await migrateControlPlane()).applied)}.`);
+  const tenant = tenantSlug ? (await listTenants()).find((t) => t.slug === tenantSlug) : undefined;
+  if (tenantSlug && !tenant) throw new Error(`No workspace with the slug "${tenantSlug}".`);
+  const results = await migrateWorkspaces(tenant ? { tenantId: tenant.id } : {});
+  for (const r of results) {
+    const who = `${r.database} (${r.tenantIds.length === 1 ? r.tenantIds[0] : `${r.tenantIds.length} workspaces`})`;
+    console.log('error' in r ? `Workspace database ${who}: FAILED, ${r.error}` : `Workspace database ${who}: applied ${plural(r.applied)}.`);
+  }
+  if (!tenantSlug) {
+    // New workspaces are copied from it; made when missing, brought up to date after the others.
+    const template = config.workspaceTemplateDatabase;
+    const made = await createDatabase(template);
+    const { applied } = await migrateWorkspaceDatabase(urlForDatabase(config.databaseAdminUrl, template));
+    console.log(`Template workspace database ${template}${made ? ' (made)' : ''}: applied ${plural(applied)}.`);
+  }
+  return results.some((r) => 'error' in r) ? 1 : 0;
 }
 
 function need(values: Record<string, string | boolean | undefined>, name: string): string {
@@ -148,6 +180,38 @@ async function backfillTenant(slug: string, release: 'r1b' | 'r1c' | 'review-flo
   return 0;
 }
 
+/** Moves one workspace, or every active one still in the shared database, into its own database (D35). */
+async function splitTenants(slug: string | undefined, all: boolean, settleMs: number, forceCleanup = false): Promise<number> {
+  if (!slug && !all) throw new Error(`Name a workspace or pass --all.\n\n${USAGE}`);
+  if (forceCleanup && all) throw new Error('--force-cleanup is for one workspace at a time: name it, not --all.');
+  const { listTenants, splitWorkspace } = await import('@/modules/tenancy');
+  const tenants = (await listTenants()).filter((t) => (slug ? t.slug === slug : true));
+  if (slug && tenants.length === 0) throw new Error(`No workspace with the slug "${slug}".`);
+  let failed = 0;
+  for (const t of tenants) {
+    try {
+      const r = await splitWorkspace(t.id, {
+        settleMs,
+        ...(forceCleanup
+          ? {
+              forceCleanup: (left: { table: string; rows: number }[]) =>
+                console.log(
+                  `Workspace ${t.slug}: --force-cleanup, deleting from the shared database without checking its own: ${left.map((c) => `${c.table} (${c.rows})`).join(', ')}.`,
+                ),
+            }
+          : {}),
+      });
+      if (r.outcome === 'skipped') console.log(`Workspace ${t.slug}: left as it is, ${r.reason}.`);
+      else if (r.outcome === 'cleaned') console.log(`Workspace ${t.slug}: its last rows deleted from the shared database.`);
+      else console.log(`Workspace ${t.slug}: moved to ${r.database}, ${r.copied.reduce((n, c) => n + c.rows, 0)} rows in ${r.copied.length} tables.`);
+    } catch (e) {
+      failed++;
+      console.error(`Workspace ${t.slug}: not moved, ${(e as Error).message}`);
+    }
+  }
+  return failed > 0 ? 1 : 0;
+}
+
 /** Queues a rescore of every account in one workspace, or in every active one. The worker does the scoring. */
 async function rescoreTenants(slug: string | undefined): Promise<number> {
   const { requestRescore } = await import('@/modules/scoring');
@@ -185,9 +249,10 @@ export async function run(argv: string[]): Promise<number> {
     case 'all-background':
       await runRoles(['worker', 'scheduler', 'relay']);
       return 0;
-    case 'migrate':
-      await migrate();
-      return 0;
+    case 'migrate': {
+      const { values } = parseArgs({ args: rest, options: { tenant: { type: 'string' } } });
+      return migrate(values.tenant);
+    }
     case 'seed': {
       const { seed } = await import('./seed');
       const { devApiKey } = await seed();
@@ -245,6 +310,17 @@ ${USAGE}`);
       });
       console.log(secret);
       return 0;
+    }
+    case 'tenant': {
+      const [sub, ...args] = rest;
+      if (sub !== 'split') throw new Error(`Unknown command: tenant ${sub ?? ''}\n\n${USAGE}`);
+      const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { all: { type: 'boolean' }, 'settle-seconds': { type: 'string' }, 'force-cleanup': { type: 'boolean' } } });
+      const settle = values['settle-seconds'] ?? '65';
+      if (!/^\d+$/.test(settle)) throw new Error(`--settle-seconds takes a whole number of seconds, 0 or more (not "${settle}").`);
+      if (Number(settle) < 65) {
+        console.warn(`--settle-seconds ${settle}: under 65, a running API or worker may still serve the workspace from its cache while it is copied. Only safe when no API or worker is running.`);
+      }
+      return splitTenants(values.all ? undefined : positionals[0], values.all === true, Number(settle) * 1000, values['force-cleanup'] === true);
     }
     case 'tenants:create': {
       const { values } = parseArgs({

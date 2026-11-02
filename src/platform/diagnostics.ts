@@ -4,7 +4,7 @@ import { withTenant, type Tx } from './db/tenant';
 import type { Actor } from './events/envelope';
 import { z } from 'zod';
 import type { ModuleContext } from './context';
-import { adminDb } from './db/client';
+import { controlAdminDb } from './db/client';
 import { pingResult as pingResultTable } from './db/schema';
 import { enqueueJob } from './events/outbox';
 import { defineJob } from './events/registry';
@@ -30,7 +30,7 @@ export function sendPing(ctx: ModuleContext): Promise<string> {
 }
 
 /** The handled ping, or null while it has not arrived. */
-export async function pingResult(id: string, db: Tx | typeof adminDb = adminDb): Promise<{ sentAt: Date; handledAt: Date } | null> {
+export async function pingResult(id: string, db: Tx | typeof controlAdminDb = controlAdminDb): Promise<{ sentAt: Date; handledAt: Date } | null> {
   const [row] = await db
     .select({ sentAt: pingResultTable.sentAt, handledAt: pingResultTable.handledAt })
     .from(pingResultTable)
@@ -41,7 +41,7 @@ export async function pingResult(id: string, db: Tx | typeof adminDb = adminDb):
 /**
  * Sends a ping through the outbox, relay, NATS and worker under tenant `t_platform`, and waits up
  * to `timeoutMs` for the answer. Returns the round trip in ms, or null when nothing answered. The ping
- * is committed on its own; with `tx` (a READ COMMITTED `adminDb` transaction, such as an admin
+ * is committed on its own; with `tx` (a READ COMMITTED `controlAdminDb` transaction, such as an admin
  * request's) the answer is read through it, so waiting takes no second admin connection.
  */
 export async function testEventRoundTrip(

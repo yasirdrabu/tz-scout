@@ -14,6 +14,7 @@ import { setDisabled } from '@/modules/integrations';
 import { personSourceFor } from '@/modules/intake';
 import { source } from '@/modules/intake/db/schema';
 import { addMember } from '@/modules/tenancy';
+import { apiKey } from '@/modules/tenancy/db/schema';
 import { authenticateKey, setKeyCacheTtl } from '@/modules/tenancy/services/api-keys';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { auditLog, idempotencyKey } from '@/platform/db/schema';
@@ -188,6 +189,24 @@ describe('POST /api/v1/sources', () => {
     expect(stored).toEqual([]);
   });
 
+  it('revokes the key when the source is not kept: no working key without its source (D35)', async () => {
+    // Fails the workspace transaction at commit, after the key committed on the control plane.
+    await adminDb.execute(sql`create or replace function intake.test_doomed() returns trigger language plpgsql as $$
+      begin if new.name = 'Doomed agent' then raise exception 'doomed'; end if; return new; end $$`);
+    await adminDb.execute(sql`create constraint trigger test_doomed after insert on intake.source deferrable initially deferred for each row execute function intake.test_doomed()`);
+    try {
+      const res = await w.as(operator, postSource, 'sources', 'POST', { kind: 'agent', name: 'Doomed agent', parent_id: personSource, create_key: true });
+      expect(res.status).toBe(500);
+    } finally {
+      await adminDb.execute(sql`drop trigger if exists test_doomed on intake.source`);
+      await adminDb.execute(sql`drop function if exists intake.test_doomed()`);
+    }
+    expect(await adminDb.select().from(source).where(and(eq(source.tenantId, w.tenantId), eq(source.name, 'Doomed agent')))).toEqual([]);
+    const keys = await adminDb.select().from(apiKey).where(and(eq(apiKey.tenantId, w.tenantId), eq(apiKey.name, 'Doomed agent key')));
+    expect(keys).toHaveLength(1);
+    expect(keys[0]!.revokedAt).not.toBeNull();
+  });
+
   it('refuses a key for a list', async () => {
     const body = await json(w.as(operator, postSource, 'sources', 'POST', { kind: 'list', name: 'Keyed list', parent_id: personSource, create_key: true }), 400);
     expect(body.title).toBe('A list gets its accounts from files, not the API.');
@@ -315,6 +334,27 @@ describe('keys under a source (Decision 14, Ruling 7)', () => {
     expect(audited).toHaveLength(1);
     // The partner now sends with a key (Ruling 6).
     expect(await json(w.as(operator, getSource, `sources/${agent.id}`))).toMatchObject({ method: 'api_key', method_label: 'API key', active_key: { id: rotated.id, prefix: rotated.prefix } });
+  });
+
+  it('a rotate whose request does not commit leaves the old key working and the new one revoked (D35)', async () => {
+    const partner = await json(w.as(operator, postSource, 'sources', 'POST', { kind: 'partner', name: 'Doomed rotate' }), 201);
+    const old = await newKey(partner.id);
+    // Fails the workspace transaction at commit, after the rotation committed on the control plane.
+    await adminDb.execute(sql`create or replace function platform.test_doomed_rotate() returns trigger language plpgsql as $$
+      begin if new.action = 'tenancy.api_key.rotated' then raise exception 'doomed'; end if; return new; end $$`);
+    await adminDb.execute(sql`create constraint trigger test_doomed_rotate after insert on platform.audit_log deferrable initially deferred for each row execute function platform.test_doomed_rotate()`);
+    try {
+      const res = await w.as(operator, keyAction, `sources/${partner.id}/keys/${old.id}:rotate`, 'POST');
+      expect(res.status).toBe(500);
+    } finally {
+      await adminDb.execute(sql`drop trigger if exists test_doomed_rotate on platform.audit_log`);
+      await adminDb.execute(sql`drop function if exists platform.test_doomed_rotate()`);
+    }
+    const keys = await adminDb.select().from(apiKey).where(and(eq(apiKey.tenantId, w.tenantId), eq(apiKey.sourceId, partner.id)));
+    expect(keys).toHaveLength(2);
+    expect(keys.find((k) => k.id === old.id)!.revokedAt).toBeNull();
+    expect(keys.find((k) => k.id !== old.id)!.revokedAt).not.toBeNull();
+    expect(await authenticateKey(old.secret, null)).toMatchObject({ id: old.id });
   });
 
   it("is 404 for a key of another source, and the rotate response is never stored for a replay", async () => {

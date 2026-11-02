@@ -52,6 +52,6 @@ export async function seedCrmDefaults(ctx: ModuleContext): Promise<void> {
     )
     .onConflictDoNothing();
   for (const s of CRM_SCHEDULES) {
-    await upsertSchedule({ actor: ctx.actor, correlationId: ctx.correlationId }, { tenantId, jobName: s.job, cron: s.cron, timezone: 'UTC', payload: {} });
+    await upsertSchedule({ actor: ctx.actor, correlationId: ctx.correlationId, tx: ctx.tx }, { tenantId, jobName: s.job, cron: s.cron, timezone: 'UTC', payload: {} });
   }
 }

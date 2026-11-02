@@ -237,6 +237,24 @@ describe('PATCH /api/v1/members/{id}', () => {
     expect(bad.status).toBe(400);
     expect((await patch(as(owner, '/members/mbr_nope', { method: 'PATCH', body: { role: 'seller' } }))).status).toBe(404);
   });
+
+  it('a 409 on the CRM user id keeps the role change out too: no change, no event, no audit row (D35)', async () => {
+    const a = await freshSeller();
+    const b = await freshSeller();
+    const taken = `h${a.id}`;
+    expect((await patch(as(owner, `/members/${a.membershipId}`, { method: 'PATCH', body: { crm_owner_ids: { hubspot: taken } } }))).status).toBe(200);
+    const res = await patch(as(owner, `/members/${b.membershipId}`, { method: 'PATCH', body: { role: 'leader', crm_owner_ids: { hubspot: taken } } }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).type).toContain('crm-owner-taken');
+    const [m] = await adminDb.select().from(membership).where(eq(membership.id, b.membershipId));
+    expect(m!.role).toBe('seller');
+    const events = await adminDb.execute(
+      sql`select 1 from platform.outbox where tenant_id = ${t.tenantId} and payload->>'type' = 'tenancy.member.role_changed' and payload->'subject'->>'id' = ${b.membershipId}`,
+    );
+    expect(events).toHaveLength(0);
+    const audits = await adminDb.select().from(auditLog).where(and(eq(auditLog.subjectId, b.membershipId), eq(auditLog.action, 'tenancy.member.changed')));
+    expect(audits).toHaveLength(0);
+  });
 });
 
 describe('suspend and reactivate', () => {

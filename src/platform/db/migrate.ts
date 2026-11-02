@@ -48,18 +48,39 @@ export type MigrateOptions = {
   folders?: Partial<Record<ModuleName, string>>;
 };
 
-/**
- * Applies each module's migrations in MODULE_ORDER as `scout_admin`. Assumes the
- * roles and schemas already exist (bootstrap.sql, run by a superuser).
- * Returns how many migrations were applied.
- */
-export async function migrateAll(opts: MigrateOptions = {}): Promise<{ applied: number }> {
-  const client = postgres(opts.adminUrl ?? config.databaseAdminUrl, { max: 1, onnotice: () => {} });
+/** The modules whose schemas the control plane holds in `per_workspace` mode (D35). */
+export const CONTROL_MODULES: readonly ModuleName[] = ['platform', 'tenancy'];
+/** The modules whose schemas each workspace database holds: every one but tenancy. */
+export const WORKSPACE_MODULES: readonly ModuleName[] = MODULE_ORDER.filter((m) => m !== 'tenancy');
+
+/** Migrations applied per module, e.g. `{ platform: 9, intake: 14 }`: what `workspace_infra.schema_versions` records. */
+export type SchemaVersions = Partial<Record<ModuleName, number>>;
+
+/** The migrations the code has per module, to tell when a database trails it ("Behind"). */
+export function codeSchemaVersions(modules: readonly ModuleName[] = MODULE_ORDER): SchemaVersions {
+  const out: SchemaVersions = {};
+  for (const m of modules) {
+    const journal = JSON.parse(readFileSync(path.join(migrationsFolder(m), 'meta', '_journal.json'), 'utf8')) as { entries: unknown[] };
+    out[m] = journal.entries.length;
+  }
+  return out;
+}
+
+/** Applies `modules`' migrations in MODULE_ORDER as `scout_admin` on the database `adminUrl` names. */
+async function migrateModules(
+  adminUrl: string,
+  modules: readonly ModuleName[],
+  folders: MigrateOptions['folders'] = {},
+): Promise<{ applied: number; versions: SchemaVersions }> {
+  const client = postgres(adminUrl, { max: 1, onnotice: () => {} });
   const db = drizzle(client);
   let applied = 0;
+  const versions: SchemaVersions = {};
   try {
-    for (const m of MODULE_ORDER) {
-      const folder = opts.folders?.[m] ?? migrationsFolder(m);
+    // One migrator per database at a time (two workspaces in one database, two migrate commands).
+    await client.unsafe("select pg_advisory_lock(hashtext('scout_migrate'))");
+    for (const m of MODULE_ORDER.filter((x) => modules.includes(x))) {
+      const folder = folders[m] ?? migrationsFolder(m);
       const journal = path.join(folder, 'meta', '_journal.json');
       if (!existsSync(journal)) throw new Error(`Module "${m}" has no migration journal (expected ${journal}).`);
       const count = async () => {
@@ -72,10 +93,82 @@ export async function migrateAll(opts: MigrateOptions = {}): Promise<{ applied: 
       };
       const before = await count();
       await migrate(db, { migrationsFolder: folder, migrationsSchema: m, migrationsTable: '__migrations' });
-      applied += (await count()) - before;
+      versions[m] = await count();
+      applied += versions[m]! - before;
     }
   } finally {
     await client.end();
   }
+  return { applied, versions };
+}
+
+/**
+ * Applies each module's migrations in MODULE_ORDER as `scout_admin`. Assumes the
+ * roles and schemas already exist (bootstrap.sql, run by a superuser).
+ * Returns how many migrations were applied. One database holding everything (`shared` mode).
+ */
+export async function migrateAll(opts: MigrateOptions = {}): Promise<{ applied: number }> {
+  const { applied } = await migrateModules(opts.adminUrl ?? config.databaseAdminUrl, MODULE_ORDER, opts.folders);
   return { applied };
+}
+
+/** `per_workspace` mode: the control plane's own modules (platform, tenancy) on `DATABASE_ADMIN_URL`. */
+export async function migrateControlPlane(opts: MigrateOptions = {}): Promise<{ applied: number; versions: SchemaVersions }> {
+  return migrateModules(opts.adminUrl ?? config.databaseAdminUrl, CONTROL_MODULES, opts.folders);
+}
+
+export function workspaceBootstrapSqlPath(): string {
+  return path.join(root, 'src/platform/db/bootstrap-workspace.sql');
+}
+
+/**
+ * Bootstraps (bootstrap-workspace.sql, as `scout_admin`, its owner) and migrates one workspace database:
+ * every module but tenancy. Idempotent. Returns what it applied and the versions now there.
+ */
+export async function migrateWorkspaceDatabase(adminUrl: string): Promise<{ applied: number; versions: SchemaVersions }> {
+  const sql = postgres(adminUrl, { max: 1, onnotice: () => {} });
+  try {
+    await sql.unsafe(readFileSync(workspaceBootstrapSqlPath(), 'utf8'));
+  } finally {
+    await sql.end();
+  }
+  return migrateModules(adminUrl, WORKSPACE_MODULES);
+}
+
+/**
+ * Creates database `name` as `scout_admin` (so it owns it) when it does not exist yet, copied from
+ * `template` when given; when the template cannot be copied (someone is connected to it, 55006) it is
+ * created empty, for the caller to migrate. Returns false when it was already there. Runs outside any
+ * transaction (as CREATE DATABASE must) on its own connection to the control plane.
+ */
+export async function createDatabase(name: string, template?: string, adminUrl: string = config.databaseAdminUrl): Promise<boolean> {
+  const sql = postgres(adminUrl, { max: 1, onnotice: () => {} });
+  try {
+    const [found] = await sql`select 1 from pg_database where datname = ${name}`;
+    if (found) return false;
+    const quoted = (n: string) => `"${n.replace(/"/g, '""')}"`;
+    try {
+      await sql.unsafe(`create database ${quoted(name)}${template ? ` template ${quoted(template)}` : ''}`);
+    } catch (e) {
+      if (!template || (e as { code?: string }).code !== '55006') throw e;
+      await sql.unsafe(`create database ${quoted(name)}`);
+    }
+    return true;
+  } catch (e) {
+    // Two creators at once: the other one made it.
+    if ((e as { code?: string }).code === '42P04') return false;
+    throw e;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** True when database `name` exists on the server `adminUrl` names. */
+export async function databaseExists(name: string, adminUrl: string = config.databaseAdminUrl): Promise<boolean> {
+  const sql = postgres(adminUrl, { max: 1, onnotice: () => {} });
+  try {
+    return (await sql`select 1 from pg_database where datname = ${name}`).length > 0;
+  } finally {
+    await sql.end();
+  }
 }

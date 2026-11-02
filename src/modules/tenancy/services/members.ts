@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
-import { adminDb } from '@/platform/db/client';
+import { controlAdminDb } from '@/platform/db/client';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
@@ -14,6 +14,7 @@ import { PERMISSIONS, isPermission, permissionsFor, type Permission, type RoleSe
 import { membership, tenant, user } from '../db/schema';
 import { endSessions, signInFacts, type SignInMethod } from './sessions';
 import { loadRoleSets } from './role-sets';
+import { onControl, onControlSavepoint } from './control';
 
 const LAST_OWNER = 'A tenant needs at least one owner.';
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That member was not found.' });
@@ -30,6 +31,9 @@ const SELF: Record<MemberAction, string> = {
   remove: "You can't remove yourself.",
   sign_out: '',
 };
+
+// The private helpers below take a control-plane context (`onControl`'s copy): their `ctx.tx` is the
+// control transaction. Public functions open it and keep the caller's context (`ws`) for audit rows.
 
 /** The rules' view of the context's actor. */
 async function ruleActor(ctx: ModuleContext): Promise<MemberActor> {
@@ -113,7 +117,7 @@ async function actorPowers(ctx: ModuleContext): Promise<Powers> {
 
 /** The actor's permissions in this tenant, read fresh (not from the up to 60 s old request principal). */
 export async function actorPermissions(ctx: ModuleContext): Promise<readonly Permission[]> {
-  return (await actorPowers(ctx)).permissions;
+  return onControl(ctx, async (c) => (await actorPowers(c)).permissions);
 }
 
 /** The limit a membership works under: its own, else the role default. null when the stored one is invalid. */
@@ -236,248 +240,279 @@ async function isLastActiveOwner(ctx: ModuleContext, m: typeof membership.$infer
  * A removed member is brought back on the same membership row. Returns the membership id.
  */
 export async function addMember(
-  ctx: ModuleContext,
+  ws: ModuleContext,
   input: { email: string; role: Role; crmOwnerIds?: Record<string, string>; dataLimit?: DataLimit | null },
 ): Promise<string> {
-  assertRole(input.role);
-  const dataLimit = input.dataLimit ?? null;
-  const powers = await actorPowers(ctx);
-  if (input.role === 'owner' && !powers.makesOwners) throw ownersOnly();
-  assertRoleGrantable(powers, input.role);
-  assertLimitGrantable(powers, dataLimit ?? DEFAULT_DATA_LIMIT[input.role]);
-  const email = input.email.trim().toLowerCase();
-  const crmIds = cleanCrmIds(input.crmOwnerIds ?? {});
-  await lockTenant(ctx, 'crm');
+  return onControl(ws, async (ctx) => {
+    assertRole(input.role);
+    const dataLimit = input.dataLimit ?? null;
+    const powers = await actorPowers(ctx);
+    if (input.role === 'owner' && !powers.makesOwners) throw ownersOnly();
+    assertRoleGrantable(powers, input.role);
+    assertLimitGrantable(powers, dataLimit ?? DEFAULT_DATA_LIMIT[input.role]);
+    const email = input.email.trim().toLowerCase();
+    const crmIds = cleanCrmIds(input.crmOwnerIds ?? {});
+    await lockTenant(ctx, 'crm');
 
-  await ctx.tx
-    .insert(user)
-    .values({ id: newId('usr'), name: displayNameFromEmail(email), email })
-    .onConflictDoNothing({ target: user.email });
-  const [u] = await ctx.tx.select().from(user).where(eq(user.email, email));
-  const status = u!.lastSignInAt ? 'active' : 'invited';
-
-  const [existing] = await ctx.tx
-    .select()
-    .from(membership)
-    .where(and(eq(membership.tenantId, ctx.tenantId), eq(membership.userId, u!.id)));
-  if (existing && existing.status !== 'removed') {
-    throw new ScoutError({ slug: 'already-member', status: 409, title: 'That person is already a member.' });
-  }
-  await assertCrmIdsFree(ctx, crmIds, existing?.id);
-
-  let id: string;
-  if (existing) {
-    id = existing.id;
     await ctx.tx
-      .update(membership)
-      .set({
+      .insert(user)
+      .values({ id: newId('usr'), name: displayNameFromEmail(email), email })
+      .onConflictDoNothing({ target: user.email });
+    const [u] = await ctx.tx.select().from(user).where(eq(user.email, email));
+    const status = u!.lastSignInAt ? 'active' : 'invited';
+
+    const [existing] = await ctx.tx
+      .select()
+      .from(membership)
+      .where(and(eq(membership.tenantId, ctx.tenantId), eq(membership.userId, u!.id)));
+    if (existing && existing.status !== 'removed') {
+      throw new ScoutError({ slug: 'already-member', status: 409, title: 'That person is already a member.' });
+    }
+    await assertCrmIdsFree(ctx, crmIds, existing?.id);
+
+    let id: string;
+    if (existing) {
+      id = existing.id;
+      await ctx.tx
+        .update(membership)
+        .set({
+          role: input.role,
+          status,
+          crmOwnerIds: crmIds,
+          extraPermissions: [],
+          dataLimit,
+          invitedBy: ctx.actor.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(membership.id, id));
+    } else {
+      id = newId('mbr');
+      await ctx.tx.insert(membership).values({
+        id,
+        tenantId: ctx.tenantId,
+        userId: u!.id,
         role: input.role,
         status,
         crmOwnerIds: crmIds,
-        extraPermissions: [],
         dataLimit,
         invitedBy: ctx.actor.id,
-        updatedAt: new Date(),
-      })
-      .where(eq(membership.id, id));
-  } else {
-    id = newId('mbr');
-    await ctx.tx.insert(membership).values({
-      id,
-      tenantId: ctx.tenantId,
-      userId: u!.id,
-      role: input.role,
-      status,
-      crmOwnerIds: crmIds,
-      dataLimit,
-      invitedBy: ctx.actor.id,
+      });
+    }
+    const subject = { type: 'membership', id };
+    await publish(ctx, memberAdded, { userId: u!.id, role: input.role, invitedBy: ctx.actor.id }, subject);
+    await audit(ws, {
+      action: 'tenancy.member.added',
+      subject,
+      after: { userId: u!.id, email, role: input.role, status, crmOwnerIds: crmIds, ...(dataLimit ? { dataLimit } : {}) },
     });
-  }
-  const subject = { type: 'membership', id };
-  await publish(ctx, memberAdded, { userId: u!.id, role: input.role, invitedBy: ctx.actor.id }, subject);
-  await audit(ctx, {
-    action: 'tenancy.member.added',
-    subject,
-    after: { userId: u!.id, email, role: input.role, status, crmOwnerIds: crmIds, ...(dataLimit ? { dataLimit } : {}) },
+    return id;
   });
-  return id;
 }
 
 /**
  * Removes a member (history stays); `tenancy.member.removed` sends their open accounts back to the
  * review queue. The last active owner, any other active owner and yourself cannot be removed.
  */
-export async function removeMember(ctx: ModuleContext, membershipId: string): Promise<void> {
-  await lockTenant(ctx, 'owners');
-  const m = await load(ctx, membershipId);
-  await assertAllowed(ctx, 'remove', m);
-  if (await isLastActiveOwner(ctx, m)) throw lastOwner();
-  await ctx.tx
-    .update(membership)
-    .set({ status: 'removed', updatedAt: new Date() })
-    .where(eq(membership.id, membershipId));
-  const subject = { type: 'membership', id: membershipId };
-  await publish(ctx, memberRemoved, { userId: m.userId, removedBy: ctx.actor.id }, subject);
-  await audit(ctx, {
-    action: 'tenancy.member.removed',
-    subject,
-    before: { userId: m.userId, role: m.role, status: m.status },
-    after: { status: 'removed' },
+export async function removeMember(ws: ModuleContext, membershipId: string): Promise<void> {
+  return onControl(ws, async (ctx) => {
+    await lockTenant(ctx, 'owners');
+    const m = await load(ctx, membershipId);
+    await assertAllowed(ctx, 'remove', m);
+    if (await isLastActiveOwner(ctx, m)) throw lastOwner();
+    await ctx.tx
+      .update(membership)
+      .set({ status: 'removed', updatedAt: new Date() })
+      .where(eq(membership.id, membershipId));
+    const subject = { type: 'membership', id: membershipId };
+    await publish(ctx, memberRemoved, { userId: m.userId, removedBy: ctx.actor.id }, subject);
+    await audit(ws, {
+      action: 'tenancy.member.removed',
+      subject,
+      before: { userId: m.userId, role: m.role, status: m.status },
+      after: { status: 'removed' },
+    });
   });
 }
 
 /** Changes role, extra permissions and/or data limit. The last active owner cannot be demoted; nobody changes their own role. */
 export async function changeMember(
-  ctx: ModuleContext,
+  ws: ModuleContext,
   membershipId: string,
   change: { role?: Role; extraPermissions?: string[]; dataLimit?: DataLimit | null },
 ): Promise<void> {
-  if (change.role !== undefined) assertRole(change.role);
-  if (change.extraPermissions !== undefined) assertPermissions(change.extraPermissions);
-  if (change.dataLimit !== undefined && change.dataLimit !== null) {
-    const parsed = DataLimitSchema.safeParse(change.dataLimit);
-    if (!parsed.success) {
-      throw new ScoutError({
-        slug: 'validation',
-        status: 400,
-        title: 'Check the data limit.',
-        errors: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
-      });
+  return onControl(ws, async (ctx) => {
+    if (change.role !== undefined) assertRole(change.role);
+    if (change.extraPermissions !== undefined) assertPermissions(change.extraPermissions);
+    if (change.dataLimit !== undefined && change.dataLimit !== null) {
+      const parsed = DataLimitSchema.safeParse(change.dataLimit);
+      if (!parsed.success) {
+        throw new ScoutError({
+          slug: 'validation',
+          status: 400,
+          title: 'Check the data limit.',
+          errors: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+        });
+      }
     }
-  }
-  await lockTenant(ctx, 'owners');
-  const m = await load(ctx, membershipId);
-  const roleChanges = change.role !== undefined && change.role !== m.role;
-  const current = new Set<string>(m.extraPermissions ?? []);
-  const added = (change.extraPermissions ?? []).filter((p) => !current.has(p)) as Permission[];
-  const extrasChange =
-    change.extraPermissions !== undefined && (added.length > 0 || new Set(change.extraPermissions).size !== current.size);
-  if (roleChanges) await assertAllowed(ctx, 'change_role', m);
-  if (extrasChange) await assertAllowed(ctx, 'change_permissions', m);
-  const newRole = (change.role ?? m.role) as Role;
-  const limitBefore = effectiveLimit(m.role as Role, m.dataLimit);
-  const limitAfter = effectiveLimit(newRole, change.dataLimit === undefined ? m.dataLimit : change.dataLimit);
-  const limitChanges = JSON.stringify(limitAfter) !== JSON.stringify(limitBefore);
-  if (roleChanges || added.length > 0 || limitChanges) {
-    const powers = await actorPowers(ctx);
-    if (roleChanges && (change.role === 'owner' || m.role === 'owner') && !powers.makesOwners) throw ownersOnly();
-    if (roleChanges) assertRoleGrantable(powers, newRole);
-    assertGrantable(powers, added);
-    if (limitChanges) assertLimitGrantable(powers, limitAfter);
-  }
-  if (change.role && change.role !== 'owner' && (await isLastActiveOwner(ctx, m))) throw lastOwner();
+    await lockTenant(ctx, 'owners');
+    const m = await load(ctx, membershipId);
+    const roleChanges = change.role !== undefined && change.role !== m.role;
+    const current = new Set<string>(m.extraPermissions ?? []);
+    const added = (change.extraPermissions ?? []).filter((p) => !current.has(p)) as Permission[];
+    const extrasChange =
+      change.extraPermissions !== undefined && (added.length > 0 || new Set(change.extraPermissions).size !== current.size);
+    if (roleChanges) await assertAllowed(ctx, 'change_role', m);
+    if (extrasChange) await assertAllowed(ctx, 'change_permissions', m);
+    const newRole = (change.role ?? m.role) as Role;
+    const limitBefore = effectiveLimit(m.role as Role, m.dataLimit);
+    const limitAfter = effectiveLimit(newRole, change.dataLimit === undefined ? m.dataLimit : change.dataLimit);
+    const limitChanges = JSON.stringify(limitAfter) !== JSON.stringify(limitBefore);
+    if (roleChanges || added.length > 0 || limitChanges) {
+      const powers = await actorPowers(ctx);
+      if (roleChanges && (change.role === 'owner' || m.role === 'owner') && !powers.makesOwners) throw ownersOnly();
+      if (roleChanges) assertRoleGrantable(powers, newRole);
+      assertGrantable(powers, added);
+      if (limitChanges) assertLimitGrantable(powers, limitAfter);
+    }
+    if (change.role && change.role !== 'owner' && (await isLastActiveOwner(ctx, m))) throw lastOwner();
 
-  const set: Partial<typeof membership.$inferInsert> = { updatedAt: new Date() };
-  const before: Record<string, unknown> = {};
-  const after: Record<string, unknown> = {};
-  if (change.role !== undefined) {
-    set.role = change.role;
-    before.role = m.role;
-    after.role = change.role;
-  }
-  if (change.extraPermissions !== undefined) {
-    set.extraPermissions = change.extraPermissions;
-    before.extraPermissions = m.extraPermissions;
-    after.extraPermissions = change.extraPermissions;
-  }
-  if (change.dataLimit !== undefined) {
-    set.dataLimit = change.dataLimit;
-    before.dataLimit = m.dataLimit;
-    after.dataLimit = change.dataLimit;
-  }
-  await ctx.tx.update(membership).set(set).where(eq(membership.id, membershipId));
-  const subject = { type: 'membership', id: membershipId };
-  if (change.role !== undefined && change.role !== m.role) {
-    await publish(ctx, memberRoleChanged, { userId: m.userId, from: m.role, to: change.role }, subject);
-  }
-  await audit(ctx, { action: 'tenancy.member.changed', subject, before, after });
+    const set: Partial<typeof membership.$inferInsert> = { updatedAt: new Date() };
+    const before: Record<string, unknown> = {};
+    const after: Record<string, unknown> = {};
+    if (change.role !== undefined) {
+      set.role = change.role;
+      before.role = m.role;
+      after.role = change.role;
+    }
+    if (change.extraPermissions !== undefined) {
+      set.extraPermissions = change.extraPermissions;
+      before.extraPermissions = m.extraPermissions;
+      after.extraPermissions = change.extraPermissions;
+    }
+    if (change.dataLimit !== undefined) {
+      set.dataLimit = change.dataLimit;
+      before.dataLimit = m.dataLimit;
+      after.dataLimit = change.dataLimit;
+    }
+    await ctx.tx.update(membership).set(set).where(eq(membership.id, membershipId));
+    const subject = { type: 'membership', id: membershipId };
+    if (change.role !== undefined && change.role !== m.role) {
+      await publish(ctx, memberRoleChanged, { userId: m.userId, from: m.role, to: change.role }, subject);
+    }
+    await audit(ws, { action: 'tenancy.member.changed', subject, before, after });
+  });
+}
+
+/**
+ * `changeMember` and `setCrmOwnerIds` together, in one control transaction: when either refuses, the
+ * other's change, event and audit row are not kept either.
+ */
+export async function updateMember(
+  ws: ModuleContext,
+  membershipId: string,
+  update: { change: Parameters<typeof changeMember>[2]; crmOwnerIds?: Record<string, string> },
+): Promise<void> {
+  return onControl(ws, async () => {
+    if (Object.keys(update.change).length > 0) await changeMember(ws, membershipId, update.change);
+    if (update.crmOwnerIds) await setCrmOwnerIds(ws, membershipId, update.crmOwnerIds);
+  });
 }
 
 /** Replaces the CRM owner ids of a membership, e.g. `{ hubspot: '123' }`. */
 export async function setCrmOwnerIds(
-  ctx: ModuleContext,
+  ws: ModuleContext,
   membershipId: string,
   ids: Record<string, string>,
 ): Promise<void> {
-  const clean = cleanCrmIds(ids);
-  await lockTenant(ctx, 'crm');
-  const m = await load(ctx, membershipId);
-  await assertCrmIdsFree(ctx, clean, membershipId);
-  await ctx.tx
-    .update(membership)
-    .set({ crmOwnerIds: clean, updatedAt: new Date() })
-    .where(eq(membership.id, membershipId));
-  await audit(ctx, {
-    action: 'tenancy.member.crm_owner_ids_changed',
-    subject: { type: 'membership', id: membershipId },
-    before: { crmOwnerIds: m.crmOwnerIds },
-    after: { crmOwnerIds: clean },
+  return onControl(ws, async (ctx) => {
+    const clean = cleanCrmIds(ids);
+    await lockTenant(ctx, 'crm');
+    const m = await load(ctx, membershipId);
+    await assertCrmIdsFree(ctx, clean, membershipId);
+    await ctx.tx
+      .update(membership)
+      .set({ crmOwnerIds: clean, updatedAt: new Date() })
+      .where(eq(membership.id, membershipId));
+    await audit(ws, {
+      action: 'tenancy.member.crm_owner_ids_changed',
+      subject: { type: 'membership', id: membershipId },
+      before: { crmOwnerIds: m.crmOwnerIds },
+      after: { crmOwnerIds: clean },
+    });
   });
 }
 
 /** Sets one CRM's owner id on a membership and leaves the other CRMs' ids as they are. */
-export async function setCrmOwnerId(ctx: ModuleContext, membershipId: string, crm: string, ownerId: string): Promise<void> {
-  const clean = cleanCrmIds({ [crm]: ownerId });
-  await lockTenant(ctx, 'crm');
-  const m = await load(ctx, membershipId);
-  await assertCrmIdsFree(ctx, clean, membershipId);
-  const merged = { ...(m.crmOwnerIds ?? {}), ...clean };
-  await ctx.tx
-    .update(membership)
-    .set({ crmOwnerIds: sql`coalesce(${membership.crmOwnerIds}, '{}'::jsonb) || ${JSON.stringify(clean)}::jsonb`, updatedAt: new Date() })
-    .where(eq(membership.id, membershipId));
-  await audit(ctx, {
-    action: 'tenancy.member.crm_owner_ids_changed',
-    subject: { type: 'membership', id: membershipId },
-    before: { crmOwnerIds: m.crmOwnerIds },
-    after: { crmOwnerIds: merged },
+export async function setCrmOwnerId(ws: ModuleContext, membershipId: string, crm: string, ownerId: string): Promise<void> {
+  return onControl(ws, async (ctx) => {
+    const clean = cleanCrmIds({ [crm]: ownerId });
+    await lockTenant(ctx, 'crm');
+    const m = await load(ctx, membershipId);
+    await assertCrmIdsFree(ctx, clean, membershipId);
+    const merged = { ...(m.crmOwnerIds ?? {}), ...clean };
+    await ctx.tx
+      .update(membership)
+      .set({ crmOwnerIds: sql`coalesce(${membership.crmOwnerIds}, '{}'::jsonb) || ${JSON.stringify(clean)}::jsonb`, updatedAt: new Date() })
+      .where(eq(membership.id, membershipId));
+    await audit(ws, {
+      action: 'tenancy.member.crm_owner_ids_changed',
+      subject: { type: 'membership', id: membershipId },
+      before: { crmOwnerIds: m.crmOwnerIds },
+      after: { crmOwnerIds: merged },
+    });
   });
 }
 
 /** The user's id in `crm` (for example the HubSpot owner id), or null. */
-export async function crmOwnerId(ctx: ModuleContext, userId: string, crm: string): Promise<string | null> {
-  const [row] = await ctx.tx
-    .select({ id: sql<string | null>`${membership.crmOwnerIds} ->> ${crm}` })
-    .from(membership)
-    .where(
-      and(
-        eq(membership.tenantId, ctx.tenantId),
-        eq(membership.userId, userId),
-        inArray(membership.status, ['invited', 'active']),
-      ),
-    );
-  return row?.id ?? null;
+export async function crmOwnerId(ws: ModuleContext, userId: string, crm: string): Promise<string | null> {
+  return onControl(ws, async (ctx) => {
+    const [row] = await ctx.tx
+      .select({ id: sql<string | null>`${membership.crmOwnerIds} ->> ${crm}` })
+      .from(membership)
+      .where(
+        and(
+          eq(membership.tenantId, ctx.tenantId),
+          eq(membership.userId, userId),
+          inArray(membership.status, ['invited', 'active']),
+        ),
+      );
+    return row?.id ?? null;
+  });
 }
 
 /** Reverse lookup: the user whose live (active or invited) membership holds this CRM owner id. */
-export async function userForCrmOwner(ctx: ModuleContext, crm: string, ownerId: string): Promise<string | null> {
-  const [row] = await ctx.tx
-    .select({ userId: membership.userId })
-    .from(membership)
-    .where(
-      and(
-        eq(membership.tenantId, ctx.tenantId),
-        inArray(membership.status, ['invited', 'active']),
-        sql`${membership.crmOwnerIds} ->> ${crm} = ${ownerId}`,
-      ),
-    )
-    .limit(1);
-  return row?.userId ?? null;
+export async function userForCrmOwner(ws: ModuleContext, crm: string, ownerId: string): Promise<string | null> {
+  return onControl(ws, async (ctx) => {
+    const [row] = await ctx.tx
+      .select({ userId: membership.userId })
+      .from(membership)
+      .where(
+        and(
+          eq(membership.tenantId, ctx.tenantId),
+          inArray(membership.status, ['invited', 'active']),
+          sql`${membership.crmOwnerIds} ->> ${crm} = ${ownerId}`,
+        ),
+      )
+      .limit(1);
+    return row?.userId ?? null;
+  });
 }
 
 /** The user's role in this tenant (invited or active membership), or null. */
-export async function memberRole(ctx: ModuleContext, userId: string): Promise<Role | null> {
-  const [row] = await ctx.tx
-    .select({ role: membership.role })
-    .from(membership)
-    .where(
-      and(
-        eq(membership.tenantId, ctx.tenantId),
-        eq(membership.userId, userId),
-        inArray(membership.status, ['invited', 'active']),
-      ),
-    );
-  return (row?.role as Role | undefined) ?? null;
+export async function memberRole(ws: ModuleContext, userId: string): Promise<Role | null> {
+  return onControl(ws, async (ctx) => {
+    const [row] = await ctx.tx
+      .select({ role: membership.role })
+      .from(membership)
+      .where(
+        and(
+          eq(membership.tenantId, ctx.tenantId),
+          eq(membership.userId, userId),
+          inArray(membership.status, ['invited', 'active']),
+        ),
+      );
+    return (row?.role as Role | undefined) ?? null;
+  });
 }
 
 /**
@@ -485,45 +520,47 @@ export async function memberRole(ctx: ModuleContext, userId: string): Promise<Ro
  * whose effective permissions (role defaults plus extras) include it.
  */
 export async function members(
-  ctx: ModuleContext,
+  ws: ModuleContext,
   opts: { permission?: Permission; roles?: Role[] } = {},
 ): Promise<Member[]> {
-  const rows = await ctx.tx
-    .select({
-      membershipId: membership.id,
-      userId: membership.userId,
-      name: user.name,
-      email: user.email,
-      role: membership.role,
-      status: membership.status,
-      extra: membership.extraPermissions,
-    })
-    .from(membership)
-    .innerJoin(user, eq(user.id, membership.userId))
-    .where(
-      and(
-        eq(membership.tenantId, ctx.tenantId),
-        inArray(membership.status, ['invited', 'active']),
-        opts.roles?.length ? inArray(membership.role, opts.roles) : undefined,
-      ),
-    )
-    .orderBy(asc(user.name), asc(user.email));
-  const roleSets = await loadRoleSets(ctx);
-  const out: Member[] = rows.map(({ extra, ...r }) => {
-    const role = r.role as Role;
-    const extras = (extra ?? []).filter(isPermission);
-    return { ...r, role, status: r.status as Member['status'], permissions: permissionsFor(role, extras, false, roleSets) };
+  return onControl(ws, async (ctx) => {
+    const rows = await ctx.tx
+      .select({
+        membershipId: membership.id,
+        userId: membership.userId,
+        name: user.name,
+        email: user.email,
+        role: membership.role,
+        status: membership.status,
+        extra: membership.extraPermissions,
+      })
+      .from(membership)
+      .innerJoin(user, eq(user.id, membership.userId))
+      .where(
+        and(
+          eq(membership.tenantId, ctx.tenantId),
+          inArray(membership.status, ['invited', 'active']),
+          opts.roles?.length ? inArray(membership.role, opts.roles) : undefined,
+        ),
+      )
+      .orderBy(asc(user.name), asc(user.email));
+    const roleSets = await loadRoleSets(ctx);
+    const out: Member[] = rows.map(({ extra, ...r }) => {
+      const role = r.role as Role;
+      const extras = (extra ?? []).filter(isPermission);
+      return { ...r, role, status: r.status as Member['status'], permissions: permissionsFor(role, extras, false, roleSets) };
+    });
+    const wanted = opts.permission;
+    return wanted ? out.filter((m) => m.permissions.includes(wanted)) : out;
   });
-  const wanted = opts.permission;
-  return wanted ? out.filter((m) => m.permissions.includes(wanted)) : out;
 }
 
 /**
  * Active tenants where the user has an active membership; nothing for a disabled user. Platform-wide
- * lookup, so it uses `adminDb`.
+ * lookup, so it uses `controlAdminDb`.
  */
 export async function tenantsFor(userId: string): Promise<{ id: string; slug: string; name: string }[]> {
-  return adminDb
+  return controlAdminDb
     .select({ id: tenant.id, slug: tenant.slug, name: tenant.name })
     .from(membership)
     .innerJoin(tenant, eq(tenant.id, membership.tenantId))
@@ -570,58 +607,60 @@ const LOCKED_ACTIONS = { changeRole: 'change_role', suspend: 'suspend', remove: 
  * Invited, active and suspended members by name, with sign-in facts and what the caller may do to
  * each (from the caller's own powers); or just `membershipId` (404 when not one).
  */
-export async function memberList(ctx: ModuleContext, membershipId?: string): Promise<MemberRow[]> {
-  const rows = await ctx.tx
-    .select({ m: membership, name: user.name, email: user.email, platformAdmin: user.platformAdmin })
-    .from(membership)
-    .innerJoin(user, eq(user.id, membership.userId))
-    .where(
-      and(
-        eq(membership.tenantId, ctx.tenantId),
-        inArray(membership.status, ['invited', 'active', 'suspended']),
-        membershipId ? eq(membership.id, membershipId) : undefined,
-      ),
-    )
-    .orderBy(asc(user.name), asc(user.email));
-  if (membershipId && rows.length === 0) throw notFound();
-  const facts = await signInFacts(ctx.tx, rows.map((r) => r.m.userId));
-  const powers = await actorPowers(ctx);
-  const actor: MemberActor = { userId: ctx.actor.id, makesOwners: powers.makesOwners, platformAdmin: powers.platformAdmin };
-  const manages = powers.permissions.includes('members:manage');
-  const [owners] = await ctx.tx
-    .select({ n: sql<number>`count(*)::int` })
-    .from(membership)
-    .where(and(eq(membership.tenantId, ctx.tenantId), eq(membership.role, 'owner'), eq(membership.status, 'active')));
-  return rows.map(({ m, name, email, platformAdmin }) => {
-    const limit = m.dataLimit === null ? null : DataLimitSchema.safeParse(m.dataLimit);
-    const f = facts.get(m.userId);
-    const target = { userId: m.userId, role: m.role as Role, status: m.status as MembershipStatus, platformAdmin };
-    const onlyOwner = target.role === 'owner' && target.status === 'active' && (owners?.n ?? 0) <= 1;
-    const lock = (key: keyof typeof LOCKED_ACTIONS): MemberLock | null => {
-      if (!manages) return 'no_permission';
-      const refusal = memberActionRefusal(LOCKED_ACTIONS[key], actor, target);
-      if (refusal) return refusal;
-      return key === 'changeRole' && onlyOwner ? 'last_owner' : null;
-    };
-    const lockReasons = { changeRole: lock('changeRole'), suspend: lock('suspend'), remove: lock('remove'), signOut: lock('signOut') };
-    return {
-      id: m.id,
-      userId: m.userId,
-      name,
-      email,
-      role: m.role as Role,
-      status: m.status as MemberRow['status'],
-      lastActiveAt: f?.lastActiveAt ?? null,
-      signInMethod: f?.signInMethod ?? null,
-      dataLimit: limit && limit.success ? limit.data : null,
-      crmOwnerIds: (m.crmOwnerIds ?? {}) as Record<string, string>,
-      extraPermissions: (m.extraPermissions ?? []).filter(isPermission),
-      canChangeRole: !lockReasons.changeRole,
-      canSuspend: !lockReasons.suspend,
-      canRemove: !lockReasons.remove,
-      canSignOut: !lockReasons.signOut,
-      lockReasons,
-    };
+export async function memberList(ws: ModuleContext, membershipId?: string): Promise<MemberRow[]> {
+  return onControl(ws, async (ctx) => {
+    const rows = await ctx.tx
+      .select({ m: membership, name: user.name, email: user.email, platformAdmin: user.platformAdmin })
+      .from(membership)
+      .innerJoin(user, eq(user.id, membership.userId))
+      .where(
+        and(
+          eq(membership.tenantId, ctx.tenantId),
+          inArray(membership.status, ['invited', 'active', 'suspended']),
+          membershipId ? eq(membership.id, membershipId) : undefined,
+        ),
+      )
+      .orderBy(asc(user.name), asc(user.email));
+    if (membershipId && rows.length === 0) throw notFound();
+    const facts = await signInFacts(ctx.tx, rows.map((r) => r.m.userId));
+    const powers = await actorPowers(ctx);
+    const actor: MemberActor = { userId: ctx.actor.id, makesOwners: powers.makesOwners, platformAdmin: powers.platformAdmin };
+    const manages = powers.permissions.includes('members:manage');
+    const [owners] = await ctx.tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(membership)
+      .where(and(eq(membership.tenantId, ctx.tenantId), eq(membership.role, 'owner'), eq(membership.status, 'active')));
+    return rows.map(({ m, name, email, platformAdmin }) => {
+      const limit = m.dataLimit === null ? null : DataLimitSchema.safeParse(m.dataLimit);
+      const f = facts.get(m.userId);
+      const target = { userId: m.userId, role: m.role as Role, status: m.status as MembershipStatus, platformAdmin };
+      const onlyOwner = target.role === 'owner' && target.status === 'active' && (owners?.n ?? 0) <= 1;
+      const lock = (key: keyof typeof LOCKED_ACTIONS): MemberLock | null => {
+        if (!manages) return 'no_permission';
+        const refusal = memberActionRefusal(LOCKED_ACTIONS[key], actor, target);
+        if (refusal) return refusal;
+        return key === 'changeRole' && onlyOwner ? 'last_owner' : null;
+      };
+      const lockReasons = { changeRole: lock('changeRole'), suspend: lock('suspend'), remove: lock('remove'), signOut: lock('signOut') };
+      return {
+        id: m.id,
+        userId: m.userId,
+        name,
+        email,
+        role: m.role as Role,
+        status: m.status as MemberRow['status'],
+        lastActiveAt: f?.lastActiveAt ?? null,
+        signInMethod: f?.signInMethod ?? null,
+        dataLimit: limit && limit.success ? limit.data : null,
+        crmOwnerIds: (m.crmOwnerIds ?? {}) as Record<string, string>,
+        extraPermissions: (m.extraPermissions ?? []).filter(isPermission),
+        canChangeRole: !lockReasons.changeRole,
+        canSuspend: !lockReasons.suspend,
+        canRemove: !lockReasons.remove,
+        canSignOut: !lockReasons.signOut,
+        lockReasons,
+      };
+    });
   });
 }
 
@@ -657,62 +696,66 @@ export type InviteResult =
  * email; they get in the first time they sign in). One address failing does not stop the others.
  */
 export async function inviteMembers(
-  ctx: ModuleContext,
+  ws: ModuleContext,
   input: { emails: string[]; role: Role; dataLimit?: DataLimit | null },
 ): Promise<InviteResult[]> {
-  assertRole(input.role);
-  if (input.dataLimit && !DataLimitSchema.safeParse(input.dataLimit).success) {
-    throw new ScoutError({ slug: 'validation', status: 400, title: 'Check the data limit.' });
-  }
-  // Checked once for the whole request; addMember checks them again per address.
-  const powers = await actorPowers(ctx);
-  if (input.role === 'owner' && !powers.makesOwners) throw ownersOnly();
-  assertRoleGrantable(powers, input.role);
-  assertLimitGrantable(powers, input.dataLimit ?? DEFAULT_DATA_LIMIT[input.role]);
-  const emails = [...new Set(input.emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
-  const out: InviteResult[] = [];
-  for (const email of emails) {
-    if (!EMAIL.test(email)) {
-      out.push({ email, ok: false, error: { slug: 'invalid-email', title: 'That is not an email address.' } });
-      continue;
+  return onControl(ws, async (ctx) => {
+    assertRole(input.role);
+    if (input.dataLimit && !DataLimitSchema.safeParse(input.dataLimit).success) {
+      throw new ScoutError({ slug: 'validation', status: 400, title: 'Check the data limit.' });
     }
-    try {
-      // A savepoint, so one refused address leaves the others' work in place.
-      const id = await ctx.tx.transaction((sp) =>
-        addMember({ ...ctx, tx: sp }, { email, role: input.role, dataLimit: input.dataLimit ?? null }),
-      );
-      const [m] = await ctx.tx.select({ status: membership.status }).from(membership).where(eq(membership.id, id));
-      out.push({ email, ok: true, membershipId: id, status: m!.status as 'invited' | 'active' });
-    } catch (e) {
-      if (!(e instanceof ScoutError)) throw e;
-      out.push({ email, ok: false, error: { slug: e.slug, title: e.slug === 'already-member' ? 'Already a member' : e.message } });
+    // Checked once for the whole request; addMember checks them again per address.
+    const powers = await actorPowers(ctx);
+    if (input.role === 'owner' && !powers.makesOwners) throw ownersOnly();
+    assertRoleGrantable(powers, input.role);
+    assertLimitGrantable(powers, input.dataLimit ?? DEFAULT_DATA_LIMIT[input.role]);
+    const emails = [...new Set(input.emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+    const out: InviteResult[] = [];
+    for (const email of emails) {
+      if (!EMAIL.test(email)) {
+        out.push({ email, ok: false, error: { slug: 'invalid-email', title: 'That is not an email address.' } });
+        continue;
+      }
+      try {
+        // A savepoint, so one refused address leaves the others' work in place.
+        const id = await onControlSavepoint(ws, () =>
+          addMember(ws, { email, role: input.role, dataLimit: input.dataLimit ?? null }),
+        );
+        const [m] = await ctx.tx.select({ status: membership.status }).from(membership).where(eq(membership.id, id));
+        out.push({ email, ok: true, membershipId: id, status: m!.status as 'invited' | 'active' });
+      } catch (e) {
+        if (!(e instanceof ScoutError)) throw e;
+        out.push({ email, ok: false, error: { slug: e.slug, title: e.slug === 'already-member' ? 'Already a member' : e.message } });
+      }
     }
-  }
-  return out;
+    return out;
+  });
 }
 
 async function setStatus(
-  ctx: ModuleContext,
+  ws: ModuleContext,
   membershipId: string,
   from: 'active' | 'suspended',
   to: 'active' | 'suspended',
 ): Promise<void> {
-  await lockTenant(ctx, 'owners');
-  const m = await load(ctx, membershipId);
-  if (to === 'suspended') await assertAllowed(ctx, 'suspend', m);
-  if (m.status !== from) {
-    throw new ScoutError({
-      slug: to === 'suspended' ? 'not-active' : 'not-suspended',
-      status: 409,
-      title: to === 'suspended' ? 'Only active members can be suspended.' : 'That member is not suspended.',
+  return onControl(ws, async (ctx) => {
+    await lockTenant(ctx, 'owners');
+    const m = await load(ctx, membershipId);
+    if (to === 'suspended') await assertAllowed(ctx, 'suspend', m);
+    if (m.status !== from) {
+      throw new ScoutError({
+        slug: to === 'suspended' ? 'not-active' : 'not-suspended',
+        status: 409,
+        title: to === 'suspended' ? 'Only active members can be suspended.' : 'That member is not suspended.',
+      });
+    }
+    await ctx.tx.update(membership).set({ status: to, updatedAt: new Date() }).where(eq(membership.id, membershipId));
+    await audit(ws, {
+      action: to === 'suspended' ? 'tenancy.member.suspended' : 'tenancy.member.reactivated',
+      subject: { type: 'membership', id: membershipId },
+      before: { status: from },
+      after: { status: to },
     });
-  }
-  await ctx.tx.update(membership).set({ status: to, updatedAt: new Date() }).where(eq(membership.id, membershipId));
-  await audit(ctx, {
-    action: to === 'suspended' ? 'tenancy.member.suspended' : 'tenancy.member.reactivated',
-    subject: { type: 'membership', id: membershipId },
-    before: { status: from },
-    after: { status: to },
   });
 }
 
@@ -734,14 +777,16 @@ export async function reactivateMember(ctx: ModuleContext, membershipId: string)
  * platform-wide, so only someone who makes owners signs out an owner, and only a platform admin
  * signs out a platform admin.
  */
-export async function signOutMemberEverywhere(ctx: ModuleContext, membershipId: string): Promise<void> {
-  const m = await load(ctx, membershipId);
-  await assertAllowed(ctx, 'sign_out', m);
-  const ended = await endSessions(ctx.tx, m.userId);
-  await audit(ctx, {
-    action: 'tenancy.member.signed_out_everywhere',
-    subject: { type: 'membership', id: membershipId },
-    after: { userId: m.userId, sessionsEnded: ended },
+export async function signOutMemberEverywhere(ws: ModuleContext, membershipId: string): Promise<void> {
+  return onControl(ws, async (ctx) => {
+    const m = await load(ctx, membershipId);
+    await assertAllowed(ctx, 'sign_out', m);
+    const ended = await endSessions(ctx.tx, m.userId);
+    await audit(ws, {
+      action: 'tenancy.member.signed_out_everywhere',
+      subject: { type: 'membership', id: membershipId },
+      after: { userId: m.userId, sessionsEnded: ended },
+    });
   });
 }
 
@@ -749,22 +794,24 @@ export async function signOutMemberEverywhere(ctx: ModuleContext, membershipId: 
 export type AssignableMember = { userId: string; name: string; email: string; role: Role; dataLimit: DataLimit | null; crmOwnerIds: Record<string, string> };
 
 /** Active members holding `assignments:respond`, by name. `dataLimit` is the one they work under (null when the stored one is invalid). */
-export async function assignableMembers(ctx: ModuleContext): Promise<AssignableMember[]> {
-  const rows = await ctx.tx
-    .select({ userId: membership.userId, name: user.name, email: user.email, role: membership.role, extra: membership.extraPermissions, dataLimit: membership.dataLimit, crmOwnerIds: membership.crmOwnerIds })
-    .from(membership)
-    .innerJoin(user, eq(user.id, membership.userId))
-    .where(and(eq(membership.tenantId, ctx.tenantId), eq(membership.status, 'active')))
-    .orderBy(asc(user.name), asc(user.email));
-  const roleSets = await loadRoleSets(ctx);
-  return rows
-    .filter((r) => permissionsFor(r.role as Role, (r.extra ?? []).filter(isPermission), false, roleSets).includes('assignments:respond'))
-    .map((r) => ({
-      userId: r.userId,
-      name: r.name,
-      email: r.email,
-      role: r.role as Role,
-      dataLimit: effectiveLimit(r.role as Role, r.dataLimit),
-      crmOwnerIds: (r.crmOwnerIds ?? {}) as Record<string, string>,
-    }));
+export async function assignableMembers(ws: ModuleContext): Promise<AssignableMember[]> {
+  return onControl(ws, async (ctx) => {
+    const rows = await ctx.tx
+      .select({ userId: membership.userId, name: user.name, email: user.email, role: membership.role, extra: membership.extraPermissions, dataLimit: membership.dataLimit, crmOwnerIds: membership.crmOwnerIds })
+      .from(membership)
+      .innerJoin(user, eq(user.id, membership.userId))
+      .where(and(eq(membership.tenantId, ctx.tenantId), eq(membership.status, 'active')))
+      .orderBy(asc(user.name), asc(user.email));
+    const roleSets = await loadRoleSets(ctx);
+    return rows
+      .filter((r) => permissionsFor(r.role as Role, (r.extra ?? []).filter(isPermission), false, roleSets).includes('assignments:respond'))
+      .map((r) => ({
+        userId: r.userId,
+        name: r.name,
+        email: r.email,
+        role: r.role as Role,
+        dataLimit: effectiveLimit(r.role as Role, r.dataLimit),
+        crmOwnerIds: (r.crmOwnerIds ?? {}) as Record<string, string>,
+      }));
+  });
 }

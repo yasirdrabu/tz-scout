@@ -107,6 +107,18 @@ test("adminDb may be imported by the platform, tenancy services, auth, the clean
   }
 });
 
+test("the control plane's admin pool and the admin doors are held to the same rule (D35)", async () => {
+  const code = [
+    'import { controlAdminDb } from "@/platform/db/client";',
+    'import { withControlAdmin, withWorkspaceAdmin, listWorkspaceDatabases } from "@/platform/db/doors";',
+    "export const d = [controlAdminDb, withControlAdmin, withWorkspaceAdmin, listWorkspaceDatabases];",
+  ].join("\n");
+  expect(await adminDbErrors("src/modules/crm/x.ts", code)).toHaveLength(4);
+  expect(await adminDbErrors("src/modules/tenancy/services/x.ts", code)).toHaveLength(0);
+  const doors = 'import { withControl, workspaceDb } from "@/platform/db/doors";\nexport const d = [withControl, workspaceDb];\n';
+  expect(await adminDbErrors("src/modules/crm/x.ts", doors)).toHaveLength(0);
+});
+
 test("other exports of the db client stay importable everywhere", async () => {
   const code = 'import { appDb } from "@/platform/db/client";\nexport const d = appDb;\n';
   expect(await adminDbErrors("src/http/x.ts", code)).toHaveLength(0);

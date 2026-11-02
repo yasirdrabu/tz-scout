@@ -107,12 +107,15 @@ export async function listQueue(ctx: ModuleContext, f: QueueFilters = {}): Promi
     data: page.data.map((r) => {
       const check = checks.get(r.accountId);
       const review = byId.get(r.accountId);
-      const s = r.reviewStatusKey ? status.get(r.reviewStatusKey) : undefined;
+      // Routing's own status: the summary's copy changes only once a consumer handles routing.review.changed.
+      const statusKey = review?.statusKey ?? r.reviewStatusKey;
+      const s = statusKey ? status.get(statusKey) : undefined;
       const { newFrom, ...flags } = review?.flags ?? {};
       const source = sources.get(r.accountId);
       const tier = tiers.get(r.accountId);
       return {
         ...r,
+        reviewStatusKey: statusKey,
         reviewStatusLabel: s?.label ?? null,
         reviewStatusColor: s?.color ?? null,
         statusChangedAt: review?.statusChangedAt ?? null,

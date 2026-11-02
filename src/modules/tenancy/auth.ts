@@ -4,7 +4,7 @@ import { APIError, createAuthEndpoint, createAuthMiddleware } from 'better-auth/
 import { setSessionCookie } from 'better-auth/cookies';
 import { z } from 'zod';
 import { config, type Config } from '@/platform/config';
-import { adminDb } from '@/platform/db/client';
+import { controlAdminDb } from '@/platform/db/client';
 import { newId, type IdPrefix } from '@/platform/ids';
 import { account, session, user, verification } from './db/schema';
 import { safeReturnPath, signInErrorUrl } from './domain/return-path';
@@ -108,7 +108,7 @@ export function createAuth(overrides: { azureAd?: Config['azureAd'] } = {}) {
         return { context: { body: { ...body, callbackURL: back, errorCallbackURL: signInErrorUrl(config.publicUrl, back) } } };
       }),
     },
-    database: drizzleAdapter(adminDb, {
+    database: drizzleAdapter(controlAdminDb, {
       provider: 'pg',
       schema: { user, session, account, verification },
       transaction: true,

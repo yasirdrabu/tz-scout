@@ -1,8 +1,9 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { adminDb } from '@/platform/db/client';
-import { schedule } from '@/platform/db/schema';
+import { auditLog, schedule } from '@/platform/db/schema';
+import { withTenant } from '@/platform/db/tenant';
 import { defineJob } from '@/platform/events/registry';
 import { pauseSchedule, resumeSchedule, runNow, schedulerTick, upsertSchedule } from '@/platform/scheduler';
 
@@ -125,5 +126,34 @@ describe('scheduler', () => {
     expect((await row(id)).nextRunAt.getTime()).toBe(before.nextRunAt.getTime());
     await resumeSchedule(admin, id);
     expect((await row(id)).nextRunAt.getTime()).toBe(before.nextRunAt.getTime());
+  });
+});
+
+describe('schedules where the tenant works (D35)', () => {
+  const ws = { tenantId: 't_sched_ws', jobName: job.name, cron: '0 3 * * *', timezone: 'UTC', payload: {} };
+  const rowsOf = (tenantId: string) => adminDb.select().from(schedule).where(eq(schedule.tenantId, tenantId));
+
+  it("a seeder's schedule commits and rolls back with its workspace transaction; the platform audit stays on the control plane", async () => {
+    await expect(
+      withTenant(ws.tenantId, async (tx) => {
+        await upsertSchedule({ ...admin, tx }, ws);
+        throw new Error('the seeder failed');
+      }),
+    ).rejects.toThrow('the seeder failed');
+    expect(await rowsOf(ws.tenantId)).toEqual([]);
+
+    const id = await withTenant(ws.tenantId, (tx) => upsertSchedule({ ...admin, tx }, ws));
+    expect(await rowsOf(ws.tenantId)).toHaveLength(1);
+    const audits = await adminDb.select().from(auditLog).where(and(eq(auditLog.subjectId, id), eq(auditLog.action, 'platform.schedule.upserted')));
+    expect(audits.map((a) => a.tenantId)).toContain('t_platform');
+  });
+
+  it('pause, resume and run now find a workspace schedule by id; an unknown id is a 404', async () => {
+    const id = await upsertSchedule(admin, { ...ws, tenantId: 't_sched_ws2' });
+    await pauseSchedule(admin, id);
+    expect((await row(id)).enabled).toBe(false);
+    await resumeSchedule(admin, id);
+    expect(await runNow(admin, id)).toMatch(/^job_/);
+    await expect(runNow(admin, 'sch_missing')).rejects.toMatchObject({ slug: 'not-found', status: 404 });
   });
 });

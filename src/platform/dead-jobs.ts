@@ -2,7 +2,8 @@ import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { scrubError } from '@/platform/scrub-error';
 import { platformAudit } from './audit';
-import { adminDb, adminTransaction } from './db/client';
+import { controlAdminDb } from './db/client';
+import { assertWorkspaceOpen, inDatabaseHolding, mapPlatformDatabases, withWorkspaceAdmin } from './db/doors';
 import type { Tx } from './db/tenant';
 import { deadJob, outbox } from './db/schema';
 import { ScoutError } from './errors';
@@ -19,7 +20,7 @@ export const jobDead = defineEvent(
   z.object({ jobType: z.string(), error: z.string(), attempts: z.number().int() }),
 );
 
-/** A platform admin acting on dead jobs. Not tenant-scoped. `tx`: the request's `adminDb` transaction, to work in. */
+/** A platform admin acting on dead jobs. Not tenant-scoped. `tx`: the request's `controlAdminDb` transaction, to work in. */
 export type AdminCtx = { actor: Actor; correlationId?: string; tx?: Tx };
 
 export type DeadJobView = {
@@ -38,7 +39,8 @@ const JOB_PREFIX = 'jobs.';
  * Stores a message that failed on its last delivery and publishes `platform.job.dead`, in one
  * transaction. Returns false and publishes nothing when the same envelope is already dead for
  * this consumer or job (unique index `dead_job_envelope_uq`): a dead-letter whose `term()` was
- * lost, or two workers giving up on the same message at once.
+ * lost, or two workers giving up on the same message at once. Stored in the database of the
+ * envelope's tenant (`t_platform`: the control plane), whose outbox sends the event.
  */
 export async function recordDeadJob(input: {
   name: string;
@@ -48,7 +50,7 @@ export async function recordDeadJob(input: {
 }): Promise<boolean> {
   const { name, envelope, attempts } = input;
   const error = scrubError(input.error);
-  return adminDb.transaction(async (tx) => {
+  return withWorkspaceAdmin(envelope.tenantId, async (tx) => {
     const inserted = await tx
       .insert(deadJob)
       .values({
@@ -77,14 +79,16 @@ export async function recordDeadJob(input: {
   });
 }
 
-/** Dead jobs, newest first. */
+/** Dead jobs of every database (`platformDatabases`), newest first. `tx`: the control plane's, to read it in. */
 export async function listDeadJobs(opts: { limit?: number; tx?: Tx } = {}): Promise<DeadJobView[]> {
-  const rows = await (opts.tx ?? adminDb)
-    .select()
-    .from(deadJob)
-    .orderBy(desc(deadJob.deadAt), desc(deadJob.id))
-    .limit(opts.limit ?? 200);
-  return rows.map((r) => ({
+  const limit = opts.limit ?? 200;
+  const rows = (
+    await mapPlatformDatabases((db) =>
+      (db.control ? (opts.tx ?? controlAdminDb) : db.admin).select().from(deadJob).orderBy(desc(deadJob.deadAt), desc(deadJob.id)).limit(limit),
+    )
+  ).flat();
+  rows.sort((a, b) => b.deadAt.getTime() - a.deadAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  return rows.slice(0, limit).map((r) => ({
     id: r.id,
     tenantId: r.tenantId,
     name: r.consumerOrJob,
@@ -104,9 +108,12 @@ const notFound = (id: string) =>
  *   consumers that already handled it skip it through `processed_event`. Returns the event id.
  */
 export async function retryDeadJob(adminCtx: AdminCtx, deadJobId: string): Promise<string> {
-  return adminTransaction(adminCtx.tx, async (tx) => {
+  // In the database that holds the dead row, whose outbox sends the retry.
+  const found = await inDatabaseHolding(adminCtx.tx, async (tx, db) => {
     const [row] = await tx.select().from(deadJob).where(eq(deadJob.id, deadJobId)).for('update');
-    if (!row) throw notFound(deadJobId);
+    if (!row) return undefined;
+    // A workspace being made, moved or suspended is not changed under it (D35).
+    await assertWorkspaceOpen(tx, row.tenantId);
     const original = EnvelopeSchema.parse(row.envelope) as Envelope;
     let sentId: string;
     if (original.type.startsWith(JOB_PREFIX)) {
@@ -138,17 +145,22 @@ export async function retryDeadJob(adminCtx: AdminCtx, deadJobId: string): Promi
         subject: { type: 'dead_job', id: deadJobId },
         after: { tenantId: row.tenantId, name: row.consumerOrJob, attempts: row.attempts, sentId },
       },
-      tx,
+      db.control ? tx : undefined,
     );
-    return sentId;
+    return { value: sentId };
   });
+  if (!found) throw notFound(deadJobId);
+  return found.value;
 }
 
 /** Deletes a dead job without running it again. */
 export async function discardDeadJob(adminCtx: AdminCtx, deadJobId: string): Promise<void> {
-  await adminTransaction(adminCtx.tx, async (tx) => {
+  const found = await inDatabaseHolding(adminCtx.tx, async (tx, db) => {
+    const [found] = await tx.select({ tenantId: deadJob.tenantId }).from(deadJob).where(eq(deadJob.id, deadJobId)).for('update');
+    if (!found) return undefined;
+    await assertWorkspaceOpen(tx, found.tenantId);
     const [row] = await tx.delete(deadJob).where(eq(deadJob.id, deadJobId)).returning();
-    if (!row) throw notFound(deadJobId);
+    if (!row) return undefined;
     await platformAudit(
       {
         action: 'platform.dead_job.discarded',
@@ -157,7 +169,9 @@ export async function discardDeadJob(adminCtx: AdminCtx, deadJobId: string): Pro
         subject: { type: 'dead_job', id: deadJobId },
         after: { tenantId: row.tenantId, name: row.consumerOrJob, attempts: row.attempts, lastError: row.lastError },
       },
-      tx,
+      db.control ? tx : undefined,
     );
+    return { value: undefined };
   });
+  if (!found) throw notFound(deadJobId);
 }

@@ -12,7 +12,13 @@ if grep -n "to_regclass()" "$here/restore-check.sh"; then
   exit 1
 fi
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+# Databases this check made, dropped again on exit.
+made=""
+cleanup() {
+  for db in $made; do psql -X -q -c "drop database if exists $db with (force)" >/dev/null 2>&1 || true; done
+  rm -rf "$work"
+}
+trap cleanup EXIT
 export BACKUP_DIR="$work/backups"
 unset BACKUP_REMOTE
 
@@ -22,8 +28,28 @@ if [ "$rows" -eq 0 ]; then
   exit 1
 fi
 
+# A workspace database (D35) is dumped to a file of its own; the template is not dumped (named by
+# SCOUT_WORKSPACE_TEMPLATE_DATABASE: a name of the check's own here, so the variable is honoured).
+export SCOUT_WORKSPACE_TEMPLATE_DATABASE=scout_t_ci_template
+for db in scout_t_ci_check scout_t_ci_template; do
+  if [ "$(psql -X -At -c "select count(*) from pg_database where datname = '$db'")" -eq 0 ]; then
+    psql -X -q -c "create database $db"
+    made="$made $db"
+  fi
+done
+psql -X -q -d scout_t_ci_check -c "create table if not exists ci_rows as select 1 as id"
+
 bash "$here/backup.sh"
 ls "$BACKUP_DIR"/scout-*.dump >/dev/null
+ws_dump="$(ls "$BACKUP_DIR"/scout_t_ci_check-*.dump)"
+if ! pg_restore -l "$ws_dump" | grep -q "TABLE public ci_rows"; then
+  echo "ci-check: the workspace database's dump has no ci_rows table" >&2
+  exit 1
+fi
+if ls "$BACKUP_DIR"/scout_t_ci_template-*.dump >/dev/null 2>&1; then
+  echo "ci-check: the template database was backed up" >&2
+  exit 1
+fi
 
 out="$(bash "$here/restore-check.sh")"
 echo "$out"
@@ -33,7 +59,7 @@ case "$out" in
 esac
 
 # A table created after the dump must be skipped, not fail the check.
-trap 'psql -X -q -c "drop table if exists platform.ci_extra" >/dev/null 2>&1 || true; rm -rf "$work"' EXIT
+trap 'psql -X -q -c "drop table if exists platform.ci_extra" >/dev/null 2>&1 || true; cleanup' EXIT
 psql -X -q -c "create table platform.ci_extra as select 1 as id"
 out="$(bash "$here/restore-check.sh")"
 echo "$out"

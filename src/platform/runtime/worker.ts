@@ -8,9 +8,11 @@ import {
 } from '@nats-io/jetstream';
 import { sql } from 'drizzle-orm';
 import { ZodError } from 'zod';
-import { config } from '../config';
+import { config, type Config } from '../config';
 import type { ModuleContext } from '../context';
-import { adminDb } from '../db/client';
+import { PLATFORM_TENANT } from '../audit';
+import { workspaceDb, type WorkspaceOpen } from '../db/doors';
+import { ScoutError } from '../errors';
 import { guardTx } from '../db/guarded-tx';
 import { withTenant, type Tx } from '../db/tenant';
 import { recordDeadJob } from '../dead-jobs';
@@ -28,10 +30,32 @@ import {
   type JobHandlerDef,
 } from './jobs';
 
-/** Half the pool at most (see `maxInFlight`), at least 1. */
-export function inFlightCap(requested?: number): number {
-  const half = Math.max(1, Math.floor(config.databasePoolMax / 2));
+/**
+ * In-flight rule (D35). A handler may hold its transaction's connection while it needs a second one
+ * from the same workspace pool (see `maxInFlight`), so messages in flight stay at half the workspace
+ * connections, at least 1:
+ * - across the worker, half the workspace connections it may hold: `DATABASE_POOL_MAX` in `shared`
+ *   mode (one pool for every workspace), `SCOUT_WORKSPACE_POOL_CAP` in `per_workspace` mode;
+ * - per workspace database (`per_workspace` only), one less than its pool (`workspaceInFlightCap`).
+ * Tenancy calls use the control plane's own pool and do not count.
+ */
+type PoolConfig = Pick<Config, 'workspaceDatabases' | 'databasePoolMax' | 'workspacePoolMax' | 'workspacePoolCap'>;
+
+export function inFlightCap(requested?: number, c: PoolConfig = config): number {
+  const budget = c.workspaceDatabases === 'per_workspace' ? c.workspacePoolCap : c.databasePoolMax;
+  const half = Math.max(1, Math.floor(budget / 2));
   return Math.max(1, Math.min(requested ?? half, half));
+}
+
+/**
+ * Messages in flight for one workspace database: one less than `SCOUT_WORKSPACE_POOL_MAX`, at least 1 (the
+ * default pool of 3 runs two at a time). Each holds a connection and may want one more for a moment; with
+ * fewer messages than connections one is always free, so they cannot all wait on each other. null in
+ * `shared` mode, where every workspace shares the one pool `inFlightCap` already bounds.
+ */
+export function workspaceInFlightCap(c: PoolConfig = config): number | null {
+  if (c.workspaceDatabases !== 'per_workspace') return null;
+  return Math.max(1, c.workspacePoolMax - 1);
 }
 
 /** What happened to a message just before it is acked. */
@@ -52,8 +76,8 @@ export type WorkerOptions = {
   /** Messages handled at once per consumer or job. Default 8. */
   concurrency?: number;
   /**
-   * Messages handled at once across the whole worker. Each holds one appDb connection, so the
-   * default, and the most allowed, is half of DATABASE_POOL_MAX: a handler can hold its transaction
+   * Messages handled at once across the whole worker. Each holds one workspace connection, so the
+   * default, and the most allowed, is `inFlightCap` (half the workspace connections): a handler can hold its transaction
    * connection while it needs a second one (the integrations gateway writes its call log in its own
    * transaction), so more than half in flight could leave every connection waiting on another.
    */
@@ -148,9 +172,81 @@ class Semaphore {
   }
 }
 
+/** How many messages may wait for a free slot in one workspace, and for how long (`KeyedSlots.acquire`). */
+const WORKSPACE_QUEUE = 16;
+const WORKSPACE_SLOT_WAIT_MS = 1000;
+/** How long a message whose workspace has no free slot is put back for before it comes again. */
+const WORKSPACE_FULL_RETRY_MS = 500;
+
+/**
+ * At most `size` messages at once per key (a workspace). When the workspace is full, up to `queue` more
+ * wait a moment for a slot (`acquire`), in order, so the burst of events one action makes (a handful,
+ * one per consumer) is handled within milliseconds; the rest are put back for a moment instead. A
+ * waiting message holds none of its consumer's concurrency (`runSub` sets it aside), so one busy
+ * workspace holds at most `size` of a consumer's concurrency and of the worker's slots, and does not
+ * hold up every other workspace's messages.
+ */
+export class KeyedSlots {
+  private used = new Map<string, number>();
+  private waiting = new Map<string, (() => void)[]>();
+  constructor(
+    private size: number,
+    private queue = WORKSPACE_QUEUE,
+  ) {}
+  tryAcquire(key: string): boolean {
+    const n = this.used.get(key) ?? 0;
+    if (n >= this.size) return false;
+    this.used.set(key, n + 1);
+    return true;
+  }
+  /** A slot, waiting up to `ms` for one behind at most `queue` others; false if none came. */
+  async acquire(key: string, ms: number): Promise<boolean> {
+    if (this.tryAcquire(key)) return true;
+    const queue = this.waiting.get(key) ?? [];
+    if (queue.length >= this.queue) return false;
+    this.waiting.set(key, queue);
+    return new Promise<boolean>((resolve) => {
+      const take = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        queue.splice(queue.indexOf(take), 1);
+        if (queue.length === 0 && this.waiting.get(key) === queue) this.waiting.delete(key);
+        resolve(false);
+      }, ms);
+      queue.push(take);
+    });
+  }
+  release(key: string): void {
+    // A waiting message takes the slot over.
+    const queue = this.waiting.get(key);
+    const next = queue?.shift();
+    if (next) {
+      if (queue!.length === 0) this.waiting.delete(key);
+      return next();
+    }
+    const n = (this.used.get(key) ?? 1) - 1;
+    if (n <= 0) this.used.delete(key);
+    else this.used.set(key, n);
+  }
+}
+
+/** The tenant a message is for, from its envelope, without validating it (`processMessage` does). */
+function tenantOf(m: JsMsg): string | undefined {
+  try {
+    const t = (m.json() as { tenantId?: unknown }).tenantId;
+    return typeof t === 'string' ? t : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 type Runtime = {
   hooks: WorkerOptions['hooks'];
   slots: Semaphore;
+  /** Per workspace database (`per_workspace` only); taken before `slots`, waiting briefly at most (see `KeyedSlots`). */
+  workspaceSlots?: KeyedSlots;
   busyLockTimeoutMs: number;
   busyRetryMs: number;
 };
@@ -280,11 +376,11 @@ async function runInTx(
 /**
  * Runs one message through a handler exactly as the worker's delivery does (same transaction body),
  * without NATS, retries or dead-lettering. Errors from the handler propagate and roll back.
- * Tests use it through `runOutbox`.
+ * Tests use it through `runOutbox`; provisioning seeds a new workspace with it (`open.provisioning`).
  */
-export function deliverOnce(def: ConsumerDef | JobHandlerDef, envelope: Envelope): Promise<'handled' | 'duplicate'> {
+export function deliverOnce(def: ConsumerDef | JobHandlerDef, envelope: Envelope, open: WorkspaceOpen = {}): Promise<'handled' | 'duplicate'> {
   const s = def.kind === 'job' ? fromJob(def) : fromConsumer(def);
-  return withTenant(envelope.tenantId, (tx) => runInTx(tx, s, envelope, 2000));
+  return withTenant(envelope.tenantId, (tx) => runInTx(tx, s, envelope, 2000), open);
 }
 
 
@@ -314,27 +410,30 @@ async function ensureConsumer(jsm: JetStreamManager, s: Sub): Promise<void> {
 }
 
 
+/** Where a message's handler runs are counted: its tenant's database, next to its handler's writes. */
+const attemptsDb = async (e: Envelope) => (await workspaceDb(e.tenantId)).admin;
+
 /** Handler runs recorded for an earlier delivery of this message (0 when none). */
-async function runsSoFar(s: Sub, eventId: string): Promise<number> {
-  const rows = await adminDb.execute(
-    sql`select run_attempts from platform.delivery_attempt where consumer_name = ${s.processedName} and event_id = ${eventId}`,
+async function runsSoFar(s: Sub, e: Envelope): Promise<number> {
+  const rows = await (await attemptsDb(e)).execute(
+    sql`select run_attempts from platform.delivery_attempt where consumer_name = ${s.processedName} and event_id = ${e.id}`,
   );
   return (rows[0] as { run_attempts: number } | undefined)?.run_attempts ?? 0;
 }
 
 /** Counts one more handler run, outside the handler's transaction. Returns the new count. */
-async function countRun(s: Sub, eventId: string): Promise<number> {
-  const rows = await adminDb.execute(
-    sql`insert into platform.delivery_attempt (consumer_name, event_id, run_attempts) values (${s.processedName}, ${eventId}, 1)
+async function countRun(s: Sub, e: Envelope): Promise<number> {
+  const rows = await (await attemptsDb(e)).execute(
+    sql`insert into platform.delivery_attempt (consumer_name, event_id, run_attempts) values (${s.processedName}, ${e.id}, 1)
         on conflict (consumer_name, event_id) do update set run_attempts = platform.delivery_attempt.run_attempts + 1, updated_at = now()
         returning run_attempts`,
   );
   return (rows[0] as { run_attempts: number }).run_attempts;
 }
 
-async function forgetRuns(s: Sub, eventId: string): Promise<void> {
-  await adminDb.execute(
-    sql`delete from platform.delivery_attempt where consumer_name = ${s.processedName} and event_id = ${eventId}`,
+async function forgetRuns(s: Sub, e: Envelope): Promise<void> {
+  await (await attemptsDb(e)).execute(
+    sql`delete from platform.delivery_attempt where consumer_name = ${s.processedName} and event_id = ${e.id}`,
   );
 }
 
@@ -367,7 +466,7 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
   let runs = 0; // handler runs including this one, once it starts
   let timedOut: TimedOut | undefined;
   try {
-    if (redelivery) runsBefore = await runsSoFar(s, envelope.id);
+    if (redelivery) runsBefore = await runsSoFar(s, envelope);
     const outcome = await withTenant(envelope.tenantId, (tx) =>
       runInTx(tx, s, envelope, rt.busyLockTimeoutMs, {
         parseFailed: () => {
@@ -376,7 +475,7 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
         // From here the handler runs: this counts toward maxDeliver.
         starting: async () => {
           if (redelivery) {
-            runs = await countRun(s, envelope.id);
+            runs = await countRun(s, envelope);
             if (runs > s.maxDeliver) {
               runs -= 1;
               throw new Permanent(`Gave up after ${runs} runs: the last one did not finish`);
@@ -392,14 +491,24 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
       return;
     }
     m.ack();
-    if (redelivery) await forgetRuns(s, envelope.id).catch(() => {});
+    if (redelivery) await forgetRuns(s, envelope).catch(() => {});
     if (outcome === 'duplicate') lg.debug('worker: already processed, skipped');
   } catch (caught) {
     const e = timedOut ?? caught;
-    if (e instanceof Busy) {
+    // A workspace that does not exist (no registry row: deleted, or from another installation) will never
+    // take this message, and there is no database to keep it in as a dead job: it is dropped, and logged.
+    if (e instanceof ScoutError && e.slug === 'workspace-unknown') {
+      lg.error({ err: e.detail }, 'worker: the message is for a workspace that does not exist, dropped');
+      m.term('no such workspace');
+      return;
+    }
+    // A workspace not open (provisioning, suspended, failed: D35) is waited out like a busy one: put
+    // back with backoff, the handler never ran, and it costs no run, so it is not dead-lettered meanwhile.
+    const closed = e instanceof ScoutError && e.slug === 'workspace-unavailable';
+    if (e instanceof Busy || closed) {
       const busyInARow = Math.max(0, deliveryCount - 1 - runsBefore);
       const delay = Math.min(BUSY_RETRY_CAP_MS, rt.busyRetryMs * 2 ** Math.min(busyInARow, 20));
-      lg.info({ retryInMs: delay }, 'worker: another delivery holds this message or key, put back');
+      lg.info({ retryInMs: delay }, closed ? 'worker: the workspace is not open, put back' : 'worker: another delivery holds this message or key, put back');
       m.nak(delay);
       return;
     }
@@ -407,8 +516,8 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
     try {
       // A failure before the handler started (database down) still uses up a run, so a broken
       // message cannot loop forever.
-      if (runs === 0) runs = await countRun(s, envelope.id);
-      else if (!redelivery) await countRun(s, envelope.id);
+      if (runs === 0) runs = await countRun(s, envelope);
+      else if (!redelivery) await countRun(s, envelope);
     } catch (e2) {
       lg.error({ err: error, countErr: errorText(e2) }, 'worker: could not count the run, will retry');
       m.nak(backoffFor(s.backoffMs, Math.max(1, runsBefore + 1)));
@@ -423,7 +532,7 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
     try {
       await recordDeadJob({ name: s.deadName, envelope, error, attempts: runs });
       m.term(error.slice(0, 200));
-      await forgetRuns(s, envelope.id).catch(() => {});
+      await forgetRuns(s, envelope).catch(() => {});
       lg.error({ err: error, runs }, 'worker: gave up, stored as a dead job');
     } catch (e2) {
       lg.error({ err: error, deadLetterErr: errorText(e2) }, 'worker: could not store dead job, will retry');
@@ -438,31 +547,58 @@ async function runSub(nats: Nats, s: Sub, opts: WorkerOptions, rt: Runtime): Pro
   const consumer = await nats.js.consumers.get(s.stream, s.durable);
   const messages = await consumer.consume({ max_messages: concurrency });
   const inFlight = new Set<Promise<void>>();
+  // Messages waiting for their workspace's slot. They do not count toward `concurrency`: one busy
+  // workspace runs at most its own slots' worth of this consumer's messages, and the rest of the
+  // consumer's concurrency stays free for every other workspace.
+  const waiting = new Set<Promise<void>>();
   const heartbeatMs = Math.max(50, Math.min(Math.floor(s.timeoutMs / 3), 10_000));
-  const loop = (async () => {
-    for await (const m of messages) {
-      // Keep the delivery ours while it waits for a slot and runs; every step is time-bounded.
-      const heartbeat = setInterval(() => m.working(), heartbeatMs);
-      while (inFlight.size >= concurrency) await Promise.race(inFlight);
-      const p: Promise<void> = (async () => {
+  /** Runs `m`, its workspace slot (if any) already held. */
+  const run = (m: JsMsg, workspace: string | undefined, heartbeat: ReturnType<typeof setInterval>) => {
+    const p: Promise<void> = (async () => {
+      try {
         await rt.slots.acquire();
         try {
           await processMessage(m, s, rt);
         } finally {
           rt.slots.release();
         }
-      })()
-        .catch((e) => log.error({ consumer: s.processedName, err: errorText(e) }, 'worker: unexpected error'))
-        .finally(() => {
-          clearInterval(heartbeat);
-          inFlight.delete(p);
-        });
-      inFlight.add(p);
+      } finally {
+        if (workspace !== undefined) rt.workspaceSlots!.release(workspace);
+      }
+    })()
+      .catch((e) => log.error({ consumer: s.processedName, err: errorText(e) }, 'worker: unexpected error'))
+      .finally(() => {
+        clearInterval(heartbeat);
+        inFlight.delete(p);
+      });
+    inFlight.add(p);
+  };
+  const loop = (async () => {
+    for await (const m of messages) {
+      const tenant = rt.workspaceSlots ? tenantOf(m) : undefined;
+      const workspace = tenant !== undefined && tenant !== PLATFORM_TENANT ? tenant : undefined;
+      // Keep the delivery ours while it waits for a slot and runs; every step is time-bounded.
+      const heartbeat = setInterval(() => m.working(), heartbeatMs);
+      while (inFlight.size >= concurrency) await Promise.race(inFlight);
+      if (workspace === undefined || rt.workspaceSlots!.tryAcquire(workspace)) {
+        run(m, workspace, heartbeat);
+        continue;
+      }
+      // Its workspace is full: wait a moment for a slot, aside from the consumer's concurrency.
+      const w: Promise<void> = rt.workspaceSlots!.acquire(workspace, WORKSPACE_SLOT_WAIT_MS).then((ok) => {
+        waiting.delete(w);
+        if (ok) return run(m, workspace, heartbeat);
+        clearInterval(heartbeat);
+        m.nak(WORKSPACE_FULL_RETRY_MS);
+      });
+      waiting.add(w);
     }
   })();
   return async () => {
     await messages.close().catch(() => {});
     await loop.catch(() => {});
+    // A waiting message may start running when its wait ends.
+    await Promise.allSettled([...waiting]);
     await Promise.allSettled([...inFlight]);
   };
 }
@@ -505,6 +641,7 @@ export async function startWorker(opts: WorkerOptions): Promise<void> {
     const rt: Runtime = {
       hooks: opts.hooks,
       slots: new Semaphore(inFlightCap(opts.maxInFlight)),
+      ...(workspaceInFlightCap() !== null ? { workspaceSlots: new KeyedSlots(workspaceInFlightCap()!) } : {}),
       busyLockTimeoutMs: opts.busyLockTimeoutMs ?? 2000,
       busyRetryMs: opts.busyRetryMs ?? 1000,
     };

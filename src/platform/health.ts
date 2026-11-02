@@ -2,7 +2,8 @@ import { sql } from 'drizzle-orm';
 import { connect, type NatsConnection } from '@nats-io/transport-node';
 import { config } from '@/platform/config';
 import { jetstreamManager } from '@nats-io/jetstream';
-import { adminDb, appDb } from '@/platform/db/client';
+import { controlAdminDb, controlDb } from '@/platform/db/client';
+import { mapPlatformDatabases } from '@/platform/db/doors';
 import type { Tx } from '@/platform/db/tenant';
 import { deadJob, schedule } from '@/platform/db/schema';
 import { STREAMS } from '@/platform/nats/streams';
@@ -37,7 +38,7 @@ export async function closeHealthConnections(): Promise<void> {
 }
 
 async function checkDb(): Promise<void> {
-  await Promise.race([appDb.execute(sql`select 1`), timeout(TIMEOUT_MS)]);
+  await Promise.race([controlDb.execute(sql`select 1`), timeout(TIMEOUT_MS)]);
 }
 
 async function checkNats(url: string): Promise<void> {
@@ -123,15 +124,30 @@ async function consumerNumbers(url: string): Promise<ConsumerHealth[]> {
 
 /**
  * What the System page shows: relay lag, queue numbers per consumer, dead jobs and schedules. When NATS
- * does not answer, the database parts still come back and `consumersAvailable` is false.
+ * does not answer, the database parts still come back and `consumersAvailable` is false. The database
+ * parts cover every database with an outbox (`platformDatabases`): the worst lag, every dead job and
+ * schedule. The control plane's are read in `tx` when given.
  */
 export async function systemHealth(opts: { natsUrl?: string; tx?: Tx } = {}): Promise<SystemHealth> {
   const url = opts.natsUrl ?? config.natsUrl;
-  const db = opts.tx ?? adminDb;
-  const [lag, dead, schedules, consumers] = await Promise.all([
-    relayLagMs(db),
-    db.select({ n: sql<number>`count(*)::int` }).from(deadJob),
-    db.select().from(schedule).orderBy(schedule.jobName, schedule.tenantId),
+  const readDatabases = async () => {
+    const parts = await mapPlatformDatabases(async (d) => {
+      const db = d.control ? (opts.tx ?? controlAdminDb) : d.admin;
+      return {
+        lag: await relayLagMs(db),
+        dead: (await db.select({ n: sql<number>`count(*)::int` }).from(deadJob))[0]?.n ?? 0,
+        schedules: await db.select().from(schedule).orderBy(schedule.jobName, schedule.tenantId),
+      };
+    });
+    const lag = Math.max(0, ...parts.map((p) => p.lag));
+    const dead = parts.reduce((n, p) => n + p.dead, 0);
+    const schedules = parts.flatMap((p) => p.schedules);
+    const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+    if (parts.length > 1) schedules.sort((a, b) => byName(a.jobName, b.jobName) || byName(a.tenantId, b.tenantId));
+    return { lag, dead, schedules };
+  };
+  const [{ lag, dead, schedules }, consumers] = await Promise.all([
+    readDatabases(),
     consumerNumbers(url).then(
       (c) => ({ ok: true as const, c }),
       () => ({ ok: false as const, c: [] as ConsumerHealth[] }),
@@ -141,7 +157,7 @@ export async function systemHealth(opts: { natsUrl?: string; tx?: Tx } = {}): Pr
     relayLagMs: lag,
     consumers: consumers.c,
     consumersAvailable: consumers.ok,
-    deadJobs: dead[0]?.n ?? 0,
+    deadJobs: dead,
     schedules: schedules.map((s) => ({
       id: s.id,
       tenantId: s.tenantId,

@@ -27,4 +27,7 @@ export const e2eEnv: Record<string, string> = {
   APP_PUBLIC_URL: `http://localhost:${E2E_PORT}`,
   SCOUT_MASTER_KEY: Buffer.alloc(32, 7).toString('base64'),
   AUTH_SECRET: 'e2e-only-secret-not-for-use-anywhere-else',
+  // A database per workspace (D35), copied from this run's template.
+  SCOUT_WORKSPACE_DATABASES: 'per_workspace',
+  SCOUT_WORKSPACE_TEMPLATE_DATABASE: `${E2E_DB}_template`,
 };

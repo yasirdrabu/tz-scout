@@ -14,7 +14,7 @@ import { accessWithSources } from '@/platform/access';
 import { PLATFORM_TENANT } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { config } from '@/platform/config';
-import { adminDb } from '@/platform/db/client';
+import { withControlAdmin } from '@/platform/db/doors';
 import { withTenant, type Tx } from '@/platform/db/tenant';
 import type { Actor } from '@/platform/events/envelope';
 import { ScoutError, toProblem } from '@/platform/errors';
@@ -244,24 +244,34 @@ export function v1Route(opts: V1Options, handler: V1Handler): (req: Request) => 
     if (opts.peopleOnly && principal.kind !== 'user') throw forbidden(opts.peopleOnly, 'Only a person can do this.');
     const actor = actorFor(principal);
     const ip = clientIp(req);
-    return execute(
-      req,
-      opts,
-      { tenantId: principal.tenantId, principalId: principal.id },
-      (fn) => withTenant(principal.tenantId, fn),
-      correlationId,
-      async (r, tx) => {
-        const ctx: ModuleContext = {
-          tenantId: principal.tenantId,
-          actor,
-          correlationId,
-          tx,
-          ...(principal.environment ? { environment: principal.environment } : {}),
-          ...(ip ? { ip } : {}),
-        };
-        return handler(r, principal, { ...ctx, access: await accessWithSources(ctx, principal, sourceAccessProvider()) });
-      },
-    );
+    const undos: (() => Promise<void>)[] = [];
+    try {
+      return await execute(
+        req,
+        opts,
+        { tenantId: principal.tenantId, principalId: principal.id },
+        (fn) => withTenant(principal.tenantId, fn),
+        correlationId,
+        async (r, tx) => {
+          const ctx: ModuleContext = {
+            tenantId: principal.tenantId,
+            actor,
+            correlationId,
+            tx,
+            ...(principal.environment ? { environment: principal.environment } : {}),
+            ...(ip ? { ip } : {}),
+            onRollback: (undo) => void undos.push(undo),
+          };
+          return handler(r, principal, { ...ctx, access: await accessWithSources(ctx, principal, sourceAccessProvider()) });
+        },
+      );
+    } catch (e) {
+      // The workspace transaction rolled back: undo what was committed on the control plane, newest first.
+      for (const undo of undos.reverse()) {
+        await undo().catch((err) => logFor({ correlationId }).error({ err }, 'could not undo a control plane change'));
+      }
+      throw e;
+    }
   });
 }
 
@@ -285,7 +295,7 @@ function personRoute(opts: SessionOptions & { admin: boolean }, handler: Session
       req,
       opts,
       { tenantId: PLATFORM_TENANT, principalId: person.userId },
-      opts.admin ? (fn) => adminDb.transaction(fn) : (fn) => withTenant(PLATFORM_TENANT, fn),
+      opts.admin ? (fn) => withControlAdmin(fn) : (fn) => withTenant(PLATFORM_TENANT, fn),
       correlationId,
       (r, tx) => handler(r, person, { actor, correlationId, tx }),
     );
@@ -302,7 +312,7 @@ export function sessionRoute(opts: SessionOptions, handler: SessionHandler): (re
   return personRoute({ ...opts, admin: false }, handler);
 }
 
-/** `sessionRoute` for platform admins only (403 for anyone else); the transaction is on `adminDb`. */
+/** `sessionRoute` for platform admins only (403 for anyone else); the transaction is the control plane's, as `scout_admin`. */
 export function adminRoute(opts: SessionOptions, handler: SessionHandler): (req: Request) => Promise<Response> {
   return personRoute({ ...opts, admin: true }, handler);
 }

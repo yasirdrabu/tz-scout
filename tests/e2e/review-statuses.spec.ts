@@ -54,6 +54,9 @@ test('an owner edits a review status and a send-back reason and the queue shows 
   // A person's own account starts in the renamed status, so move it out first, then back to it.
   await peek.getByLabel('Review status').selectOption({ label: 'Ready for review' });
   await shows(page, 'Review status changed to Ready for review.');
+  // Wait until the panel has reloaded the new status: selecting while it still shows the old one sends nothing.
+  await expect(peek.getByText(/^Review status changed from .+ to Ready for review/).first()).toBeVisible();
+  await expect(peek.getByLabel('Review status').locator('option:checked')).toHaveText('Ready for review');
   await peek.getByLabel('Review status').selectOption({ label: status });
   await shows(page, `Review status changed to ${status}.`);
   const row = page.getByRole('row').filter({ has: page.getByRole('button', { name, exact: true }) });

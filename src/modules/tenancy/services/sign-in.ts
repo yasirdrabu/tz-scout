@@ -1,7 +1,9 @@
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
-import { audit } from '@/platform/audit';
-import { adminDb } from '@/platform/db/client';
+import { controlAdminDb } from '@/platform/db/client';
+import { withControlAdmin } from '@/platform/db/doors';
+import { enqueueJob } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
+import { memberActivatedAuditJob } from '../contracts/jobs';
 import { account, membership, tenant, user } from '../db/schema';
 import { tenantsFor } from './members';
 
@@ -27,17 +29,17 @@ const norm = (v: string | null | undefined): string | undefined => v?.trim().toL
 async function findUser(id: SignInIdentity) {
   const cols = { id: user.id, email: user.email, disabledAt: user.disabledAt, platformAdmin: user.platformAdmin };
   if (id.userId) {
-    const [u] = await adminDb.select(cols).from(user).where(eq(user.id, id.userId));
+    const [u] = await controlAdminDb.select(cols).from(user).where(eq(user.id, id.userId));
     return u ?? null;
   }
   const oid = id.entraObjectId?.trim();
   if (oid) {
-    const [u] = await adminDb.select(cols).from(user).where(eq(user.entraObjectId, oid));
+    const [u] = await controlAdminDb.select(cols).from(user).where(eq(user.entraObjectId, oid));
     if (u) return u;
   }
   for (const email of [norm(id.email), norm(id.upn)]) {
     if (!email) continue;
-    const [u] = await adminDb.select(cols).from(user).where(eq(user.email, email));
+    const [u] = await controlAdminDb.select(cols).from(user).where(eq(user.email, email));
     if (u) return u;
   }
   return null;
@@ -53,7 +55,7 @@ export async function checkSignIn(identity: SignInIdentity): Promise<SignInResul
   if (!u) return { ok: false, message: NOT_SET_UP };
   if (u.disabledAt) return { ok: false, message: ACCOUNT_TURNED_OFF };
   if (u.platformAdmin) return { ok: true, userId: u.id };
-  const memberships = await adminDb
+  const memberships = await controlAdminDb
     .select({ status: membership.status })
     .from(membership)
     .innerJoin(tenant, eq(tenant.id, membership.tenantId))
@@ -114,7 +116,7 @@ export async function signInEmailFor(profile: MicrosoftProfile, policy: EntraPol
   const oid = str(profile.oid);
   const tid = lower(str(profile.tid));
   if (oid) {
-    const [pinned] = await adminDb
+    const [pinned] = await controlAdminDb
       .select({ email: user.email, tid: user.entraTenantId })
       .from(user)
       .where(eq(user.entraObjectId, oid));
@@ -124,7 +126,7 @@ export async function signInEmailFor(profile: MicrosoftProfile, policy: EntraPol
   const upn = str(profile.preferred_username) ?? str(profile.upn);
   const u = await findUser({ email, upn });
   if (!u) return norm(email) ?? norm(upn);
-  const [pin] = await adminDb.select({ oid: user.entraObjectId }).from(user).where(eq(user.id, u.id));
+  const [pin] = await controlAdminDb.select({ oid: user.entraObjectId }).from(user).where(eq(user.id, u.id));
   if (pin?.oid) return noMatch(); // pinned to a different Microsoft identity
   return mayLinkByEmail(u, tid, policy) ? u.email : noMatch();
 }
@@ -151,19 +153,19 @@ export async function entraIdentityFits(
   tid: string | undefined,
   policy: EntraPolicy,
 ): Promise<boolean> {
-  const [u] = await adminDb
+  const [u] = await controlAdminDb
     .select({ oid: user.entraObjectId, tid: user.entraTenantId, platformAdmin: user.platformAdmin })
     .from(user)
     .where(eq(user.id, userId));
   if (!u) return false;
   if (u.oid !== null) return u.oid === entraObjectId && (u.tid === null || u.tid === tid);
-  const [other] = await adminDb
+  const [other] = await controlAdminDb
     .select({ id: user.id })
     .from(user)
     .where(and(eq(user.entraObjectId, entraObjectId), ne(user.id, userId)))
     .limit(1);
   if (other) return false;
-  const [link] = await adminDb
+  const [link] = await controlAdminDb
     .select({ id: account.id })
     .from(account)
     .where(and(eq(account.userId, userId), eq(account.providerId, 'microsoft'), ne(account.accountId, entraObjectId)))
@@ -174,7 +176,7 @@ export async function entraIdentityFits(
 
 /** Pins the user to the Microsoft identity just linked (only when not pinned yet). */
 export async function pinEntraIdentity(userId: string, entraObjectId: string, tid: string | undefined): Promise<void> {
-  await adminDb
+  await controlAdminDb
     .update(user)
     .set({ entraObjectId, entraTenantId: tid ?? null, updatedAt: new Date() })
     .where(and(eq(user.id, userId), isNull(user.entraObjectId)));
@@ -183,12 +185,14 @@ export async function pinEntraIdentity(userId: string, entraObjectId: string, ti
 /**
  * After a passed gate: records the sign-in and makes invited memberships
  * active (TEN-E2-S1-AC3) with a `tenancy.member.activated` audit row in each tenant. No event: the
- * member was announced by `tenancy.member.added` at invite.
+ * member was announced by `tenancy.member.added` at invite. The memberships change on the control
+ * plane; each audit row is a job enqueued in the same transaction and written in its workspace
+ * (`memberActivatedAuditJob`), so a workspace that is down gets it on a retry.
  */
 export async function completeSignIn(userId: string): Promise<void> {
   const correlationId = newId('cor');
   const actor = { kind: 'user' as const, id: userId };
-  await adminDb.transaction(async (tx) => {
+  await withControlAdmin(async (tx) => {
     await tx.update(user).set({ lastSignInAt: new Date(), updatedAt: new Date() }).where(eq(user.id, userId));
     const activated = await tx
       .update(membership)
@@ -202,15 +206,7 @@ export async function completeSignIn(userId: string): Promise<void> {
       )
       .returning({ id: membership.id, tenantId: membership.tenantId, role: membership.role });
     for (const m of activated) {
-      await audit(
-        { tenantId: m.tenantId, actor, correlationId, tx },
-        {
-          action: 'tenancy.member.activated',
-          subject: { type: 'membership', id: m.id },
-          before: { status: 'invited' },
-          after: { status: 'active', role: m.role },
-        },
-      );
+      await enqueueJob({ tenantId: m.tenantId, actor, correlationId, tx }, memberActivatedAuditJob, { membershipId: m.id, role: m.role });
     }
   });
 }
@@ -220,12 +216,12 @@ export async function completeSignIn(userId: string): Promise<void> {
  * (TEN-E2-S1-AC1). A platform admin's last used tenant counts even without a membership.
  */
 export async function landingPathFor(userId: string): Promise<string> {
-  const [u] = await adminDb
+  const [u] = await controlAdminDb
     .select({ last: user.lastTenantId, platformAdmin: user.platformAdmin })
     .from(user)
     .where(eq(user.id, userId));
   if (u?.platformAdmin && u.last) {
-    const [t] = await adminDb
+    const [t] = await controlAdminDb
       .select({ slug: tenant.slug })
       .from(tenant)
       .where(and(eq(tenant.id, u.last), eq(tenant.status, 'active')));

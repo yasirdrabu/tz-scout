@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { config } from '@/platform/config';
-import { adminDb } from '@/platform/db/client';
+import { controlAdminDb } from '@/platform/db/client';
 import { log } from '@/platform/log';
 import { SESSION_MAX_SECONDS, SESSION_UPDATE_AGE_SECONDS, auth } from '../auth';
 import type { Principal } from '../contracts/principal';
@@ -52,7 +52,7 @@ export function forgetAccess(by: { tenantId?: string; userId?: string }): void {
 }
 
 async function loadAccess(userId: string, tenantSlug: string): Promise<Access | null> {
-  const [row] = await adminDb
+  const [row] = await controlAdminDb
     .select({
       disabledAt: user.disabledAt,
       platformAdmin: user.platformAdmin,
@@ -156,7 +156,7 @@ export async function sessionPrincipal(headers: Headers, tenantSlug: string): Pr
 
   // Record activity at most once per update age, so the idle clock restarts.
   if (now - lastActive > SESSION_UPDATE_AGE_SECONDS * 1000) {
-    await adminDb
+    await controlAdminDb
       .update(session)
       .set({ updatedAt: sql`now()` })
       .where(eq(session.id, found.session.id));
@@ -206,14 +206,14 @@ export async function sessionUser(headers: Headers): Promise<SessionUser | null>
   const lastActive = new Date(found.session.updatedAt).getTime();
   if (now - lastActive > SESSION_IDLE_MS) return null;
   if (now - new Date(found.session.createdAt).getTime() > SESSION_MAX_SECONDS * 1000) return null;
-  const [u] = await adminDb
+  const [u] = await controlAdminDb
     .select({ id: user.id, name: user.name, email: user.email, platformAdmin: user.platformAdmin, disabledAt: user.disabledAt })
     .from(user)
     .where(eq(user.id, found.user.id));
   if (!u || u.disabledAt) return null;
   // Record activity as sessionPrincipal does, so pages with no tenant keep the idle clock going too.
   if (now - lastActive > SESSION_UPDATE_AGE_SECONDS * 1000) {
-    await adminDb
+    await controlAdminDb
       .update(session)
       .set({ updatedAt: sql`now()` })
       .where(eq(session.id, found.session.id));

@@ -22,6 +22,7 @@ import { account, membership, session, tenant, user } from '@/modules/tenancy/db
 import { config } from '@/platform/config';
 import { adminDb } from '@/platform/db/client';
 import { auditLog } from '@/platform/db/schema';
+import { runOutbox } from '../helpers/run-outbox';
 import { inTenant, seedUser, uniqueSlug } from './helpers';
 
 const HOUR = 3600_000;
@@ -151,6 +152,8 @@ describe('sign-in gate (TEN-E2-S1, Review Focus 5)', () => {
     expect(after!.status).toBe('active');
     const [u] = await adminDb.select().from(user).where(eq(user.id, ashId));
     expect(u!.lastSignInAt).not.toBeNull();
+    // The audit row is a job enqueued with the activation (D35), written in the workspace.
+    await runOutbox(tenantId);
     const rows = await adminDb
       .select()
       .from(auditLog)

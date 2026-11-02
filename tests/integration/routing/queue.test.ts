@@ -83,6 +83,15 @@ describe('the queue (REV-E1-S1)', () => {
     expect(ids(await asPerson(t, (ctx) => listQueue(ctx, { sourceId: tag, flag: 'declined_by_seller' })))).toEqual([bounced]);
   });
 
+  it('a row shows the status just changed, before the accounts summary has caught up', async () => {
+    const tag = newId('src');
+    const a = await arrivedAccount(t, { sourceChain: { personSourceId: tag } });
+    await asPerson(t, (ctx) => changeStatus(ctx, a, { to: 'needs_review' }));
+    // No runOutbox: the summary's copy of the status is still the old one.
+    const page = await asPerson(t, (ctx) => listQueue(ctx, { sourceId: tag }));
+    expect(page.data).toEqual([expect.objectContaining({ accountId: a, reviewStatusKey: 'needs_review', reviewStatusLabel: 'In review' })]);
+  });
+
   it('filters by practice, offer, tier, batch and arrived date (AC2)', async () => {
     const tag = newId('src');
     const chain = { personSourceId: tag };

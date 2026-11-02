@@ -1,16 +1,26 @@
 import { sql } from 'drizzle-orm';
-import { appDb } from './client';
+import { PLATFORM_TENANT } from '../audit';
+import type { controlDb } from './client';
+import { admitted } from './admission';
+import { holdAgainstMove, withControlTenant, workspaceDb, workspaceTx, type WorkspaceOpen } from './doors';
 
-export type Tx = Parameters<Parameters<typeof appDb.transaction>[0]>[0];
+export type Tx = Parameters<Parameters<typeof controlDb.transaction>[0]>[0];
 
 /**
- * Runs `fn` in a transaction on `appDb` with the tenant set for row level security.
- * The setting is transaction-local, so it cannot leak to another request on the
- * same pooled connection.
+ * Runs `fn` in a transaction on the tenant's workspace database (`workspaceDb`) with the tenant set
+ * for row level security. The setting is transaction-local, so it cannot leak to another request on
+ * the same pooled connection. `t_platform` is the control plane.
  */
-export async function withTenant<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
-  return appDb.transaction(async (tx) => {
-    await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
-    return fn(tx);
-  });
+export async function withTenant<T>(tenantId: string, fn: (tx: Tx) => Promise<T>, open: WorkspaceOpen = {}): Promise<T> {
+  if (tenantId === PLATFORM_TENANT) return withControlTenant(tenantId, fn);
+  const { app, inShared, pool, poolSize } = await workspaceDb(tenantId, open);
+  // At most one less than the pool's connections at once, so a nested withTenant always gets one.
+  return admitted(pool, poolSize, () =>
+    app.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+      // Still in the shared database: a split of this workspace waits for this transaction (D35).
+      if (inShared) await holdAgainstMove(tx, tenantId);
+      return fn(workspaceTx(tx));
+    }),
+  );
 }

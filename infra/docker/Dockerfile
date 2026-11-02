@@ -36,6 +36,7 @@ COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=web-ui --chown=node:node /app/web-ui/dist ./web-ui/dist
 # Everything "migrate" reads, at the same relative paths it uses from the working directory.
 COPY --from=build --chown=node:node /app/src/platform/db/bootstrap.sql ./src/platform/db/bootstrap.sql
+COPY --from=build --chown=node:node /app/src/platform/db/bootstrap-workspace.sql ./src/platform/db/bootstrap-workspace.sql
 COPY --from=build --chown=node:node /app/src/platform/db/migrations ./src/platform/db/migrations
 COPY --from=build --chown=node:node /app/src/modules/tenancy/db/migrations ./src/modules/tenancy/db/migrations
 COPY --from=build --chown=node:node /app/src/modules/integrations/db/migrations ./src/modules/integrations/db/migrations

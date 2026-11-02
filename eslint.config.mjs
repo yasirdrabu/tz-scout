@@ -47,8 +47,8 @@ export const ADMIN_DB_ALLOWED = [
   "src/modules/tenancy/services/**",
   "src/modules/tenancy/auth.ts",
   "src/modules/integrations/jobs.ts",
-  // An unauthenticated webhook has no tenant until its connection is found (connectionTenant).
-  "src/modules/integrations/services/inbound.ts",
+  // Platform admins read every workspace's AI runs (Decision 24), one workspace database at a time.
+  "src/modules/ai-tasks/services/admin-runs.ts",
   // adminRoute: platform-admin requests have no tenant and run on adminDb, after the admin check.
   "src/http/routes/v1/_lib/v1-route.ts",
   "src/entry/**",
@@ -67,9 +67,18 @@ const sdkRestriction = {
 };
 const ADMIN_DB_MESSAGE =
   "adminDb bypasses row level security. Use withTenant, or add this file to ADMIN_DB_ALLOWED in eslint.config.mjs with a reason.";
+// What bypasses row level security: the control plane's admin pool, and the admin doors to workspaces.
+const ADMIN_CLIENT = ["adminDb", "controlAdminDb"];
+const ADMIN_DOORS = ["withControlAdmin", "withWorkspaceAdmin", "listWorkspaceDatabases", "platformDatabases", "inDatabaseHolding", "mapWorkspaces", "mapPlatformDatabases"];
 const adminDbRestriction = {
-  paths: [{ name: "@/platform/db/client", importNames: ["adminDb"], message: ADMIN_DB_MESSAGE }],
-  patterns: [{ group: ["**/platform/db/client", "!@/platform/db/client"], importNames: ["adminDb"], message: ADMIN_DB_MESSAGE }],
+  paths: [
+    { name: "@/platform/db/client", importNames: ADMIN_CLIENT, message: ADMIN_DB_MESSAGE },
+    { name: "@/platform/db/doors", importNames: ADMIN_DOORS, message: ADMIN_DB_MESSAGE },
+  ],
+  patterns: [
+    { group: ["**/platform/db/client", "!@/platform/db/client"], importNames: ADMIN_CLIENT, message: ADMIN_DB_MESSAGE },
+    { group: ["**/platform/db/doors", "!@/platform/db/doors"], importNames: ADMIN_DOORS, message: ADMIN_DB_MESSAGE },
+  ],
 };
 const restrict = (...parts) => [
   "error",

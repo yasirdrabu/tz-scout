@@ -129,6 +129,8 @@ function Body({ tenant, me, row, onChanged, onSendBack, tiers, statuses }: PeekP
 
   const changed = async () => {
     onChanged();
+    // A first load still in flight read the account before the change, and invalidating would only wait for it.
+    await queryClient.cancelQueries({ queryKey: ['account', tenant, id] });
     await queryClient.invalidateQueries({ queryKey: ['account', tenant, id] });
   };
 
