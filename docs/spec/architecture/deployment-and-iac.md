@@ -37,6 +37,31 @@ with no hand-made servers.
 - DNS by `infra/tofu/dns-cloudflare` (Cloudflare holds `taazaa.ai`).
 - Expected cost: $10 to $40 a month plus managed Postgres if chosen.
 
+## Postgres connections (D35)
+
+Each process holds, at most:
+
+| Pool | `shared` | `per_workspace` |
+| --- | --- | --- |
+| Control plane, app role (`DATABASE_POOL_MAX`) | 20 | 20 |
+| Control plane, admin role (postgres.js default) | 10 | 10 |
+| Workspace pools | 30 (one app pool of `DATABASE_POOL_MAX`, one admin of 10) | `SCOUT_WORKSPACE_POOL_CAP`, 60 (a workspace takes `SCOUT_WORKSPACE_POOL_MAX` + 1 = 4, so 15 open at once) |
+| Relay lock and `LISTEN` (relay role only) | 1 | 1 |
+| **Total** | **61** | **91** |
+
+The cap can be passed for a moment when every open workspace pool was used in the last 10 seconds
+(logged). Pools close after 10 minutes idle. `migrate` adds one connection at a time per database it
+works on (4 workspaces at once).
+
+Postgres' default `max_connections` is 100, so the four background and web roles of the compose stack
+(web, worker, scheduler, relay: up to 4 × 91) need either a larger `max_connections` or smaller limits
+for the roles that do little workspace work. A workable single-VM setting for `per_workspace`: web and
+worker as above (182); scheduler and relay with `DATABASE_POOL_MAX=5`, `SCOUT_WORKSPACE_POOL_CAP=20`
+(at most 36 each, 72); `max_connections = 300` leaves room for `migrate`, backups and an operator
+session. Managed Postgres limits connections by tier: size the tier, or the caps, to the sum. A pooler
+in transaction mode (PgBouncer) suits web and worker, not the relay, which needs a session for its
+advisory lock and `LISTEN`.
+
 ## Hosting options (decision open, owner: Yasir)
 
 Where staging and production run is not decided yet. Every option uses the same image and compose

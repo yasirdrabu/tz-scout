@@ -11,7 +11,8 @@ import { ZodError } from 'zod';
 import { config, type Config } from '../config';
 import type { ModuleContext } from '../context';
 import { PLATFORM_TENANT } from '../audit';
-import { workspaceDb } from '../db/doors';
+import { workspaceDb, type WorkspaceOpen } from '../db/doors';
+import { ScoutError } from '../errors';
 import { guardTx } from '../db/guarded-tx';
 import { withTenant, type Tx } from '../db/tenant';
 import { recordDeadJob } from '../dead-jobs';
@@ -338,11 +339,11 @@ async function runInTx(
 /**
  * Runs one message through a handler exactly as the worker's delivery does (same transaction body),
  * without NATS, retries or dead-lettering. Errors from the handler propagate and roll back.
- * Tests use it through `runOutbox`.
+ * Tests use it through `runOutbox`; provisioning seeds a new workspace with it (`open.provisioning`).
  */
-export function deliverOnce(def: ConsumerDef | JobHandlerDef, envelope: Envelope): Promise<'handled' | 'duplicate'> {
+export function deliverOnce(def: ConsumerDef | JobHandlerDef, envelope: Envelope, open: WorkspaceOpen = {}): Promise<'handled' | 'duplicate'> {
   const s = def.kind === 'job' ? fromJob(def) : fromConsumer(def);
-  return withTenant(envelope.tenantId, (tx) => runInTx(tx, s, envelope, 2000));
+  return withTenant(envelope.tenantId, (tx) => runInTx(tx, s, envelope, 2000), open);
 }
 
 
@@ -457,10 +458,13 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
     if (outcome === 'duplicate') lg.debug('worker: already processed, skipped');
   } catch (caught) {
     const e = timedOut ?? caught;
-    if (e instanceof Busy) {
+    // A workspace not open (provisioning, suspended, failed: D35) is waited out like a busy one: put
+    // back with backoff, the handler never ran, and it costs no run, so it is not dead-lettered meanwhile.
+    const closed = e instanceof ScoutError && e.slug === 'workspace-unavailable';
+    if (e instanceof Busy || closed) {
       const busyInARow = Math.max(0, deliveryCount - 1 - runsBefore);
       const delay = Math.min(BUSY_RETRY_CAP_MS, rt.busyRetryMs * 2 ** Math.min(busyInARow, 20));
-      lg.info({ retryInMs: delay }, 'worker: another delivery holds this message or key, put back');
+      lg.info({ retryInMs: delay }, closed ? 'worker: the workspace is not open, put back' : 'worker: another delivery holds this message or key, put back');
       m.nak(delay);
       return;
     }

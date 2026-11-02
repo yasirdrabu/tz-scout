@@ -2,7 +2,9 @@ import { sql } from 'drizzle-orm';
 import { PLATFORM_TENANT } from '../audit';
 import { config, type Config } from '../config';
 import { ScoutError } from '../errors';
-import { adminTransaction, controlAdminDb, controlDb, pool, type Db } from './client';
+import { log } from '../log';
+import { adminTransaction, connect, controlAdminDb, controlDb, onCloseDbs, pool, type Db } from './client';
+import { urlForDatabase, WorkspacePools } from './workspace-pools';
 import type { Tx } from './tenant';
 
 /**
@@ -19,13 +21,22 @@ export type WorkspaceInfo = { status: string; database: string };
 /** Reads a tenant's registry row; null when it has none. Registered by tenancy (inverted dependency). */
 export type WorkspaceLookup = (tenantId: string) => Promise<WorkspaceInfo | null>;
 
+/** Every tenant's registry row, for cross-workspace work in `per_workspace` mode. Registered by tenancy. */
+export type WorkspaceListing = () => Promise<Array<WorkspaceInfo & { tenantId: string }>>;
+
 let lookup: WorkspaceLookup | undefined;
+let listing: WorkspaceListing | undefined;
 const CACHE_MS = 60_000;
 const cache = new Map<string, { at: number; info: WorkspaceInfo | null }>();
+/** The registry list, cached briefly: the relay and scheduler read it every turn. */
+const LIST_CACHE_MS = 5_000;
+let listed: { at: number; rows: Array<WorkspaceInfo & { tenantId: string }> } | undefined;
 
-export function registerWorkspaceLookup(fn: WorkspaceLookup): void {
+export function registerWorkspaceLookup(fn: WorkspaceLookup, list?: WorkspaceListing): void {
   lookup = fn;
+  listing = list;
   cache.clear();
+  listed = undefined;
 }
 
 /**
@@ -36,6 +47,7 @@ export function registerWorkspaceLookup(fn: WorkspaceLookup): void {
 export function forgetWorkspace(tenantId?: string): void {
   if (tenantId) cache.delete(tenantId);
   else cache.clear();
+  listed = undefined;
 }
 
 async function infoFor(tenantId: string): Promise<WorkspaceInfo | null> {
@@ -53,6 +65,39 @@ const sharedWorkspace = {
   admin: pool(() => config.databaseAdminUrl),
 };
 
+// `per_workspace` mode: a pool per workspace database (see WorkspacePools), closed after 10 minutes idle.
+const IDLE_MS = 600_000;
+const workspacePools = new WorkspacePools(
+  (database, role, max) => connect(urlForDatabase(role === 'app' ? config.databaseUrl : config.databaseAdminUrl, database), max, IDLE_MS / 1000),
+  () => ({ max: config.workspacePoolMax, cap: config.workspacePoolCap, idleMs: IDLE_MS }),
+  Date.now,
+  (open, allowed) => log.warn({ open, allowed }, 'workspace pools: over SCOUT_WORKSPACE_POOL_CAP, every pool is in use'),
+);
+let idleTimer: ReturnType<typeof setInterval> | undefined;
+onCloseDbs(async () => {
+  if (idleTimer) clearInterval(idleTimer);
+  idleTimer = undefined;
+  await workspacePools.closeAll();
+});
+
+function poolsOf(database: string): { app: Db; admin: Db } {
+  if (!idleTimer) {
+    idleTimer = setInterval(() => void workspacePools.closeIdle(), 60_000);
+    idleTimer.unref?.();
+  }
+  return workspacePools.get(database);
+}
+
+/** Closes one workspace database's pools in this process (before it is dropped or moved), or every one. */
+export function closeWorkspacePools(database?: string): Promise<void> {
+  return workspacePools.closeAll(database);
+}
+
+/** Workspace databases with open pools in this process, least recently used first. For tests and health. */
+export function openWorkspacePools(): string[] {
+  return workspacePools.openDatabases();
+}
+
 const unavailable = () =>
   new ScoutError({ slug: 'workspace-unavailable', status: 503, title: 'This workspace is not available right now.' });
 
@@ -67,27 +112,80 @@ export function workspaceRoute(
   tenantId: string,
   info: WorkspaceInfo | null,
   mode: Config['workspaceDatabases'],
+  opening = false,
 ): { shared: true } | { database: string } {
-  if (info && info.status !== 'active') throw unavailable();
+  if (info && info.status !== 'active' && !(opening && info.status === 'provisioning')) throw unavailable();
   if (mode === 'shared') return { shared: true };
   if (!info) throw new Error(`Tenant ${tenantId} has no workspace registry row (tenancy.workspace_infra).`);
   return { database: info.database };
 }
 
+/** `provisioning`: open a workspace that is still `provisioning`, to seed it. Only provisioning does. */
+export type WorkspaceOpen = { provisioning?: boolean };
+
 /**
  * The connections for one workspace: `app` (row level security applies) and `admin` (bypasses it).
  * `t_platform` is the control plane; every other tenant goes where `workspaceRoute` says.
  */
-export async function workspaceDb(tenantId: string): Promise<{ app: Db; admin: Db }> {
+export async function workspaceDb(tenantId: string, opts: WorkspaceOpen = {}): Promise<{ app: Db; admin: Db }> {
   if (tenantId === PLATFORM_TENANT) return { app: controlDb, admin: controlAdminDb };
-  const route = workspaceRoute(tenantId, await infoFor(tenantId), config.workspaceDatabases);
-  if ('database' in route) throw new Error('SCOUT_WORKSPACE_DATABASES=per_workspace is not available yet.');
-  return sharedWorkspace;
+  const route = workspaceRoute(tenantId, await infoFor(tenantId), config.workspaceDatabases, opts.provisioning);
+  return 'database' in route ? poolsOf(route.database) : sharedWorkspace;
 }
 
-/** Every workspace database, for cross-workspace jobs. `shared` mode: one entry standing for all tenants. */
-export async function listWorkspaceDatabases(): Promise<Array<{ tenantId: string; admin: Db }>> {
-  return [{ tenantId: '*', admin: sharedWorkspace.admin }];
+/**
+ * Every workspace database, for cross-workspace jobs. `shared` mode: one entry standing for all tenants.
+ * `per_workspace` mode: each database an `active` workspace is in, once (`tenantId` '*' for one that
+ * holds several: the shared database, while workspaces are moved out of it). Its `admin` pool opens when
+ * first used, so a loop over them holds few pools at a time (the LRU cap closes the ones done with).
+ */
+export async function listWorkspaceDatabases(): Promise<Array<{ tenantId: string; database: string; admin: Db }>> {
+  if (config.workspaceDatabases === 'shared') return [{ tenantId: '*', database: controlDatabase(), admin: sharedWorkspace.admin }];
+  if (!listing) throw new Error('No workspace listing is registered (entry/compose.ts).');
+  if (!listed || Date.now() - listed.at >= LIST_CACHE_MS) listed = { at: Date.now(), rows: await listing() };
+  const byDatabase = new Map<string, string>();
+  for (const r of listed.rows) {
+    if (r.status !== 'active') continue;
+    byDatabase.set(r.database, byDatabase.has(r.database) ? '*' : r.tenantId);
+  }
+  return [...byDatabase].map(([database, tenantId]) => ({
+    tenantId,
+    database,
+    get admin() {
+      return poolsOf(database).admin;
+    },
+  }));
+}
+
+/** The control plane's database name (from `DATABASE_ADMIN_URL`). */
+function controlDatabase(): string {
+  return decodeURIComponent(new URL(config.databaseAdminUrl).pathname.slice(1));
+}
+
+/** How many workspace databases cross-workspace admin reads work on at once. */
+export const WORKSPACE_READ_PARALLELISM = 4;
+
+/** `fn` over every workspace database (`listWorkspaceDatabases`), `limit` at a time; results in list order. */
+export async function mapWorkspaces<T>(fn: (w: { tenantId: string; admin: Db }) => Promise<T>, limit = WORKSPACE_READ_PARALLELISM): Promise<T[]> {
+  return mapLimited(await listWorkspaceDatabases(), fn, limit);
+}
+
+/** `fn` over every database with an outbox (`platformDatabases`), `limit` at a time; results in list order. */
+export async function mapPlatformDatabases<T>(fn: (db: PlatformDatabase) => Promise<T>, limit = WORKSPACE_READ_PARALLELISM): Promise<T[]> {
+  return mapLimited(await platformDatabases(), fn, limit);
+}
+
+async function mapLimited<I, T>(all: I[], fn: (item: I) => Promise<T>, limit: number): Promise<T[]> {
+  const out: T[] = new Array(all.length);
+  let next = 0;
+  const run = async () => {
+    while (next < all.length) {
+      const i = next++;
+      out[i] = await fn(all[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, all.length) }, run));
+  return out;
 }
 
 /** A database with its own outbox, schedules and dead jobs, as `scout_admin`. */
@@ -101,8 +199,18 @@ export type PlatformDatabase = { name: string; admin: Db; control: boolean };
 export async function platformDatabases(): Promise<PlatformDatabase[]> {
   const control: PlatformDatabase = { name: 'control', admin: controlAdminDb, control: true };
   if (config.workspaceDatabases === 'shared') return [control];
-  const workspaces = await listWorkspaceDatabases();
-  return [control, ...workspaces.map((w) => ({ name: w.tenantId, admin: w.admin, control: false }))];
+  // A workspace still in the control plane's database is read as the control plane.
+  const workspaces = (await listWorkspaceDatabases()).filter((w) => w.database !== controlDatabase());
+  return [
+    control,
+    ...workspaces.map((w) => ({
+      name: w.database,
+      control: false,
+      get admin() {
+        return w.admin;
+      },
+    })),
+  ];
 }
 
 /**

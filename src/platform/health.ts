@@ -3,7 +3,7 @@ import { connect, type NatsConnection } from '@nats-io/transport-node';
 import { config } from '@/platform/config';
 import { jetstreamManager } from '@nats-io/jetstream';
 import { controlAdminDb, controlDb } from '@/platform/db/client';
-import { platformDatabases } from '@/platform/db/doors';
+import { mapPlatformDatabases } from '@/platform/db/doors';
 import type { Tx } from '@/platform/db/tenant';
 import { deadJob, schedule } from '@/platform/db/schema';
 import { STREAMS } from '@/platform/nats/streams';
@@ -131,18 +131,19 @@ async function consumerNumbers(url: string): Promise<ConsumerHealth[]> {
 export async function systemHealth(opts: { natsUrl?: string; tx?: Tx } = {}): Promise<SystemHealth> {
   const url = opts.natsUrl ?? config.natsUrl;
   const readDatabases = async () => {
-    let lag = 0;
-    let dead = 0;
-    const schedules: (typeof schedule.$inferSelect)[] = [];
-    const databases = await platformDatabases();
-    for (const d of databases) {
+    const parts = await mapPlatformDatabases(async (d) => {
       const db = d.control ? (opts.tx ?? controlAdminDb) : d.admin;
-      lag = Math.max(lag, await relayLagMs(db));
-      dead += (await db.select({ n: sql<number>`count(*)::int` }).from(deadJob))[0]?.n ?? 0;
-      schedules.push(...(await db.select().from(schedule).orderBy(schedule.jobName, schedule.tenantId)));
-    }
+      return {
+        lag: await relayLagMs(db),
+        dead: (await db.select({ n: sql<number>`count(*)::int` }).from(deadJob))[0]?.n ?? 0,
+        schedules: await db.select().from(schedule).orderBy(schedule.jobName, schedule.tenantId),
+      };
+    });
+    const lag = Math.max(0, ...parts.map((p) => p.lag));
+    const dead = parts.reduce((n, p) => n + p.dead, 0);
+    const schedules = parts.flatMap((p) => p.schedules);
     const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-    if (databases.length > 1) schedules.sort((a, b) => byName(a.jobName, b.jobName) || byName(a.tenantId, b.tenantId));
+    if (parts.length > 1) schedules.sort((a, b) => byName(a.jobName, b.jobName) || byName(a.tenantId, b.tenantId));
     return { lag, dead, schedules };
   };
   const [{ lag, dead, schedules }, consumers] = await Promise.all([

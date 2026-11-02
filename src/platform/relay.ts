@@ -24,7 +24,16 @@ export type OutboxSource = {
   /** Unsent rows, oldest first. */
   unsent(limit: number): Promise<OutboxRow[]>;
   markSent(ids: string[]): Promise<void>;
+  /** Polled at most this often while it has nothing to send (workspace databases: no LISTEN there). */
+  pollEveryMs?: number;
 };
+
+/**
+ * How often an empty workspace outbox is polled. Only the control plane is LISTENed to (its lock
+ * connection); a workspace database would need a connection of its own, outside the pool cap. So a
+ * workspace event waits up to this long before it is relayed.
+ */
+export const WORKSPACE_POLL_MS = 1000;
 
 /** Per source: failures in a row and when to try it again. */
 export type SourceHealth = Map<string, { failures: number; retryAt: number }>;
@@ -38,6 +47,7 @@ const PUBLISH_FAILURES_TO_STOP = 3;
 export function outboxSource(db: PlatformDatabase): OutboxSource {
   return {
     name: db.name,
+    ...(db.control ? {} : { pollEveryMs: WORKSPACE_POLL_MS }),
     unsent: async (limit) =>
       (await db.admin.execute(
         sql`select seq, id, nats_subject, payload from platform.outbox where sent_at is null order by seq limit ${limit}`,
@@ -61,7 +71,7 @@ export async function relayTurn(
   sources: OutboxSource[],
   health: SourceHealth,
   publish: (row: OutboxRow) => Promise<unknown>,
-  opts: { batchSize: number; now?: number; stopped?: () => boolean; natsDown?: () => boolean },
+  opts: { batchSize: number; now?: number; stopped?: () => boolean; natsDown?: () => boolean; quiet?: Map<string, number> },
 ): Promise<{ sentAny: boolean; full: boolean }> {
   const now = opts.now ?? Date.now();
   let sentAny = false;
@@ -77,6 +87,7 @@ export async function relayTurn(
     if (opts.stopped?.()) break;
     const h = health.get(src.name);
     if (h && h.retryAt > now) continue;
+    if (src.pollEveryMs && (opts.quiet?.get(src.name) ?? -Infinity) > now) continue;
     let rows: OutboxRow[];
     try {
       rows = await src.unsent(opts.batchSize);
@@ -85,6 +96,8 @@ export async function relayTurn(
       continue;
     }
     if (rows.length >= opts.batchSize) full = true;
+    if (src.pollEveryMs && rows.length === 0) opts.quiet?.set(src.name, now + src.pollEveryMs);
+    else opts.quiet?.delete(src.name);
     const sent: string[] = [];
     let failure: unknown;
     for (const row of rows) {
@@ -226,6 +239,7 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
     nats = connected;
     let streamsReady = false;
     const health: SourceHealth = new Map();
+    const quiet = new Map<string, number>();
     const js = nats.js;
 
     while (!signal.aborted) {
@@ -242,7 +256,7 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
           sources,
           health,
           (row) => js.publish(row.nats_subject, JSON.stringify(row.payload), { msgID: row.id }),
-          { batchSize, stopped: () => signal.aborted || lost, natsDown: () => nats!.nc.isClosed() },
+          { batchSize, stopped: () => signal.aborted || lost, natsDown: () => nats!.nc.isClosed(), quiet },
         ));
       } catch (e) {
         log.warn({ err: errorText(e) }, 'relay: publish failed, retrying');

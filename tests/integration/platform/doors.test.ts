@@ -19,7 +19,7 @@ describe('doors in shared mode (D35)', () => {
     expect(a).toBe(b);
     expect(await dbName(a.app)).toBe(await dbName(controlDb));
     expect(await dbName(a.admin)).toBe(await dbName(controlAdminDb));
-    expect(await listWorkspaceDatabases()).toEqual([{ tenantId: '*', admin: a.admin }]);
+    expect(await listWorkspaceDatabases()).toEqual([{ tenantId: '*', database: await dbName(controlDb), admin: a.admin }]);
   });
 
   it('sends t_platform to the control plane and every other tenant to its workspace', async () => {

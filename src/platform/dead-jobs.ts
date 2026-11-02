@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { scrubError } from '@/platform/scrub-error';
 import { platformAudit } from './audit';
 import { controlAdminDb } from './db/client';
-import { inDatabaseHolding, platformDatabases, withWorkspaceAdmin } from './db/doors';
+import { inDatabaseHolding, mapPlatformDatabases, withWorkspaceAdmin } from './db/doors';
 import type { Tx } from './db/tenant';
 import { deadJob, outbox } from './db/schema';
 import { ScoutError } from './errors';
@@ -82,11 +82,11 @@ export async function recordDeadJob(input: {
 /** Dead jobs of every database (`platformDatabases`), newest first. `tx`: the control plane's, to read it in. */
 export async function listDeadJobs(opts: { limit?: number; tx?: Tx } = {}): Promise<DeadJobView[]> {
   const limit = opts.limit ?? 200;
-  const rows: (typeof deadJob.$inferSelect)[] = [];
-  for (const db of await platformDatabases()) {
-    const from = db.control ? (opts.tx ?? controlAdminDb) : db.admin;
-    rows.push(...(await from.select().from(deadJob).orderBy(desc(deadJob.deadAt), desc(deadJob.id)).limit(limit)));
-  }
+  const rows = (
+    await mapPlatformDatabases((db) =>
+      (db.control ? (opts.tx ?? controlAdminDb) : db.admin).select().from(deadJob).orderBy(desc(deadJob.deadAt), desc(deadJob.id)).limit(limit),
+    )
+  ).flat();
   rows.sort((a, b) => b.deadAt.getTime() - a.deadAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
   return rows.slice(0, limit).map((r) => ({
     id: r.id,

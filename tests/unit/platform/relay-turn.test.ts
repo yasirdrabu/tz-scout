@@ -101,3 +101,22 @@ describe('relayTurn: one turn over every database outbox (D35)', () => {
     await expect(relayTurn(sources.map((s) => s.source), new Map(), publish, { batchSize: 1, natsDown: () => false })).rejects.toThrow('timeout');
   });
 });
+
+describe('relayTurn: polling workspace outboxes (no LISTEN there)', () => {
+  it('asks an empty workspace outbox again only after its poll interval; the control plane every turn', async () => {
+    let asked = { control: 0, ws: 0 };
+    const counting = (name: 'control' | 'ws', pollEveryMs?: number): OutboxSource => ({
+      name,
+      ...(pollEveryMs ? { pollEveryMs } : {}),
+      unsent: async () => {
+        asked = { ...asked, [name]: asked[name] + 1 };
+        return [];
+      },
+      markSent: async () => {},
+    });
+    const sources = [counting('control'), counting('ws', 1000)];
+    const quiet = new Map<string, number>();
+    for (const now of [0, 200, 400, 999, 1000]) await relayTurn(sources, new Map(), async () => {}, { batchSize: 10, now, quiet });
+    expect(asked).toEqual({ control: 5, ws: 2 });
+  });
+});

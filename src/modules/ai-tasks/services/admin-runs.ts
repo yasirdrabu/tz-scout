@@ -1,12 +1,12 @@
 import { and, desc, eq, getTableColumns, gte, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
-import { listWorkspaceDatabases } from '@/platform/db/doors';
+import { mapWorkspaces } from '@/platform/db/doors';
 import { aiRun } from '../db/schema';
 import { rawStatuses, type RunStatus } from '../domain/run-status';
 import type { AiRunRow } from '../runner';
 
 /**
  * Every tenant's runs (Decision 24), for platform admins only. Runs are workspace data, so these read
- * each workspace database in turn (`listWorkspaceDatabases`, as `scout_admin`) and merge (D35).
+ * every workspace database (`mapWorkspaces`, as `scout_admin`, a few at a time) and merge (D35).
  */
 export type AllRunsQuery = {
   /** Text in the run id, the task, or the subject (account) id. */
@@ -36,10 +36,9 @@ export async function allRuns(f: AllRunsQuery): Promise<(AiRunRow & { atText: st
       : undefined,
     f.after ? sql`(${aiRun.createdAt}, ${aiRun.id}) < (${f.after.at}::timestamptz, ${f.after.id})` : undefined,
   ];
-  const rows: RunWithAt[] = [];
-  for (const { admin } of await listWorkspaceDatabases()) {
-    rows.push(
-      ...(await admin
+  const rows: RunWithAt[] = (
+    await mapWorkspaces(({ admin }) =>
+      admin
         .select({
           ...getTableColumns(aiRun),
           atText: sql<string>`${aiRun.createdAt}::text`,
@@ -49,9 +48,9 @@ export async function allRuns(f: AllRunsQuery): Promise<(AiRunRow & { atText: st
         .from(aiRun)
         .where(and(...conditions))
         .orderBy(desc(aiRun.createdAt), desc(aiRun.id))
-        .limit(f.limit)),
-    );
-  }
+        .limit(f.limit),
+    )
+  ).flat();
   rows.sort((a, b) => {
     const at = BigInt(b.atMicros) - BigInt(a.atMicros);
     return at !== 0n ? (at > 0n ? 1 : -1) : a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
@@ -61,11 +60,8 @@ export async function allRuns(f: AllRunsQuery): Promise<(AiRunRow & { atText: st
 
 /** One run in any tenant. */
 export async function anyRun(id: string): Promise<AiRunRow | undefined> {
-  for (const { admin } of await listWorkspaceDatabases()) {
-    const [row] = await admin.select().from(aiRun).where(eq(aiRun.id, id));
-    if (row) return row;
-  }
-  return undefined;
+  const found = await mapWorkspaces(async ({ admin }) => (await admin.select().from(aiRun).where(eq(aiRun.id, id)))[0]);
+  return found.find((r) => r !== undefined);
 }
 
 export type RunsSummary = {
@@ -99,7 +95,7 @@ export async function runsSummary(): Promise<RunsSummary> {
   let spend = 0;
   let failedLastHour = 0;
   const durations: { task: string; ms: number | null }[] = [];
-  for (const { admin } of await listWorkspaceDatabases()) {
+  const parts = await mapWorkspaces(async ({ admin }) => {
     const [t] = await admin
       .select({
         runs: sql<number>`(count(*) filter (where ${aiRun.createdAt} >= ${today}))::int`,
@@ -109,11 +105,15 @@ export async function runsSummary(): Promise<RunsSummary> {
       })
       .from(aiRun)
       .where(or(gte(aiRun.createdAt, today), gte(aiRun.createdAt, sql`now() - interval '1 hour'`)));
+    const ms = await admin.select({ task: aiRun.task, ms: aiRun.durationMs }).from(aiRun).where(gte(aiRun.createdAt, today));
+    return { t, ms };
+  });
+  for (const { t, ms } of parts) {
     runs += t?.runs ?? 0;
     failedToday += t?.failed ?? 0;
     spend += t?.spend ?? 0;
     failedLastHour += t?.failedLastHour ?? 0;
-    durations.push(...(await admin.select({ task: aiRun.task, ms: aiRun.durationMs }).from(aiRun).where(gte(aiRun.createdAt, today))));
+    durations.push(...ms);
   }
   const byTask = new Map<string, (number | null)[]>();
   for (const d of durations) byTask.set(d.task, [...(byTask.get(d.task) ?? []), d.ms]);

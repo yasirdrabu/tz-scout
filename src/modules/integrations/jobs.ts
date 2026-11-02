@@ -1,6 +1,6 @@
 import { and, isNotNull, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { listWorkspaceDatabases } from '@/platform/db/doors';
+import { mapWorkspaces } from '@/platform/db/doors';
 import { defineJob } from '@/platform/events/registry';
 import { defineJobHandler } from '@/platform/runtime/jobs';
 import { credential } from './db/schema';
@@ -15,9 +15,7 @@ export const credentialsCleanupJob = defineJob('integrations.credentials.cleanup
  * an hour ago. A database that fails fails the run, which is retried; the deletes are safe to repeat.
  */
 export const credentialsCleanupHandler = defineJobHandler(credentialsCleanupJob, async () => {
-  for (const { admin } of await listWorkspaceDatabases()) {
-    await admin
-      .delete(credential)
-      .where(and(isNotNull(credential.replacedAt), lt(credential.replacedAt, sql`now() - interval '1 hour'`)));
-  }
+  await mapWorkspaces(({ admin }) =>
+    admin.delete(credential).where(and(isNotNull(credential.replacedAt), lt(credential.replacedAt, sql`now() - interval '1 hour'`))),
+  );
 });

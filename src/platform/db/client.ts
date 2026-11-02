@@ -28,6 +28,22 @@ export function pool(url: () => string, max?: () => number): Db {
 }
 
 /**
+ * A pool that its owner closes (the per-workspace pools, D35): `max` connections, each closed after
+ * `idleSeconds` unused. Not closed by `closeDbs` itself; the owner registers with `onCloseDbs`.
+ */
+export function connect(url: string, max: number, idleSeconds = 600): { db: Db; end: () => Promise<void> } {
+  const sql = postgres(url, { max, idle_timeout: idleSeconds, onnotice: () => {} });
+  return { db: drizzle(sql), end: () => sql.end({ timeout: 30 }) };
+}
+
+const closers: (() => Promise<unknown>)[] = [];
+
+/** Registers more pools for `closeDbs` to close. */
+export function onCloseDbs(close: () => Promise<unknown>): void {
+  closers.push(close);
+}
+
+/**
  * Control plane connection as `scout_app` (D35): tenancy and the platform-wide tables. Subject to row
  * level security: tenant rows are only visible with `app.tenant_id` set (`withControlTenant`).
  */
@@ -56,5 +72,8 @@ export function adminTransaction<T>(tx: Tx | undefined, fn: (tx: Tx) => Promise<
 
 /** Close every pool. Only needed by scripts and tests. Safe to call when never used. */
 export async function closeDbs(): Promise<void> {
-  await Promise.allSettled(pools.map((db) => (db as unknown as { $client: postgres.Sql }).$client.end()));
+  await Promise.allSettled([
+    ...pools.map((db) => (db as unknown as { $client: postgres.Sql }).$client.end()),
+    ...closers.map((close) => close()),
+  ]);
 }
