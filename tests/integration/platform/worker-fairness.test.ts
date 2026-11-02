@@ -1,5 +1,6 @@
 import { dropAfter, TEST_TEMPLATE } from '../helpers/per-workspace';
 import '@/entry/compose';
+import { inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { z } from 'zod';
 import { workspaceInfra } from '@/modules/tenancy/db/schema';
@@ -22,13 +23,16 @@ import { waitFor } from '../helpers/wait';
 const flooded = defineEvent('accounts.account.flooded', 1, z.object({ n: z.number() }));
 let nats: Nats;
 
-/** A workspace in a database of its own, copied from the run's template, registered `active`. */
+const registered: string[] = [];
+
+/** A workspace in a database of its own, copied from the run's template, registered `active` (no tenant row). */
 async function workspace(): Promise<string> {
   const tenantId = newId('t');
   const database = `scout_test_${process.pid}_w${tenantId.slice(-8).toLowerCase()}`;
   await createDatabase(database, TEST_TEMPLATE);
   dropAfter(database);
   await controlAdminDb.insert(workspaceInfra).values({ tenantId, region: 'us-1', database, status: 'active' });
+  registered.push(tenantId);
   return tenantId;
 }
 
@@ -50,6 +54,8 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await nats.nc.drain();
+  // Registry rows with no tenant would be orphans to the later files' checks.
+  if (registered.length > 0) await controlAdminDb.delete(workspaceInfra).where(inArray(workspaceInfra.tenantId, registered));
 });
 
 it("a workspace flooding one consumer leaves room for another workspace's message", async () => {
