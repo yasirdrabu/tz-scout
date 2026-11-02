@@ -1,11 +1,9 @@
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
-import { audit } from '@/platform/audit';
 import { controlAdminDb } from '@/platform/db/client';
 import { withControlAdmin } from '@/platform/db/doors';
-import { auditLog } from '@/platform/db/schema';
-import { withTenant } from '@/platform/db/tenant';
+import { enqueueJob } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
-import { log } from '@/platform/log';
+import { memberActivatedAuditJob } from '../contracts/jobs';
 import { account, membership, tenant, user } from '../db/schema';
 import { tenantsFor } from './members';
 
@@ -188,13 +186,15 @@ export async function pinEntraIdentity(userId: string, entraObjectId: string, ti
  * After a passed gate: records the sign-in and makes invited memberships
  * active (TEN-E2-S1-AC3) with a `tenancy.member.activated` audit row in each tenant. No event: the
  * member was announced by `tenancy.member.added` at invite. The memberships change on the control
- * plane; the audit rows are written after that commits, in each workspace (`recordActivations`).
+ * plane; each audit row is a job enqueued in the same transaction and written in its workspace
+ * (`memberActivatedAuditJob`), so a workspace that is down gets it on a retry.
  */
 export async function completeSignIn(userId: string): Promise<void> {
   const correlationId = newId('cor');
-  const activated = await withControlAdmin(async (tx) => {
+  const actor = { kind: 'user' as const, id: userId };
+  await withControlAdmin(async (tx) => {
     await tx.update(user).set({ lastSignInAt: new Date(), updatedAt: new Date() }).where(eq(user.id, userId));
-    return tx
+    const activated = await tx
       .update(membership)
       .set({ status: 'active', updatedAt: new Date() })
       .where(
@@ -205,51 +205,10 @@ export async function completeSignIn(userId: string): Promise<void> {
         ),
       )
       .returning({ id: membership.id, tenantId: membership.tenantId, role: membership.role });
-  });
-  await recordActivations(userId, correlationId, activated);
-}
-
-/**
- * Writes the `tenancy.member.activated` audit row of each activated membership in its workspace.
- * Safe to run again for the same sign-in (`correlationId`): a row already written is not written twice.
- * One workspace failing is logged and does not stop the others or the sign-in.
- */
-export async function recordActivations(
-  userId: string,
-  correlationId: string,
-  activated: { id: string; tenantId: string; role: string }[],
-): Promise<void> {
-  const actor = { kind: 'user' as const, id: userId };
-  for (const m of activated) {
-    try {
-      await withTenant(m.tenantId, async (tx) => {
-        const [done] = await tx
-          .select({ id: auditLog.id })
-          .from(auditLog)
-          .where(
-            and(
-              eq(auditLog.tenantId, m.tenantId),
-              eq(auditLog.action, 'tenancy.member.activated'),
-              eq(auditLog.subjectId, m.id),
-              eq(auditLog.correlationId, correlationId),
-            ),
-          )
-          .limit(1);
-        if (done) return;
-        await audit(
-          { tenantId: m.tenantId, actor, correlationId, tx },
-          {
-            action: 'tenancy.member.activated',
-            subject: { type: 'membership', id: m.id },
-            before: { status: 'invited' },
-            after: { status: 'active', role: m.role },
-          },
-        );
-      });
-    } catch (e) {
-      log.error({ err: e, tenantId: m.tenantId, membershipId: m.id }, 'could not audit a membership activation');
+    for (const m of activated) {
+      await enqueueJob({ tenantId: m.tenantId, actor, correlationId, tx }, memberActivatedAuditJob, { membershipId: m.id, role: m.role });
     }
-  }
+  });
 }
 
 /**

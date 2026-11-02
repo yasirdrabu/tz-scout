@@ -69,7 +69,7 @@ const ADMIN_DB_MESSAGE =
   "adminDb bypasses row level security. Use withTenant, or add this file to ADMIN_DB_ALLOWED in eslint.config.mjs with a reason.";
 // What bypasses row level security: the control plane's admin pool, and the admin doors to workspaces.
 const ADMIN_CLIENT = ["adminDb", "controlAdminDb"];
-const ADMIN_DOORS = ["withControlAdmin", "withWorkspaceAdmin", "listWorkspaceDatabases"];
+const ADMIN_DOORS = ["withControlAdmin", "withWorkspaceAdmin", "listWorkspaceDatabases", "platformDatabases", "inDatabaseHolding"];
 const adminDbRestriction = {
   paths: [
     { name: "@/platform/db/client", importNames: ADMIN_CLIENT, message: ADMIN_DB_MESSAGE },

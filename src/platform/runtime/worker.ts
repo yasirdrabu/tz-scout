@@ -8,9 +8,10 @@ import {
 } from '@nats-io/jetstream';
 import { sql } from 'drizzle-orm';
 import { ZodError } from 'zod';
-import { config } from '../config';
+import { config, type Config } from '../config';
 import type { ModuleContext } from '../context';
-import { adminDb } from '../db/client';
+import { PLATFORM_TENANT } from '../audit';
+import { workspaceDb } from '../db/doors';
 import { guardTx } from '../db/guarded-tx';
 import { withTenant, type Tx } from '../db/tenant';
 import { recordDeadJob } from '../dead-jobs';
@@ -28,10 +29,31 @@ import {
   type JobHandlerDef,
 } from './jobs';
 
-/** Half the pool at most (see `maxInFlight`), at least 1. */
-export function inFlightCap(requested?: number): number {
-  const half = Math.max(1, Math.floor(config.databasePoolMax / 2));
+/**
+ * In-flight rule (D35). A handler may hold its transaction's connection while it needs a second one
+ * from the same workspace pool (see `maxInFlight`), so messages in flight stay at half the workspace
+ * connections, at least 1:
+ * - across the worker, half the workspace connections it may hold: `DATABASE_POOL_MAX` in `shared`
+ *   mode (one pool for every workspace), `SCOUT_WORKSPACE_POOL_CAP` in `per_workspace` mode;
+ * - per workspace database (`per_workspace` only), half its pool (`workspaceInFlightCap`).
+ * Tenancy calls use the control plane's own pool and do not count.
+ */
+type PoolConfig = Pick<Config, 'workspaceDatabases' | 'databasePoolMax' | 'workspacePoolMax' | 'workspacePoolCap'>;
+
+export function inFlightCap(requested?: number, c: PoolConfig = config): number {
+  const budget = c.workspaceDatabases === 'per_workspace' ? c.workspacePoolCap : c.databasePoolMax;
+  const half = Math.max(1, Math.floor(budget / 2));
   return Math.max(1, Math.min(requested ?? half, half));
+}
+
+/**
+ * Messages in flight for one workspace database: half of `SCOUT_WORKSPACE_POOL_MAX`, at least 1 (the
+ * default pool of 3 runs one message at a time per workspace). null in `shared` mode, where every
+ * workspace shares the one pool `inFlightCap` already bounds.
+ */
+export function workspaceInFlightCap(c: PoolConfig = config): number | null {
+  if (c.workspaceDatabases !== 'per_workspace') return null;
+  return Math.max(1, Math.floor(c.workspacePoolMax / 2));
 }
 
 /** What happened to a message just before it is acked. */
@@ -148,9 +170,35 @@ class Semaphore {
   }
 }
 
+/** One `Semaphore` of `size` per key, made on first use. */
+export class KeyedSlots {
+  private byKey = new Map<string, Semaphore>();
+  constructor(private size: number) {}
+  acquire(key: string): Promise<void> {
+    let s = this.byKey.get(key);
+    if (!s) this.byKey.set(key, (s = new Semaphore(this.size)));
+    return s.acquire();
+  }
+  release(key: string): void {
+    this.byKey.get(key)?.release();
+  }
+}
+
+/** The tenant a message is for, from its envelope, without validating it (`processMessage` does). */
+function tenantOf(m: JsMsg): string | undefined {
+  try {
+    const t = (m.json() as { tenantId?: unknown }).tenantId;
+    return typeof t === 'string' ? t : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 type Runtime = {
   hooks: WorkerOptions['hooks'];
   slots: Semaphore;
+  /** Per workspace database (`per_workspace` only); taken before `slots`, so a busy workspace holds none of the shared ones while it waits. */
+  workspaceSlots?: KeyedSlots;
   busyLockTimeoutMs: number;
   busyRetryMs: number;
 };
@@ -314,27 +362,30 @@ async function ensureConsumer(jsm: JetStreamManager, s: Sub): Promise<void> {
 }
 
 
+/** Where a message's handler runs are counted: its tenant's database, next to its handler's writes. */
+const attemptsDb = async (e: Envelope) => (await workspaceDb(e.tenantId)).admin;
+
 /** Handler runs recorded for an earlier delivery of this message (0 when none). */
-async function runsSoFar(s: Sub, eventId: string): Promise<number> {
-  const rows = await adminDb.execute(
-    sql`select run_attempts from platform.delivery_attempt where consumer_name = ${s.processedName} and event_id = ${eventId}`,
+async function runsSoFar(s: Sub, e: Envelope): Promise<number> {
+  const rows = await (await attemptsDb(e)).execute(
+    sql`select run_attempts from platform.delivery_attempt where consumer_name = ${s.processedName} and event_id = ${e.id}`,
   );
   return (rows[0] as { run_attempts: number } | undefined)?.run_attempts ?? 0;
 }
 
 /** Counts one more handler run, outside the handler's transaction. Returns the new count. */
-async function countRun(s: Sub, eventId: string): Promise<number> {
-  const rows = await adminDb.execute(
-    sql`insert into platform.delivery_attempt (consumer_name, event_id, run_attempts) values (${s.processedName}, ${eventId}, 1)
+async function countRun(s: Sub, e: Envelope): Promise<number> {
+  const rows = await (await attemptsDb(e)).execute(
+    sql`insert into platform.delivery_attempt (consumer_name, event_id, run_attempts) values (${s.processedName}, ${e.id}, 1)
         on conflict (consumer_name, event_id) do update set run_attempts = platform.delivery_attempt.run_attempts + 1, updated_at = now()
         returning run_attempts`,
   );
   return (rows[0] as { run_attempts: number }).run_attempts;
 }
 
-async function forgetRuns(s: Sub, eventId: string): Promise<void> {
-  await adminDb.execute(
-    sql`delete from platform.delivery_attempt where consumer_name = ${s.processedName} and event_id = ${eventId}`,
+async function forgetRuns(s: Sub, e: Envelope): Promise<void> {
+  await (await attemptsDb(e)).execute(
+    sql`delete from platform.delivery_attempt where consumer_name = ${s.processedName} and event_id = ${e.id}`,
   );
 }
 
@@ -367,7 +418,7 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
   let runs = 0; // handler runs including this one, once it starts
   let timedOut: TimedOut | undefined;
   try {
-    if (redelivery) runsBefore = await runsSoFar(s, envelope.id);
+    if (redelivery) runsBefore = await runsSoFar(s, envelope);
     const outcome = await withTenant(envelope.tenantId, (tx) =>
       runInTx(tx, s, envelope, rt.busyLockTimeoutMs, {
         parseFailed: () => {
@@ -376,7 +427,7 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
         // From here the handler runs: this counts toward maxDeliver.
         starting: async () => {
           if (redelivery) {
-            runs = await countRun(s, envelope.id);
+            runs = await countRun(s, envelope);
             if (runs > s.maxDeliver) {
               runs -= 1;
               throw new Permanent(`Gave up after ${runs} runs: the last one did not finish`);
@@ -392,7 +443,7 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
       return;
     }
     m.ack();
-    if (redelivery) await forgetRuns(s, envelope.id).catch(() => {});
+    if (redelivery) await forgetRuns(s, envelope).catch(() => {});
     if (outcome === 'duplicate') lg.debug('worker: already processed, skipped');
   } catch (caught) {
     const e = timedOut ?? caught;
@@ -407,8 +458,8 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
     try {
       // A failure before the handler started (database down) still uses up a run, so a broken
       // message cannot loop forever.
-      if (runs === 0) runs = await countRun(s, envelope.id);
-      else if (!redelivery) await countRun(s, envelope.id);
+      if (runs === 0) runs = await countRun(s, envelope);
+      else if (!redelivery) await countRun(s, envelope);
     } catch (e2) {
       lg.error({ err: error, countErr: errorText(e2) }, 'worker: could not count the run, will retry');
       m.nak(backoffFor(s.backoffMs, Math.max(1, runsBefore + 1)));
@@ -423,7 +474,7 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
     try {
       await recordDeadJob({ name: s.deadName, envelope, error, attempts: runs });
       m.term(error.slice(0, 200));
-      await forgetRuns(s, envelope.id).catch(() => {});
+      await forgetRuns(s, envelope).catch(() => {});
       lg.error({ err: error, runs }, 'worker: gave up, stored as a dead job');
     } catch (e2) {
       lg.error({ err: error, deadLetterErr: errorText(e2) }, 'worker: could not store dead job, will retry');
@@ -445,11 +496,18 @@ async function runSub(nats: Nats, s: Sub, opts: WorkerOptions, rt: Runtime): Pro
       const heartbeat = setInterval(() => m.working(), heartbeatMs);
       while (inFlight.size >= concurrency) await Promise.race(inFlight);
       const p: Promise<void> = (async () => {
-        await rt.slots.acquire();
+        const workspace = rt.workspaceSlots ? tenantOf(m) : undefined;
+        const perWorkspace = workspace !== undefined && workspace !== PLATFORM_TENANT;
+        if (perWorkspace) await rt.workspaceSlots!.acquire(workspace);
         try {
-          await processMessage(m, s, rt);
+          await rt.slots.acquire();
+          try {
+            await processMessage(m, s, rt);
+          } finally {
+            rt.slots.release();
+          }
         } finally {
-          rt.slots.release();
+          if (perWorkspace) rt.workspaceSlots!.release(workspace);
         }
       })()
         .catch((e) => log.error({ consumer: s.processedName, err: errorText(e) }, 'worker: unexpected error'))
@@ -505,6 +563,7 @@ export async function startWorker(opts: WorkerOptions): Promise<void> {
     const rt: Runtime = {
       hooks: opts.hooks,
       slots: new Semaphore(inFlightCap(opts.maxInFlight)),
+      ...(workspaceInFlightCap() !== null ? { workspaceSlots: new KeyedSlots(workspaceInFlightCap()!) } : {}),
       busyLockTimeoutMs: opts.busyLockTimeoutMs ?? 2000,
       busyRetryMs: opts.busyRetryMs ?? 1000,
     };

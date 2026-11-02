@@ -21,7 +21,7 @@ export async function seedScoringDefaults(ctx: ModuleContext): Promise<void> {
   await ctx.tx.insert(scoringProfile).values({ tenantId, ...DEFAULT_PROFILE }).onConflictDoNothing();
   // Signals fade with time, so rescore nightly at 02:00 UTC.
   await upsertSchedule(
-    { actor: ctx.actor, correlationId: ctx.correlationId },
+    { actor: ctx.actor, correlationId: ctx.correlationId, tx: ctx.tx },
     { tenantId, jobName: ageingJob.name, cron: '0 2 * * *', timezone: 'UTC', payload: {} },
   );
 }

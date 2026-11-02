@@ -49,12 +49,12 @@ export async function seedIntakeDefaults(ctx: ModuleContext): Promise<void> {
     .onConflictDoNothing();
   // Ruling 8: rejects arrivals that waited 30 days, daily at 04:00 UTC.
   await upsertSchedule(
-    { actor: ctx.actor, correlationId: ctx.correlationId },
+    { actor: ctx.actor, correlationId: ctx.correlationId, tx: ctx.tx },
     { tenantId, jobName: waitingExpireJob.name, cron: '0 4 * * *', timezone: 'UTC', payload: {} },
   );
   // Ruling 14: HubSpot qualified leads, every 15 minutes.
   await upsertSchedule(
-    { actor: ctx.actor, correlationId: ctx.correlationId },
+    { actor: ctx.actor, correlationId: ctx.correlationId, tx: ctx.tx },
     { tenantId, jobName: qualifiedLeadsPollJob.name, cron: '*/15 * * * *', timezone: 'UTC', payload: {} },
   );
 }

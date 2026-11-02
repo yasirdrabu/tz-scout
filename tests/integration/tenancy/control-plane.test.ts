@@ -13,13 +13,17 @@ import {
   SYSTEM_GRANTOR,
   tenantTimezone,
 } from '@/modules/tenancy';
-import { membership, tenant } from '@/modules/tenancy/db/schema';
-import { recordActivations } from '@/modules/tenancy/services/sign-in';
+import { memberActivatedAuditHandler, memberActivatedAuditJob } from '@/modules/tenancy';
+import { membership, tenant, workspaceInfra } from '@/modules/tenancy/db/schema';
 import { PLATFORM_TENANT } from '@/platform/audit';
 import { config } from '@/platform/config';
 import { adminDb } from '@/platform/db/client';
-import { auditLog } from '@/platform/db/schema';
+import { forgetWorkspace } from '@/platform/db/doors';
+import { auditLog, outbox } from '@/platform/db/schema';
 import { withTenant } from '@/platform/db/tenant';
+import type { Envelope } from '@/platform/events/envelope';
+import { deliverOnce } from '@/platform/runtime/worker';
+import { runOutbox } from '../helpers/run-outbox';
 import { TenancyOnWorkspaceTx } from '../helpers/tenancy-guard';
 import { inTenant, seedUser, uniqueSlug } from './helpers';
 
@@ -132,7 +136,7 @@ describe('writes that span the control plane and a workspace (Review Focus 2)', 
     expect(await outboxCount(tenantId, 'tenancy.tenant.created')).toBe(1);
   });
 
-  it('sign-in activates on the control plane and audits in each workspace, once even when run again', async () => {
+  it('sign-in activates on the control plane and audits in each workspace through a job: a failed delivery retries, a repeat adds nothing', async () => {
     const a = await newTenant();
     const b = await newTenant();
     const person = await seedUser();
@@ -140,20 +144,31 @@ describe('writes that span the control plane and a workspace (Review Focus 2)', 
       await inTenant(t.tenantId, t.owner.actor, (ctx) => addMember(ctx, { email: person.email, role: 'seller' }));
     }
     await completeSignIn(person.id);
-    const activated = await adminDb
-      .select({ id: membership.id, tenantId: membership.tenantId, role: membership.role, status: membership.status })
-      .from(membership)
-      .where(eq(membership.userId, person.id));
-    expect(activated.map((m) => m.status)).toEqual(['active', 'active']);
-    const rows = async () =>
+    const statuses = await adminDb.select({ status: membership.status }).from(membership).where(eq(membership.userId, person.id));
+    expect(statuses.map((m) => m.status)).toEqual(['active', 'active']);
+    const rows = () =>
       adminDb
-        .select({ tenantId: auditLog.tenantId, correlationId: auditLog.correlationId })
+        .select({ tenantId: auditLog.tenantId })
         .from(auditLog)
         .where(and(eq(auditLog.action, 'tenancy.member.activated'), eq(auditLog.actorId, person.id)));
-    const first = await rows();
-    expect(first.map((r) => r.tenantId).sort()).toEqual([a.tenantId, b.tenantId].sort());
-    // The follow-up again for the same sign-in (a retry) adds nothing.
-    await recordActivations(person.id, first[0]!.correlationId!, activated);
-    expect(await rows()).toHaveLength(2);
+    // Enqueued on the control plane with the activation; nothing written in the workspaces yet.
+    expect(await rows()).toEqual([]);
+    const jobs = async (tenantId: string) =>
+      (await adminDb.select().from(outbox).where(and(eq(outbox.tenantId, tenantId), eq(outbox.kind, 'job'))))
+        .map((r) => r.payload as Envelope)
+        .filter((e) => e.type === `jobs.${memberActivatedAuditJob.name}`);
+    const [jobA] = await jobs(a.tenantId);
+    expect(await jobs(b.tenantId)).toHaveLength(1);
+
+    // Workspace a is down: the delivery fails and nothing is written; the worker retries it later.
+    await adminDb.update(workspaceInfra).set({ status: 'suspended' }).where(eq(workspaceInfra.tenantId, a.tenantId));
+    forgetWorkspace(a.tenantId);
+    await expect(deliverOnce(memberActivatedAuditHandler, jobA!)).rejects.toMatchObject({ slug: 'workspace-unavailable' });
+    await adminDb.update(workspaceInfra).set({ status: 'active' }).where(eq(workspaceInfra.tenantId, a.tenantId));
+    forgetWorkspace(a.tenantId);
+    expect(await deliverOnce(memberActivatedAuditHandler, jobA!)).toBe('handled');
+    expect(await deliverOnce(memberActivatedAuditHandler, jobA!)).toBe('duplicate');
+    await runOutbox(b.tenantId);
+    expect((await rows()).map((r) => r.tenantId).sort()).toEqual([a.tenantId, b.tenantId].sort());
   });
 });

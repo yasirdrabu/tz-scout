@@ -4,6 +4,7 @@
 import '@/platform/dead-jobs';
 import '@/platform/diagnostics';
 import '@/modules/tenancy/contracts/events';
+import '@/modules/tenancy/contracts/jobs';
 import '@/modules/integrations/contracts/events';
 import '@/modules/integrations';
 import '@/modules/ai-tasks/contracts/events';

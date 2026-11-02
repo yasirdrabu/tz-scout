@@ -67,3 +67,5 @@ export { addPlatformAdmin, platformAdmins, removePlatformAdmin, type PlatformAdm
 export { listRoles, loadRoleSets, setRolePermissions, type RoleView } from './services/roles';
 export { forgetAccess } from './services/principal';
 export { workspaceInfo } from './services/workspace-infra';
+export { memberActivatedAuditJob } from './contracts/jobs';
+export { memberActivatedAuditHandler } from './jobs';

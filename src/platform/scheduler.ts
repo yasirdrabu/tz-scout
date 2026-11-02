@@ -1,8 +1,9 @@
 import { and, eq, lte } from 'drizzle-orm';
 import { CronExpressionParser } from 'cron-parser';
-import { adminDb, adminTransaction } from './db/client';
+import type { adminDb } from './db/client';
+import { inDatabaseHolding, platformDatabases, withControlAdmin, withWorkspaceAdmin, type PlatformDatabase } from './db/doors';
 import { schedule } from './db/schema';
-import { platformAudit } from './audit';
+import { PLATFORM_TENANT, platformAudit, type AuditEntry } from './audit';
 import type { AdminCtx } from './dead-jobs';
 import { ScoutError } from './errors';
 import type { ModuleContext } from './context';
@@ -63,12 +64,28 @@ async function enqueueFor(tx: Tx, row: ScheduleRow, correlationId = newId('cor')
   return enqueueJob(ctx, jobFor(row.jobName), row.payload);
 }
 
-/** Creates or updates the schedule for (tenant, job). Computes `next_run_at` from `now`. Returns the id. */
+/**
+ * Writes a platform audit entry: in `tx` when the change is on the control plane, else on its own (a
+ * workspace schedule's change is in its workspace database; the platform audit log is the control plane's).
+ */
+async function auditScheduleChange(entry: AuditEntry & { actor: AdminCtx['actor']; correlationId?: string }, tx: Tx, onControl: boolean) {
+  await platformAudit(entry, onControl ? tx : undefined);
+}
+
+/**
+ * Creates or updates the schedule for (tenant, job). Computes `next_run_at` from `now`. Returns the id.
+ * Written where the tenant's jobs run: `t_platform` on the control plane, a workspace's in its own
+ * database, in `adminCtx.tx` when given (a seeder passes its workspace transaction, so the schedule
+ * commits with the defaults), else in a transaction of its own.
+ */
 export async function upsertSchedule(adminCtx: AdminCtx, input: ScheduleInput, now = new Date()): Promise<string> {
   const def = jobFor(input.jobName);
   const payload = def.data.parse(input.payload ?? {}) as object;
   const nextRunAt = nextRun(input.cron, input.timezone, now);
-  return adminDb.transaction(async (tx) => {
+  const onControl = input.tenantId === PLATFORM_TENANT;
+  const inTx = <T>(fn: (tx: Tx) => Promise<T>): Promise<T> =>
+    adminCtx.tx ? adminCtx.tx.transaction(fn) : onControl ? withControlAdmin(fn) : withWorkspaceAdmin(input.tenantId, fn);
+  return inTx(async (tx) => {
     const [existing] = await tx
       .select()
       .from(schedule)
@@ -99,7 +116,7 @@ export async function upsertSchedule(adminCtx: AdminCtx, input: ScheduleInput, n
         nextRunAt,
       });
     }
-    await platformAudit(
+    await auditScheduleChange(
       {
         action: 'platform.schedule.upserted',
         actor: adminCtx.actor,
@@ -108,21 +125,37 @@ export async function upsertSchedule(adminCtx: AdminCtx, input: ScheduleInput, n
         after: { tenantId: input.tenantId, jobName: input.jobName, cron: input.cron, timezone: input.timezone },
       },
       tx,
+      onControl,
     );
     return id;
   });
 }
 
-async function setEnabled(adminCtx: AdminCtx, id: string, enabled: boolean, now = new Date()): Promise<void> {
-  await adminTransaction(adminCtx.tx, async (tx) => {
+/**
+ * Runs `fn` on the schedule row `id`, locked, in the database that holds it: the caller's control
+ * transaction (`adminCtx.tx`) or a new one first, then each workspace database. 404 when none has it.
+ */
+async function onScheduleRow<T>(
+  adminCtx: AdminCtx,
+  id: string,
+  fn: (tx: Tx, row: ScheduleRow, db: PlatformDatabase) => Promise<T>,
+): Promise<T> {
+  const found = await inDatabaseHolding(adminCtx.tx, async (tx, db) => {
     const [row] = await tx.select().from(schedule).where(eq(schedule.id, id)).for('update');
-    if (!row) throw notFound(id);
+    return row ? { value: await fn(tx, row, db) } : undefined;
+  });
+  if (!found) throw notFound(id);
+  return found.value;
+}
+
+async function setEnabled(adminCtx: AdminCtx, id: string, enabled: boolean, now = new Date()): Promise<void> {
+  await onScheduleRow(adminCtx, id, async (tx, row, db) => {
     if (row.enabled === enabled) return;
     await tx
       .update(schedule)
       .set(enabled ? { enabled, nextRunAt: nextRun(row.cron, row.timezone, now) } : { enabled })
       .where(eq(schedule.id, id));
-    await platformAudit(
+    await auditScheduleChange(
       {
         action: enabled ? 'platform.schedule.resumed' : 'platform.schedule.paused',
         actor: adminCtx.actor,
@@ -131,6 +164,7 @@ async function setEnabled(adminCtx: AdminCtx, id: string, enabled: boolean, now 
         after: { tenantId: row.tenantId, jobName: row.jobName },
       },
       tx,
+      db.control,
     );
   });
 }
@@ -141,11 +175,10 @@ export const resumeSchedule = (adminCtx: AdminCtx, id: string) => setEnabled(adm
 
 /** Publishes the job now. Leaves `next_run_at` and `last_run_at` alone. Returns the job id. */
 export async function runNow(adminCtx: AdminCtx, id: string): Promise<string> {
-  return adminTransaction(adminCtx.tx, async (tx) => {
-    const [row] = await tx.select().from(schedule).where(eq(schedule.id, id));
-    if (!row) throw notFound(id);
+  return onScheduleRow(adminCtx, id, async (tx, row, db) => {
+    // Into the outbox of the database that holds the schedule: where the tenant's jobs are relayed from.
     const jobId = await enqueueFor(tx, row, adminCtx.correlationId);
-    await platformAudit(
+    await auditScheduleChange(
       {
         action: 'platform.schedule.run_now',
         actor: adminCtx.actor,
@@ -154,6 +187,7 @@ export async function runNow(adminCtx: AdminCtx, id: string): Promise<string> {
         after: { tenantId: row.tenantId, jobName: row.jobName, jobId },
       },
       tx,
+      db.control,
     );
     return jobId;
   });
@@ -163,9 +197,23 @@ export async function runNow(adminCtx: AdminCtx, id: string): Promise<string> {
  * Publishes every due schedule in one transaction. Rows are claimed with `for update skip locked`,
  * so concurrent ticks (several scheduler processes) never publish the same run twice.
  * A row whose job is not registered or whose cron is unreadable is logged and left alone.
+ * Each database (`platformDatabases`) is ticked in turn and its due jobs go into its own outbox; a
+ * database that fails is logged and the others still tick.
  */
 export async function schedulerTick(now: Date): Promise<number> {
-  return adminDb.transaction(async (tx) => {
+  let published = 0;
+  for (const db of await platformDatabases()) {
+    try {
+      published += await tickDatabase(db, now);
+    } catch (e) {
+      log.error({ database: db.name, err: errorText(e) }, 'scheduler tick failed for a database');
+    }
+  }
+  return published;
+}
+
+async function tickDatabase(db: PlatformDatabase, now: Date): Promise<number> {
+  return db.admin.transaction(async (tx) => {
     const due = await tx
       .select()
       .from(schedule)

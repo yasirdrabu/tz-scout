@@ -16,6 +16,7 @@ import { playbooksConsumers, playbooksJobHandlers } from '@/modules/playbooks';
 import { credentialsCleanupHandler } from '@/modules/integrations';
 import { autoAcceptHandler, routingConsumers } from '@/modules/routing';
 import { ageingHandler, rescoreAccountsHandler, rescorePageHandler, scoringConsumers } from '@/modules/scoring';
+import { memberActivatedAuditHandler } from '@/modules/tenancy';
 import { pingHandler } from '@/platform/diagnostics';
 import { log } from '@/platform/log';
 import type { ConsumerDef } from '@/platform/runtime/consumers';
@@ -26,7 +27,7 @@ import { startWorker } from '@/platform/runtime/worker';
 export const consumers: ConsumerDef[] = [accountsTenantDefaults, accountsSummaryOnReviewChanged, accountsSummaryOnScored, ...accountsCrmStatusConsumers, intakeTenantDefaults, intakeAccountMerged, intakeStatusFeedback, intakeSellerDeclineFeedback, intakeLeadQualified, ...scoringConsumers, ...routingConsumers, ...crmConsumers, ...playbooksConsumers];
 
 /** Every job handler in the app. */
-export const jobs: JobHandlerDef[] = [pingHandler, credentialsCleanupHandler, exclusionsRecheckHandler, resolveHandler, waitingExpireHandler, importRunHandler, qualifiedLeadsPollHandler, rescoreAccountsHandler, rescorePageHandler, ageingHandler, autoAcceptHandler, ...crmJobHandlers, ...playbooksJobHandlers];
+export const jobs: JobHandlerDef[] = [pingHandler, memberActivatedAuditHandler, credentialsCleanupHandler, exclusionsRecheckHandler, resolveHandler, waitingExpireHandler, importRunHandler, qualifiedLeadsPollHandler, rescoreAccountsHandler, rescorePageHandler, ageingHandler, autoAcceptHandler, ...crmJobHandlers, ...playbooksJobHandlers];
 
 /** Worker role: consumers and job handlers. Runs until SIGINT or SIGTERM. */
 export async function main(): Promise<void> {

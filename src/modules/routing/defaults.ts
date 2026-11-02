@@ -116,7 +116,7 @@ export async function seedRoutingDefaults(ctx: ModuleContext): Promise<void> {
   await ctx.tx.insert(routingSetting).values({ tenantId, autoAcceptWorkingDays: DEFAULT_AUTO_ACCEPT_WORKING_DAYS }).onConflictDoNothing();
   // Auto-acceptance is checked every hour, on the hour.
   await upsertSchedule(
-    { actor: ctx.actor, correlationId: ctx.correlationId },
+    { actor: ctx.actor, correlationId: ctx.correlationId, tx: ctx.tx },
     { tenantId, jobName: autoAcceptJob.name, cron: '0 * * * *', timezone: 'UTC', payload: {} },
   );
 }

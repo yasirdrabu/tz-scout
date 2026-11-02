@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import postgres from 'postgres';
 import { config } from '@/platform/config';
 import { adminDb } from '@/platform/db/client';
+import { platformDatabases, type PlatformDatabase } from '@/platform/db/doors';
 import { log } from '@/platform/log';
 import { errorText } from '@/platform/scrub-error';
 import { connectNats, type Nats } from '@/platform/nats/connection';
@@ -15,7 +16,96 @@ export type RelayOptions = {
   natsUrl?: string;
 };
 
-type Row = { seq: number; id: string; nats_subject: string; payload: unknown };
+export type OutboxRow = { seq: number; id: string; nats_subject: string; payload: unknown };
+
+/** One outbox the relay reads: the control plane's or a workspace database's. */
+export type OutboxSource = {
+  name: string;
+  /** Unsent rows, oldest first. */
+  unsent(limit: number): Promise<OutboxRow[]>;
+  markSent(ids: string[]): Promise<void>;
+};
+
+/** Per source: failures in a row and when to try it again. */
+export type SourceHealth = Map<string, { failures: number; retryAt: number }>;
+
+const SOURCE_BACKOFF_MS = 1000;
+const SOURCE_BACKOFF_CAP_MS = 60_000;
+
+/** The outbox of one database. */
+export function outboxSource(db: PlatformDatabase): OutboxSource {
+  return {
+    name: db.name,
+    unsent: async (limit) =>
+      (await db.admin.execute(
+        sql`select seq, id, nats_subject, payload from platform.outbox where sent_at is null order by seq limit ${limit}`,
+      )) as unknown as OutboxRow[],
+    markSent: async (ids) => {
+      await db.admin.execute(sql`update platform.outbox set sent_at = now() where id in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`);
+    },
+  };
+}
+
+/**
+ * One relay turn: a batch from each source in turn (round-robin, so a busy database cannot starve the
+ * others), oldest first within each, so each database's order holds. A source whose database fails is
+ * logged and skipped, with a backoff doubling up to a minute, while the others go on. A publish failure
+ * (NATS) ends the turn and is thrown once what was sent is marked. `full`: some source had a full batch.
+ */
+export async function relayTurn(
+  sources: OutboxSource[],
+  health: SourceHealth,
+  publish: (row: OutboxRow) => Promise<unknown>,
+  opts: { batchSize: number; now?: number; stopped?: () => boolean },
+): Promise<{ sentAny: boolean; full: boolean }> {
+  const now = opts.now ?? Date.now();
+  let sentAny = false;
+  let full = false;
+  const failed = (src: OutboxSource, e: unknown) => {
+    const failures = (health.get(src.name)?.failures ?? 0) + 1;
+    const wait = Math.min(SOURCE_BACKOFF_CAP_MS, SOURCE_BACKOFF_MS * 2 ** (failures - 1));
+    health.set(src.name, { failures, retryAt: now + wait });
+    log.warn({ err: errorText(e), source: src.name, retryInMs: wait }, 'relay: could not read or mark an outbox, skipping it');
+  };
+  for (const src of sources) {
+    if (opts.stopped?.()) break;
+    const h = health.get(src.name);
+    if (h && h.retryAt > now) continue;
+    let rows: OutboxRow[];
+    try {
+      rows = await src.unsent(opts.batchSize);
+    } catch (e) {
+      failed(src, e);
+      continue;
+    }
+    if (rows.length >= opts.batchSize) full = true;
+    const sent: string[] = [];
+    let failure: unknown;
+    for (const row of rows) {
+      if (opts.stopped?.()) break;
+      try {
+        await publish(row);
+        sent.push(row.id);
+      } catch (e) {
+        failure = e;
+        break;
+      }
+    }
+    if (sent.length > 0) {
+      try {
+        await src.markSent(sent);
+        sentAny = true;
+      } catch (e) {
+        // Published but not marked: sent again later, and deduplicated by JetStream (msgID).
+        failed(src, e);
+        continue;
+      }
+    }
+    if (failure) throw failure;
+    health.delete(src.name);
+  }
+  return { sentAny, full };
+}
 
 const LOCK_RETRY_MS = 2000;
 const ERROR_RETRY_MS = 1000;
@@ -34,8 +124,10 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Moves rows from `platform.outbox` into JetStream, oldest first, one relay at a time
- * (Postgres advisory lock). Each message carries the envelope id as its NATS message id,
+ * Moves rows from every database's `platform.outbox` (`platformDatabases`: the control plane and each
+ * workspace database) into JetStream, oldest first per database, one relay at a time (Postgres advisory
+ * lock on the control plane, which also `LISTEN`s for new rows there; workspace databases are polled
+ * every `idleMs`). Each message carries the envelope id as its NATS message id,
  * so a crash between publish and `sent_at` only causes a deduplicated re-publish.
  * Runs until `signal` aborts.
  */
@@ -121,6 +213,8 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
     }
     nats = connected;
     let streamsReady = false;
+    const health: SourceHealth = new Map();
+    const js = nats.js;
 
     while (!signal.aborted) {
       if (!(await holdsLock())) return;
@@ -131,27 +225,13 @@ async function relayWhileLocked(opts: RelayOptions): Promise<void> {
           await ensureStreams(nats.jsm);
           streamsReady = true;
         }
-        const rows = (await adminDb.execute(
-          sql`select seq, id, nats_subject, payload from platform.outbox where sent_at is null order by seq limit ${batchSize}`,
-        )) as unknown as Row[];
-        full = rows.length >= batchSize;
-        const sent: string[] = [];
-        let failure: unknown;
-        for (const row of rows) {
-          if (signal.aborted || lost) break;
-          try {
-            await nats.js.publish(row.nats_subject, JSON.stringify(row.payload), { msgID: row.id });
-            sent.push(row.id);
-          } catch (e) {
-            failure = e;
-            break;
-          }
-        }
-        if (sent.length > 0) {
-          await adminDb.execute(sql`update platform.outbox set sent_at = now() where id in (${sql.join(sent.map((id) => sql`${id}`), sql`, `)})`);
-          sentAny = true;
-        }
-        if (failure) throw failure;
+        const sources = (await platformDatabases()).map(outboxSource);
+        ({ sentAny, full } = await relayTurn(
+          sources,
+          health,
+          (row) => js.publish(row.nats_subject, JSON.stringify(row.payload), { msgID: row.id }),
+          { batchSize, stopped: () => signal.aborted || lost },
+        ));
       } catch (e) {
         log.warn({ err: errorText(e) }, 'relay: publish failed, retrying');
         streamsReady = false;

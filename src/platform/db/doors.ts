@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import { PLATFORM_TENANT } from '../audit';
 import { config } from '../config';
 import { ScoutError } from '../errors';
-import { controlAdminDb, controlDb, pool, type Db } from './client';
+import { adminTransaction, controlAdminDb, controlDb, pool, type Db } from './client';
 import type { Tx } from './tenant';
 
 /**
@@ -71,6 +71,37 @@ export async function workspaceDb(tenantId: string): Promise<{ app: Db; admin: D
 /** Every workspace database, for cross-workspace jobs. `shared` mode: one entry standing for all tenants. */
 export async function listWorkspaceDatabases(): Promise<Array<{ tenantId: string; admin: Db }>> {
   return [{ tenantId: '*', admin: sharedWorkspace.admin }];
+}
+
+/** A database with its own outbox, schedules and dead jobs, as `scout_admin`. */
+export type PlatformDatabase = { name: string; admin: Db; control: boolean };
+
+/**
+ * Every database with an outbox, for the relay, the scheduler and dead jobs: the control plane
+ * (tenancy events, `t_platform` jobs), then each workspace database that is not the control plane's.
+ * `shared` mode: the control plane alone, since every workspace lives in it.
+ */
+export async function platformDatabases(): Promise<PlatformDatabase[]> {
+  const control: PlatformDatabase = { name: 'control', admin: controlAdminDb, control: true };
+  if (config.workspaceDatabases === 'shared') return [control];
+  const workspaces = await listWorkspaceDatabases();
+  return [control, ...workspaces.map((w) => ({ name: w.tenantId, admin: w.admin, control: false }))];
+}
+
+/**
+ * Runs `fn` in each database (`platformDatabases`) in turn, as `scout_admin`, until it finds what it
+ * looks for (returns `{ value }`, not undefined): for a platform admin acting on a row by id (a
+ * schedule, a dead job). The control plane's turn runs in a savepoint of `controlTx` when given.
+ */
+export async function inDatabaseHolding<T>(
+  controlTx: Tx | undefined,
+  fn: (tx: Tx, db: PlatformDatabase) => Promise<{ value: T } | undefined>,
+): Promise<{ value: T } | undefined> {
+  for (const db of await platformDatabases()) {
+    const found = await (db.control ? adminTransaction(controlTx, (tx) => fn(tx, db)) : db.admin.transaction((tx) => fn(tx, db)));
+    if (found) return found;
+  }
+  return undefined;
 }
 
 // Control-plane transactions, with the tenant `app.tenant_id` is set to (null for the admin role, which sees every tenant).
