@@ -197,7 +197,8 @@ describe('relay', () => {
     }
   }, 20000);
 
-  it('listens again on a workspace database whose LISTEN connection went silent (D35 review)', async () => {
+  // Only per_workspace has workspace databases of their own to listen on.
+  it.skipIf(process.env.SCOUT_WORKSPACE_DATABASES === 'shared')('listens again on a workspace database whose LISTEN connection went silent (D35 review)', async () => {
     await clear();
     const t = newId('t');
     const got: Got[] = [];
