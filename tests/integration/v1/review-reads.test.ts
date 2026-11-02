@@ -97,6 +97,7 @@ describe('GET /review-queue/facets', () => {
       { value: 'act_now', label: 'Act now', count: 2 },
       { value: 'good_fit', label: 'Good fit', count: 0 },
       { value: 'watch', label: 'Watch', count: 0 },
+      { value: 'nurture', label: 'Nurture', count: 0 },
       { value: 'not_fit', label: 'Not a fit', count: 0 },
     ]);
     expect(f.sources).toContainEqual({ value: src.agentId, label: 'Facet agent', count: 2 });

@@ -668,14 +668,14 @@ Files: `src/http/routes/v1/accounts/[id]/{score,matches}/**`, `src/http/routes/v
 | 4a | "6 won of 41 sent" on the trust tile | LATER (R3) | none | Trust from outcomes is R3. |
 | 4a | Warm intro line | READY | `/score` `warm_intro{introducer_name, points}` or null | |
 | 4a | Revenue potential tile | LATER (R2) | none | `revenue_potential_cents`, `revenue_band` null until R2. |
-| 21f | Read weights and cutoffs | SMALL GAP | `GET /api/v1/scoring/profile` (`scoring:manage`) | Returns the profile and `version`; model differs from the screen. Decision 21. |
-| 21f | Sliders summing to 100, `Balance to 100` | SMALL GAP | `PUT /api/v1/scoring/profile` | Weights 0 to 1; fit parts must sum to exactly 100; the "adds up to 100" check maps to fit parts only. Decision 21. |
-| 21f | Cutoffs per tier, ordering rule | SMALL GAP | `PUT /api/v1/scoring/profile` | Cutoffs are on match-level fit, intent and total; "each tier higher than the one below" is not validated (only 0 to 100). Add the check in `problems()` (`profile.ts`). |
+| 21f | Read weights and cutoffs | READY | `GET /api/v1/scoring/profile` (`scoring:manage`) | `weights`, `tier_cutoffs` and `defaults` (SCO-E6, done 2026-11-01, `docs/plans/2026-11-01-scoring-four-weights.md`). |
+| 21f | Sliders summing to 100, `Balance to 100` | READY | `PUT /api/v1/scoring/profile` | Four weights 0 to 60 in steps of 5 adding to 100 (SCO-E6); `Balance to 100` is client side. |
+| 21f | Cutoffs per tier, ordering rule | READY | `PUT /api/v1/scoring/profile` | `tier_cutoffs` Act now, Good fit, Watch; Nurture below; Not a fit = excluded only (SCO-E6). |
 | 21f | Save | READY | `PUT /api/v1/scoring/profile` (`scoring:manage`) | Partial patch; 202 with profile and `version`; errors name snake_case fields; audited. |
 | 21f | `Save and rescore` | READY | automatic on save | `rescoreOnRulesChanged` rescores the whole tenant. `POST /api/v1/rescore` (`scoring:manage`, optional `practice_id` or `source_id`) -> 202 `{job_id}`. Decision 22. |
 | 21f | `Restore defaults` | READY | `POST /api/v1/scoring/profile/reset` (`scoring:manage`) | 202. |
 | 21f | `Discard` | READY | client | |
-| 21f | "What changes": tier counts before and after, 8 sample accounts | NEW ENDPOINT | `POST /api/v1/scoring/profile:preview` (`scoring:manage`, no writes) | Data: `account_score`, `offer_match` (fit, intent, `match_total`, tier), pure `matchTotal`, `tierFor`, `priority`, `applyFloors`. Floors need research tier and warm points, not stored on the match: store them or state the approximation. Scoring spec tags preview R2; screens.md calls it a gap. |
+| 21f | "What changes": tier counts before and after, 8 sample accounts | READY | `POST /api/v1/scoring/profile:preview` (`scoring:manage`, no writes) | Same functions and floors as a rescore (SCO-E6). |
 | 21f | Rescore progress | LATER (R2) | job status endpoint | Toast "Rescoring started". |
 
 ### Proposed changes
@@ -1186,9 +1186,8 @@ user can overturn them.
    "In HubSpot" is the handoff state chip, not a review status.
 2. **Manual tier note.** (Call) Optional. The select saves on change; the change log records who and
    when.
-3. **Lowest tier after the scoring redesign.** Deferred to the scoring redesign plan; it does not block
-   any R1 screen.
-4. **Revenue potential before R2.** Deferred to the scoring redesign plan, with item 3.
+3. **Lowest tier after the scoring redesign.** Answered (2026-11-01, SCO-E6): Nurture below the Watch cutoff; excluded accounts stay Not a fit.
+4. **Revenue potential before R2.** Answered (2026-11-01, SCO-E6): computed now from the offer's deal size and company size.
 5. **Scoring settings before the redesign.** Decided by the user (2026-10-31): the Scoring weights tab stays hidden until the scoring redesign lands.
 6. **Remove source.** (Call) Remove is a soft delete: the source is archived and hidden from lists and
    pickers, its history kept. A source that has sent shows `Archive source` instead, which keeps it

@@ -181,12 +181,10 @@ step.
 3. **Score strip**, five tiles with bar and a note, as the scoring model returns them: Priority (note
    from the API's tier cutoffs, for example "Act now tier starts at 75"), Fit ("County transit agency
    with 3,000+ staff"), Buying intent ("RFP re-issue expected in December"), Revenue potential
-   ("$250K to $400K in year one"), Source trust. In today's scoring model only Priority, Fit and
-   Buying intent are scores "/ 100": Revenue potential shows "Arrives with enrichment" (R2) and
-   Source trust shows "Not enough data yet" (every source starts the same until R3), and the
-   Priority note is the API's sentence for the Act now thresholds. With the scoring redesign
-   (Decision 21) all five are "/ 100"; Source trust stays the same for every source until R3, when
-   its note becomes "RFP Watch: 6 won of 41 sent".
+   ("$250K to $400K in year one"), Source trust. Since the scoring redesign (Decision 21, SCO-E6)
+   all five are "/ 100" with the API's reason as the note; Priority's note is the Act now cutoff
+   sentence. Source trust is the same for every source until R3, when its note becomes "RFP Watch:
+   6 won of 41 sent".
 4. **Why now**: "{n} signals · newest first"; each date, text and source link.
 5. **Account facts** with badge "{n} conflicts to resolve" or "All facts agree". Rows label and
    value. A conflict (R2) shows both values side by side with source and date and `Keep this one`;
@@ -761,10 +759,10 @@ scorecard use them now.").
 
 ### 21f. Scoring weights
 
-**Tag** Redesign (scoring model plan, Decision 21) · **Who** `scoring:manage`
+**Tag** R1 since the scoring model plan (Decision 21, SCO-E6, 2026-11-01) · **Who** `scoring:manage`
 
 The screen follows the mockup's four-weight model, which needs the scoring redesign plan (a new
-scoring model and a full rescore). The tab is hidden until that plan lands.
+scoring model and a full rescore), done 2026-11-01.
 
 "Every account gets a priority score from 0 to 100. It blends four scores using these weights, and the
 result puts the account in a tier. The tier picks which playbook runs." Sliders 0 to 60 in steps of

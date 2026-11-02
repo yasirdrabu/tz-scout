@@ -15,6 +15,13 @@
       "when": 1793484272009,
       "tag": "0001_tier_override",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793566892463,
+      "tag": "0002_four_weights",
+      "breakpoints": true
     }
   ]
 }

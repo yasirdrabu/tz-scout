@@ -125,6 +125,48 @@ describe('Review queue', () => {
     );
   });
 
+  it('the banner links to Scoring weights only for scoring:manage', async () => {
+    serveQueue({ rescore: RESCORE, scopes: ['review:act', 'scoring:manage'] });
+    const first = renderApp('/t/taazaa/queue');
+    const banner = await screen.findByRole('region', { name: 'Scoring change' });
+    await waitFor(() => expect(within(banner).getByRole('link', { name: 'Open settings' })).toHaveAttribute('href', '/t/taazaa/settings/scoring-weights'));
+    first.unmount();
+    cleanup();
+    serveQueue({ rescore: RESCORE });
+    renderApp('/t/taazaa/queue');
+    const other = await screen.findByRole('region', { name: 'Scoring change' });
+    await screen.findByRole('button', { name: 'Miami-Dade County DTPW' });
+    expect(within(other).queryByRole('link', { name: 'Open settings' })).toBeNull();
+  });
+
+  it('shows the Nurture and Not a fit tabs only with a count or when selected', async () => {
+    const tiers = [
+      { value: 'act_now', label: 'Act now', count: 1 },
+      { value: 'good_fit', label: 'Good fit', count: 0 },
+      { value: 'watch', label: 'Watch', count: 1 },
+      { value: 'nurture', label: 'Nurture', count: 0 },
+      { value: 'not_fit', label: 'Not a fit', count: 2 },
+    ];
+    serveQueue({ facets: { ...FACETS, tiers } });
+    const first = renderApp('/t/taazaa/queue');
+    const list = await screen.findByRole('tablist', { name: 'Tier' });
+    expect(await within(list).findByRole('tab', { name: 'Not a fit 2' })).toBeInTheDocument();
+    expect(within(list).queryByRole('tab', { name: /Nurture/ })).toBeNull();
+    first.unmount();
+    cleanup();
+
+    serveQueue({ facets: { ...FACETS, tiers: tiers.map((t) => (t.value === 'nurture' ? { ...t, count: 3 } : t)) } });
+    const second = renderApp('/t/taazaa/queue');
+    expect(await screen.findByRole('tab', { name: 'Nurture 3' })).toBeInTheDocument();
+    second.unmount();
+    cleanup();
+
+    serveQueue({ facets: { ...FACETS, tiers: tiers.map((t) => ({ ...t, count: t.value === 'not_fit' ? 0 : t.count })) } });
+    renderApp('/t/taazaa/queue?tier=nurture');
+    expect(await screen.findByRole('tab', { name: 'Nurture 0' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('tab', { name: /Not a fit/ })).toBeNull();
+  });
+
   it('the banner leaves out the count when no account changed tier, and is not shown without a recent change', async () => {
     serveQueue({ rescore: { ...RESCORE, tier_changed_count: 0 } });
     const first = renderApp('/t/taazaa/queue');

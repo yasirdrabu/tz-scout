@@ -44,6 +44,8 @@ const pageSchema = z.object({
 });
 const anySchema = z.unknown();
 const namesSchema = z.object({ results: z.array(z.object({ name: z.string() })) });
+const optionSchema = z.object({ label: z.string(), value: z.string() }).passthrough();
+const propertiesSchema = z.object({ results: z.array(z.object({ name: z.string(), options: z.array(optionSchema).nullish() })) });
 const ownersSchema = z.object({
   results: z.array(z.object({ id: z.coerce.string(), firstName: z.string().nullish(), lastName: z.string().nullish(), email: z.string().nullish(), archived: z.boolean().nullish() })),
   paging: z.object({ next: z.object({ after: z.string() }).optional() }).optional(),
@@ -574,9 +576,23 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
     },
 
     async setUpProperties({ groupName, groupLabel, properties }) {
-      const have = new Set(await adapter.existingProperties({}));
+      const found = (await call(propertiesSchema, 'GET', '/crm/v3/properties/companies')).results;
+      const have = new Map(found.map((p) => [p.name, p]));
       const missing = properties.filter((p) => !have.has(p.name));
-      if (!missing.length) return { created: [] };
+      // A select property Scout set up earlier gains the options it lacks (a new tier, say); options a person added stay.
+      const widened = properties.flatMap((p) => {
+        const existing = have.get(p.name);
+        if (!existing || !p.options) return [];
+        const present = new Set((existing.options ?? []).map((o) => o.value));
+        const add = p.options.filter((o) => !present.has(o));
+        return add.length ? [{ name: p.name, options: [...(existing.options ?? []), ...add.map((o, i) => ({ label: o, value: o, displayOrder: (existing.options ?? []).length + i }))] }] : [];
+      });
+      const updated: string[] = [];
+      for (const w of widened) {
+        await call(anySchema, 'PATCH', `/crm/v3/properties/companies/${encodeURIComponent(w.name)}`, { options: w.options });
+        updated.push(w.name);
+      }
+      if (!missing.length) return { created: [], updated };
       const groups = await call(namesSchema, 'GET', '/crm/v3/properties/companies/groups');
       if (!groups.results.some((g) => g.name === groupName)) {
         await call(anySchema, 'POST', '/crm/v3/properties/companies/groups', { name: groupName, label: groupLabel ?? groupName });
@@ -595,7 +611,7 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
         });
         created.push(p.name);
       }
-      return { created };
+      return { created, updated };
     },
 
     // The client secret is a separate credential this adapter is not built from, so it cannot check a signature.

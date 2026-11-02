@@ -2,8 +2,9 @@ import { getAccountForScoring } from '@/modules/accounts';
 import { listApprovedOffers } from '@/modules/offers';
 import type { ModuleContext } from '@/platform/context';
 import type { FitPart, RuleHit, ScoringProfile, ScoringSignal } from '../contracts/types';
-import { matchTotal } from '../domain/combine';
-import { HARD_MISS_CAP, intentText, matchText, missingInputs, summarySentence, wouldRaise, type Explanation, type ExplanationLine } from '../domain/explain';
+import { matchScore } from '../domain/combine';
+import { HARD_MISS_CAP, intentText, missingInputs, revenueReason, scoreLines, summarySentence, wouldRaise, type Explanation, type ExplanationLine } from '../domain/explain';
+import { revenuePotential } from '../domain/revenue';
 import { scoreTiles, warmIntro, type ScoreTile } from '../domain/tiles';
 import { getMatches, getScore } from './read';
 import { getProfile } from './profile';
@@ -32,13 +33,14 @@ export type ScoreExplanation = Explanation & {
 const oneDecimal = (n: number) => Math.round(n * 10) / 10;
 
 /**
- * Lines for a non-best offer, from its stored match: no warm or trust adjustments. Fit and intent come from the match row;
- * a capped fit or total gets the same combine lines as the stored explanation, so the lines add up (SCO-E4-S1-AC1).
+ * Lines for a non-best offer, from its stored match: no warm adjustment. The four scores come from the match row (a match scored
+ * before the four-weight model has no revenue or trust score, so it shows the neutral 50 and trust); a capped fit or score gets the same combine lines as the stored explanation, so the lines add up (SCO-E4-S1-AC1).
  */
 function matchLines(
-  m: { fit: number; intent: number; matchTotal: number; fitParts: unknown; ruleHits: unknown; disqualifiedReason: string | null; computedAt: Date },
+  m: { fit: number; intent: number; revenueScore: number | null; trustScore: number | null; matchTotal: number; fitParts: unknown; ruleHits: unknown; disqualifiedReason: string | null; computedAt: Date },
   signals: ScoringSignal[],
   profile: ScoringProfile,
+  reasons: { revenue: string; trust: string | undefined },
 ): ExplanationLine[] {
   const lines: ExplanationLine[] = [];
   const parts = m.fitParts as FitPart[];
@@ -62,16 +64,19 @@ function matchLines(
   if (m.disqualifiedReason === null && Math.round(rawFit) > m.fit) {
     lines.push({ group: 'combine', label: 'Hard miss', points: m.fit, text: `Hard miss: fit capped at ${HARD_MISS_CAP}.` });
   }
-  if (matchTotal(m.fit, m.intent, profile).cappedAtFit) {
-    lines.push({ group: 'combine', label: 'Low fit', points: m.fit, text: `Fit below 50: total capped at fit (${m.fit}).` });
+  const scores = { fit: m.fit, intent: m.intent, revenue: m.revenueScore ?? 50, trust: m.trustScore ?? Math.round(profile.trustNeutral * 100) };
+  // A match written before the four-weight model has no revenue or trust score: no score lines, so the tiles say "Not scored yet."
+  if (m.revenueScore !== null && m.trustScore !== null) lines.push(...scoreLines(scores, profile.weights, { revenue: reasons.revenue, ...(reasons.trust === undefined ? {} : { trust: reasons.trust }) }));
+  if (matchScore(scores, profile).cappedAtFit) {
+    lines.push({ group: 'combine', label: 'Low fit', points: m.fit, text: `Fit below 50: score capped at fit (${m.fit}).` });
   }
-  lines.push({ group: 'combine', label: 'Match', points: m.matchTotal, text: matchText(m.fit, m.intent, profile) });
+  lines.push({ group: 'combine', label: 'Match', points: m.matchTotal, text: `Score ${m.matchTotal} from the four scores.` });
   return lines;
 }
 
 /**
  * The stored explanation with `wouldRaise` and `summary` (SCO-E4-S2). With `offerId` for an offer that is not the best,
- * explains that offer's match, where priority is the match total; `bestOffer` still names the best one.
+ * explains that offer's match, where priority is the match score; `bestOffer` still names the best one.
  * Null when the account is hidden or missing, has no score, or the offer has no match on it.
  */
 export async function explainScore(ctx: ModuleContext, accountId: string, opts: { offerId?: string } = {}): Promise<ScoreExplanation | null> {
@@ -103,7 +108,22 @@ export async function explainScore(ctx: ModuleContext, accountId: string, opts: 
       tier: m.tier as Explanation['tier'],
       tierReason: 'computed',
       bestOffer: offer,
-      lines: matchLines(m, toScoringSignals(view), profile),
+      lines: matchLines(m, toScoringSignals(view), profile, {
+        revenue: revenueReason(
+          revenuePotential({
+            typicalDealCents: named.typicalDealCents,
+            priceMinCents: named.priceMinCents,
+            expansionRate: named.expansionRate,
+            sizeMin: named.companySizeMin,
+            sizeMax: named.companySizeMax,
+            employees: account.employees,
+            referenceCents: null,
+          }),
+          named.name,
+        ),
+        // The account's trust is the same for every offer, so its reason is the one the stored explanation already wrote.
+        trust: stored.lines.find((l) => l.label === 'Source trust')?.reason,
+      }),
       otherOffers: matches
         .filter((x) => x !== m)
         .flatMap((x) => {
@@ -134,7 +154,7 @@ export async function explainScore(ctx: ModuleContext, accountId: string, opts: 
     summary: summarySentence(explanation),
     tiles: scoreTiles(
       { priority: explanation.priority, fit, intent, lines: explanation.lines, offer: offer?.name ?? null, datedSignals: view.signals.filter((s) => s.occurredAt).length },
-      profile.tierThresholds,
+      profile.tierCutoffs,
     ),
     warmIntro: warmIntro(explanation.lines),
   };

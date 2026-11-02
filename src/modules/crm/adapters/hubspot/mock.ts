@@ -401,7 +401,8 @@ ${note}` : note) : task.body;
             .returning({ name: mockProperty.name });
           if (rows.length) created.push(p.name);
         }
-        return { created };
+        // The stand-in keeps no option lists, so there is nothing to add to an existing property.
+        return { created, updated: [] };
       }),
 
     // Sample webhooks carry `x-hubspot-signature-v3: mock-valid`; the real check is the pure verifyHubSpotV3.

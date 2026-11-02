@@ -5,7 +5,7 @@ import { activityPollJob, dealsPollJob, ownersSyncJob } from './contracts/jobs';
 import { DEFAULT_FOLLOW_UP_DAYS } from './contracts/types';
 import { crmSetting, fieldMapping } from './db/schema';
 
-const TIER_LABELS = { act_now: 'Act now', good_fit: 'Good fit', watch: 'Watch', not_fit: 'Not a fit' };
+const TIER_LABELS = { act_now: 'Act now', good_fit: 'Good fit', watch: 'Watch', nurture: 'Nurture', not_fit: 'Not a fit' };
 
 type Transform = 'none' | 'date' | 'enum_map';
 

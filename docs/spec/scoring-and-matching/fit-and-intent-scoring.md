@@ -2,6 +2,8 @@
 
 Release R1 · Carried from `src/lib/matching.ts` (v1), unchanged in behaviour unless stated.
 
+> **Scoring redesign:** [SCO-E6](four-weight-model.md) replaces this epic's match total, trust modifier, tier thresholds and weights editor. Where they differ, SCO-E6 wins.
+
 ## Why
 
 A leader reviewing 100 accounts needs to know, for each one and each offer, "is this the kind of

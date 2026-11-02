@@ -87,14 +87,14 @@ export const SETTINGS_RULE: Rule = {
 
 export type SettingsTab = { tab: string; label: string; section: string; tag: string; rule: Rule; hidden?: boolean };
 
-/** Settings tabs in order (screens.md §21). Pipeline stages and Scoring weights stay hidden until their redesigns land. */
+/** Settings tabs in order (screens.md §21). Pipeline stages stays hidden until its redesign lands. */
 export const SETTINGS_TABS: SettingsTab[] = [
   { tab: 'members', label: 'Members', section: '21a', tag: 'R1', rule: { any: ['members:read', 'members:manage'] } },
   { tab: 'integrations', label: 'Integrations', section: '21b', tag: 'R1', rule: { all: ['integrations:manage'] } },
   { tab: 'api-keys', label: 'API keys', section: '21c', tag: 'R1', rule: { all: ['keys:manage'] } },
   { tab: 'review-statuses', label: 'Review statuses', section: '21d', tag: 'R1', rule: { all: ['settings:manage'] } },
   { tab: 'pipeline-stages', label: 'Pipeline stages', section: '21e', tag: 'Redesign', rule: { all: ['settings:manage'] }, hidden: true },
-  { tab: 'scoring-weights', label: 'Scoring weights', section: '21f', tag: 'Redesign', rule: { all: ['scoring:manage'] }, hidden: true },
+  { tab: 'scoring-weights', label: 'Scoring weights', section: '21f', tag: 'R1', rule: { all: ['scoring:manage'] } },
   { tab: 'audit-log', label: 'Audit log', section: '21g', tag: 'R1', rule: { all: ['audit:read'] } },
   { tab: 'ai-runs', label: 'AI runs', section: '21h', tag: 'R1', rule: { all: ['settings:manage'] } },
 ];

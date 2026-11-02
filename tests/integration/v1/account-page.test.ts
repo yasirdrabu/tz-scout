@@ -16,6 +16,8 @@ import { seedMockCrm, syncOwners } from '@/modules/crm';
 import { activity, companyCheck, followThrough, handoff } from '@/modules/crm/db/schema';
 import { setMockFailure } from '@/modules/crm/fixtures';
 import { arrival } from '@/modules/intake/db/schema';
+import { offer as offerTable } from '@/modules/offers/db/schema';
+import { offerMatch } from '@/modules/scoring/db/schema';
 import { setConnectionSettings } from '@/modules/integrations';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
 import { setPrincipalCacheTtl } from '@/modules/tenancy';
@@ -31,6 +33,7 @@ let other: Workspace;
 let leader: string;
 let seller: string;
 let otherAccount: string;
+let bestPractice: string;
 let bestOfferId: string;
 let otherOfferId: string;
 let unmatchedOfferId: string;
@@ -46,6 +49,7 @@ beforeAll(async () => {
   const best = await w.run((ctx) => createOffer(ctx, { name: 'Page Best', practiceId: practice.id, ...completeOffer }));
   const second = await w.run((ctx) => createOffer(ctx, { name: 'Page Other', practiceId: practice.id, ...completeOffer, industries: ['healthcare'] }));
   for (const o of [best, second]) await w.run((ctx) => approveOffer(ctx, o.id));
+  bestPractice = practice.id;
   bestOfferId = best.id;
   otherOfferId = second.id;
   unmatchedOfferId = (await w.run((ctx) => createOffer(ctx, { name: 'Page Draft', practiceId: practice.id, ...completeOffer }))).id;
@@ -70,11 +74,12 @@ describe('GET /accounts/{id}/score tiles and warm_intro', () => {
       ['revenue_potential', 'Revenue potential'],
       ['source_trust', 'Source trust'],
     ]);
-    expect(s.tiles[0]).toMatchObject({ value: s.priority, max: 100, note: expect.stringMatching(/^Act now needs a priority of \d+, fit \d+ and buying intent \d+\.$/) });
+    expect(s.tiles[0]).toMatchObject({ value: s.priority, max: 100 });
     expect(s.tiles[1]).toMatchObject({ value: s.fit, max: 100 });
     expect(s.tiles[2]).toMatchObject({ value: s.intent, max: 100, note: 'No dated signals yet.' });
-    expect(s.tiles[3]).toEqual({ key: 'revenue_potential', label: 'Revenue potential', value: null, max: null, note: 'Arrives with enrichment' });
-    expect(s.tiles[4]).toEqual({ key: 'source_trust', label: 'Source trust', value: null, max: null, note: 'Not enough data yet' });
+    expect(s.tiles[0].note).toBe('Act now starts at 75 with a research or trigger signal.');
+    expect(s.tiles[3]).toEqual({ key: 'revenue_potential', label: 'Revenue potential', value: expect.any(Number), max: 100, note: "About $50,000 a deal at this company's size (medium)." });
+    expect(s.tiles[4]).toEqual({ key: 'source_trust', label: 'Source trust', value: expect.any(Number), max: 100, note: expect.stringMatching(/rated|counts as 60/) });
     expect(s.warm_intro).toBeNull();
   });
 
@@ -105,6 +110,29 @@ describe('GET /accounts/{id}/score tiles and warm_intro', () => {
     expect(s.tiles[1].value).toBe(s.fit);
     expect(s.tiles[0].value).toBe(s.priority);
     expect((await w.as(leader, getScore, `accounts/${a}/score?offer_id=${unmatchedOfferId}`)).status).toBe(404);
+  });
+
+  it("a chosen offer's tiles carry the reasons, say when it has no deal size, and say not scored yet for a match from before the four-weight model", async () => {
+    const a = await w.sent({ name: 'Reason Tile Co', industry: 'Logistics' });
+    const noDeal = await w.run((ctx) =>
+      createOffer(ctx, { name: 'Page No Deal', practiceId: bestPractice, ...completeOffer, industries: ['healthcare'] }),
+    );
+    await w.run((ctx) => approveOffer(ctx, noDeal.id));
+    // Approval needs a deal size; an offer can lose it afterwards.
+    await w.run((ctx) => ctx.tx.update(offerTable).set({ typicalDealCents: null }).where(eq(offerTable.id, noDeal.id)));
+    await w.deliver();
+    const best = await json(w.as(leader, getScore, `accounts/${a}/score`));
+    const chosen = await json(w.as(leader, getScore, `accounts/${a}/score?offer_id=${otherOfferId}`));
+    expect(chosen.tiles[3]).toMatchObject({ value: expect.any(Number), max: 100, note: "About $50,000 a deal at this company's size (medium)." });
+    expect(chosen.tiles[4]).toMatchObject({ value: expect.any(Number), max: 100, note: best.tiles[4].note });
+    expect(chosen.tiles[4].note).not.toBe('');
+    const empty = await json(w.as(leader, getScore, `accounts/${a}/score?offer_id=${noDeal.id}`));
+    expect(empty.tiles[3]).toMatchObject({ value: 50, note: 'No deal size on Page No Deal.' });
+
+    await w.run((ctx) => ctx.tx.update(offerMatch).set({ revenueScore: null, trustScore: null }).where(and(eq(offerMatch.accountId, a), eq(offerMatch.offerId, otherOfferId))));
+    const old = await json(w.as(leader, getScore, `accounts/${a}/score?offer_id=${otherOfferId}`));
+    expect(old.tiles[3]).toEqual({ key: 'revenue_potential', label: 'Revenue potential', value: null, max: null, note: 'Not scored yet.' });
+    expect(old.tiles[4]).toEqual({ key: 'source_trust', label: 'Source trust', value: null, max: null, note: 'Not scored yet.' });
   });
 
   it('needs accounts:read, is a 404 across tenants, and a seller reads their own account', async () => {

@@ -298,6 +298,12 @@
   color: var(--ink-600);
 }
 
+.tier_nurture {
+  border: 1px dashed var(--ink-300);
+  background: transparent;
+  color: var(--text-soft);
+}
+
 .tier_low {
   border: 1px solid var(--line);
   background: var(--surface);

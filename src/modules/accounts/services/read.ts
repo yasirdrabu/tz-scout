@@ -252,6 +252,18 @@ export async function getAccountForScoring(ctx: ModuleContext, accountId: string
   };
 }
 
+/** What a floor needs of many accounts at once, for scoring's preview: the research tier and its date, and the practices. No visibility filter; it carries no account content. */
+export type FloorBasics = { researchTier: 'A' | 'B' | 'C' | null; researchTierSignalAt: Date | null; practiceIds: string[] };
+
+export async function floorBasics(ctx: ModuleContext, ids: string[]): Promise<Map<string, FloorBasics>> {
+  if (ids.length === 0) return new Map();
+  const rows = await ctx.tx
+    .select({ id: account.id, researchTier: account.researchTier, researchTierSignalAt: account.researchTierSignalAt, practiceIds: account.practiceIds })
+    .from(account)
+    .where(and(eq(account.tenantId, ctx.tenantId), inArray(account.id, ids)));
+  return new Map(rows.map((r) => [r.id, { researchTier: r.researchTier as FloorBasics['researchTier'], researchTierSignalAt: r.researchTierSignalAt, practiceIds: r.practiceIds }]));
+}
+
 /** An outside system's id for an account (`personId` null) or one of its people, as recorded when it arrived. */
 export type ExternalIdRow = { accountId: string; personId: string | null; system: string; id: string };
 

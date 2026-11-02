@@ -30,6 +30,7 @@ One-shot commands
   backfill-r1b <slug>   Give a workspace built before R1b its scoring and routing defaults, a review row for each account, and a rescore
   backfill-r1c <slug>   Give a workspace built before R1c its CRM defaults and schedules, a company check for each account, and its HubSpot links
   backfill-review-flow <slug>  Send a workspace's earlier lead offer picks to the account summary, so the offer filter finds them
+  rescore             [--tenant <slug>]  Rescore every account in every active workspace, or in one; each change is recorded as a rules change
   keys:create         --tenant <slug> --name <name> --scopes a,b [--test]
   tenants:create      --slug <s> --name <n> --currency <USD> --timezone <zone> --owner-email <email>
                       Operator command: run it on the server. It acts as a system platform admin.
@@ -147,6 +148,25 @@ async function backfillTenant(slug: string, release: 'r1b' | 'r1c' | 'review-flo
   return 0;
 }
 
+/** Queues a rescore of every account in one workspace, or in every active one. The worker does the scoring. */
+async function rescoreTenants(slug: string | undefined): Promise<number> {
+  const { requestRescore } = await import('@/modules/scoring');
+  const { ensurePlatformAdmin, listTenants } = await import('@/modules/tenancy');
+  const { withTenant } = await import('@/platform/db/tenant');
+  const { newId } = await import('@/platform/ids');
+  const all = await listTenants();
+  const tenants = slug ? all.filter((t) => t.slug === slug) : all.filter((t) => t.status === 'active');
+  if (slug && tenants.length === 0) throw new Error(`No workspace with the slug "${slug}".`);
+  const adminId = await ensurePlatformAdmin('system@scout.local');
+  for (const tenant of tenants) {
+    await withTenant(tenant.id, (tx) =>
+      requestRescore({ tenantId: tenant.id, actor: { kind: 'system', id: adminId }, correlationId: newId('cor'), tx }, {}, 'rules_changed'),
+    );
+    console.log(`Workspace ${tenant.slug}: rescore queued. Scores will refresh as the worker runs.`);
+  }
+  return 0;
+}
+
 /** Runs one command. Returns the exit code. */
 export async function run(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
@@ -201,6 +221,10 @@ ${USAGE}`);
 
 ${USAGE}`);
       return backfillTenant(slug, 'review-flow');
+    }
+    case 'rescore': {
+      const { values } = parseArgs({ args: rest, options: { tenant: { type: 'string' } } });
+      return rescoreTenants(values.tenant);
     }
     case 'keys:create': {
       const { values } = parseArgs({

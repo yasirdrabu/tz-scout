@@ -3,16 +3,14 @@ import { upsertSchedule } from '@/platform/scheduler';
 import { ageingJob } from './contracts/jobs';
 import { scoringProfile } from './db/schema';
 
-/** The scoring defaults every tenant starts with (SCO-E1 to E3). */
+/** The scoring defaults every tenant starts with (SCO-E1 to E3, SCO-E6). */
 export const DEFAULT_PROFILE = {
-  fitWeight: 0.55,
-  intentWeight: 0.45,
+  weights: { fit: 40, intent: 25, revenue: 15, trust: 20 },
   fitParts: { industry: 30, size: 25, revenue: 20, region: 10, buyer: 15 },
   halfLifeDays: 45,
   maxSignalAgeDays: 365,
-  tierThresholds: { notFitBelow: 40, actNow: { fit: 60, intent: 35, total: 60 }, goodFit: { fit: 60 } },
+  tierCutoffs: { actNow: 75, goodFit: 55, watch: 35 },
   warmIntroCap: 20,
-  trustModifierMax: 5,
   trustNeutral: 0.6,
   researchFloorDays: 180,
 };

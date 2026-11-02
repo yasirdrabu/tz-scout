@@ -13,14 +13,12 @@ const ratio = (name: string) => numeric(name, { precision: 5, scale: 4, mode: 'n
 /** One row per tenant. Every change bumps `version` and publishes `scoring.rules.changed`. */
 export const scoringProfile = scoring.table('scoring_profile', {
   tenantId: text('tenant_id').primaryKey(),
-  fitWeight: ratio('fit_weight').notNull(),
-  intentWeight: ratio('intent_weight').notNull(),
+  weights: jsonb('weights').notNull().default(sql`'{"fit":40,"intent":25,"revenue":15,"trust":20}'::jsonb`), // fit, intent, revenue, trust: 0 to 60 in fives, adding to 100
   fitParts: jsonb('fit_parts').notNull(), // maxes per part: industry, size, revenue, region, buyer
   halfLifeDays: integer('half_life_days').notNull(),
   maxSignalAgeDays: integer('max_signal_age_days').notNull(),
-  tierThresholds: jsonb('tier_thresholds').notNull(),
+  tierCutoffs: jsonb('tier_cutoffs').notNull().default(sql`'{"actNow":75,"goodFit":55,"watch":35}'::jsonb`), // lowest score of act now, good fit, watch
   warmIntroCap: integer('warm_intro_cap').notNull(),
-  trustModifierMax: integer('trust_modifier_max').notNull(),
   trustNeutral: ratio('trust_neutral').notNull(),
   researchFloorDays: integer('research_floor_days').notNull(),
   version: integer('version').notNull().default(1),
@@ -38,8 +36,10 @@ export const offerMatch = scoring.table(
     offerId: text('offer_id').notNull(),
     fit: integer('fit').notNull(),
     intent: integer('intent').notNull(),
-    matchTotal: integer('match_total').notNull(),
-    tier: text('tier').notNull(), // not_fit | watch | good_fit | act_now
+    revenueScore: integer('revenue_score'), // null on matches scored before the four-weight model
+    trustScore: integer('trust_score'),
+    matchTotal: integer('match_total').notNull(), // the match score
+    tier: text('tier').notNull(), // not_fit | nurture | watch | good_fit | act_now
     fitParts: jsonb('fit_parts').notNull(),
     ruleHits: jsonb('rule_hits').notNull(),
     disqualifiedReason: text('disqualified_reason'),
@@ -62,13 +62,15 @@ export const accountScore = scoring.table(
     practiceId: text('practice_id'),
     fit: integer('fit').notNull(),
     intent: integer('intent').notNull(),
-    matchTotal: integer('match_total').notNull(),
+    revenueScore: integer('revenue_score'),
+    trustScore: integer('trust_score'),
+    matchTotal: integer('match_total').notNull(), // the best match's score
     warmPoints: integer('warm_points').notNull().default(0),
     warmIntroducerId: text('warm_introducer_id'),
     warmIntroducerName: text('warm_introducer_name'),
     trust: ratio('trust'),
     trustSourceId: text('trust_source_id'),
-    trustModifier: integer('trust_modifier').notNull().default(0),
+    trustModifier: integer('trust_modifier').notNull().default(0), // written 0 since the four-weight model; trust is a weighted score
     priority: integer('priority').notNull(),
     tier: text('tier').notNull(),
     tierReason: text('tier_reason').notNull(), // computed | research_floor | warm_intro_floor
@@ -79,8 +81,8 @@ export const accountScore = scoring.table(
     tierOverrideBy: text('tier_override_by'),
     tierOverrideAt: at('tier_override_at'),
     tierOverrideNote: text('tier_override_note'),
-    revenuePotentialCents: bigint('revenue_potential_cents', { mode: 'number' }), // null until R2
-    revenueBand: text('revenue_band'), // low | medium | high, null until R2
+    revenuePotentialCents: bigint('revenue_potential_cents', { mode: 'number' }), // the best offer's, null with no deal size
+    revenueBand: text('revenue_band'), // low | medium | high
     explanation: jsonb('explanation').notNull(),
     inputsHash: text('inputs_hash').notNull(),
     profileVersion: integer('profile_version').notNull(),

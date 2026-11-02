@@ -2,6 +2,8 @@
 
 Release R1 (revenue potential R2)
 
+> **Scoring redesign:** [SCO-E6](four-weight-model.md) replaces this epic's match total, trust modifier, tier thresholds and weights editor. Where they differ, SCO-E6 wins.
+
 ## Why
 
 The queue needs one number to sort by. It should start from how well the account matches its best

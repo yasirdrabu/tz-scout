@@ -1,17 +1,21 @@
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { GET as getHistory } from '@/http/routes/v1/accounts/[id]/score/history/route';
 import { GET as getMatches } from '@/http/routes/v1/accounts/[id]/matches/route';
 import { GET as getScore } from '@/http/routes/v1/accounts/[id]/score/route';
 import { POST as rescore } from '@/http/routes/v1/rescore/route';
+import { POST as previewProfile } from '@/http/routes/v1/scoring/[profile]/route';
 import { POST as resetProfile } from '@/http/routes/v1/scoring/profile/reset/route';
 import { GET as getLastRescore } from '@/http/routes/v1/scoring/last-rescore/route';
 import { GET as getProfile, PUT as putProfile } from '@/http/routes/v1/scoring/profile/route';
 import { upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { approveOffer, createOffer, createPractice, replaceSignalRules } from '@/modules/offers';
 import { lastRescore, scoreAccount } from '@/modules/scoring';
+import { accountScore, scoreChange } from '@/modules/scoring/db/schema';
 import { setPrincipalCacheTtl, type Permission } from '@/modules/tenancy';
 import { closeDbs } from '@/platform/db/client';
+import { outbox } from '@/platform/db/schema';
 import { newId } from '@/platform/ids';
 import { runOutbox } from '../helpers/run-outbox';
 import { completeOffer } from '../offers/helpers';
@@ -128,7 +132,7 @@ describe('GET /api/v1/accounts/{id}/score', () => {
     expect(cap).toMatchObject({ group: 'combine', points: m.fit, text: 'Hard miss: fit capped at 45.' });
     const fitSum = body.lines.filter((l: { group: string }) => l.group === 'fit').reduce((a: number, l: { points: number }) => a + l.points, 0);
     expect(fitSum).toBeGreaterThan(m.fit);
-    expect(body.lines.find((l: { label: string }) => l.label === 'Match')).toMatchObject({ points: m.match_total, text: expect.stringMatching(/^\d+% fit \(\d+\) and \d+% intent \(\d+\)\.$/) });
+    expect(body.lines.find((l: { label: string }) => l.label === 'Match')).toMatchObject({ points: m.match_total, text: `Score ${m.match_total} from the four scores.` });
     expect(body.summary).not.toMatch(/strong fit|decent fit/);
     expect(body.summary).toContain('weak fit');
     expect(body.priority).toBeLessThanOrEqual(best.priority);
@@ -230,30 +234,40 @@ describe('scoring profile', () => {
     const w = await world();
     const key = await keyFor(w.t, MANAGE, ALL);
     const got = await json(await call(getProfile, key, 'scoring/profile'));
-    expect(got).toMatchObject({
-      fit_weight: 0.55,
-      half_life_days: 45,
-      tier_thresholds: { not_fit_below: 40, act_now: { fit: 60, intent: 35, total: 60 }, good_fit: { fit: 60 } },
-      version: expect.any(Number),
-    });
+    const defaults = {
+      weights: { fit: 40, intent: 25, revenue: 15, trust: 20 },
+      tier_cutoffs: { act_now: 75, good_fit: 55, watch: 35 },
+    };
+    expect(got).toMatchObject({ ...defaults, half_life_days: 45, version: expect.any(Number), defaults: { ...defaults, half_life_days: 45 } });
+    expect(got).not.toHaveProperty('fit_weight');
+    expect(got).not.toHaveProperty('tier_thresholds');
 
     const put = (body: unknown) => call(putProfile, key, 'scoring/profile', { method: 'PUT', body });
     const bad = await put({ fit_parts: { industry: 50 } });
     expect(bad.status).toBe(400);
     expect((await json(bad)).errors).toEqual([{ path: 'fit_parts', message: 'The fit parts must add up to 100.' }]);
-    expect((await put({ fit_weight: 0, intent_weight: 0 })).status).toBe(400);
+    expect((await put({ fit_weight: 0.5 })).status).toBe(400);
+    const sum = await put({ weights: { fit: 35 } });
+    expect(sum.status).toBe(400);
+    expect((await json(sum)).errors).toEqual([{ path: 'weights', message: 'Weights add up to 95. Make them add up to 100.' }]);
+    const order = await put({ tier_cutoffs: { act_now: 75, good_fit: 80 } });
+    expect(order.status).toBe(400);
+    expect((await json(order)).errors).toEqual([{ path: 'tier_cutoffs.act_now', message: 'Act now has to start higher than Good fit.' }]);
+    const low = await put({ tier_cutoffs: { watch: 55 } });
+    expect((await json(low)).errors).toEqual([{ path: 'tier_cutoffs.good_fit', message: 'Good fit has to start higher than Watch.' }]);
     expect((await put({ half_life_days: 'x' })).status).toBe(400);
     expect((await put({ nope: 1 })).status).toBe(400);
 
-    const res = await put({ half_life_days: 30, tier_thresholds: { act_now: { total: 70 } } });
+    const res = await put({ half_life_days: 30, weights: { fit: 45, trust: 15 }, tier_cutoffs: { act_now: 70 } });
     expect(res.status).toBe(202);
     const saved = await json(res);
     expect(saved).toMatchObject({
       half_life_days: 30,
       version: got.version + 1,
-      tier_thresholds: { not_fit_below: 40, act_now: { fit: 60, intent: 35, total: 70 } },
+      weights: { fit: 45, intent: 25, revenue: 15, trust: 15 },
+      tier_cutoffs: { act_now: 70, good_fit: 55, watch: 35 },
     });
-    expect(await json(await call(getProfile, key, 'scoring/profile'))).toEqual(saved);
+    expect(await json(await call(getProfile, key, 'scoring/profile'))).toEqual({ ...saved, defaults: got.defaults });
   });
 
   it('a PUT changes tiers once the jobs have run, and reset puts the defaults back', async () => {
@@ -262,18 +276,103 @@ describe('scoring profile', () => {
     const key = await keyFor(w.t, MANAGE, ALL);
     const before = await json(await call(getScore, reader, `accounts/${w.mine}/score`));
     expect(before.tier).not.toBe('not_fit');
-    const put = await call(putProfile, key, 'scoring/profile', { method: 'PUT', body: { tier_thresholds: { not_fit_below: 100 } } });
+    const put = await call(putProfile, key, 'scoring/profile', { method: 'PUT', body: { tier_cutoffs: { act_now: 100, good_fit: 99, watch: 98 } } });
     expect(put.status).toBe(202);
     await runOutbox(w.t.tenantId);
     const after = await json(await call(getScore, reader, `accounts/${w.mine}/score`));
-    expect(after.tier).toBe('not_fit');
+    expect(after.tier).toBe('nurture');
     expect(after.profile_version).toBe(before.profile_version + 1);
 
     const reset = await call(resetProfile, key, 'scoring/profile/reset', { method: 'POST', body: {} });
     expect(reset.status).toBe(202);
-    expect((await json(reset)).tier_thresholds.not_fit_below).toBe(40);
+    expect((await json(reset)).tier_cutoffs).toEqual({ act_now: 75, good_fit: 55, watch: 35 });
     await runOutbox(w.t.tenantId);
     expect((await json(await call(getScore, reader, `accounts/${w.mine}/score`))).tier).toBe(before.tier);
+  });
+});
+
+describe('POST /api/v1/scoring/profile:preview (SCO-E6-S4-AC3)', () => {
+  const PATH = 'scoring/profile:preview';
+  const tiers = ['not_fit', 'nurture', 'watch', 'good_fit', 'act_now'];
+  const total = (c: Record<string, number>) => Object.values(c).reduce((a, b) => a + b, 0);
+  const NURTURE_ALL = { tier_cutoffs: { act_now: 100, good_fit: 99, watch: 98 } };
+
+  it('needs scoring:manage, only answers profile:preview, and checks the draft like a save', async () => {
+    const w = await world();
+    const reader = await keyFor(w.t, READ, ALL);
+    const key = await keyFor(w.t, MANAGE, ALL);
+    expect((await call(previewProfile, reader, PATH, { body: {} })).status).toBe(403);
+    expect((await call(previewProfile, key, 'scoring/profile:nope', { body: {} })).status).toBe(404);
+    expect((await call(previewProfile, key, 'scoring/profile', { body: {} })).status).toBe(404);
+    const sum = await call(previewProfile, key, PATH, { body: { weights: { fit: 35 } } });
+    expect(sum.status).toBe(400);
+    expect((await json(sum)).errors).toEqual([{ path: 'weights', message: 'Weights add up to 95. Make them add up to 100.' }]);
+    const order = await call(previewProfile, key, PATH, { body: { tier_cutoffs: { act_now: 50 } } });
+    expect((await json(order)).errors).toEqual([{ path: 'tier_cutoffs.act_now', message: 'Act now has to start higher than Good fit.' }]);
+    expect((await call(previewProfile, key, PATH, { body: { half_life_days: 30 } })).status).toBe(400);
+  });
+
+  it('counts tiers before and after for recently scored accounts, with samples, and writes nothing', async () => {
+    const w = await world();
+    const key = await keyFor(w.t, MANAGE, ALL);
+    const state = () =>
+      w.t.run(async (ctx) => ({
+        scores: await ctx.tx.select().from(accountScore),
+        changes: (await ctx.tx.select().from(scoreChange)).length,
+        events: (await ctx.tx.select().from(outbox)).length,
+      }));
+    const profileBefore = await json(await call(getProfile, key, 'scoring/profile'));
+    const before = await state();
+
+    const res = await call(previewProfile, key, PATH, { body: NURTURE_ALL });
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(Object.keys(body.before)).toEqual(tiers);
+    expect(Object.keys(body.after)).toEqual(tiers);
+    expect(total(body.before)).toBe(2);
+    expect(total(body.after)).toBe(2);
+    expect(body.before.nurture).toBe(0);
+    expect(body.after.nurture).toBe(2);
+    expect(body.samples).toHaveLength(2);
+    expect(body.samples[0]).toEqual({
+      account_id: expect.any(String),
+      name: 'Score Co',
+      fit: expect.any(Number),
+      intent: expect.any(Number),
+      revenue: expect.any(Number),
+      trust: expect.any(Number),
+      score_before: expect.any(Number),
+      score_after: expect.any(Number),
+      tier_before: expect.any(String),
+      tier_after: 'nurture',
+    });
+
+    // The saved settings as the draft: nothing moves.
+    const same = await json(await call(previewProfile, key, PATH, { body: {} }));
+    expect(same.after).toEqual(same.before);
+
+    // Nothing was written: no score, no history, no event; the profile reads the same.
+    expect(await state()).toEqual(before);
+    expect(await json(await call(getProfile, key, 'scoring/profile'))).toEqual(profileBefore);
+  });
+
+  it('a hand-set tier stays in the preview, and an account scored over 90 days ago is not counted', async () => {
+    const w = await world();
+    const key = await keyFor(w.t, MANAGE, ALL);
+    await w.t.run((ctx) => ctx.tx.update(accountScore).set({ tierOverride: 'act_now', tier: 'act_now' }).where(eq(accountScore.accountId, w.mine)));
+    await w.t.run((ctx) => ctx.tx.update(accountScore).set({ computedAt: new Date(Date.now() - 91 * 86_400_000) }).where(eq(accountScore.accountId, w.theirs)));
+    const body = await json(await call(previewProfile, key, PATH, { body: NURTURE_ALL }));
+    expect(body.before.act_now).toBe(1);
+    expect(body.after.act_now).toBe(1);
+    expect(total(body.after)).toBe(1);
+  });
+
+  it('SCO-E6-S4-AC5: another workspace is not counted', async () => {
+    const w = await world();
+    await world();
+    const key = await keyFor(w.t, MANAGE, ALL);
+    const body = await json(await call(previewProfile, key, PATH, { body: {} }));
+    expect(total(body.before)).toBe(2);
   });
 });
 
@@ -316,7 +415,7 @@ describe('GET /api/v1/scoring/last-rescore (Ruling 16)', () => {
     expect((await json(empty)).data).toBeNull();
 
     const before = await tiers();
-    const put = await w.as(w.owner, putProfile, 'scoring/profile', 'PUT', { fit_weight: 0.6, intent_weight: 0.4, tier_thresholds: { not_fit_below: 100 } });
+    const put = await w.as(w.owner, putProfile, 'scoring/profile', 'PUT', { weights: { fit: 60, intent: 20, revenue: 10, trust: 10 }, tier_cutoffs: { act_now: 100, good_fit: 99, watch: 98 } });
     expect(put.status).toBe(202);
     await w.deliver();
     const after = await tiers();
@@ -329,7 +428,7 @@ describe('GET /api/v1/scoring/last-rescore (Ruling 16)', () => {
       changed_at: expect.any(String),
       changed_by_name: 'Rescore Co Owner',
       summary: 'Scoring settings changed',
-      weights_text: 'Fit 60%, buying intent 40%',
+      weights_text: 'Fit 60%, buying intent 20%, revenue potential 10%, source trust 10%',
       tier_changed_count: moved,
     });
 
@@ -351,7 +450,7 @@ describe('GET /api/v1/scoring/last-rescore (Ruling 16)', () => {
   it("never reports another tenant's change", async () => {
     const mine = await workspace('Rescore Mine');
     const theirs = await workspace('Rescore Theirs');
-    expect((await theirs.as(theirs.owner, putProfile, 'scoring/profile', 'PUT', { fit_weight: 0.7, intent_weight: 0.3 })).status).toBe(202);
+    expect((await theirs.as(theirs.owner, putProfile, 'scoring/profile', 'PUT', { weights: { fit: 50, intent: 30, revenue: 10, trust: 10 } })).status).toBe(202);
     expect((await json(await mine.as(mine.owner, getLastRescore, 'scoring/last-rescore'))).data).toBeNull();
   });
 });

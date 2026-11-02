@@ -22,7 +22,7 @@ import { getArrival, intakeSourceInfo, registerSource, submitArrival } from '@/m
 import { arrivalRejected, arrivalResolved, sourceTrustChanged } from '@/modules/intake/contracts/events';
 import { approveOffer, archiveOffer, createOffer, createPractice, listApprovedOffers } from '@/modules/offers';
 import { offerChanged } from '@/modules/offers/contracts/events';
-import { getScore, requestRescore, scoreAccount, updateProfile } from '@/modules/scoring';
+import { getScore, requestRescore, scoreAccount, setTierOverride, updateProfile } from '@/modules/scoring';
 import { accountScore, offerMatch, scoreChange } from '@/modules/scoring/db/schema';
 import { ageingPage, rescoreAccounts } from '@/modules/scoring/services/rescore';
 import type { ModuleContext } from '@/platform/context';
@@ -31,6 +31,7 @@ import { newId } from '@/platform/ids';
 import { publishTestEvent } from '../helpers/publish';
 import { runOutbox } from '../helpers/run-outbox';
 import { completeOffer, freshTenant } from '../offers/helpers';
+import { asPerson } from '../routing/helpers';
 
 afterAll(closeDbs);
 afterEach(() => {
@@ -310,25 +311,41 @@ describe('fan-out on trust and rules', () => {
     };
     const accA = await send(agentA);
     const accB = await send(agentB);
-    expect((await current(t, accA))!.trustModifier).toBe(0);
+    expect((await current(t, accA))!.trustScore).toBe(60);
     vi.spyOn(intakeSourceInfo, 'getTrust').mockResolvedValue(0.9);
     await publishTestEvent(t.tenantId, sourceTrustChanged, { sourceId: agentA, level: 'agent', from: 0.6, to: 0.9, sampleSize: 20, cause: 'outcomes' });
     await runOutbox(t.tenantId);
-    expect((await current(t, accA))!.trustModifier).toBe(5);
-    expect((await current(t, accB))!.trustModifier).toBe(0);
+    expect((await current(t, accA))!.trustScore).toBe(90);
+    expect((await current(t, accA))!.trustModifier).toBe(0);
+    expect((await current(t, accB))!.trustScore).toBe(60);
     expect((await changes(t, accA)).some((c) => c.cause === 'trust_changed')).toBe(true);
   });
 
-  it('SCO-E3-S1-AC4: a threshold change moves tiers after the jobs run', async () => {
+  it('SCO-E3-S1-AC4: a cutoff change moves tiers after the jobs run', async () => {
     const { t, practice } = await world();
     await approved(t, practice.id, 'Lead');
     await runOutbox(t.tenantId);
     const a = await seed(t);
     await score(t, a.accountId);
     expect((await current(t, a.accountId))!.tier).not.toBe('not_fit');
-    await t.run((ctx) => updateProfile(ctx, { tierThresholds: { notFitBelow: 100 } }));
+    await t.run((ctx) => updateProfile(ctx, { tierCutoffs: { actNow: 100, goodFit: 99, watch: 98 } }));
     await runOutbox(t.tenantId);
-    expect(await current(t, a.accountId)).toMatchObject({ tier: 'not_fit', profileVersion: 2 });
+    expect(await current(t, a.accountId)).toMatchObject({ tier: 'nurture', scoredTier: 'nurture', profileVersion: 2 });
+    expect((await changes(t, a.accountId)).map((c) => c.cause)).toContain('rules_changed');
+  });
+});
+
+describe('hand-set tiers (Review Focus 1)', () => {
+  it.each(['nurture', 'act_now'] as const)('a hand-set %s tier survives a rules_changed rescore', async (tier) => {
+    const { t, practice } = await world();
+    await approved(t, practice.id, 'Lead');
+    await runOutbox(t.tenantId);
+    const a = await seed(t);
+    await score(t, a.accountId);
+    await asPerson(t, (ctx) => setTierOverride(ctx, a.accountId, { tier }));
+    await t.run((ctx) => updateProfile(ctx, { tierCutoffs: { actNow: 100, goodFit: 99, watch: 98 } }));
+    await runOutbox(t.tenantId);
+    expect(await current(t, a.accountId)).toMatchObject({ tier, tierOverride: tier, scoredTier: 'nurture', profileVersion: 2 });
     expect((await changes(t, a.accountId)).map((c) => c.cause)).toContain('rules_changed');
   });
 });

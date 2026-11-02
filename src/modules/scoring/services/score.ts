@@ -8,15 +8,16 @@ import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { accountScored } from '../contracts/events';
-import type { Match, ScoreCause, ScoringAccount, ScoringOffer, ScoringSignal, Tier, TierReason } from '../contracts/types';
+import type { Match, RevenueBand, ScoreCause, ScoringAccount, ScoringOffer, ScoringSignal, Tier, TierReason } from '../contracts/types';
 import { accountScore, offerMatch, scoreChange } from '../db/schema';
 import { bestOffer } from '../domain/best-offer';
-import { matchTotal } from '../domain/combine';
+import { matchScore } from '../domain/combine';
 import { buildExplanation, NO_OFFER_TEXT, type Explanation } from '../domain/explain';
 import { fit } from '../domain/fit';
 import { inputsHash } from '../domain/inputs-hash';
 import { intent } from '../domain/intent';
 import { priority } from '../domain/priority';
+import { revenuePotential, trustScore } from '../domain/revenue';
 import { applyFloors, tierFor } from '../domain/tiers';
 import { getProfile, type ProfileView } from './profile';
 
@@ -66,6 +67,9 @@ export const toScoringOffer = (o: ApprovedOffer): ScoringOffer => ({
   companySizeMax: o.companySizeMax,
   revenueMinCents: o.revenueMinCents,
   revenueMaxCents: o.revenueMaxCents,
+  typicalDealCents: o.typicalDealCents,
+  priceMinCents: o.priceMinCents,
+  expansionRate: o.expansionRate,
   regions: o.regions,
   targetTitles: o.targetTitles,
   targetBuyingRoles: o.targetBuyingRoles,
@@ -141,23 +145,29 @@ export async function scoreAccount(
     if (dayIn(prev.computedAt, timeZone) === dayIn(now, timeZone)) return { changed: false, score: prev };
   }
 
+  const trustPoints = trustScore(trust?.trust ?? null, profile);
   const computed = offers.map((o, i) => {
     const so = scoringOffers[i]!;
     const f = fit(account, so, profile);
     const found = f.disqualifiedReason === null ? intent(account, signals, so.rules, profile, now) : { intent: 0, hits: [] };
-    const combine = matchTotal(f.fit, found.intent, profile);
+    // Until the R3 win analysis (won deals carry no practice) the reference is the offer's base value.
+    const revenue = revenuePotential({
+      typicalDealCents: so.typicalDealCents,
+      priceMinCents: so.priceMinCents,
+      expansionRate: so.expansionRate,
+      sizeMin: so.companySizeMin,
+      sizeMax: so.companySizeMax,
+      employees: account.employees,
+      referenceCents: null,
+    });
+    const scores = { fit: f.fit, intent: found.intent, revenue: revenue.score, trust: trustPoints };
+    const combine = matchScore(scores, profile);
     const tier = tierFor(
-      {
-        fit: f.fit,
-        intent: found.intent,
-        total: combine.total,
-        disqualifiedReason: f.disqualifiedReason,
-        hasResearchOrTrigger: found.hits.some((h) => h.kind !== 'pain'),
-      },
+      { score: combine.score, disqualifiedReason: f.disqualifiedReason, hasResearchOrTrigger: found.hits.some((h) => h.kind !== 'pain') },
       profile,
     );
-    const match: Match = { offerId: o.id, fit: f.fit, intent: found.intent, total: combine.total, tier };
-    return { offer: o, fit: f, intent: found, combine, match };
+    const match: Match = { offerId: o.id, fit: f.fit, intent: found.intent, score: combine.score, tier };
+    return { offer: o, fit: f, intent: found, scores, revenue, combine, match };
   });
   const best = bestOffer(
     computed.map((c) => c.match),
@@ -167,7 +177,7 @@ export async function scoreAccount(
 
   let tier: Tier = 'not_fit';
   let tierReason: TierReason = 'computed';
-  let pri = { priority: 0, warmPoints: 0, trustModifier: 0 };
+  let pri = { priority: 0, warmPoints: 0 };
   let explanation: Explanation = {
     priority: 0,
     tier,
@@ -194,14 +204,15 @@ export async function scoreAccount(
     );
     tier = floors.tier;
     tierReason = floors.tierReason;
-    pri = priority({ matchTotal: best.total, finalTier: tier, warmPoints: warm?.points ?? 0, trust: trust?.trust ?? null }, profile);
+    pri = priority({ score: best.score, finalTier: tier, warmPoints: warm?.points ?? 0 }, profile);
     explanation = buildExplanation({
       offer: { id: top.offer.id, name: top.offer.name },
       fit: top.fit,
       hits: top.intent.hits,
-      intent: top.intent.intent,
       signals,
       now,
+      scores: top.scores,
+      revenue: top.revenue,
       combine: top.combine,
       profile,
       tier,
@@ -212,7 +223,7 @@ export async function scoreAccount(
       trust: trust && { value: trust.trust, sourceName: trust.sourceName },
       otherOffers: computed
         .filter((c) => c !== top)
-        .map((c) => ({ id: c.offer.id, name: c.offer.name, total: c.match.total, tier: c.match.tier })),
+        .map((c) => ({ id: c.offer.id, name: c.offer.name, total: c.match.score, tier: c.match.tier })),
       computedAt: now,
       profileVersion: profile.version,
     });
@@ -228,7 +239,9 @@ export async function scoreAccount(
         offerId: c.offer.id,
         fit: c.match.fit,
         intent: c.match.intent,
-        matchTotal: c.match.total,
+        revenueScore: c.scores.revenue,
+        trustScore: c.scores.trust,
+        matchTotal: c.match.score,
         tier: c.match.tier,
         fitParts: c.fit.parts,
         ruleHits: c.intent.hits,
@@ -244,13 +257,17 @@ export async function scoreAccount(
     practiceId: top?.offer.practiceId ?? null,
     fit: best?.fit ?? 0,
     intent: best?.intent ?? 0,
-    matchTotal: best?.total ?? 0,
+    revenueScore: top?.scores.revenue ?? null,
+    trustScore: top?.scores.trust ?? null,
+    matchTotal: best?.score ?? 0,
     warmPoints: pri.warmPoints,
     warmIntroducerId: warm?.introducerUserId ?? null,
     warmIntroducerName: warm?.introducerName ?? null,
     trust: trust?.trust ?? null,
     trustSourceId: trust?.sourceId ?? null,
-    trustModifier: pri.trustModifier,
+    trustModifier: 0,
+    revenuePotentialCents: top?.revenue.cents ?? null,
+    revenueBand: top?.revenue.band ?? null,
     priority: pri.priority,
     // A tier set by hand stays through every rescore (Decision 4); the scored tier is kept beside it.
     tier: (prev?.tierOverride as Tier | null | undefined) ?? tier,
@@ -299,7 +316,7 @@ export async function scoreAccount(
         bestOfferId: score.bestOfferId,
         previousBestOfferId: prev?.bestOfferId ?? null,
         practiceId: score.practiceId,
-        revenueBand: null,
+        revenueBand: score.revenueBand as RevenueBand | null,
         cause,
         profileVersion: profile.version,
         version: score.version,

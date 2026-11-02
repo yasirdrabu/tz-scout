@@ -6,6 +6,11 @@ const now = new Date('2026-10-30T18:00:00Z');
 const all = new Set(DEFAULT_FIELD_MAPPINGS.map((m) => m.crmProperty));
 
 describe('propertyValues', () => {
+  it('maps every tier, Nurture included', () => {
+    const tier = (t: string) => propertyValues(DEFAULT_FIELD_MAPPINGS, { tier: t }, all, now).taazaa_tier;
+    expect([tier('act_now'), tier('good_fit'), tier('watch'), tier('nurture'), tier('not_fit')]).toEqual(['Act now', 'Good fit', 'Watch', 'Nurture', 'Not a fit']);
+  });
+
   it('maps the tier through enum_map and passes plain values through', () => {
     expect(propertyValues(DEFAULT_FIELD_MAPPINGS, { tier: 'act_now', fit: 80, practice: 'AI' }, all, now)).toEqual({
       taazaa_tier: 'Act now',

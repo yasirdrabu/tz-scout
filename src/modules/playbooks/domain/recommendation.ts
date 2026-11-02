@@ -53,7 +53,7 @@ export function recommendation(input: BriefInput): BriefOutput['recommendation']
     const warm = input.warmIntro ? ` Warm intro available through ${input.warmIntro.introducerName}.` : '';
     return out(`Approve and assign to someone who covers ${input.practiceName ?? 'this offer'}.`, `${why}${warm}`);
   }
-  if (tier === 'watch') {
+  if (tier === 'watch' || tier === 'nurture') {
     const raise = input.score.wouldRaise[0];
     return out('Keep it in review until a stronger signal arrives.', `Fit is ${fit} and buying intent is ${intent}.${raise ? ` ${raise} would raise the score.` : ''}`);
   }

@@ -19,15 +19,15 @@ const rows = async (t: { tenantId: string }, query: ReturnType<typeof sql>) => (
 describe('scoring profile service', () => {
   it('saves a change: version + 1, scoring.rules.changed published, audit with before and after', async () => {
     const t = await tenant();
-    const saved = await t.run((ctx) => updateProfile(ctx, { halfLifeDays: 30, fitWeight: 0.6 }));
-    expect(saved).toMatchObject({ halfLifeDays: 30, fitWeight: 0.6, intentWeight: 0.45, version: 2 });
+    const saved = await t.run((ctx) => updateProfile(ctx, { halfLifeDays: 30, weights: { fit: 45, intent: 20 } }));
+    expect(saved).toMatchObject({ halfLifeDays: 30, weights: { fit: 45, intent: 20, revenue: 15, trust: 20 }, version: 2 });
     expect(await t.run((ctx) => getProfile(ctx))).toMatchObject({ halfLifeDays: 30, version: 2 });
     const events = await rows(t, sql`select payload from platform.outbox where tenant_id = ${t.tenantId} and payload->>'type' = 'scoring.rules.changed'`);
     expect(events).toHaveLength(1);
-    expect((events[0] as { payload: { data: unknown } }).payload.data).toMatchObject({ profileVersion: 2, changed: ['fitWeight', 'halfLifeDays'] });
+    expect((events[0] as { payload: { data: unknown } }).payload.data).toMatchObject({ profileVersion: 2, changed: ['weights', 'halfLifeDays'] });
     const audits = await rows(t, sql`select before, after from platform.audit_log where tenant_id = ${t.tenantId} and action = 'scoring.profile.updated'`);
     expect(audits).toHaveLength(1);
-    expect(audits[0]).toMatchObject({ before: { halfLifeDays: 45, fitWeight: 0.55 }, after: { halfLifeDays: 30, fitWeight: 0.6 } });
+    expect(audits[0]).toMatchObject({ before: { halfLifeDays: 45, weights: DEFAULT_PROFILE.weights }, after: { halfLifeDays: 30, weights: { fit: 45, intent: 20, revenue: 15, trust: 20 } } });
   });
 
   it('a patch that changes nothing writes nothing', async () => {
@@ -37,11 +37,12 @@ describe('scoring profile service', () => {
     expect(await rows(t, sql`select 1 from platform.outbox where tenant_id = ${t.tenantId} and payload->>'type' = 'scoring.rules.changed'`)).toHaveLength(0);
   });
 
-  it('merges nested fit parts and thresholds', async () => {
+  it('merges nested fit parts, weights and cutoffs', async () => {
     const t = await tenant();
-    const saved = await t.run((ctx) => updateProfile(ctx, { fitParts: { industry: 40, size: 15 }, tierThresholds: { actNow: { total: 70 } } }));
+    const saved = await t.run((ctx) => updateProfile(ctx, { fitParts: { industry: 40, size: 15 }, tierCutoffs: { actNow: 80 }, weights: { fit: 35, trust: 25 } }));
     expect(saved.fitParts).toEqual({ industry: 40, size: 15, revenue: 20, region: 10, buyer: 15 });
-    expect(saved.tierThresholds).toEqual({ ...DEFAULT_PROFILE.tierThresholds, actNow: { fit: 60, intent: 35, total: 70 } });
+    expect(saved.tierCutoffs).toEqual({ ...DEFAULT_PROFILE.tierCutoffs, actNow: 80 });
+    expect(saved.weights).toEqual({ fit: 35, intent: 25, revenue: 15, trust: 25 });
   });
 
   it('rejects bad input with the copy to show, and changes nothing', async () => {
@@ -55,13 +56,24 @@ describe('scoring profile service', () => {
       return e!.errors.map((x) => x.message);
     };
     expect(await messages({ fitParts: { industry: 50 } })).toEqual(['The fit parts must add up to 100.']);
-    expect(await messages({ fitWeight: 0, intentWeight: 0 })).toEqual(["Fit and intent can't both have weight 0."]);
-    expect(await messages({ fitWeight: 1.5 })).toEqual(['Weights must be between 0 and 1.']);
+    expect(await messages({ weights: { fit: 35 } })).toEqual(['Weights add up to 95. Make them add up to 100.']);
+    expect(await messages({ weights: { fit: 65, trust: 15 } })).toEqual(['Each weight is 0 to 60, in steps of 5.']);
+    expect(await messages({ weights: { fit: 42, trust: 18 } })).toEqual(['Each weight is 0 to 60, in steps of 5.']);
+    expect(await messages({ tierCutoffs: { goodFit: 80 } })).toEqual(['Act now has to start higher than Good fit.']);
+    expect(await messages({ tierCutoffs: { watch: 55 } })).toEqual(['Good fit has to start higher than Watch.']);
+    expect(await messages({ tierCutoffs: { actNow: 101 } })).toEqual(["Act now can't start higher than 100."]);
+    expect(await messages({ tierCutoffs: { watch: 0 } })).toEqual(['Watch has to start at 1 or more.']);
     expect(await messages({ halfLifeDays: 0 })).toEqual(['Half-life must be between 1 and 365 days.']);
-    expect(await messages({ tierThresholds: { notFitBelow: 101 } })).toEqual(['Tier thresholds must be between 0 and 100.']);
     expect(await messages({ warmIntroCap: 21 })).toEqual(['The warm intro cap must be between 0 and 20.']);
-    expect(await messages({ trustModifierMax: 11 })).toEqual(['The trust modifier must be between 0 and 10.']);
     expect((await t.run((ctx) => getProfile(ctx))).version).toBe(1);
+  });
+
+  it('accepts weights of 0 and 60 and cutoffs of 100, 99 and 1', async () => {
+    const t = await tenant();
+    const saved = await t.run((ctx) =>
+      updateProfile(ctx, { weights: { fit: 60, intent: 0, revenue: 0, trust: 40 }, tierCutoffs: { actNow: 100, goodFit: 99, watch: 1 } }),
+    );
+    expect(saved).toMatchObject({ weights: { fit: 60, intent: 0, revenue: 0, trust: 40 }, tierCutoffs: { actNow: 100, goodFit: 99, watch: 1 } });
   });
 
   it('resets to the defaults with a new version', async () => {

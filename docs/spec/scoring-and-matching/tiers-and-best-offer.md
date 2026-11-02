@@ -2,6 +2,8 @@
 
 Release R1
 
+> **Scoring redesign:** [SCO-E6](four-weight-model.md) replaces this epic's match total, trust modifier, tier thresholds and weights editor. Where they differ, SCO-E6 wins.
+
 ## Why
 
 Leaders think in a few buckets, not in numbers: act on it now, keep it warm, watch it, drop it. And

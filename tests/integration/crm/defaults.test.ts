@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
@@ -47,7 +49,7 @@ describe('crm.tenant_defaults', () => {
     expect(m.find((r) => r.scoutField === 'tier')).toMatchObject({
       crmProperty: 'taazaa_tier',
       transform: 'enum_map',
-      transformConfig: { act_now: 'Act now', good_fit: 'Good fit', watch: 'Watch', not_fit: 'Not a fit' },
+      transformConfig: { act_now: 'Act now', good_fit: 'Good fit', watch: 'Watch', nurture: 'Nurture', not_fit: 'Not a fit' },
     });
     expect(m.find((r) => r.scoutField === 'last_handoff')).toMatchObject({ crmProperty: 'taazaa_last_pushed', transform: 'date' });
     expect(m.find((r) => r.scoutField === 'scout_link')).toMatchObject({ crmProperty: 'scout_link' });
@@ -207,7 +209,7 @@ const SAMPLES: Record<keyof typeof crmOperations, { input: unknown; dropIn: stri
   setUpProperties: {
     input: { groupName: 'scout_buyer_signals', properties: [{ name: 'scout_link', label: 'Scout link', type: 'string' }] },
     dropIn: 'groupName',
-    output: { created: ['scout_link'] },
+    output: { created: ['scout_link'], updated: [] },
     dropOut: 'created',
   },
   verifyWebhook: { input: { method: 'POST', url: 'https://x.example/hook', headers: {}, rawBody: '[]' }, dropIn: 'rawBody', output: true, dropOut: null },
@@ -244,5 +246,21 @@ describe('adapter schemas', () => {
 
   it('listActivities requires the actor owner id (Ruling 17)', () => {
     expect(crmOperations.listActivities.output.safeParse([{ externalId: 'a', kind: 'email', occurredAt: '2026-10-01T00:00:00.000Z' }]).success).toBe(false);
+  });
+});
+
+describe('migration 0012: Nurture in the tier map of workspaces set up before it', () => {
+  it('adds nurture to the existing enum_map and keeps what the workspace changed', async () => {
+    const t = await freshTenant();
+    await runOutbox(t.tenantId);
+    const old = { act_now: 'Hot', good_fit: 'Good fit', watch: 'Watch', not_fit: 'Not a fit' };
+    await adminDb.update(fieldMapping).set({ transformConfig: old }).where(sql`${fieldMapping.tenantId} = ${t.tenantId} and ${fieldMapping.scoutField} = 'tier'`);
+    const text = readFileSync(path.resolve(__dirname, '../../../src/modules/crm/db/migrations/0012_crm_tier_nurture.sql'), 'utf8');
+    await adminDb.execute(sql.raw(text));
+    const tier = (await mappings(t)).find((m) => m.scoutField === 'tier')!;
+    expect(tier.transformConfig).toEqual({ ...old, nurture: 'Nurture' });
+    // Running it again changes nothing.
+    await adminDb.execute(sql.raw(text));
+    expect((await mappings(t)).find((m) => m.scoutField === 'tier')!.transformConfig).toEqual({ ...old, nurture: 'Nurture' });
   });
 });
