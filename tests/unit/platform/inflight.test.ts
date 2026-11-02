@@ -20,15 +20,12 @@ it('per_workspace: half the workspace connection cap across the worker, half a w
   expect(workspaceInFlightCap(per(1))).toBe(1);
 });
 
-it('keyed slots limit each key on its own', async () => {
+it("a burst from one workspace is put back, never waited on, so another workspace's messages still get in", () => {
   const slots = new KeyedSlots(1);
-  await slots.acquire('t_a');
-  await slots.acquire('t_b'); // another workspace is not held up
-  let second = false;
-  const waiting = slots.acquire('t_a').then(() => (second = true));
-  await Promise.resolve();
-  expect(second).toBe(false);
+  expect(slots.tryAcquire('t_a')).toBe(true);
+  // The rest of t_a's burst: refused at once (the worker naks them for 500 ms), holding nothing.
+  for (let i = 0; i < 20; i++) expect(slots.tryAcquire('t_a')).toBe(false);
+  expect(slots.tryAcquire('t_b')).toBe(true);
   slots.release('t_a');
-  await waiting;
-  expect(second).toBe(true);
+  expect(slots.tryAcquire('t_a')).toBe(true);
 });

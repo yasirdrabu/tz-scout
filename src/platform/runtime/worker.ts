@@ -170,19 +170,29 @@ class Semaphore {
   }
 }
 
-/** One `Semaphore` of `size` per key, made on first use. */
+/**
+ * At most `size` messages at once per key (a workspace). Never waits: a message whose workspace is full
+ * is put back for a moment instead, so one workspace's burst does not fill the consumer's concurrency
+ * and hold up every other workspace's messages.
+ */
 export class KeyedSlots {
-  private byKey = new Map<string, Semaphore>();
+  private used = new Map<string, number>();
   constructor(private size: number) {}
-  acquire(key: string): Promise<void> {
-    let s = this.byKey.get(key);
-    if (!s) this.byKey.set(key, (s = new Semaphore(this.size)));
-    return s.acquire();
+  tryAcquire(key: string): boolean {
+    const n = this.used.get(key) ?? 0;
+    if (n >= this.size) return false;
+    this.used.set(key, n + 1);
+    return true;
   }
   release(key: string): void {
-    this.byKey.get(key)?.release();
+    const n = (this.used.get(key) ?? 1) - 1;
+    if (n <= 0) this.used.delete(key);
+    else this.used.set(key, n);
   }
 }
+
+/** How long a message whose workspace has no free slot waits before it comes again. */
+const WORKSPACE_FULL_RETRY_MS = 500;
 
 /** The tenant a message is for, from its envelope, without validating it (`processMessage` does). */
 function tenantOf(m: JsMsg): string | undefined {
@@ -197,7 +207,7 @@ function tenantOf(m: JsMsg): string | undefined {
 type Runtime = {
   hooks: WorkerOptions['hooks'];
   slots: Semaphore;
-  /** Per workspace database (`per_workspace` only); taken before `slots`, so a busy workspace holds none of the shared ones while it waits. */
+  /** Per workspace database (`per_workspace` only); taken before `slots`, without waiting (see `KeyedSlots`). */
   workspaceSlots?: KeyedSlots;
   busyLockTimeoutMs: number;
   busyRetryMs: number;
@@ -492,13 +502,16 @@ async function runSub(nats: Nats, s: Sub, opts: WorkerOptions, rt: Runtime): Pro
   const heartbeatMs = Math.max(50, Math.min(Math.floor(s.timeoutMs / 3), 10_000));
   const loop = (async () => {
     for await (const m of messages) {
+      const workspace = rt.workspaceSlots ? tenantOf(m) : undefined;
+      const perWorkspace = workspace !== undefined && workspace !== PLATFORM_TENANT;
+      if (perWorkspace && !rt.workspaceSlots!.tryAcquire(workspace)) {
+        m.nak(WORKSPACE_FULL_RETRY_MS);
+        continue;
+      }
       // Keep the delivery ours while it waits for a slot and runs; every step is time-bounded.
       const heartbeat = setInterval(() => m.working(), heartbeatMs);
       while (inFlight.size >= concurrency) await Promise.race(inFlight);
       const p: Promise<void> = (async () => {
-        const workspace = rt.workspaceSlots ? tenantOf(m) : undefined;
-        const perWorkspace = workspace !== undefined && workspace !== PLATFORM_TENANT;
-        if (perWorkspace) await rt.workspaceSlots!.acquire(workspace);
         try {
           await rt.slots.acquire();
           try {
