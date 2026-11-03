@@ -9,7 +9,7 @@ import {
   type ReadWebsiteInput,
   type ReadWebsiteOutput,
 } from '../domain/read-website';
-import * as P from './prompts/read_website.v1.0';
+import * as P from './prompts/read_website.v1.1';
 
 /**
  * What a company's website says about it (Ruling 3). Five pages at the 6,000-character cap are about 9,000 input

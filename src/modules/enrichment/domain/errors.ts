@@ -8,7 +8,7 @@ export type ClassifiedError = { kind: EnrichmentErrorKind; message: string; retr
 
 export const SOMETHING_WRONG = 'Something went wrong. Try again.';
 
-type Shape = { name?: unknown; message?: unknown; status?: unknown; statusCode?: unknown; kind?: unknown };
+type Shape = { name?: unknown; message?: unknown; status?: unknown; statusCode?: unknown; kind?: unknown; slug?: unknown };
 
 export function classifyError(e: unknown, providerName: string): ClassifiedError {
   const fail = (kind: EnrichmentErrorKind, message: string): ClassifiedError => ({ kind, message, retry: false });
@@ -18,6 +18,12 @@ export function classifyError(e: unknown, providerName: string): ClassifiedError
   const message = typeof o.message === 'string' ? o.message : '';
   // As the gateway's `statusCodeOf`: `status`, else `statusCode`.
   const status = o.status ?? o.statusCode;
+  // The gateway refusing the connection (review I1): no retry can change it until an owner acts, so fail at once.
+  if (o.slug === 'connection_disabled') return fail('bad_request', `${providerName} is turned off. An owner can turn it on in Integrations.`);
+  if (o.slug === 'connection_not_ready') {
+    return fail('bad_request', `${providerName} is set to live but is not ready. An owner needs to save a key and test it in Integrations.`);
+  }
+  if (o.slug === 'adapter-missing') return fail('bad_request', `${providerName} is not available yet.`);
   if (status === 401) return fail('auth', `${providerName} rejected the key. An owner needs to update it in Integrations.`);
   if (o.name === 'RateLimitedError' || status === 429) return retry('rate_limited', `${providerName} asked us to slow down.`);
   // Before 400/422: Apollo sends its credits error as a 422.

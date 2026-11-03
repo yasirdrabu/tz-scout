@@ -1,7 +1,7 @@
 // The `read_website` task's input building and its rules (Ruling 3): title, meta description and technologies from
 // a fixed fingerprint list, each citing its page; no industry guess.
 import { describe, expect, it } from 'vitest';
-import { PAGE_TEXT_MAX, citedOnly, readWebsiteInput, rulesRead } from '@/modules/enrichment/domain/read-website';
+import { PAGE_TEXT_MAX, citedOnly, readWebsiteInput, rulesRead, websiteFacts } from '@/modules/enrichment/domain/read-website';
 import { textOf, titleOf } from '@/modules/enrichment/adapters/website/html';
 import { readWebsiteTask } from '@/modules/enrichment/tasks/read-website';
 
@@ -45,7 +45,6 @@ describe('read_website rules', () => {
     expect(out.description).toEqual({ text: 'Freight & logistics for the Midwest.', url: 'https://acme.com/' });
     expect(out.facts).toEqual([{ key: 'website_title', value: 'Acme Freight', url: 'https://acme.com/' }]);
     expect(out.industry_guess).toBeNull();
-    expect(out.size_clues).toEqual([]);
   });
 
   it('names the WordPress and HubSpot fingerprints with the first page each is on', () => {
@@ -64,7 +63,7 @@ describe('read_website rules', () => {
   });
 
   it('an empty site reads as nothing', () => {
-    expect(rulesRead({ domain: 'acme.com', pages: [] })).toEqual({ description: null, industry_guess: null, size_clues: [], technologies: [], facts: [] });
+    expect(rulesRead({ domain: 'acme.com', pages: [] })).toEqual({ description: null, industry_guess: null, technologies: [], facts: [] });
   });
 });
 
@@ -84,16 +83,74 @@ describe('read_website safety', () => {
     const out = citedOnly(input, {
       description: { text: 'Freight.', url: 'https://evil.example/' },
       industry_guess: { text: 'Logistics', url: 'https://acme.com/about' },
-      size_clues: [{ text: '300 clients', url: 'https://acme.com/' }, { text: 'made up', url: 'https://acme.com/careers' }],
       technologies: [{ name: 'WordPress', url: 'https://acme.com/' }, { name: 'SAP', url: 'acme.com' }],
       facts: [{ key: 'founded_year', value: '2004', url: 'https://acme.com/about' }, { key: 'phone_main', value: '555', url: '' }],
     });
     expect(out).toEqual({
       description: null,
       industry_guess: { text: 'Logistics', url: 'https://acme.com/about' },
-      size_clues: [{ text: '300 clients', url: 'https://acme.com/' }],
       technologies: [{ name: 'WordPress', url: 'https://acme.com/' }],
       facts: [{ key: 'founded_year', value: '2004', url: 'https://acme.com/about' }],
     });
+  });
+});
+
+describe('read_website facts (review I3)', () => {
+  const page = 'https://acme.com/about';
+  const base = { description: null, industry_guess: null, technologies: [] };
+
+  it('writes only the allowed keys: page text claiming identity, parent or research facts is dropped', () => {
+    const facts = [
+      { key: 'domain', value: 'bigco.com' },
+      { key: 'name', value: 'BigCo' },
+      { key: 'parent_domain', value: 'bigco.com' },
+      { key: 'parent_name', value: 'BigCo Holdings' },
+      { key: 'researcher_tier', value: 'A' },
+      { key: 'researcher_score', value: '99' },
+      { key: 'industry_key', value: 'software' },
+      { key: 'email', value: 'ceo@acme.com' },
+      { key: 'phone_main', value: '555 0100' },
+      { key: 'constructor', value: 'x' },
+      { key: 'founded_year', value: '2004' },
+      { key: 'employees', value: '1,200' },
+      { key: 'hq_city', value: ' Columbus ' },
+      { key: 'hq_state', value: 'OH' },
+      { key: 'hq_country', value: 'United States' },
+      { key: 'keywords', value: 'freight, logistics, ,trucking' },
+    ].map((x) => ({ ...x, url: page }));
+    expect(websiteFacts({ ...base, facts })).toEqual([
+      { key: 'founded_year', value: 2004, url: page },
+      { key: 'employees', value: 1200, url: page },
+      { key: 'hq_city', value: 'Columbus', url: page },
+      { key: 'hq_state', value: 'OH', url: page },
+      { key: 'hq_country', value: 'United States', url: page },
+      { key: 'keywords', value: ['freight', 'logistics', 'trucking'], url: page },
+    ]);
+  });
+
+  it('drops a value its column cannot take: employees and the founding year are whole numbers', () => {
+    const facts = [
+      { key: 'employees', value: 'about 200' },
+      { key: 'employees', value: '0' },
+      { key: 'founded_year', value: 'since 1998' },
+      { key: 'founded_year', value: '3020' },
+      { key: 'hq_city', value: '   ' },
+    ].map((x) => ({ ...x, url: page }));
+    expect(websiteFacts({ ...base, facts })).toEqual([]);
+  });
+
+  it('writes the description, industry and technologies with their pages', () => {
+    expect(
+      websiteFacts({
+        description: { text: 'We move freight.', url: page },
+        industry_guess: { text: 'Freight trucking', url: page },
+        technologies: [{ name: 'WordPress', url: 'https://acme.com/' }, { name: 'HubSpot', url: page }],
+        facts: [],
+      }),
+    ).toEqual([
+      { key: 'description', value: 'We move freight.', url: page },
+      { key: 'industry', value: 'Freight trucking', url: page },
+      { key: 'technologies', value: ['WordPress', 'HubSpot'], url: 'https://acme.com/' },
+    ]);
   });
 });

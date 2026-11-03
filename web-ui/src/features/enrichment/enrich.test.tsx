@@ -1,8 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { HttpResponse } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { problem } from '../../test/http';
 import { renderApp } from '../../test/renderApp';
+import { server } from '../../test/server';
 import { ACCOUNT, PAGE_LEADER, SELLER, serveAccount } from '../account/testing';
 import { LEADER, serveQueue } from '../review/testing';
 import type { EnrichmentRequest } from './api';
@@ -113,6 +114,28 @@ describe('Enrich dialog', () => {
     await user.selectOptions(within(dialog).getByRole('combobox', { name: 'What to find' }), 'Reveal emails');
     expect(within(dialog).getByText('Everyone here already has an email.')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Run enrichment' })).toBeDisabled();
+  });
+
+  it('Reveal emails checks the first 25 people, and more than 25 cannot be confirmed', async () => {
+    const many = Array.from({ length: 27 }, (_, i) => ({ ...ACCOUNT.people[0]!, id: `per_${i}`, first_name: 'Person', last_name: String(i + 1), email: null }));
+    serveAccount({ scopes: [...PAGE_LEADER, ...APPROVER], account: { ...ACCOUNT, people: many } });
+    const seen = serveEnrichment();
+    renderApp(URL);
+    const { user, dialog } = await openDialog();
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'What to find' }), 'Reveal emails');
+    const people = within(dialog).getByRole('group', { name: 'People' });
+    const boxes = within(people).getAllByRole('checkbox');
+    expect(boxes.map((b) => (b as HTMLInputElement).checked)).toEqual([...Array(25).fill(true), false, false]);
+    const run = within(dialog).getByRole('button', { name: 'Run enrichment' });
+    expect(run).toBeEnabled();
+    await user.click(within(people).getByRole('checkbox', { name: 'Person 26' }));
+    expect(within(people).getByText('Pick up to 25 people.')).toBeInTheDocument();
+    expect(run).toBeDisabled();
+    await user.click(within(people).getByRole('checkbox', { name: 'Person 1' }));
+    expect(within(people).queryByText('Pick up to 25 people.')).toBeNull();
+    await user.click(run);
+    await screen.findByText('Enrichment started for Miami-Dade County DTPW. New signals appear in about 2 minutes.');
+    expect((seen.posted[0] as { person_ids: string[] }).person_ids).toHaveLength(25);
   });
 
   it('a seller writes why it is worth it and asks for approval', async () => {
@@ -239,6 +262,37 @@ describe('Account enrichment notice', () => {
       const settled = seen.lists.length;
       await vi.advanceTimersByTimeAsync(25_000);
       expect(seen.lists.length).toBe(settled);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads the account again when a request finishes, so the people it found show (review I4)', async () => {
+    serveAccount({ scopes: [...PAGE_LEADER, ...REQUESTER] });
+    const found = { ...ACCOUNT.people[0]!, id: 'per_new', first_name: 'Nia', last_name: 'Found' };
+    let status: EnrichmentRequest['status'] = 'running';
+    let accountReads = 0;
+    server.use(
+      http.get('/api/v1/accounts/acc_mdc', () => {
+        accountReads++;
+        return HttpResponse.json(status === 'running' ? ACCOUNT : { ...ACCOUNT, people: [...ACCOUNT.people, found] });
+      }),
+    );
+    const seen = serveEnrichment({ requests: () => [{ ...REQUEST, status, status_text: status === 'running' ? 'Running' : 'Found 1' }] });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderApp(URL);
+      await screen.findByRole('list', { name: 'Enrichment' });
+      expect(screen.queryByText(/Nia Found/)).toBeNull();
+      const reads = accountReads;
+      const lists = seen.lists.length;
+      status = 'completed';
+      await vi.advanceTimersByTimeAsync(10_100);
+      await waitFor(() => expect(screen.getByRole('list', { name: 'Enrichment' })).toHaveTextContent('Found 1'));
+      await waitFor(() => expect(accountReads).toBeGreaterThan(reads));
+      expect(await screen.findAllByText(/Nia Found/)).not.toHaveLength(0);
+      // The notice itself is not read again for the refresh: only its own poll read it.
+      expect(seen.lists.length).toBe(lists + 1);
     } finally {
       vi.useRealTimers();
     }

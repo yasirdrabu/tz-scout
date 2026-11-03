@@ -30,7 +30,7 @@ export {
   type RequestInput,
   type RequestView,
 } from './services/requests';
-export { EXPIRE_AFTER_DAYS, expireFlagged } from './services/expire';
+export { EXPIRE_AFTER_DAYS, STUCK_AFTER_HOURS, expireFlagged, failStuck } from './services/expire';
 export { runRequest } from './services/run';
 export { enrichmentJobHandlers, expireRequestsHandler, runRequestHandler } from './jobs';
 export {

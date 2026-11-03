@@ -56,10 +56,9 @@ test('a seller asks for a technical buyer, the owner approves, and the person ar
   await row.getByRole('button', { name: 'Approve' }).click();
   await shows(page, `Approved. Enrichment started for ${name}.`);
 
-  // The run finishes in the worker; the notice refreshes while it runs.
+  // The run finishes in the worker; the notice refreshes while it runs, and the committee once it finishes (no reload).
   await page.goto(`/t/taazaa/accounts/${id}`);
   await expect(page.getByText(/^People for buying roles from Apollo: Found [1-9]\d*$/)).toBeVisible({ timeout: 30_000 });
-  await page.reload();
   const committee = page.getByRole('region', { name: 'Buying committee' });
   await expect(committee.getByRole('listitem').filter({ hasText: 'Technical buyer' }).first()).toBeVisible();
 });

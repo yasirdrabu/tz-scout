@@ -59,9 +59,14 @@ Rulings 2 and 3 are the user's answers of 2026-11-03; the build rulings are Clau
     matches `about|services|industries|contact`, with user agent `TaazaaScout/1.0
     (+https://scout.taazaa.ai/bot)`, in at most 30 seconds in all and 2 MB per page.
   - **Mock adapter:** two fixed sample pages for any domain.
-  - **Reading:** the pages go to AI task `read_website`, whose output is `{description,
-    industry_guess, size_clues[], technologies[], facts:[{key, value, url}]}`, every item citing a page
-    URL. Its `rules` take the title and meta description, technologies from a fixed fingerprint list in
+  - **Reading:** the pages go to AI task `read_website` (prompt v1.1), whose output is `{description,
+    industry_guess, technologies[], facts:[{key, value, url}]}`, every item citing a page URL. Size
+    clues are not asked for, since nothing stored them (final review M1).
+  - **Website facts (final review I3).** A website read writes only the description, the industry,
+    the technologies, and these `facts` keys: `founded_year` (a 4-digit year), `employees` (a whole
+    number), `hq_city`, `hq_state`, `hq_country` and `keywords` (split on commas). Any other key, or a
+    value its column can't take, is dropped, so page text can't set the account's domain, name,
+    parent, or scoring and research facts. The prompt asks for these keys only. Its `rules` take the title and meta description, technologies from a fixed fingerprint list in
     the HTML, and no industry guess. With Claude on mock, or at its limit, the rules output is used and
     the request's result says "Read by rules". A website read uses 0 credits; its Claude cost goes
     through `anthropic`.
@@ -69,7 +74,12 @@ Rulings 2 and 3 are the user's answers of 2026-11-03; the build rulings are Clau
   public sites:
   - Host names are checked before a request, and every address a name resolves to is checked when the
     connection is made (DNS checked at connect, so rebinding has no window). Private, loopback,
-    link-local, CGNAT, documentation, benchmarking and multicast ranges are blocked.
+    link-local, CGNAT, documentation, benchmarking and multicast ranges are blocked, as are the 6to4
+    relay 192.88.99.0/24 and the IPv6 forms that carry an IPv4 address (NAT64, 6to4 `2002::/16`,
+    Teredo `2001:0::/32`).
+  - **HTML reading (final review C1).** The title, text, links and meta tags are read from the first
+    256 KB of a page only, in one forward scan with no backtracking regex, so a hostile or broken page
+    (unclosed tags, a binary blob with no content type) costs linear time and cannot freeze a worker.
   - Redirects are followed by hand, at most 3 hops, each hop checked; linked pages stay on the
     company's host.
   - `robots.txt` is read as RFC 9309 reads it: the `User-agent: *` group and any group naming Scout,
@@ -100,8 +110,8 @@ Scout runs end to end without keys.
 - ENR-E2-S1-AC4 The Vibe adapter, tested against stubbed Vibe responses, returns companies, people and
   business events as `arrival.v1` items with `creditsUsed`, and a saved search can pick `vibe` as its
   provider. v1's `vibe.test.ts` and `vibeExport.test.ts` cases pass through the carried-over mapping.
-- ENR-E2-S1-AC2 The website reader returns description, industry guess, size clues and technologies as
-  facts with the page URL; with the Claude connection mode = mock it returns rule-based extraction labelled
+- ENR-E2-S1-AC2 The website reader returns description, industry guess and technologies as facts with
+  the page URL (size clues dropped in R2b-2, final review M1); with the Claude connection mode = mock it returns rule-based extraction labelled
   "Read by rules".
 - ENR-E2-S1-AC3 `health()` results show on the integration's page in INT.
 

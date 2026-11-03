@@ -81,7 +81,7 @@ As fixed in [public-api/index.md](../public-api/index.md), with the R2b-2 additi
 
 | Method and path | Scope | Notes |
 |---|---|---|
-| `POST /api/v1/accounts/{id}/enrichment-requests` | `enrichment:request` | Body `{kind, provider_key, roles?, person_ids?, reason?}`. Always creates a `flagged` request from a key; a person approves. 201, or 200 with `joined: true` (Ruling 6) |
+| `POST /api/v1/accounts/{id}/enrichment-requests` | `enrichment:request` | Body `{kind, provider_key, roles?, person_ids? (at most 25), reason?}`. Always creates a `flagged` request from a key; a person approves. 201, or 200 with `joined: true` (Ruling 6) |
 | `GET /api/v1/accounts/{id}/enrichment-estimate?kind=&provider_key=&roles=&person_ids=` | `enrichment:request` | `{credits, cost_cents, currency, sample, text}` (R2b-2) |
 | `GET /api/v1/enrichment-requests?status=&account_id=&cursor=` | `enrichment:request` | Within data limits; each item has status, estimate and result. `{data, next_cursor}` |
 | `POST /api/v1/enrichment-requests/{id}:approve` | `enrichment:approve` (people only) | Async; starts the run. 202 with the request |
@@ -102,7 +102,7 @@ above; the tool is built with the server.
 | Job | Notes |
 |---|---|
 | `enrichment.request.run` | Runs one approved request (Ruling 8). Delivered up to 5 times, timeout 120 seconds, retries wait 30 seconds, 2 minutes, 10 minutes, then an hour. A usage-limit wait does not use up a try |
-| `enrichment.request.expire` | Daily at 04:00 UTC, one schedule per tenant: cancels requests flagged for 14 days. The schedule is ensured whenever a request is created (`ensureSchedule`, which never changes an existing schedule's cron), so existing workspaces need no back-fill |
+| `enrichment.request.expire` | Daily at 04:00 UTC, one schedule per tenant: cancels requests flagged for 14 days, and fails requests stuck `approved` or `running` for a day (results-and-failures.md, Ruling 9). The schedule is ensured whenever a request is created (`ensureSchedule`, which never changes an existing schedule's cron), so existing workspaces need no back-fill |
 
 ## AI tasks
 

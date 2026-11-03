@@ -8,6 +8,9 @@ export const DEFAULT_CENTS_PER_CREDIT: Record<string, number> = { apollo: 10, vi
 /** Credits a person found by `people_for_roles` may cost, per role, at most. */
 export const PEOPLE_PER_ROLE = 3;
 
+/** People one request may find or reveal: one arrival (`arrival.v1`) takes at most 25. */
+export const MAX_PEOPLE = 25;
+
 /** Apollo's operations per kind. Vibe's sample adapter answers the same operations. */
 const CREDIT_OPERATIONS: Partial<Record<EnrichmentKind, readonly string[]>> = {
   company_firmographics: ['organizations/enrich'],

@@ -83,11 +83,33 @@ Claude's calls, 2026-11-03 (the numbering is the plan's; the other rulings are i
   | `out_of_credits` | `/insufficient credits/i` or Apollo's credits error | With results: submit them, `partial`, "{Provider} is out of credits." With nothing found: `failed` with the same message (a partial keeps something) |
   | `rate_limited` | `RateLimitedError` or 429 | Rethrow for the job backoff, "{Provider} asked us to slow down." Every try counts toward the 5 deliveries |
   | `timeout` | abort or timeout | Rethrow for the job backoff, "{Provider} took too long to answer." |
-  | `bad_request` | 400, 403 or 422 | Fail with the provider's message, no retry |
-  | `unknown` | anything else | Rethrow. After the last try the job dead-letters; the request stays `running` with "Something went wrong. Try again." (dead-job handling is PLT's) |
+  | `bad_request` | 400, 403 or 422; or the gateway refusing the connection | Fail with the provider's message, no retry. A turned-off connection (`connection_disabled`): "{Provider} is turned off. An owner can turn it on in Integrations."; live but not ready (`connection_not_ready`): "{Provider} is set to live but is not ready. An owner needs to save a key and test it in Integrations."; no adapter (`adapter-missing`): "{Provider} is not available yet." |
+  | `unknown` | anything else | Rethrow. After the last try the job dead-letters and the request stays `running` with "Something went wrong. Try again." until the daily job fails it (below) |
 
   While a retryable error backs off, the request stays `running` and its status text is the error's
   message.
+
+  **Stuck requests (final review I1).** The daily `enrichment.request.expire` job also fails every
+  request `approved` or `running`, with no `waiting_reason`, whose `updated_at` is 24 hours old or
+  more: its job dead-lettered or was lost. It becomes `failed` with `error {kind: 'unknown', message:
+  'This enrichment stopped without finishing. Try again.'}` and publishes `enrichment.request.failed`
+  (credits 0: what the lost run spent is not known), so the queue chip clears, the account notice stops
+  polling and a new request of the kind is no longer joined to it. A request waiting on a limit is left
+  alone: that wait lasts until the limit resets or is raised.
+
+  **Intake refusing the arrival (final review I2).** Besides the paused source and the daily arrival
+  limit (Ruling 8), any other 4xx from intake (a body `arrival.v1` will not take) fails the request
+  once as `bad_request` "Scout couldn't store what {Provider} found. {intake's first problem, else its
+  title}", with no retry, since a retry would spend the credits again. To keep that rare:
+  - a request reveals at most 25 people, as one arrival takes: `email_reveal` is refused over 25
+    (400 at `person_ids` "Pick up to 25 people."), and `people_for_roles` stops revealing at 25
+    (a person found again for another role still gains that role);
+  - a signal with an empty title (an Apollo article with none) is dropped before the submit.
+
+  **Signals refresh and limits (final review M2).** When a limit stops a signals refresh after the
+  organization lookup and before anything was found, the request waits as usual and keeps the
+  organization id in `params.org_id` (internal; not in the request JSON), so the next try does not pay
+  for the lookup again.
 
   Differences from the Rules above: `rate_limited` uses up a try (the Rules' "doesn't count as an
   attempt for 3 tries" is not built); a 403 is `bad_request`, not `auth`: Apollo answers 403 when the

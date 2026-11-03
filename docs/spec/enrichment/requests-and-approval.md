@@ -64,6 +64,7 @@ Rulings 4 and 5 (credits, money) in [credits-costs-and-caps.md](credits-costs-an
    - **Cancel:** `:cancel` is allowed from `flagged` or `approved`. It needs `enrichment:approve`, or
      the requester themselves.
    - **Expiry:** a request `flagged` for 14 days becomes `cancelled` with `decline_reason: 'expired'`.
+     The same daily job fails requests stuck `approved` or `running` (results-and-failures.md, Ruling 9).
      The job is `enrichment.request.expire` and runs daily at `0 4 * * *` UTC. Its schedule is ensured
      (idempotently, `ensureSchedule`) whenever a request is created, so existing workspaces need no
      back-fill. `ensureSchedule` never changes an existing schedule's cron; a later cron change needs
@@ -79,7 +80,9 @@ Rulings 4 and 5 (credits, money) in [credits-costs-and-caps.md](credits-costs-an
       expired".
     - **No arrival yet:** when the source has no resolved arrival for the account (an agent flagged an
       account it never sent), the feedback row has a null `arrival_id`. The column, and
-      `arrivalId` on `intake.feedback.recorded`, are nullable from R2b-2.
+      `arrivalId` on `intake.feedback.recorded`, are nullable from R2b-2. The event stays at version 1:
+      it has no consumer yet (final review M3, accepted). Bump it, or say so in the webhook docs, before
+      outbound webhooks ship.
 - **Ruling 11. Queue chip.** Routing keeps table `routing.enrichment_open (tenant_id, account_id,
     request_id, requested_by_label, closed_at, created_at; PK tenant + request)`.
     - A routing consumer inserts a row on `flagged` or `approved`, and closes it on `declined`,

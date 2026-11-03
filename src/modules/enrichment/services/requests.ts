@@ -14,7 +14,7 @@ import { request } from '../db/schema';
 import { seedEnrichmentDefaults } from '../defaults';
 import { estimate, estimateText } from '../domain/estimate';
 import { kindLabel, operationsFor } from '../domain/kinds';
-import { WEBSITE_READ_WORST_CENTS } from '../domain/prices';
+import { MAX_PEOPLE, WEBSITE_READ_WORST_CENTS } from '../domain/prices';
 import { canTransition, statusText } from '../domain/status';
 
 type Row = typeof request.$inferSelect;
@@ -158,6 +158,7 @@ async function check(ctx: ModuleContext, accountId: string, input: RequestInput)
   if (input.kind === 'email_reveal') {
     const ids = [...new Set(input.personIds ?? [])];
     if (ids.length === 0) throw invalid('person_ids', 'Pick at least one person.');
+    if (ids.length > MAX_PEOPLE) throw invalid('person_ids', `Pick up to ${MAX_PEOPLE} people.`);
     const onAccount = new Set(account.people.map((p) => p.id));
     if (ids.some((id) => !onAccount.has(id))) throw invalid('person_ids', "That person isn't on this account.");
     params.person_ids = ids;
@@ -237,7 +238,7 @@ export async function listRequests(
   ctx: ModuleContext,
   f: { status?: RequestStatus; accountId?: string; cursor?: string; limit?: number } = {},
 ): Promise<{ data: RequestView[]; nextCursor: string | null }> {
-  const limit = Math.min(Math.max(f.limit ?? 25, 1), 200);
+  const limit = Math.min(Math.max(f.limit ?? 50, 1), 200);
   if (f.cursor) {
     // An unknown id would match nothing and read as the end of the list.
     const [known] = await ctx.tx.select({ id: request.id }).from(request).where(and(eq(request.tenantId, ctx.tenantId), eq(request.id, f.cursor)));

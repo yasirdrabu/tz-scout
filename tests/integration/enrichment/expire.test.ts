@@ -1,7 +1,7 @@
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { jobs } from '@/entry/worker';
-import { approveRequest, createRequest, expireFlagged } from '@/modules/enrichment';
+import { approveRequest, createRequest, expireFlagged, failStuck } from '@/modules/enrichment';
 import { request } from '@/modules/enrichment/db/schema';
 import { sourceFeedback } from '@/modules/intake/db/schema';
 import type { Principal } from '@/modules/tenancy';
@@ -83,6 +83,40 @@ describe('expireFlagged (Ruling 7)', () => {
     // A late approve reads as expired.
     const late = await reject(as(t, owner, (ctx) => approveRequest(ctx, owner, edge)));
     expect(late).toMatchObject({ status: 409, message: 'This request is already expired.' });
+  });
+
+  it('fails requests approved or running unchanged for a day, unless they wait on a limit (review I1)', async () => {
+    const now = new Date();
+    const waitingReason = 'Waiting for budget: Apollo monthly limit reached';
+    const cases: [Partial<typeof request.$inferInsert>, number][] = [
+      [{ status: 'running' }, 25],
+      [{ status: 'approved' }, 24],
+      [{ status: 'running' }, 23],
+      [{ status: 'approved', waitingReason }, 72],
+      [{ status: 'running', waitingReason }, 72],
+      [{ status: 'completed' }, 72],
+    ];
+    // Every account first: making one runs the outbox, which would run an earlier request's job.
+    const accounts: string[] = [];
+    while (accounts.length < cases.length) accounts.push((await accountFrom(t, agentSourceId)).accountId);
+    const ids: string[] = [];
+    for (const [i, [set, hours]] of cases.entries()) {
+      const { request: r } = await as(t, owner, (ctx) => createRequest(ctx, owner, accounts[i]!, firmo));
+      await t.run((ctx) => ctx.tx.update(request).set({ ...set, updatedAt: new Date(now.getTime() - hours * 3_600_000) }).where(eq(request.id, r.id)));
+      ids.push(r.id);
+    }
+
+    expect(await t.run((ctx) => failStuck(ctx, now))).toBe(2);
+    const rows = new Map((await t.run((ctx) => ctx.tx.select().from(request).where(inArray(request.id, ids)))).map((r) => [r.id, r]));
+    const stopped = { kind: 'unknown', message: 'This enrichment stopped without finishing. Try again.' };
+    expect(rows.get(ids[0]!)).toMatchObject({ status: 'failed', error: stopped, finishedAt: now });
+    expect(rows.get(ids[1]!)).toMatchObject({ status: 'failed', error: stopped });
+    expect(ids.slice(2).map((id) => rows.get(id)!.status)).toEqual(['running', 'approved', 'running', 'completed']);
+    const failed = await messagesFor(t, 'enrichment.request.failed', ids[0]!);
+    expect(failed.map((m) => m.data)).toEqual([
+      { requestId: ids[0], accountId: accounts[0], providerKey: 'apollo', errorKind: 'unknown', message: stopped.message, creditsUsed: 0, costCents: 0 },
+    ]);
+    expect(await t.run((ctx) => failStuck(ctx, now))).toBe(0);
   });
 
   it('is a worker job handler', () => {

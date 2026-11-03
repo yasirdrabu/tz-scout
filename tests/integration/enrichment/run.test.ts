@@ -2,7 +2,7 @@
 import { and, eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
-import { getAccount, getFacts, listConflicts, listPeople } from '@/modules/accounts';
+import { getAccount, getFacts, listBuyingRoles, listConflicts, listPeople } from '@/modules/accounts';
 import {
   cancelRequest,
   createRequest,
@@ -14,11 +14,12 @@ import {
   type RequestInput,
 } from '@/modules/enrichment';
 import { apolloMock } from '@/modules/enrichment/adapters/apollo/mock';
+import type { Signal } from '@/modules/enrichment/contracts/adapter';
 import { request } from '@/modules/enrichment/db/schema';
-import { listCaps, registerAdapter, setCapLimit } from '@/modules/integrations';
+import { listCaps, registerAdapter, setCapLimit, setDisabled } from '@/modules/integrations';
 import { callLog, connection, usageCap } from '@/modules/integrations/db/schema';
 import { ensureVendorSource, submitArrival } from '@/modules/intake';
-import { accountSummary } from '@/modules/accounts/db/schema';
+import { accountSummary, buyingRole } from '@/modules/accounts/db/schema';
 import { arrival, source } from '@/modules/intake/db/schema';
 import { createOffer, createPractice } from '@/modules/offers';
 import type { Principal } from '@/modules/tenancy';
@@ -541,5 +542,106 @@ describe('usage limits and redelivery', () => {
     await runOutbox(t2.tenantId);
     expect(await arrivalsOf(t2, id)).toHaveLength(1);
     expect(await messagesFor(t2, 'enrichment.request.completed', id)).toHaveLength(1);
+  });
+});
+
+describe('final review fixes', () => {
+  let t3: Tenant;
+  let owner3: Principal;
+  let agent3: string;
+  beforeAll(async () => {
+    const e = await enrichmentTenant();
+    t3 = e.t;
+    owner3 = e.owner;
+    agent3 = e.agentId;
+  });
+
+  it('a turned-off connection fails the request at once, with what an owner can do (review I1)', async () => {
+    const { accountId } = await accountFrom(t3, agent3);
+    const id = await approved(t3, owner3, accountId, technical);
+    await as(t3, owner3, (ctx) => setDisabled(ctx, 'apollo', true));
+    await runOutbox(t3.tenantId);
+    expect(await rowOf(t3, id)).toMatchObject({
+      status: 'failed',
+      error: { kind: 'bad_request', message: 'Apollo is turned off. An owner can turn it on in Integrations.' },
+    });
+    expect(await messagesFor(t3, 'enrichment.request.failed', id)).toHaveLength(1);
+    await as(t3, owner3, (ctx) => setDisabled(ctx, 'apollo', false));
+  });
+
+  it('an arrival intake refuses fails once with its reason, and is not retried (review I2)', async () => {
+    const mock = apolloMock();
+    let postings = 0;
+    const untyped = [{ title: 'Hiring: an analyst', occurred_at: '2026-10-01' }] as Signal[];
+    registerAdapter('apollo', { mock: () => ({ ...mock, jobPostings: async () => (postings++, { value: untyped, creditsUsed: 1 }) }) });
+    const { accountId } = await accountFrom(t3, agent3);
+    const id = await approved(t3, owner3, accountId, { kind: 'signals_refresh', providerKey: 'apollo' });
+    await runOutbox(t3.tenantId);
+    const row = await rowOf(t3, id);
+    expect(row).toMatchObject({ status: 'failed', error: { kind: 'bad_request', message: "Scout couldn't store what Apollo found. Say what kind of signal this is." } });
+    expect(row.result).toBeNull();
+    expect(postings).toBe(1);
+    expect(await messagesFor(t3, 'enrichment.request.failed', id)).toHaveLength(1);
+  });
+
+  it('drops signals with no title, and keeps the rest (review I2)', async () => {
+    const mock = apolloMock();
+    const posting: Signal = { type: 'pain', fine_type: 'hiring', title: 'Hiring: an analyst', occurred_at: '2026-10-01' };
+    const untitled: Signal[] = ['', '  '].map((title) => ({ type: 'trigger', fine_type: 'news', title, occurred_at: '2026-10-02' }));
+    registerAdapter('apollo', {
+      mock: () => ({ ...mock, jobPostings: async () => ({ value: [posting], creditsUsed: 1 }), news: async () => ({ value: untitled, creditsUsed: 1 }) }),
+    });
+    const { accountId } = await accountFrom(t3, agent3);
+    const id = await approved(t3, owner3, accountId, { kind: 'signals_refresh', providerKey: 'apollo' });
+    await runOutbox(t3.tenantId);
+    const row = await rowOf(t3, id);
+    expect(row.status).toBe('completed');
+    expect((row.result as Result).found).toBe(1);
+  });
+
+  it('finds at most 25 people for buying roles, as one arrival takes (review I2)', async () => {
+    await t3.run((ctx) => ctx.tx.insert(buyingRole).values({ tenantId: ctx.tenantId, key: 'extra_buyer', label: 'Extra buyer', sort: 99 }).onConflictDoNothing());
+    const roles = (await t3.run((ctx) => listBuyingRoles(ctx))).map((r) => r.key);
+    expect(roles.length * 3).toBeGreaterThan(25);
+    const mock = apolloMock();
+    let n = 0;
+    const three = () => [0, 1, 2].map(() => ({ name: `Person ${++n}`, title: 'Director', provider_ref: `p-${n}` }));
+    registerAdapter('apollo', { mock: () => ({ ...mock, peopleSearch: async () => ({ value: three(), creditsUsed: 0 }) }) });
+    const { accountId } = await accountFrom(t3, agent3);
+    const id = await approved(t3, owner3, accountId, { kind: 'people_for_roles', providerKey: 'apollo', roles });
+    await runOutbox(t3.tenantId);
+    const row = await rowOf(t3, id);
+    expect(row.status).toBe('completed');
+    expect((row.result as Result).credits_used).toBe(25);
+    expect(await arrivalsOf(t3, id)).toHaveLength(1);
+  });
+
+  it('a signals refresh stopped by a limit after the lookup keeps the organization id, so the next try does not pay for it again (review M2)', async () => {
+    await t3.run((ctx) => setCapLimit(ctx, 'apollo', 1000));
+    const mock = apolloMock();
+    let lookups = 0;
+    registerAdapter('apollo', {
+      mock: () => ({
+        ...mock,
+        companyEnrich: async (i: Parameters<EnrichmentAdapter['companyEnrich']>[0]) => {
+          lookups++;
+          const r = await mock.companyEnrich(i);
+          // Another request spends the rest of the limit while this one runs.
+          await adminDb.update(usageCap).set({ limit: 1 }).where(and(eq(usageCap.tenantId, t3.tenantId), eq(usageCap.providerKey, 'apollo')));
+          return r;
+        },
+      }),
+    });
+    const { accountId } = await accountFrom(t3, agent3);
+    const id = await approved(t3, owner3, accountId, { kind: 'signals_refresh', providerKey: 'apollo' });
+    await expect(runOutbox(t3.tenantId)).rejects.toMatchObject({ slug: 'blocked_by_cap' });
+    expect(await rowOf(t3, id)).toMatchObject({ waitingReason: 'Waiting for budget: Apollo monthly limit reached', params: { org_id: expect.any(String) } });
+
+    await t3.run((ctx) => setCapLimit(ctx, 'apollo', 1000));
+    await runOutbox(t3.tenantId);
+    const row = await rowOf(t3, id);
+    expect(row.status).toBe('completed');
+    expect(lookups).toBe(1);
+    expect((row.result as Result).credits_used).toBe(2);
   });
 });

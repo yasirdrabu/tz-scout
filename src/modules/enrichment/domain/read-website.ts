@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { SitePage } from '../contracts/adapter';
-import { decodeEntities } from '../adapters/website/html';
+import { attrOf, capHtml, decodeEntities, tagsOf } from '../adapters/website/html';
 
 // The `read_website` task's input and output, and its rules (Ruling 3). The HTML is read here, before the task:
 // the meta description and the technologies from a fixed fingerprint list go in as fields, so the prompt carries
@@ -34,15 +34,56 @@ const cited = z.object({ text: z.string().min(1).max(600), url });
 export const readWebsiteOutputSchema = z.object({
   description: cited.nullable(),
   industry_guess: cited.nullable(),
-  size_clues: z.array(cited).max(10),
   technologies: z.array(z.object({ name: z.string().min(1).max(80), url })).max(30),
   facts: z.array(z.object({ key: z.string().min(1).max(60), value: z.string().min(1).max(300), url })).max(30),
 });
 export type ReadWebsiteOutput = z.infer<typeof readWebsiteOutputSchema>;
 
-/** Technologies a page's HTML gives away, in this order. */
+const asText = (v: string) => v.trim() || undefined;
+const asList = (v: string) => {
+  const items = v.split(',').map((s) => s.trim()).filter(Boolean);
+  return items.length ? items : undefined;
+};
+const asWhole = (v: string) => {
+  const s = v.trim().replace(/,/g, '');
+  return /^\d{1,7}$/.test(s) && Number(s) > 0 ? Number(s) : undefined;
+};
+
+/**
+ * The only `facts` keys a website read may write (review I3), each as its account column takes it. Any other key,
+ * or a value that isn't one (an employee count of "about 200"), is dropped: a page can't set the account's identity,
+ * its parent, or its scoring or research facts. The prompt asks for these keys only.
+ */
+export const WEBSITE_FACT_KEYS: Record<string, (v: string) => unknown> = {
+  founded_year: (v) => {
+    const y = asWhole(v);
+    return y !== undefined && y >= 1600 && y <= new Date().getUTCFullYear() ? y : undefined;
+  },
+  employees: asWhole,
+  hq_city: asText,
+  hq_state: asText,
+  hq_country: asText,
+  keywords: asList,
+};
+
+type WebsiteFact = { key: string; value: unknown; url: string };
+
+/** The account facts a website read writes: the description, industry and technologies, and the allowed `facts`. */
+export function websiteFacts(o: ReadWebsiteOutput): WebsiteFact[] {
+  const out: WebsiteFact[] = [];
+  if (o.description) out.push({ key: 'description', value: o.description.text, url: o.description.url });
+  if (o.industry_guess) out.push({ key: 'industry', value: o.industry_guess.text, url: o.industry_guess.url });
+  if (o.technologies.length) out.push({ key: 'technologies', value: o.technologies.map((x) => x.name), url: o.technologies[0]!.url });
+  for (const x of o.facts) {
+    const value = Object.hasOwn(WEBSITE_FACT_KEYS, x.key) ? WEBSITE_FACT_KEYS[x.key]!(x.value) : undefined;
+    if (value !== undefined) out.push({ key: x.key, value, url: x.url });
+  }
+  return out;
+}
+
+/** Technologies a page's HTML gives away, in this order. Plain alternations only, so none can backtrack (review C1). */
 const FINGERPRINTS: [string, RegExp][] = [
-  ['WordPress', /\/wp-content\/|\/wp-includes\/|<meta[^>]+generator[^>]+wordpress/i],
+  ['WordPress', /\/wp-content\/|\/wp-includes\//i],
   ['HubSpot', /js\.hs-scripts\.com|js\.hsforms\.net|js\.hs-analytics\.net|\/hs\/hsstatic\//i],
   ['Shopify', /cdn\.shopify\.com/i],
   ['Wix', /static\.wixstatic\.com|static\.parastorage\.com/i],
@@ -58,12 +99,20 @@ const FINGERPRINTS: [string, RegExp][] = [
   ['Next.js', /__NEXT_DATA__|\/_next\/static\//i],
 ];
 
-export const fingerprints = (html: string): string[] => FINGERPRINTS.filter(([, re]) => re.test(html)).map(([name]) => name);
+/** A `<meta name="generator">` naming WordPress gives it away too. */
+const wordpressGenerator = (html: string) =>
+  tagsOf(html, 'meta').some((t) => attrOf(t, 'name')?.toLowerCase() === 'generator' && /wordpress/i.test(attrOf(t, 'content') ?? ''));
 
-/** The page's `<meta name="description">`, else its `og:description`. */
+/** The technologies of the page's first 256 KB. */
+export function fingerprints(html: string): string[] {
+  const h = capHtml(html);
+  return FINGERPRINTS.filter(([name, re]) => re.test(h) || (name === 'WordPress' && wordpressGenerator(h))).map(([name]) => name);
+}
+
+/** The page's `<meta name="description">`, else its `og:description` (from its first 256 KB). */
 export function metaDescription(html: string): string | null {
-  const metas = html.match(/<meta\b[^>]*>/gi) ?? [];
-  const attr = (tag: string, name: string) => tag.match(new RegExp(`\\b${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, 'i'))?.[2];
+  const metas = tagsOf(html, 'meta');
+  const attr = attrOf;
   const find = (want: string) => {
     const tag = metas.find((m) => (attr(m, 'name') ?? attr(m, 'property'))?.toLowerCase() === want);
     const content = tag ? attr(tag, 'content') : undefined;
@@ -102,7 +151,6 @@ export function rulesRead(i: ReadWebsiteInput): ReadWebsiteOutput {
   return {
     description: described?.description ? { text: cut(described.description, 600), url: described.url } : null,
     industry_guess: null,
-    size_clues: [],
     technologies: technologies.slice(0, 30),
     facts: home?.title ? [{ key: 'website_title', value: home.title, url: home.url }] : [],
   };
@@ -115,7 +163,6 @@ export function citedOnly(i: ReadWebsiteInput, o: ReadWebsiteOutput): ReadWebsit
   return {
     description: o.description && ok(o.description) ? o.description : null,
     industry_guess: o.industry_guess && ok(o.industry_guess) ? o.industry_guess : null,
-    size_clues: o.size_clues.filter(ok),
     technologies: o.technologies.filter(ok),
     facts: o.facts.filter(ok),
   };

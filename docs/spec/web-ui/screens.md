@@ -174,7 +174,9 @@ Enrichment (R2b-2, with `enrichment:request`): one line per request that is open
 {provider}: {status text}", for example "People for buying roles from Apollo: Waiting for approval"
 or "People for buying roles from Apollo: Found 2". Kind labels and status texts come from the API
 (requests-and-approval.md). The lines refresh every 10 seconds while any request is `approved` or
-`running`, and stop once none is.
+`running`, and stop once none is. When a request leaves `approved` or `running`, the rest of the
+account (its people, buying committee, facts and score) is read again, so what it found shows without a
+reload.
 
 **Stage tracker.** One step per pipeline stage, names and order from the API (C6), each with its
 date, the current step marked, "Waiting on you" on the review step for a reviewer, "Next" on the next
@@ -276,9 +278,10 @@ Opened by `Enrich` on the account page (both views) and in the queue peek (§3).
   their order; checked to start with are the roles with no person on the account yet. While they
   load: "Loading buying roles"; if they fail: "Buying roles didn't load. {error}". Sending with none
   checked: "Pick at least one buying role."
-- **People** (Reveal emails): a checkbox per person on the account without an email, all checked to
-  start with ("Loading people" while the account loads). With none: "Everyone here already has an
-  email." and the send button is off.
+- **People** (Reveal emails): a checkbox per person on the account without an email, the first 25
+  checked to start with ("Loading people" while the account loads). With none: "Everyone here already
+  has an email." and the send button is off. With more than 25 checked: "Pick up to 25 people." under
+  the list, no estimate, and the send button is off (one request reveals at most 25, as the API allows).
 - **Estimate line** from `GET /api/v1/accounts/{id}/enrichment-estimate`, asked again whenever the
   kind, provider, roles or people change: the API's `text`, for example "Up to 3 credits, about
   $0.30 · Sample" or "Free. Claude usage up to $0.05". While it loads: "Working out the cost"; if it

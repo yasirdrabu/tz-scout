@@ -134,6 +134,9 @@ describe('createRequest (Ruling 1)', () => {
     expect(await reject(create(owner, accountId, people([])))).toMatchObject({ status: 400, message: 'Pick at least one buying role.' });
     const stranger = await reject(create(owner, accountId, { kind: 'email_reveal', providerKey: 'apollo', personIds: [personIds[0]!, other.personIds[0]!] }));
     expect(stranger).toMatchObject({ status: 400, message: "That person isn't on this account." });
+    // One arrival takes at most 25 people (review I2).
+    const many = Array.from({ length: 26 }, (_, i) => `per_${i}`);
+    expect(await reject(create(owner, accountId, { kind: 'email_reveal', providerKey: 'apollo', personIds: many }))).toMatchObject({ status: 400, message: 'Pick up to 25 people.' });
     expect(await reject(create(owner, accountId, { kind: 'website_read', providerKey: 'apollo' }))).toMatchObject({ status: 400, message: "Apollo can't do that." });
     expect(await reject(create(owner, accountId, { kind: 'nope' as never, providerKey: 'apollo' }))).toMatchObject({ status: 400 });
     const tooLong = await reject(create(seller, accountId, { ...firmo, reason: 'x'.repeat(501) }));

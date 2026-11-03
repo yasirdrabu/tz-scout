@@ -10,7 +10,7 @@ import { accountQuery, buyingRolesQuery, personName } from '../account/api';
 import { errorText } from '../settings/shared';
 import { createRequest, estimateQuery, type EnrichmentKind, type NewRequest } from './api';
 import styles from './Enrichment.module.css';
-import { EVERYONE_EMAILED, FLAGGED_TEXT, JOINED_TEXT, KINDS, providersFor, REASON_NEEDED, ROLE_NEEDED, startedText } from './words';
+import { EVERYONE_EMAILED, FLAGGED_TEXT, JOINED_TEXT, KINDS, PEOPLE_MAX, providersFor, REASON_NEEDED, ROLE_NEEDED, startedText, TOO_MANY_PEOPLE } from './words';
 
 export type EnrichDialogProps = {
   tenant: string;
@@ -37,7 +37,7 @@ export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: E
 
   const [kind, setKind] = useState<EnrichmentKind>('people_for_roles');
   const [provider, setProvider] = useState(providersFor('people_for_roles')[0]!.key);
-  // null until the person changes them: the roles with no person yet, and everyone without an email.
+  // null until the person changes them: the roles with no person yet, and the first 25 people without an email.
   const [roles, setRoles] = useState<string[] | null>(null);
   const [people, setPeople] = useState<string[] | null>(null);
   const [reason, setReason] = useState('');
@@ -51,7 +51,8 @@ export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: E
   const covered = new Set(persons.flatMap((p) => p.roles.map((r) => r.key)));
   const pickedRoles = roles ?? allRoles.filter((r) => !covered.has(r.key)).map((r) => r.key);
   const noEmail = persons.filter((p) => !p.email);
-  const pickedPeople = people ?? noEmail.map((p) => p.id);
+  const pickedPeople = people ?? noEmail.slice(0, PEOPLE_MAX).map((p) => p.id);
+  const tooMany = kind === 'email_reveal' && pickedPeople.length > PEOPLE_MAX;
 
   const choice: Omit<NewRequest, 'reason'> = {
     kind,
@@ -59,7 +60,7 @@ export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: E
     ...(kind === 'people_for_roles' ? { roles: pickedRoles } : {}),
     ...(kind === 'email_reveal' ? { person_ids: pickedPeople } : {}),
   };
-  const ready = kind === 'people_for_roles' ? pickedRoles.length > 0 : kind === 'email_reveal' ? pickedPeople.length > 0 : true;
+  const ready = kind === 'people_for_roles' ? pickedRoles.length > 0 : kind === 'email_reveal' ? pickedPeople.length > 0 && !tooMany : true;
   const estimate = useQuery({ ...estimateQuery(tenant, accountId, choice), enabled: ready });
   const nobody = kind === 'email_reveal' && account.isSuccess && noEmail.length === 0;
 
@@ -89,7 +90,7 @@ export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: E
     const noReason = !approver && !why;
     setRoleError(noRole ? ROLE_NEEDED : null);
     setReasonError(noReason ? REASON_NEEDED : null);
-    if (noRole || noReason || nobody) return;
+    if (noRole || noReason || nobody || tooMany) return;
     setBusy(true);
     setError(null);
     try {
@@ -117,7 +118,7 @@ export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: E
           <Button variant="secondary" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={() => void submit()} disabled={busy || nobody}>
+          <Button onClick={() => void submit()} disabled={busy || nobody || tooMany}>
             {approver ? 'Run enrichment' : 'Ask for approval'}
           </Button>
         </>
@@ -178,7 +179,7 @@ export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: E
         )}
 
         {kind === 'email_reveal' && (
-          <fieldset className={styles.group}>
+          <fieldset className={styles.group} aria-describedby={tooMany ? 'enrich-people-error' : undefined}>
             <legend className={styles.legend}>People</legend>
             {account.isPending ? (
               <p className={styles.note}>Loading people</p>
@@ -191,6 +192,11 @@ export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: E
                   {personName(p)}
                 </label>
               ))
+            )}
+            {tooMany && (
+              <p id="enrich-people-error" className={styles.error}>
+                {TOO_MANY_PEOPLE}
+              </p>
             )}
           </fieldset>
         )}

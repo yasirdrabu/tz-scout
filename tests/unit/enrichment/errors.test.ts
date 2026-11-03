@@ -49,6 +49,21 @@ describe('classifyError (Ruling 9)', () => {
     expect(classifyError(withProps('bad', { status: 400 }), 'Apollo')).toMatchObject({ kind: 'bad_request', retry: false });
   });
 
+  it('the gateway refusing the connection fails at once (review I1)', () => {
+    const refused = (slug: string, status: number) => new ScoutError({ slug, status, title: 'x' });
+    expect(classifyError(refused('connection_disabled', 409), 'Apollo')).toEqual({
+      kind: 'bad_request',
+      message: 'Apollo is turned off. An owner can turn it on in Integrations.',
+      retry: false,
+    });
+    expect(classifyError(refused('connection_not_ready', 409), 'Apollo')).toEqual({
+      kind: 'bad_request',
+      message: 'Apollo is set to live but is not ready. An owner needs to save a key and test it in Integrations.',
+      retry: false,
+    });
+    expect(classifyError(refused('adapter-missing', 501), 'Apollo')).toEqual({ kind: 'bad_request', message: 'Apollo is not available yet.', retry: false });
+  });
+
   it('anything else is unknown and retries', () => {
     expect(classifyError(new Error('boom'), 'Apollo')).toEqual({ kind: 'unknown', message: 'Something went wrong. Try again.', retry: true });
     expect(classifyError('not an error', 'Apollo')).toMatchObject({ kind: 'unknown', retry: true });

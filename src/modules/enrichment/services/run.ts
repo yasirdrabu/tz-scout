@@ -1,5 +1,5 @@
 import { and, eq, inArray } from 'drizzle-orm';
-import { getAccount, getSummaries, isKnownFactKey, listBuyingRoles, type AccountView, type PersonView } from '@/modules/accounts';
+import { getAccount, getSummaries, listBuyingRoles, type AccountView, type PersonView } from '@/modules/accounts';
 import { getRun } from '@/modules/ai-tasks';
 import { PROVIDERS, checkCap, connectionStatus, gateway, markConnectionFailing } from '@/modules/integrations';
 import { checkArrivalCap, countryCode, ensureVendorSource, findArrivalByRef, normaliseDomain, readSource, submitArrival } from '@/modules/intake';
@@ -14,8 +14,8 @@ import { requestCompleted, requestFailed } from '../contracts/events';
 import type { EnrichmentKind, RequestStatus } from '../contracts/types';
 import { request } from '../db/schema';
 import { classifyError, type ClassifiedError } from '../domain/errors';
-import { DEFAULT_CENTS_PER_CREDIT, PEOPLE_PER_ROLE } from '../domain/prices';
-import { readWebsiteInput } from '../domain/read-website';
+import { DEFAULT_CENTS_PER_CREDIT, MAX_PEOPLE, PEOPLE_PER_ROLE } from '../domain/prices';
+import { readWebsiteInput, websiteFacts } from '../domain/read-website';
 import { nothingFound, searchTitles, type LeadOffer } from '../domain/run';
 import { readWebsite } from '../tasks/read-website';
 import { connectionFacts, fromStoredEstimate } from './requests';
@@ -25,6 +25,8 @@ import { connectionFacts, fromStoredEstimate } from './requests';
 // with the arrival, and the job returns normally, also when the request failed.
 
 type Row = typeof request.$inferSelect;
+/** `org_id` is the run's own: a signals refresh's organization id, kept while it waits on a limit. */
+type Params = { roles?: string[]; person_ids?: string[]; org_id?: string };
 type FactItem = { key: string; value: unknown; url?: string };
 type Failure = Pick<ClassifiedError, 'kind' | 'message'>;
 type Submitted = { arrivalIds: string[]; found: number };
@@ -39,6 +41,8 @@ type Found = {
   /** Claude's cost for a website read. */
   aiCents: number;
   readByRules: boolean;
+  /** A signals refresh's organization id, once looked up: kept on the request if a limit stops the run. */
+  orgId?: string;
 };
 
 /** A redelivery of a run that crashed finds it `running`; any other status means there is nothing to do. */
@@ -52,7 +56,13 @@ const subject = (id: string) => ({ type: 'enrichment_request', id });
 const sourcePaused = (name: string) => `The ${name} source is paused. An owner can turn it back on in Sources.`;
 const sourceFull = (name: string) => `The ${name} source reached its daily arrival limit. Try again tomorrow.`;
 
-/** Intake refused the arrival: the vendor source is paused or archived, or at its daily arrival limit. */
+/** Intake refused the arrival's body, in its own words: its first problem, else its title. */
+function storeRefused(name: string, e: ScoutError): string {
+  const why = (e.errors?.[0]?.message ?? e.detail ?? e.message).trim().replace(/\.?$/, '.');
+  return `Scout couldn't store what ${name} found. ${why}`;
+}
+
+/** Intake refused the arrival: the vendor source is paused or archived, at its daily arrival limit, or the body. */
 class SubmitRefused extends Error {}
 
 /** Writes `set` in its own committed transaction; false when the request is no longer in one of `from`. */
@@ -115,7 +125,9 @@ async function operate(ctx: ModuleContext, r: Row, domain: string, f: Found): Pr
     f.credits += paid.creditsUsed;
     return paid.value;
   };
-  const params = r.params as { roles?: string[]; person_ids?: string[] };
+  const params = r.params as Params;
+  /** An arrival needs a title on every signal: a provider's untitled item (an Apollo article with none) is dropped. */
+  const titled = (xs: Signal[]) => xs.filter((s) => s.title?.trim());
 
   switch (r.kind as EnrichmentKind) {
     case 'company_firmographics':
@@ -137,6 +149,8 @@ async function operate(ctx: ModuleContext, r: Row, domain: string, f: Found): Pr
             known.buying_roles = [...new Set([...(known.buying_roles ?? []), role])];
             continue;
           }
+          // One arrival takes at most 25 people: past that, nothing more is revealed (review I2).
+          if (f.people.length >= MAX_PEOPLE) continue;
           const revealed = await call('people/match', 1, (a) => a.revealEmail({ person: p, domain }));
           const person: Person = { ...revealed, buying_role: role, buying_roles: [role] };
           byRef.set(ref, person);
@@ -153,12 +167,13 @@ async function operate(ctx: ModuleContext, r: Row, domain: string, f: Found): Pr
     }
     case 'signals_refresh': {
       // One lookup for the organization id, so job postings and news need no lookup of their own (3 credits in all).
-      // With no such company there is nothing to look for: the run stops and finds nothing new.
-      const company = await call('organizations/enrich', 1, (a) => a.companyEnrich({ domain }));
-      const orgId = company?.provider_ref;
+      // With no such company there is nothing to look for: the run stops and finds nothing new. An id a limit stopped
+      // an earlier try after is reused, so waiting for the limit doesn't pay for the lookup again (review M2).
+      const orgId = params.org_id ?? (await call('organizations/enrich', 1, (a) => a.companyEnrich({ domain })))?.provider_ref;
       if (!orgId) return;
-      f.signals.push(...(await call('organizations/job_postings', 1, (a) => a.jobPostings({ domain, orgId }))));
-      f.signals.push(...(await call('news_articles/search', 1, (a) => a.news({ domain, orgId }))));
+      f.orgId = orgId;
+      f.signals.push(...titled(await call('organizations/job_postings', 1, (a) => a.jobPostings({ domain, orgId }))));
+      f.signals.push(...titled(await call('news_articles/search', 1, (a) => a.news({ domain, orgId }))));
       return;
     }
     case 'website_read': {
@@ -169,11 +184,7 @@ async function operate(ctx: ModuleContext, r: Row, domain: string, f: Found): Pr
       const read = await readWebsite(ctx, readWebsiteInput(domain, pages), { subject: subject(r.id) });
       f.readByRules = read.mode !== 'live';
       f.aiCents += (await getRun(ctx, read.runId))?.costCents ?? 0;
-      const o = read.output;
-      if (o.description) f.facts.push({ key: 'description', value: o.description.text, url: o.description.url });
-      if (o.industry_guess) f.facts.push({ key: 'industry', value: o.industry_guess.text, url: o.industry_guess.url });
-      if (o.technologies.length) f.facts.push({ key: 'technologies', value: o.technologies.map((x) => x.name), url: o.technologies[0]!.url });
-      for (const x of o.facts) if (isKnownFactKey(x.key)) f.facts.push({ key: x.key, value: x.value, url: x.url });
+      f.facts.push(...websiteFacts(read.output));
       return;
     }
   }
@@ -253,6 +264,8 @@ async function submit(ctx: ModuleContext, r: Row, f: Found, before: AccountView 
     // Intake checks the sender and its daily limit before it writes anything, so this transaction can record the failure.
     if (e instanceof ScoutError && e.status === 403) throw new SubmitRefused(sourcePaused(name));
     if (e instanceof ScoutError && e.slug === 'cap-reached') throw new SubmitRefused(sourceFull(name));
+    // Any other refusal (a body intake won't take) is the same on every try: fail once, don't spend again (review I2).
+    if (e instanceof ScoutError && e.status >= 400 && e.status < 500) throw new SubmitRefused(storeRefused(name, e));
     throw e;
   }
   const i = out.inlineResult;
@@ -400,7 +413,8 @@ export async function runRequest(ctx: ModuleContext, requestId: string): Promise
     const c = classifyError(e, name);
     if (c.kind === 'cap_reached') {
       if (hasResults(f)) return finish(ctx, r, f, before, c);
-      await commit(ctx, r.id, { waitingReason: waiting });
+      const orgId = f.orgId && f.orgId !== (r.params as Params).org_id ? { params: { ...(r.params as Params), org_id: f.orgId } } : {};
+      await commit(ctx, r.id, { waitingReason: waiting, ...orgId });
       throw e;
     }
     // Partial means it kept something: out of credits before anything was found is a failure.
