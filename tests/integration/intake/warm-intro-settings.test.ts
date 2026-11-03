@@ -2,19 +2,20 @@ import { and, eq, like, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   accountIdsForWarmIntroChange,
+  confirmWarmIntro,
   getArrival,
   getWarmIntroSettings,
   saveWarmIntroSettings,
   submitArrival,
   type WarmIntroSettingsInput,
 } from '@/modules/intake';
-import { warmIntro } from '@/modules/intake/db/schema';
+import { warmIntro, warmIntroRule } from '@/modules/intake/db/schema';
 import { addMember, removeMember } from '@/modules/tenancy';
 import { adminDb } from '@/platform/db/client';
 import { auditLog } from '@/platform/db/schema';
 import { ScoutError } from '@/platform/errors';
 import { runOutbox } from '../helpers/run-outbox';
-import { seedUser } from '../tenancy/helpers';
+import { inTenant, seedUser } from '../tenancy/helpers';
 import { asSource, freshTenant, personAndAgent, type Tenant } from './helpers';
 
 let t: Tenant;
@@ -259,5 +260,67 @@ describe('saveWarmIntroSettings, follow-ups', () => {
     const input = await asInput();
     const again = await refused({ ...input, rules: [...input.rules, { introducerUserId: sel.id, relationshipKey: 'other', points: 3 }] });
     expect(again.errors).toEqual([{ path: 'rules[1].introducer_user_id', message: 'Pick a person in this workspace.' }]);
+  });
+});
+
+describe('final review fixes', () => {
+  it('leaves out introducers with neither a user nor an email, and lists intro makers first by count, then members by name', async () => {
+    await intro({ introducer_name: 'Ash Patel', relationship_key: 'employee_network' });
+    await intro({ introducer_name: 'Zed', introducer_email: 'zed@example.com', relationship_key: 'other' });
+    await intro({ introducer_name: 'Zed', introducer_email: 'zed@example.com', relationship_key: 'other' });
+    await intro({ introducer_name: 'Amy', introducer_email: 'amy@example.com', relationship_key: 'other' });
+    const s = await settings();
+    expect(s.introducers.some((i) => i.name === 'Ash Patel')).toBe(false);
+    expect(s.introducers.every((i) => i.userId !== null || i.email !== null)).toBe(true);
+    expect(s.introducers.slice(0, 2).map((i) => [i.email, i.introCount])).toEqual([
+      ['zed@example.com', 2],
+      ['amy@example.com', 1],
+    ]);
+    const rest = s.introducers.slice(2);
+    expect(rest.length).toBeGreaterThan(1); // the owner and Sel, members with no intros
+    expect(rest.every((i) => i.introCount === 0 && i.userId !== null)).toBe(true);
+    const names = rest.map((i) => i.name ?? '');
+    expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
+  });
+
+  it('treats an intro recorded by email before the person joined as the member: a member rule reprices and stamps it, and they can confirm it', async () => {
+    const joiner = await seedUser({ email: `join-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}@example.com` });
+    const early = await intro({ introducer_name: 'Jo Iner', introducer_email: joiner.email, relationship_key: 'employee_network' });
+    expect(early.introducerUserId).toBeNull();
+    await t.run((ctx) => addMember(ctx, { email: joiner.email, role: 'seller' }));
+    expect((await settings()).introducers.filter((i) => i.email === joiner.email)).toEqual([
+      { userId: joiner.id, email: joiner.email, name: expect.any(String), introCount: 1 },
+    ]);
+
+    const out = await save({ ...(await asInput()), rules: [{ introducerUserId: joiner.id, relationshipKey: 'employee_network', points: 12 }] });
+    expect(out.rescoringAccountCount).toBe(1);
+    expect(out.settings.rules[0]!.introCount).toBe(1);
+    const after = await row(early.arrivalId);
+    expect(after).toMatchObject({ introducerUserId: joiner.id, points: 12, effectivePoints: 6 });
+    expect(after.repricedChangeId).toMatch(/^wic_/);
+
+    const confirmed = await inTenant(t.tenantId, { kind: 'user', id: joiner.id }, (ctx) => confirmWarmIntro(ctx, early.id, { canReview: false }));
+    expect(confirmed).toMatchObject({ confirmed: true, points: 12, fullPoints: 12 });
+  });
+
+  it('a stored outside rule with no name does not block a save: it takes the name on its intros, else its email', async () => {
+    await intro({ introducer_name: 'Olu Ade', introducer_email: 'olu@example.com', relationship_key: 'other' });
+    await save({
+      ...(await asInput()),
+      rules: [
+        { introducerEmail: 'olu@example.com', introducerName: 'Olu', relationshipKey: 'other', points: 4 },
+        { introducerEmail: 'pat@example.com', introducerName: 'Pat', relationshipKey: 'other', points: 5 },
+      ],
+    });
+    await t.run((ctx) => ctx.tx.update(warmIntroRule).set({ introducerName: null }).where(eq(warmIntroRule.tenantId, ctx.tenantId)));
+    const named = (rules: { introducerEmail: string | null; introducerName: string | null }[]) => rules.map((r) => [r.introducerEmail, r.introducerName]).sort();
+    const expected = [
+      ['olu@example.com', 'Olu Ade'],
+      ['pat@example.com', 'pat@example.com'],
+    ];
+    expect(named((await settings()).rules)).toEqual(expected);
+    const input = await asInput();
+    const out = await save(withDefault({ ...input, rules: input.rules.map((r) => ({ ...r, introducerName: null })) }, 'partner_referral', 9));
+    expect(named(out.settings.rules)).toEqual(expected);
   });
 });

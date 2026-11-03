@@ -1,5 +1,5 @@
 import { and, asc, eq, gt, inArray } from 'drizzle-orm';
-import { activeAccountIds, listAccountIds } from '@/modules/accounts';
+import { activeAccountIds, listAccountIds, resolveAccountId } from '@/modules/accounts';
 import { accountIdsForSource, accountIdsForWarmIntroChange } from '@/modules/intake';
 import { listApprovedOffers } from '@/modules/offers';
 import type { ModuleContext } from '@/platform/context';
@@ -55,9 +55,17 @@ async function pageIds(ctx: ModuleContext, filter: RescoreFilter, afterId: strin
   const cursor = afterId ? { afterId } : {};
   if (filter.sourceId) return accountIdsForSource(ctx, filter.sourceId, { ...cursor, limit: RESCORE_PAGE_SIZE });
   if (filter.warmIntroChangeId) {
-    // Archived and merged-away accounts are dropped, as for a source; a page may come up short of the limit.
+    // A merged-away account (its intro not yet moved) is scored as its survivor, as scoreAccount redirects it; other
+    // archived accounts are dropped, as for a source. A page may come up short of the limit.
     const raw = await accountIdsForWarmIntroChange(ctx, filter.warmIntroChangeId, { ...cursor, limit: RESCORE_PAGE_SIZE });
-    return { ids: await activeAccountIds(ctx, raw), nextAfterId: raw.length === RESCORE_PAGE_SIZE ? raw[raw.length - 1]! : null };
+    const active = new Set(await activeAccountIds(ctx, raw));
+    const survivors: string[] = [];
+    for (const id of raw.filter((x) => !active.has(x))) {
+      const r = await resolveAccountId(ctx, id);
+      if (r?.mergedInto) survivors.push(r.mergedInto);
+    }
+    const ids = [...new Set([...active, ...(await activeAccountIds(ctx, survivors))])].sort();
+    return { ids, nextAfterId: raw.length === RESCORE_PAGE_SIZE ? raw[raw.length - 1]! : null };
   }
   if (filter.offerId) {
     const rows = await ctx.tx

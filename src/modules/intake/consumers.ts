@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { getConflict } from '@/modules/accounts';
 import { accountMerged, conflictResolved } from '@/modules/accounts/contracts/events';
 import { leadQualified } from '@/modules/crm/contracts/events';
@@ -26,7 +26,10 @@ export const intakeAccountMerged = defineConsumer({
   handle: async ({ data: { survivorId, mergedId } }, ctx) => {
     await ctx.tx.update(arrival).set({ accountId: survivorId }).where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.accountId, mergedId)));
     await ctx.tx.update(sourceFeedback).set({ accountId: survivorId }).where(and(eq(sourceFeedback.tenantId, ctx.tenantId), eq(sourceFeedback.accountId, mergedId)));
-    await ctx.tx.update(warmIntro).set({ accountId: survivorId }).where(and(eq(warmIntro.tenantId, ctx.tenantId), eq(warmIntro.accountId, mergedId)));
+    const merged = and(eq(warmIntro.tenantId, ctx.tenantId), eq(warmIntro.accountId, mergedId));
+    // Locked in id order first, as a settings save locks them, so the two can't deadlock.
+    await ctx.tx.select({ id: warmIntro.id }).from(warmIntro).where(merged).orderBy(asc(warmIntro.id)).for('update');
+    await ctx.tx.update(warmIntro).set({ accountId: survivorId }).where(merged);
     await ctx.tx.execute(sql`
       update intake.arrival set duplicate_candidates = (
         select jsonb_agg(case when c->>'accountId' = ${mergedId} then jsonb_set(c, '{accountId}', to_jsonb(${survivorId}::text)) else c end)

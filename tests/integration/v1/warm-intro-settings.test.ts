@@ -63,8 +63,9 @@ describe('GET and PUT /settings/warm-intros (SRC-E5-S2)', () => {
     expect((await get()).rules).toEqual([expect.objectContaining({ id: keep.id, points: 16 })]);
   });
 
-  it('an agent key is refused (people only)', async () => {
+  it('an agent key is refused for reading (it lists member emails) and saving (people only)', async () => {
     const key = await keyFor(w.tenant, ['scoring:manage']);
+    expect((await call(getSettings, key, 'settings/warm-intros')).status).toBe(403);
     const res = await call(putSettings, key, 'settings/warm-intros', { method: 'PUT', body: { relationships: [], rules: [] } });
     expect(res.status).toBe(403);
   });

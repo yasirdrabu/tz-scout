@@ -669,4 +669,24 @@ describe('fan-out on warm intros', () => {
     expect((await current(t, survivor.accountId))!.warmPoints).toBe(6);
     expect(await current(t, merged.accountId)).toBeUndefined();
   });
+
+  it('a stamped intro still on a merged-away account rescores the survivor, not nothing', async () => {
+    const { t, intro } = await warmWorld();
+    const merged = await intro('employee_network');
+    const survivor = await seed(t);
+    await score(t, survivor.accountId);
+    const person = { userId: 'usr_leader', sourceId: 'src_leader', dataLimit: { kind: 'all' as const } };
+    await t.run((ctx) => mergeAccounts({ ...ctx, access: person } as ModuleContext, survivor.accountId, merged.accountId));
+    await runOutbox(t.tenantId);
+    // The merge window: the intro has not moved to the survivor yet when the save stamps it.
+    await adminDb.execute(sql`update intake.warm_intro set account_id = ${merged.accountId} where id = ${merged.warmIntroId}`);
+    const out = await reprice(t, 12);
+    expect(out.rescoringAccountCount).toBe(1);
+    const { changeId } = (await outboxOf(t, 'intake.warm_intro.repriced'))[0]!.data as { changeId: string };
+    expect(await t.run((ctx) => accountIdsForWarmIntroChange(ctx, changeId, { limit: 50 }))).toEqual([merged.accountId]);
+    await runOutbox(t.tenantId);
+    const run = (await t.run((ctx) => ctx.tx.select().from(rescoreRun).where(eq(rescoreRun.cause, 'warm_intro'))))[0]!;
+    expect(run).toMatchObject({ total: 1, done: 1 });
+    expect(run.finishedAt).not.toBeNull();
+  });
 });

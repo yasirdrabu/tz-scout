@@ -18,8 +18,8 @@ const body = z.strictObject({
 // `parseBody` camelCases only the top-level keys, so the rules arrive in snake_case.
 type Body = { relationships: { key: string; points: number }[]; rules: z.infer<typeof rule>[] };
 
-/** SRC-E5-S2: the Warm intros tab: relationship points, introducer rules, and the people a rule can name. */
-export const GET = v1Route({ permission: 'scoring:manage' }, async (_req, _principal, ctx) => getWarmIntroSettings(ctx));
+/** SRC-E5-S2: the Warm intros tab: relationship points, introducer rules, and the people a rule can name. People only (it lists member emails). */
+export const GET = v1Route({ permission: 'scoring:manage', peopleOnly: true },async (_req, _principal, ctx) => getWarmIntroSettings(ctx));
 
 /**
  * Saves the whole tab: rules in the body replace the stored ones, and the intros already recorded are repriced.

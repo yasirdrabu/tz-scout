@@ -9,7 +9,7 @@ import { warmIntroRepriced } from '../contracts/events';
 import { relationshipDefault, warmIntro, warmIntroRule } from '../db/schema';
 import { RELATIONSHIP_DEFAULTS } from '../defaults';
 import { pickRule } from '../domain/warm-intro';
-import { loadDefaults, repriceWarmIntros } from './warm-intros';
+import { introducerId, loadDefaults, repriceWarmIntros } from './warm-intros';
 
 export type RelationshipDefaultView = { relationshipKey: string; label: string; points: number };
 
@@ -55,6 +55,12 @@ const view = (r: typeof relationshipDefault.$inferSelect): RelationshipDefaultVi
 
 const validPoints = (p: number) => Number.isInteger(p) && p >= 0 && p <= MAX_POINTS;
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+/** The name on each email's first recorded intro (intros in created order). */
+function firstNameByEmail(intros: { email: string | null; name: string | null }[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const i of intros) if (i.email && i.name && !out.has(i.email)) out.set(i.email, i.name);
+  return out;
+}
 const validation = (errors: { path: string; message: string }[]) => new ScoutError({ slug: 'validation', status: 400, title: errors[0]!.message, errors });
 
 export async function listRelationshipDefaults(ctx: ModuleContext): Promise<RelationshipDefaultView[]> {
@@ -80,6 +86,8 @@ export async function getWarmIntroSettings(ctx: ModuleContext): Promise<WarmIntr
   // A former member keeps a name: the one stored on their rule, else the one on their first recorded intro.
   const introName = new Map<string, string>();
   for (const i of intros) if (i.userId && i.name && !introName.has(i.userId)) introName.set(i.userId, i.name);
+  const emailName = firstNameByEmail(intros);
+  const memberByEmail = new Map(people.map((m) => [m.email.toLowerCase(), m.userId]));
 
   const byRelationship = new Map<string, number>();
   const byRule = new Map<string, number>();
@@ -91,14 +99,14 @@ export async function getWarmIntroSettings(ctx: ModuleContext): Promise<WarmIntr
   }
   for (const i of intros) {
     byRelationship.set(i.relationshipKey, (byRelationship.get(i.relationshipKey) ?? 0) + 1);
+    // An intro recorded by email before its introducer joined counts as the member's, as repricing prices it.
     const rule = pickRule(
       rules.filter((r) => r.relationshipKey === i.relationshipKey),
-      i,
+      { userId: introducerId({ introducerUserId: i.userId, introducerEmail: i.email }, memberByEmail), email: i.email },
     );
     if (rule) byRule.set(rule.id, (byRule.get(rule.id) ?? 0) + 1);
-    const keys = [i.userId && `u:${i.userId}`, i.email && `e:${i.email}`, !i.userId && !i.email && i.name && `n:${i.name.trim().toLowerCase()}`].filter(
-      (k): k is string => !!k,
-    );
+    // A person named with neither a user nor an email can't have a rule (one could never match), so isn't listed.
+    const keys = [i.userId && `u:${i.userId}`, i.email && `e:${i.email}`].filter((k): k is string => !!k);
     if (keys.length === 0) continue;
     let entry = keys.map((k) => introducers.get(k)).find((e) => e !== undefined);
     if (!entry) {
@@ -117,13 +125,18 @@ export async function getWarmIntroSettings(ctx: ModuleContext): Promise<WarmIntr
       id: r.id,
       introducerUserId: r.introducerUserId,
       introducerEmail: r.introducerEmail,
-      introducerName: (r.introducerUserId ? memberName.get(r.introducerUserId) : undefined) ?? r.introducerName ?? (r.introducerUserId ? introName.get(r.introducerUserId) : undefined) ?? null,
+      introducerName:
+        (r.introducerUserId ? memberName.get(r.introducerUserId) : undefined) ??
+        r.introducerName ??
+        (r.introducerUserId ? introName.get(r.introducerUserId) : undefined) ??
+        (r.introducerEmail ? (emailName.get(r.introducerEmail) ?? r.introducerEmail) : null),
       relationshipKey: r.relationshipKey,
       points: r.points,
       introCount: byRule.get(r.id) ?? 0,
     })),
+    // §21i: people who made intros first (most intros first), then members with none; by name within each.
     introducers: [...new Set(introducers.values())].sort(
-      (a, b) => (a.name ?? '￿').localeCompare(b.name ?? '￿') || (a.email ?? '').localeCompare(b.email ?? ''),
+      (a, b) => b.introCount - a.introCount || (a.name ?? '￿').localeCompare(b.name ?? '￿') || (a.email ?? '').localeCompare(b.email ?? ''),
     ),
   };
 }
@@ -155,6 +168,13 @@ export async function saveWarmIntroSettings(
   const people = new Map((await members(ctx)).map((m) => [m.userId, m.name]));
   const labels = new Map(defaults.map((d) => [d.relationshipKey, d.label]));
   const storedById = new Map(stored.map((r) => [r.id, r]));
+  const emailName = firstNameByEmail(
+    await ctx.tx
+      .select({ email: warmIntro.introducerEmail, name: warmIntro.introducerName })
+      .from(warmIntro)
+      .where(eq(warmIntro.tenantId, ctx.tenantId))
+      .orderBy(asc(warmIntro.createdAt)),
+  );
 
   const errors: { path: string; message: string }[] = [];
   const seenKeys = new Set<string>();
@@ -178,7 +198,11 @@ export async function saveWarmIntroSettings(
     const userId = r.introducerUserId || null;
     const email = userId ? null : r.introducerEmail?.trim().toLowerCase() || null;
     // A member's name is kept on their rule too, so the rule still has one if they leave.
-    const name = userId ? (people.get(userId) ?? before?.introducerName ?? null) : r.introducerName?.trim() || null;
+    // A stored email rule saved with no name takes the name on its intros, else its email, so it never blocks a save.
+    const storedEmail = !userId && email && before?.introducerEmail === email;
+    const name = userId
+      ? (people.get(userId) ?? before?.introducerName ?? null)
+      : r.introducerName?.trim() || (storedEmail ? (before?.introducerName ?? emailName.get(email) ?? email) : null);
     // A stored rule keeps its person after they leave the workspace; a new or changed one must name a current member.
     const sameUser = before?.introducerUserId === userId;
     if (userId && !people.has(userId) && !sameUser) errors.push({ path: at('introducer_user_id'), message: 'Pick a person in this workspace.' });

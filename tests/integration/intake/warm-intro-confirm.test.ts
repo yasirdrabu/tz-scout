@@ -96,6 +96,17 @@ describe('confirmWarmIntro', () => {
     expect((await row(i.arrivalId)).confirmedBy).toBe(`user:${sel.id}`);
   });
 
+  it('lets a person confirm an intro recorded by their email before they joined, and stamps their user id', async () => {
+    const late = await seedUser({ email: email('late') });
+    const i = await intro({ introducer_name: 'Lee Late', introducer_email: late.email, relationship_key: 'partner_referral' });
+    expect(i.introducerUserId).toBeNull();
+    await t.run((ctx) => addMember(ctx, { email: late.email, role: 'seller' }));
+    expect(await t.run((ctx) => getWarmIntro(ctx, i.accountId))).toMatchObject({ warmIntroId: i.id, introducerUserId: late.id });
+    const view = await as(late.id, (ctx) => confirmWarmIntro(ctx, i.id, { canReview: false }));
+    expect(view).toMatchObject({ confirmed: true, introducerUserId: late.id });
+    expect(await row(i.arrivalId)).toMatchObject({ introducerUserId: late.id, confirmedBy: `user:${late.id}` });
+  });
+
   it('is not found for an unknown intro', async () => {
     const e = await t.run((ctx) => confirmWarmIntro(ctx, 'wi_nope', { canReview: true })).catch((x: unknown) => x);
     expect((e as ScoutError).status).toBe(404);

@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, inArray } from 'drizzle-orm';
 import { filterVisibleAccountIds } from '@/modules/accounts';
-import { memberRole, userIdForEmail } from '@/modules/tenancy';
+import { memberRole, members, userIdForEmail } from '@/modules/tenancy';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -71,6 +71,15 @@ async function introducerUser(ctx: ModuleContext, email: string | undefined): Pr
   return userId && (await memberRole(ctx, userId)) ? userId : null;
 }
 
+/** Each current member's user id by lower-case email: an intro recorded by email before they joined is theirs too. */
+export async function memberIdsByEmail(ctx: ModuleContext): Promise<Map<string, string>> {
+  return new Map((await members(ctx)).map((m) => [m.email.toLowerCase(), m.userId]));
+}
+
+/** The intro's introducer as a user: its stored user id, else the member its email belongs to. */
+export const introducerId = (r: { introducerUserId: string | null; introducerEmail: string | null }, byEmail: Map<string, string>) =>
+  r.introducerUserId ?? (r.introducerEmail ? (byEmail.get(r.introducerEmail) ?? null) : null);
+
 /** An intro's points under the given rules and defaults: its introducer's rule for the relationship, else the default. */
 function priced(r: Pick<Row, 'introducerUserId' | 'introducerEmail' | 'relationshipKey' | 'confirmed'>, rules: readonly Rule[], defaults: Record<string, number>) {
   const rule = pickRule(
@@ -140,7 +149,10 @@ export async function getWarmIntro(ctx: ModuleContext, accountIds: string | stri
     .where(and(eq(warmIntro.tenantId, ctx.tenantId), inArray(warmIntro.accountId, ids)))
     .orderBy(warmIntro.createdAt);
   const best = strongest(rows);
-  return best ? view(best, await relationshipLabels(ctx)) : null;
+  if (!best) return null;
+  // An intro recorded by email before its introducer joined is theirs (so the account page offers them Confirm).
+  const introducerUserId = best.introducerUserId ?? (await introducerUser(ctx, best.introducerEmail ?? undefined));
+  return view({ ...best, introducerUserId }, await relationshipLabels(ctx));
 }
 
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That warm intro was not found.' });
@@ -158,7 +170,9 @@ export async function confirmWarmIntro(ctx: ModuleContext, warmIntroId: string, 
     .where(and(eq(warmIntro.tenantId, ctx.tenantId), eq(warmIntro.id, warmIntroId)))
     .for('update');
   if (!row || (await filterVisibleAccountIds(ctx, [row.accountId])).length === 0) throw notFound();
-  const isIntroducer = ctx.actor.kind === 'user' && row.introducerUserId !== null && ctx.actor.id === row.introducerUserId;
+  // An intro recorded by email before its introducer joined is theirs once they are a member.
+  const introducerUserId = row.introducerUserId ?? (await introducerUser(ctx, row.introducerEmail ?? undefined));
+  const isIntroducer = ctx.actor.kind === 'user' && introducerUserId !== null && ctx.actor.id === introducerUserId;
   if (!opts.canReview && !isIntroducer) {
     const name = row.introducerName ?? row.introducerEmail ?? 'the introducer';
     throw new ScoutError({ slug: 'forbidden', status: 403, title: `Only a reviewer or ${name}, who made the intro, can confirm it.` });
@@ -171,6 +185,7 @@ export async function confirmWarmIntro(ctx: ModuleContext, warmIntroId: string, 
     .update(warmIntro)
     .set({
       confirmed: true,
+      introducerUserId,
       effectivePoints: row.points,
       confirmedBy: `${ctx.actor.kind}:${ctx.actor.id}`,
       confirmedAt: new Date(),
@@ -204,15 +219,19 @@ export async function repriceWarmIntros(ctx: ModuleContext): Promise<{ changeId:
   const rows = await ctx.tx.select().from(warmIntro).where(eq(warmIntro.tenantId, ctx.tenantId)).orderBy(asc(warmIntro.id)).for('update');
   const rules = await ctx.tx.select().from(warmIntroRule).where(eq(warmIntroRule.tenantId, ctx.tenantId));
   const defaults = pointsByKey(await loadDefaults(ctx));
+  const byEmail = await memberIdsByEmail(ctx);
   const accountIds = new Set<string>();
   for (const r of rows) {
-    const next = priced(r, rules, defaults);
-    if (next.points === r.points && next.effectivePoints === r.effectivePoints) continue;
+    // An intro recorded by email before its introducer joined is priced as theirs, and gets their user id.
+    const introducerUserId = introducerId(r, byEmail);
+    const next = priced({ ...r, introducerUserId }, rules, defaults);
+    const moved = next.points !== r.points || next.effectivePoints !== r.effectivePoints;
+    if (!moved && introducerUserId === r.introducerUserId) continue;
     await ctx.tx
       .update(warmIntro)
-      .set({ ...next, repricedChangeId: changeId })
+      .set({ introducerUserId, ...(moved ? { ...next, repricedChangeId: changeId } : {}) })
       .where(eq(warmIntro.id, r.id));
-    accountIds.add(r.accountId);
+    if (moved) accountIds.add(r.accountId);
   }
   return { changeId, accountIds: [...accountIds].sort() };
 }
