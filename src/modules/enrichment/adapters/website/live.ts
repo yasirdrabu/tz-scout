@@ -11,8 +11,8 @@ import { parseRobots, type Robots } from './robots';
 // page, and says who it is. Needs no key.
 // - Only public sites (review I-1): the domain is read as the URL parser reads it, redirects are followed by hand (at
 //   most 3 hops, each hop checked), and the default transport checks every address when it connects.
-// - A home page that can't be reached, or that answers with an error, is a bad request: "Scout couldn't reach
-//   {domain}." Only a dropped connection, a DNS hiccup, a rate limit or the time running out retries.
+// - A home page that can't be reached, or that answers 4xx, is a bad request: "Scout couldn't reach {domain}." A 5xx,
+//   a dropped connection, a DNS hiccup, a rate limit or the time running out retries.
 // - When the 30 seconds run out before the home page is read, the read fails as a timeout; after that, it stops and
 //   keeps the pages it has. A linked page that fails is skipped.
 
@@ -127,7 +127,8 @@ export function websiteLive(_creds: LiveCredentials, fetchImpl: typeof fetch = g
           }
           if (!res.ok) {
             await cancel(res);
-            throw unreachable();
+            // A server error may pass: its 5xx status classifies as `unknown`, which retries. A 4xx won't change.
+            throw res.status >= 500 ? new ProviderError(res.status, `${domain} answered ${res.status}.`) : unreachable();
           }
           if (!isHtml(res)) {
             await cancel(res);

@@ -9,12 +9,13 @@ describe('isBlockedAddress', () => {
   it.each([
     '0.0.0.0', '10.0.0.5', '127.0.0.1', '100.64.0.1', '100.127.255.255', '169.254.169.254', '172.16.0.1', '172.31.255.255', '192.168.1.1',
     '224.0.0.1', '255.255.255.255', '::', '::1', 'fc00::1', 'fd12:3456::1', 'fe80::1', 'febf::1', '::ffff:127.0.0.1', '::ffff:10.0.0.5',
-    '::ffff:a9fe:a9fe', '0:0:0:0:0:ffff:7f00:1', 'ff02::1', 'not an address',
+    '::ffff:a9fe:a9fe', '0:0:0:0:0:ffff:7f00:1', 'ff02::1', 'not an address', '192.0.2.1', '192.0.0.8',
+    '64:ff9b::a00:5', '64:ff9b::7f00:1', '64:ff9b:1::1', '2002:a00:5::1', '2002::1', 'fec0::1', 'feff::1',
   ])('refuses %s', (ip) => {
     expect(isBlockedAddress(ip)).toBe(true);
   });
 
-  it.each(['93.184.216.34', '8.8.8.8', '100.63.255.255', '100.128.0.1', '172.32.0.1', '2606:4700::1111', '::ffff:93.184.216.34'])('allows %s', (ip) => {
+  it.each(['93.184.216.34', '8.8.8.8', '100.63.255.255', '100.128.0.1', '172.32.0.1', '192.0.78.9', '192.0.1.1', '2606:4700::1111', '::ffff:93.184.216.34', '2001:4860::8888', '2003::1'])('allows %s', (ip) => {
     expect(isBlockedAddress(ip)).toBe(false);
   });
 });
@@ -63,7 +64,7 @@ describe('the connect-time lookup', () => {
 describe('guardedFetch', () => {
   it('fails a request to a name that resolves privately, before connecting', async () => {
     const resolve = vi.fn(async () => [{ address: '10.0.0.5', family: 4 }]);
-    const e = await guardedFetch(resolve)('https://looks-public.example/', {}).catch((x: unknown) => x);
+    const e = await guardedFetch({ resolve })('https://looks-public.example/', {}).catch((x: unknown) => x);
     expect(resolve).toHaveBeenCalledWith('looks-public.example');
     expect(e).toMatchObject({ status: 400 });
     expect(classifyError(e, 'Company website').kind).toBe('bad_request');
@@ -72,12 +73,12 @@ describe('guardedFetch', () => {
   it('refuses an address in the URL without looking anything up', async () => {
     const resolve = vi.fn();
     for (const url of ['http://0x7f.1/', 'http://169.254.169.254/latest/meta-data/', 'http://[::1]/', 'http://[::ffff:7f00:1]/']) {
-      await expect(guardedFetch(resolve)(url, {})).rejects.toMatchObject({ status: 400 });
+      await expect(guardedFetch({ resolve })(url, {})).rejects.toMatchObject({ status: 400 });
     }
     expect(resolve).not.toHaveBeenCalled();
   });
 
   it('reads only http and https', async () => {
-    await expect(guardedFetch(vi.fn())('ftp://acme.com/', {})).rejects.toMatchObject({ status: 400 });
+    await expect(guardedFetch({ resolve: vi.fn() })('ftp://acme.com/', {})).rejects.toMatchObject({ status: 400 });
   });
 });

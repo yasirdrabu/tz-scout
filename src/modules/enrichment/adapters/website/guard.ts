@@ -9,7 +9,7 @@ const v4 = (ip: string): number[] | null => {
   return parts.length === 4 && parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) ? parts : null;
 };
 
-function blockedV4([a, b]: number[]): boolean {
+function blockedV4([a, b, c]: number[]): boolean {
   return (
     a === 0 || // "this network", unspecified
     a === 10 ||
@@ -18,7 +18,7 @@ function blockedV4([a, b]: number[]): boolean {
     (a === 169 && b === 254) || // link-local, cloud metadata (169.254.169.254)
     (a === 172 && b! >= 16 && b! <= 31) ||
     (a === 192 && b === 168) ||
-    (a === 192 && b === 0) || // 192.0.0/24 protocol assignments, 192.0.2/24 documentation
+    (a === 192 && b === 0 && (c === 0 || c === 2)) || // 192.0.0/24 protocol assignments, 192.0.2/24 documentation
     (a === 198 && (b === 18 || b === 19)) || // benchmarking
     a! >= 224 // multicast and reserved, broadcast
   );
@@ -39,10 +39,13 @@ export function isBlockedAddress(address: string): boolean {
     return blockedV4([hi >> 8, hi & 255, lo >> 8, lo & 255]);
   }
   if (/^::ffff:/.test(ip) || /^::[0-9a-f]/.test(ip)) return true; // other IPv4-compatible forms
-  const first = parseInt(ip.split(':')[0] || '0', 16);
+  const [first, second] = ip.split(':').map((h) => parseInt(h || '0', 16)) as [number, number];
   return (
+    (first === 0x64 && second === 0xff9b) || // NAT64 64:ff9b::/96 and the local-use 64:ff9b:1::/48 (both in 64:ff9b::/32)
+    first === 0x2002 || // 6to4 2002::/16, which carries an IPv4 address
     (first & 0xfe00) === 0xfc00 || // unique local fc00::/7
     (first & 0xffc0) === 0xfe80 || // link-local fe80::/10
+    (first & 0xffc0) === 0xfec0 || // site-local fec0::/10 (deprecated, still routed on some networks)
     (first & 0xff00) === 0xff00 // multicast
   );
 }

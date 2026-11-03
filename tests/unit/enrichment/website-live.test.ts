@@ -96,14 +96,17 @@ describe('website live adapter', () => {
     expect(pages[0]!.title).toBe('Big');
   });
 
-  it("a home page that answers with an error, or can't be reached, is a bad request: Scout couldn't reach it", async () => {
-    for (const route of [{ status: 404 }, { status: 503 }, { code: 'ENOTFOUND' }, { code: 'ECONNREFUSED' }, { code: 'ERR_TLS_CERT_ALTNAME_INVALID' }]) {
+  it("a home page that answers 4xx, or can't be reached, is a bad request: Scout couldn't reach it", async () => {
+    for (const route of [{ status: 404 }, { status: 403 }, { code: 'ENOTFOUND' }, { code: 'ECONNREFUSED' }, { code: 'ERR_TLS_CERT_ALTNAME_INVALID' }]) {
       const e = await site({ '/': route }).adapter.readSite({ domain: 'acme.com' }).catch((x: unknown) => x);
       expect(classifyError(e, 'Company website')).toEqual({ kind: 'bad_request', message: "Scout couldn't reach acme.com.", retry: false });
     }
   });
 
-  it('a dropped connection still retries', async () => {
+  it('a dropped connection or a server error on the home page retries', async () => {
+    const down = await site({ '/': { status: 503 } }).adapter.readSite({ domain: 'acme.com' }).catch((x: unknown) => x);
+    expect(down).toMatchObject({ status: 503, message: 'acme.com answered 503.' });
+    expect(classifyError(down, 'Company website')).toMatchObject({ kind: 'unknown', retry: true });
     const e = await site({ '/': { code: 'ECONNRESET' } }).adapter.readSite({ domain: 'acme.com' }).catch((x: unknown) => x);
     expect(classifyError(e, 'Company website')).toMatchObject({ kind: 'unknown', retry: true });
   });
