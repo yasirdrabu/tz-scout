@@ -15,6 +15,13 @@
       "when": 1793037820855,
       "tag": "0001_credential_hint_nullable",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793677320974,
+      "tag": "0002_usage_caps",
+      "breakpoints": true
     }
   ]
 }

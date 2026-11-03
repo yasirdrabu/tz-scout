@@ -1,9 +1,8 @@
-import { index, integer, jsonb, pgSchema, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, boolean, date, index, integer, jsonb, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Integrations schema. Every table here is a tenant table: `tenant_id` not null, row level security
  * enabled and forced with the standard `tenant_isolation` policy (added by hand in the migration).
- * Usage caps tables arrive in R1.
  */
 export const integrations = pgSchema('integrations');
 
@@ -77,4 +76,36 @@ export const callLog = integrations.table(
     index('call_log_tenant_at_idx').on(t.tenantId, t.at),
     index('call_log_tenant_provider_at_idx').on(t.tenantId, t.provider, t.at),
   ],
+);
+
+/** One usage limit per provider (R2b-1 Ruling 2); the defaults are lazily ensured. */
+export const usageCap = integrations.table(
+  'usage_cap',
+  {
+    tenantId: text('tenant_id').notNull(),
+    providerKey: text('provider_key').notNull(),
+    unit: text('unit').notNull(), // calls | credits | cost_cents
+    period: text('period').notNull(), // day | month
+    limit: bigint('limit', { mode: 'number' }).notNull(),
+    /** The period start an owner allowed overage for; it lapses when the period resets. */
+    overagePeriodStart: date('overage_period_start'),
+    updatedBy: text('updated_by'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.providerKey] })],
+);
+
+/** Usage in one local period. `warned` and `blocked` mark the threshold events already published. */
+export const usagePeriod = integrations.table(
+  'usage_period',
+  {
+    tenantId: text('tenant_id').notNull(),
+    providerKey: text('provider_key').notNull(),
+    periodStart: date('period_start').notNull(),
+    used: bigint('used', { mode: 'number' }).notNull().default(0),
+    reserved: bigint('reserved', { mode: 'number' }).notNull().default(0),
+    warned: boolean('warned').notNull().default(false),
+    blocked: boolean('blocked').notNull().default(false),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.providerKey, t.periodStart] })],
 );

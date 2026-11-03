@@ -39,6 +39,18 @@ export {
   type IntegrationCredential,
   type IntegrationRow,
 } from './services/overview';
+export {
+  LIMIT_INVALID,
+  allowOverage,
+  checkCap,
+  listCaps,
+  reserve,
+  setCapLimit,
+  settle,
+  type CapView,
+  type Reservation,
+} from './services/caps';
+export { DEFAULT_CAPS, type CapLevel, type CapPeriod, type CapUnit } from './domain/caps';
 export { connectionTenant } from './services/inbound';
 export { MASTER_KEY_MISSING } from './services/vault';
 export { credentialsCleanupHandler, credentialsCleanupJob } from './jobs';
