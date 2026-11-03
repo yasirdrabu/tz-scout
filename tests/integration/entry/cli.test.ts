@@ -102,7 +102,7 @@ describe('scout CLI', () => {
     )) as unknown as { source_id: string; scopes: string[] }[];
     expect(key[0]!.source_id).toBe(agents[0]!.id);
     expect([...key[0]!.scopes].sort()).toEqual(
-      ['accounts:read', 'accounts:write', 'arrivals:read', 'arrivals:write', 'imports:run', 'offers:read', 'people:write', 'signals:write', 'status:read'],
+      ['accounts:read', 'accounts:write', 'arrivals:read', 'arrivals:write', 'enrichment:request', 'imports:run', 'offers:read', 'people:write', 'signals:write', 'status:read'],
     );
     const vendors = await adminDb.execute(sql`select 1 from intake.source where tenant_id = ${id} and kind = 'vendor'`);
     expect(vendors.length).toBeGreaterThan(0);

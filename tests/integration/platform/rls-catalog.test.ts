@@ -24,7 +24,7 @@ const PLATFORM_WIDE = new Set([
 ]);
 
 /** Schemas where every table must be tenant-scoped, with no exceptions beyond the allowlist. */
-const STRICT_SCHEMAS = ['offers', 'accounts', 'crm', 'intake', 'scoring', 'routing', 'playbooks'];
+const STRICT_SCHEMAS = ['offers', 'accounts', 'crm', 'intake', 'scoring', 'routing', 'playbooks', 'enrichment'];
 
 it('every table with a tenant_id forces row level security, except the platform-wide allowlist', async () => {
   const query = sql`
@@ -33,7 +33,7 @@ it('every table with a tenant_id forces row level security, except the platform-
     join pg_namespace n on n.oid = c.relnamespace
     join pg_attribute a on a.attrelid = c.oid and a.attname = 'tenant_id' and not a.attisdropped
     where c.relkind in ('r', 'p')
-      and n.nspname in ('platform', 'tenancy', 'integrations', 'ai', 'offers', 'accounts', 'crm', 'intake', 'scoring', 'routing', 'playbooks')
+      and n.nspname in ('platform', 'tenancy', 'integrations', 'ai', 'offers', 'accounts', 'crm', 'intake', 'scoring', 'routing', 'playbooks', 'enrichment')
     order by 1`;
   // The control plane and a workspace database (the same one in shared mode, so names may repeat).
   type Row = { name: string; rls: boolean; forced: boolean };
