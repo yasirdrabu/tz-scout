@@ -1,10 +1,21 @@
-// robots.txt as Ruling 3 reads it: the `User-agent: *` group and any group naming Scout, `Disallow` path prefixes.
-// `Allow` lines and wildcards are not read; a site that relies on them is read more cautiously, never less.
+// robots.txt as Ruling 3 and RFC 9309 read it. The rules come from the `User-agent: *` group and any group naming
+// Scout (both, merged: more cautious than the RFC's one most specific group). A rule's path may use `*` (any run of
+// characters) and a trailing `$` (end of path). The longest matching rule decides; on a tie, Allow wins; no match
+// allows. Whether a 5xx robots.txt means "read nothing" is the reader's call (`live.ts`).
 
 export type Robots = { allows(path: string): boolean };
 
+type Rule = { allow: boolean; length: number; test: (path: string) => boolean };
+
+function rule(allow: boolean, pattern: string): Rule {
+  const anchored = pattern.endsWith('$');
+  const body = anchored ? pattern.slice(0, -1) : pattern;
+  const re = new RegExp(`^${body.split('*').map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}${anchored ? '$' : ''}`);
+  return { allow, length: pattern.length, test: (path) => re.test(path) };
+}
+
 export function parseRobots(text: string): Robots {
-  const disallowed: string[] = [];
+  const rules: Rule[] = [];
   let agents: string[] = [];
   let inRules = false;
   for (const raw of text.split(/\r?\n/)) {
@@ -20,9 +31,19 @@ export function parseRobots(text: string): Robots {
       agents.push(value.toLowerCase());
       continue;
     }
+    if (field !== 'allow' && field !== 'disallow') continue;
     inRules = true;
     const ours = agents.some((a) => a === '*' || a.includes('scout'));
-    if (field === 'disallow' && ours && value) disallowed.push(value);
+    if (ours && value) rules.push(rule(field === 'allow', value));
   }
-  return { allows: (path) => !disallowed.some((prefix) => path.startsWith(prefix)) };
+  return {
+    allows(path) {
+      let best: Rule | null = null;
+      for (const r of rules) {
+        if (!r.test(path)) continue;
+        if (!best || r.length > best.length || (r.length === best.length && r.allow)) best = r;
+      }
+      return best ? best.allow : true;
+    },
+  };
 }

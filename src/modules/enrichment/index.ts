@@ -46,5 +46,5 @@ export { registerApolloAdapter } from './adapters/apollo/register';
 export { registerVibeAdapter } from './adapters/vibe/register';
 export { registerWebsiteAdapter } from './adapters/website/register';
 export { setMockFailure, type MockFailureKind } from './adapters/mock-failure';
-export { readWebsiteTask } from './tasks/read-website';
-export { readWebsiteInput, rulesRead, type ReadWebsiteInput, type ReadWebsiteOutput } from './domain/read-website';
+export { readWebsite, readWebsiteTask } from './tasks/read-website';
+export { citedOnly, readWebsiteInput, rulesRead, type ReadWebsiteInput, type ReadWebsiteOutput } from './domain/read-website';

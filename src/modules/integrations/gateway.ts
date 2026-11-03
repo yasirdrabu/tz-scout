@@ -338,7 +338,9 @@ export async function runCall<T>(
       if (outcome === 'rate_limited') return;
       // Only calls that reached the real service say anything about the connection's health:
       // a sample-data success must not mark a never-tested credential as connected.
-      if (!useLive) return;
+      // A provider with no key (the company website) has no credential to go bad: a failed call is the target's
+      // fault (one company's site down), so it never moves the connection's health.
+      if (!useLive || keyless) return;
       // Skip the status change when the caller's open transaction holds the row: it would wait for us.
       const locked = await tx.execute(
         sql`select 1 from integrations.connection where tenant_id = ${ctx.tenantId} and id = ${conn.id} for update skip locked`,
@@ -351,7 +353,7 @@ export async function runCall<T>(
           .set({
             consecutiveFailures: 0,
             lastError: null,
-            status: sql`case when ${connection.status} = 'disabled' then 'disabled' when ${connection.credentialId} is not null or ${keyless}::boolean then 'connected' else 'not_set_up' end`,
+            status: sql`case when ${connection.status} = 'disabled' then 'disabled' when ${connection.credentialId} is not null then 'connected' else 'not_set_up' end`,
             updatedAt: sql`now()`,
           })
           .where(where);

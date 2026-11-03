@@ -1,5 +1,5 @@
-// v1's Vibe mapping tests (`vibe.test.ts`, `vibeExport.test.ts`), for the pure mapping the Vibe sample adapter is
-// built on (Ruling 2), plus the step to arrival-shaped values. v1's matching and brief cases test other modules.
+// v1's Vibe mapping tests (`vibe.test.ts`, `vibeExport.test.ts`) against the one copy of the mapping (intake's Vibe
+// layout, Ruling 2), plus the step to arrival-shaped values. v1's matching and brief cases test other modules.
 import { describe, expect, it } from 'vitest';
 import {
   fromVibeExportRow,
@@ -15,6 +15,7 @@ import {
   toSignals,
   topicLabel,
   vibeSignals,
+  type VibeCompany,
 } from '@/modules/enrichment/adapters/vibe/mapping';
 
 const NOW = new Date('2026-10-15T12:00:00Z');
@@ -53,30 +54,30 @@ describe('events', () => {
 });
 
 describe('signals from a Vibe company', () => {
-  const sigs = vibeSignals(
-    {
-      businessId: 'b1', name: 'Sentral', domain: 'sentral.com',
-      intent: [{ topic: 'machine learning & artificial intelligence: ai risk management', score: 84 }, { topic: 'x: noise', score: 30 }],
-      workforce: { share: { operations: 0.21 }, change: { operations: 6, sales: 1 } },
-      events: [{ type: 'outages_and_security_breaches', date: '2026-09-20' }, { type: 'company_award', date: '2026-09-01', title: 'Best place to work' }],
-    },
-    NOW,
-  );
+  // Intake's mapping gives arrival signals: v1's `value` is in the detail, its `externalId` is gone, its date is `occurred_at`.
+  const company: VibeCompany = {
+    businessId: 'b1', name: 'Sentral', domain: 'sentral.com', website: null, linkedin: null, city: null, region: null, country: null, naics: null,
+    naicsDescription: null, linkedinCategory: null, employeesRange: null, revenueRange: null, description: null, techStack: [],
+    intent: [{ topic: 'machine learning & artificial intelligence: ai risk management', score: 84 }, { topic: 'x: noise', score: 30 }],
+    workforce: { share: { operations: 0.21 }, change: { operations: 6, sales: 1 } },
+    events: [{ type: 'outages_and_security_breaches', date: '2026-09-20' }, { type: 'company_award', date: '2026-09-01', title: 'Best place to work' }],
+  };
+  const sigs = vibeSignals(company, NOW);
   it('keeps intent of 50 or more with its score', () => {
-    const intent = sigs.filter((s) => s.type === 'intent');
+    const intent = sigs.filter((s) => s.fine_type === 'intent');
     expect(intent).toHaveLength(1);
-    expect(intent[0]).toMatchObject({ title: 'Researching: AI risk management', value: 0.84 });
+    expect(intent[0]).toMatchObject({ title: 'Researching: AI risk management', detail: expect.stringMatching(/^Research score 84 of 100/) });
   });
   it('adds team makeup and growth', () => {
-    expect(sigs.find((s) => s.externalId === 'workforce:ops-share')?.title).toBe('Operations is 21% of staff');
+    expect(sigs.find((s) => s.title === 'Operations is 21% of staff')).toMatchObject({ fine_type: 'workforce' });
     expect(sigs.some((s) => s.title.startsWith('Operations team growing: 6'))).toBe(true);
     expect(sigs.some((s) => s.title.startsWith('Sales team growing'))).toBe(false);
   });
   it('dates events', () => {
-    expect(sigs.find((s) => s.type === 'risk')?.occurredAt.toISOString()).toBe('2026-09-20T00:00:00.000Z');
+    expect(sigs.find((s) => s.fine_type === 'risk')?.occurred_at).toBe('2026-09-20');
   });
-  it('become arrival signals with the kind for each type', () => {
-    const out = toSignals(sigs);
+  it('become arrival signals with the kind for each type, every one dated', () => {
+    const out = toSignals(sigs, NOW);
     expect(out.find((s) => s.fine_type === 'intent')).toEqual({ type: 'research', fine_type: 'intent', title: 'Researching: AI risk management', occurred_at: '2026-10-15', detail: expect.stringMatching(/^Research score 84/) });
     expect(out.find((s) => s.fine_type === 'risk')).toMatchObject({ type: 'trigger', occurred_at: '2026-09-20' });
     expect(out.find((s) => s.fine_type === 'workforce')).toMatchObject({ type: 'pain' });
@@ -133,20 +134,20 @@ describe('Vibe export rows', () => {
     expect(ma.map((s) => s.title)).toEqual(['Acquisition or merger: Fortegra Joins DB Insurance']);
   });
   it('skips crime stories in the legal feed', () => {
-    expect(sigs.filter((s) => s.type === 'risk' && s.title.startsWith('Lawsuit')).map((s) => s.title)).toEqual(['Lawsuit: Property manager sues insurer']);
+    expect(sigs.filter((s) => s.fine_type === 'risk' && s.title.startsWith('Lawsuit')).map((s) => s.title)).toEqual(['Lawsuit: Property manager sues insurer']);
   });
   it('describes breaches by what happened, not the newsletter headline', () => {
     expect(sigs.find((s) => s.title.startsWith('Security'))?.title).toBe('Security breach or outage: Unauthorized access, 3,803,750 people affected');
   });
   it('counts executive hires only', () => {
-    expect(sigs.filter((s) => s.type === 'leadership').map((s) => s.title)).toEqual(['New leader joined: Executive Vice President']);
+    expect(sigs.filter((s) => s.fine_type === 'leadership').map((s) => s.title)).toEqual(['New leader joined: Executive Vice President']);
   });
   it("a company's own investment is news, not funding", () => {
-    expect(sigs.some((s) => s.type === 'funding')).toBe(false);
-    expect(sigs.find((s) => s.title.startsWith('Investing'))?.type).toBe('news');
+    expect(sigs.some((s) => s.fine_type === 'funding')).toBe(false);
+    expect(sigs.find((s) => s.title.startsWith('Investing'))?.fine_type).toBe('news');
   });
-  it('event ids are stable across imports', () => {
-    expect(fromVibeExportRow(row, NOW).events!.map((e) => e.id)).toEqual(c.events!.map((e) => e.id));
+  it('signals are the same across imports', () => {
+    expect(vibeSignals(fromVibeExportRow(row, NOW), NOW)).toEqual(sigs);
   });
   it('becomes arrival account fields', () => {
     expect(toCompanyFacts(c)).toMatchObject({

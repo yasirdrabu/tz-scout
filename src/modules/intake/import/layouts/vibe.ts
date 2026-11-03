@@ -14,9 +14,9 @@ type Signal = NonNullable<ArrivalV1['signals']>[number];
 type Person = ArrivalV1['people'][number];
 
 type RawEvent = Record<string, unknown> & { event_name: string; event_time: string };
-type VibeEvent = { type: string; date: string; title?: string | null; detail?: string | null; url?: string | null };
+export type VibeEvent = { type: string; date: string; title?: string | null; detail?: string | null; url?: string | null };
 
-type VibeCompany = {
+export type VibeCompany = {
   businessId: string;
   name: string;
   domain: string;
@@ -248,7 +248,7 @@ export function vibeSignals(c: VibeCompany, now: Date): Signal[] {
 
 // ---------- People ----------
 
-type VibePerson = { prospectId: string; businessId: string; firstName: string; lastName: string | null; title: string | null; email: string | null; phone: string | null; linkedin: string | null };
+export type VibePerson = { prospectId: string; businessId: string; firstName: string; lastName: string | null; title: string | null; email: string | null; emailStatus: string | null; phone: string | null; linkedin: string | null };
 
 /** A row from a Vibe prospects export (with contact enrichment) to one person. */
 export function fromVibeProspectRow(r: Row): VibePerson | null {
@@ -272,6 +272,7 @@ export function fromVibeProspectRow(r: Row): VibePerson | null {
     lastName: last || null,
     title: r.prospect_job_title ? r.prospect_job_title.replace(/^\w/, (c) => c.toUpperCase()) : null,
     email: r.contact_professional_email?.trim().toLowerCase() || null,
+    emailStatus: r.contact_professional_email_status?.trim() || null,
     phone: r.contact_mobile_phone?.trim() || null,
     linkedin: li ? (li.startsWith('http') ? li : `https://${li}`) : null,
   };

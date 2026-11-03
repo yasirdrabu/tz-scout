@@ -23,6 +23,8 @@ export function classifyError(e: unknown, providerName: string): ClassifiedError
   // Before 400/422: Apollo sends its credits error as a 422.
   if (o.kind === 'out_of_credits' || /insufficient credits/i.test(message)) return fail('out_of_credits', `${providerName} is out of credits.`);
   if (o.name === 'AbortError' || o.name === 'TimeoutError') return retry('timeout', `${providerName} took too long to answer.`);
-  if (status === 400 || status === 422) return fail('bad_request', message || `${providerName} refused the request.`);
+  // A 403 is this key not allowed this endpoint (Apollo: people search needs a master key): a retry cannot change it,
+  // and the key still works elsewhere, so it is not `auth`. A departure from Ruling 9's "400 or 422".
+  if (status === 400 || status === 403 || status === 422) return fail('bad_request', message || `${providerName} refused the request.`);
   return retry('unknown', SOMETHING_WRONG);
 }

@@ -180,3 +180,17 @@ export {
 } from './services/batches-read';
 export { BATCH_STATUS_KEYS, BATCH_STATUS_LABELS, type BatchStatusKey } from './domain/batch-status';
 export { retryBatch } from './services/retry';
+// The pure Vibe Prospecting mapping, shared with the enrichment module's sample Vibe adapter (one copy of the rules).
+export {
+  fromVibeExportRow,
+  fromVibeProspectRow,
+  isParty,
+  mapEvent,
+  nameKey,
+  seniority,
+  topicLabel,
+  vibeSignals,
+  type VibeCompany,
+  type VibeEvent,
+  type VibePerson,
+} from './import/layouts/vibe';

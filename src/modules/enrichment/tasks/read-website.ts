@@ -1,6 +1,14 @@
-import { defineTask } from '@/modules/ai-tasks';
+import { defineTask, runTask, type RunOpts, type RunResult } from '@/modules/ai-tasks';
+import type { ModuleContext } from '@/platform/context';
 import { WEBSITE_READ_WORST_CENTS } from '../domain/prices';
-import { readWebsiteInputSchema, readWebsiteOutputSchema, rulesRead, type ReadWebsiteInput } from '../domain/read-website';
+import {
+  citedOnly,
+  readWebsiteInputSchema,
+  readWebsiteOutputSchema,
+  rulesRead,
+  type ReadWebsiteInput,
+  type ReadWebsiteOutput,
+} from '../domain/read-website';
 import * as P from './prompts/read_website.v1.0';
 
 /**
@@ -22,3 +30,9 @@ export const readWebsiteTask = defineTask({
   maxTokens: 1200,
   maxCostCents: WEBSITE_READ_WORST_CENTS,
 });
+
+/** Runs `read_website` and keeps only the items that cite one of the pages it was given. */
+export async function readWebsite(ctx: ModuleContext, input: ReadWebsiteInput, opts: RunOpts): Promise<RunResult<ReadWebsiteOutput>> {
+  const r = await runTask(ctx, readWebsiteTask, input, opts);
+  return { ...r, output: citedOnly(input, r.output) };
+}

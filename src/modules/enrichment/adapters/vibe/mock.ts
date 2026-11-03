@@ -2,7 +2,9 @@ import type { EnrichmentAdapter, Person } from '../../contracts/adapter';
 import { cantDo } from '../errors';
 import { failIfAsked } from '../mock-failure';
 import { daysAgo, intBetween, nameFromDomain, pick, rng } from '../sample';
-import { fromVibeExportRow, fromVibeProspectRow, toCompanyFacts, toPerson, toSignals, vibeSignals, type VibeExportRow } from './mapping';
+import { fromVibeExportRow, fromVibeProspectRow, toCompanyFacts, toPerson, toSignals, vibeSignals } from './mapping';
+
+type Row = Record<string, string | undefined>;
 
 // Sample Vibe Prospecting (Ruling 2: sample data only). Each domain gets a made-up dataset export row and prospect
 // rows, read through the same mapping a live Vibe connection would use. Credits as Apollo's, per Ruling 4.
@@ -22,7 +24,7 @@ const EXEC_TITLES = ['Chief Operating Officer', 'Chief Information Officer', 'Vi
 const ev = (o: Record<string, unknown>) => JSON.stringify([o]);
 
 /** The made-up Vibe export row for a domain. */
-function rowFor(domain: string, now: Date): VibeExportRow {
+function rowFor(domain: string, now: Date): Row {
   const r = rng(`vibe:${domain}`);
   const [city, region] = pick(r, CITIES);
   const at = (lo: number, hi: number) => `${daysAgo(intBetween(r, lo, hi), now)}T00:00:00+00:00`;
@@ -47,7 +49,7 @@ function rowFor(domain: string, now: Date): VibeExportRow {
   };
 }
 
-function prospectRow(domain: string, i: number, title: string): VibeExportRow {
+function prospectRow(domain: string, i: number, title: string): Row {
   const r = rng(`vibe-p:${domain}:${i}`);
   const first = pick(r, FIRST);
   const last = pick(r, LAST);
@@ -65,7 +67,7 @@ function prospectRow(domain: string, i: number, title: string): VibeExportRow {
 
 const signalsFor = (domain: string) => {
   const now = new Date();
-  return toSignals(vibeSignals(fromVibeExportRow(rowFor(domain, now), now), now));
+  return toSignals(vibeSignals(fromVibeExportRow(rowFor(domain, now), now), now), now);
 };
 
 export function vibeMock(): EnrichmentAdapter {

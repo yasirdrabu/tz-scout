@@ -28,6 +28,8 @@ export type ConnectionView = {
   lastTestResult?: TestResult;
   lastError?: string;
   callsToday: number;
+  /** False for a service that needs no key (the company website): the screen shows no key field. */
+  needsCredential: boolean;
   lastCallAt?: Date;
 };
 
@@ -78,6 +80,7 @@ export async function listConnections(ctx: ModuleContext): Promise<ConnectionVie
       mode: (row?.mode as ConnectionMode | undefined) ?? 'mock',
       status: (row?.status as ConnectionStatus | undefined) ?? 'not_set_up',
       callsToday: callsBy.get(p.key) ?? 0,
+      needsCredential: p.needsCredential !== false,
     };
     const hint = row?.credentialId ? hintById.get(row.credentialId) : undefined;
     const lastCallAt = lastBy.get(p.key);

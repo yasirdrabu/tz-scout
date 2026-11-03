@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { websiteLive, USER_AGENT } from '@/modules/enrichment/adapters/website/live';
 import { classifyError } from '@/modules/enrichment/domain/errors';
 
-type Route = string | { status?: number; body?: string; type?: string; hang?: boolean };
+type Route = string | { status?: number; body?: string; type?: string; hang?: boolean; location?: string; code?: string };
 
 const HOME = `<html><head><title>Acme Freight</title><meta name="description" content="Freight for the Midwest."></head>
 <body><nav><a href="/about">About us</a> <a href="/services/">What we do</a> <a href="https://acme.com/industries">Markets</a>
@@ -16,14 +16,17 @@ function site(routes: Record<string, Route>) {
   const seen: { url: string; headers: Record<string, string> }[] = [];
   const fetchImpl = ((input: string, init: RequestInit) => {
     seen.push({ url: input, headers: init.headers as Record<string, string> });
-    const r = routes[new URL(input).pathname] ?? { status: 404, body: 'not found' };
+    expect(init.redirect).toBe('manual');
+    const u = new URL(input);
+    // A route keyed by full URL is another host; a path is a page on any host.
+    const r = routes[u.href] ?? (u.hostname === 'acme.com' ? routes[u.pathname] : undefined) ?? { status: 404, body: 'not found' };
     const o = typeof r === 'string' ? { body: r } : r;
     if (o.hang) {
       return new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal!.reason)));
     }
-    const res = new Response(o.body ?? '', { status: o.status ?? 200, headers: { 'content-type': o.type ?? 'text/html; charset=utf-8' } });
-    Object.defineProperty(res, 'url', { value: input });
-    return Promise.resolve(res);
+    if (o.code) return Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(o.code), { code: o.code }) }));
+    const headers: Record<string, string> = { 'content-type': o.type ?? 'text/html; charset=utf-8', ...(o.location ? { location: o.location } : {}) };
+    return Promise.resolve(new Response(o.body ?? '', { status: o.status ?? 200, headers }));
   }) as unknown as typeof fetch;
   return { seen, adapter: websiteLive({ kind: 'none', value: '', settings: {} }, fetchImpl) };
 }
@@ -93,11 +96,24 @@ describe('website live adapter', () => {
     expect(pages[0]!.title).toBe('Big');
   });
 
-  it('a home page the site refuses is a bad request; a 5xx retries', async () => {
-    const refused = await site({ '/': { status: 404 } }).adapter.readSite({ domain: 'acme.com' }).catch((e: unknown) => e);
-    expect(classifyError(refused, 'Company website')).toMatchObject({ kind: 'bad_request', message: 'acme.com answered 404.' });
-    const down = await site({ '/': { status: 503 } }).adapter.readSite({ domain: 'acme.com' }).catch((e: unknown) => e);
-    expect(classifyError(down, 'Company website')).toMatchObject({ kind: 'unknown', retry: true });
+  it("a home page that answers with an error, or can't be reached, is a bad request: Scout couldn't reach it", async () => {
+    for (const route of [{ status: 404 }, { status: 503 }, { code: 'ENOTFOUND' }, { code: 'ECONNREFUSED' }, { code: 'ERR_TLS_CERT_ALTNAME_INVALID' }]) {
+      const e = await site({ '/': route }).adapter.readSite({ domain: 'acme.com' }).catch((x: unknown) => x);
+      expect(classifyError(e, 'Company website')).toEqual({ kind: 'bad_request', message: "Scout couldn't reach acme.com.", retry: false });
+    }
+  });
+
+  it('a dropped connection still retries', async () => {
+    const e = await site({ '/': { code: 'ECONNRESET' } }).adapter.readSite({ domain: 'acme.com' }).catch((x: unknown) => x);
+    expect(classifyError(e, 'Company website')).toMatchObject({ kind: 'unknown', retry: true });
+  });
+
+  it('a robots.txt that answers 5xx means read nothing; a 4xx means no rules', async () => {
+    const down = site({ '/robots.txt': { status: 503 }, '/': HOME });
+    expect(await down.adapter.readSite({ domain: 'acme.com' })).toEqual({ pages: [] });
+    expect(down.seen.map((s) => s.url)).toEqual(['https://acme.com/robots.txt']);
+    const missing = site({ '/robots.txt': { status: 404 }, '/': HOME });
+    expect((await missing.adapter.readSite({ domain: 'acme.com' })).pages.length).toBeGreaterThan(0);
   });
 
   it('skips linked pages that fail or are not web pages', async () => {
@@ -106,18 +122,45 @@ describe('website live adapter', () => {
     expect(pages.map((p) => p.url)).toEqual(['https://acme.com/', 'https://acme.com/contact']);
   });
 
-  it('reads only public sites, and does not follow a redirect onto an internal one', async () => {
-    for (const domain of ['localhost', '127.0.0.1', '10.0.0.5', 'intranet', 'files.corp', 'printer.local']) {
+  it('reads only public sites, the domain read as the URL parser reads it', async () => {
+    for (const domain of ['localhost', '127.0.0.1', '10.0.0.5', '0x7f.1', '0x7f.0.0.1', '2130706433', '[::1]', 'intranet', 'files.corp', 'printer.local', 'a.com@10.0.0.1', 'acme.com/x']) {
       const { seen, adapter } = site({ '/': HOME });
       await expect(adapter.readSite({ domain })).rejects.toMatchObject({ status: 400, message: `${domain} isn't a public website.` });
       expect(seen).toHaveLength(0);
     }
-    const fetchImpl = (async (input: string) => {
-      const res = new Response(HOME, { headers: { 'content-type': 'text/html' } });
-      Object.defineProperty(res, 'url', { value: input.endsWith('robots.txt') ? input : 'http://169.254.169.254/' });
-      return res;
-    }) as unknown as typeof fetch;
+  });
+
+  it('follows a redirect by hand and refuses one onto an internal address without requesting it', async () => {
+    const { seen, adapter } = site({ '/': { status: 302, location: 'http://169.254.169.254/latest/meta-data/' } });
+    await expect(adapter.readSite({ domain: 'acme.com' })).rejects.toMatchObject({ status: 400, message: "acme.com sent us to a site that isn't public." });
+    expect(seen.map((s) => s.url)).not.toContain('http://169.254.169.254/latest/meta-data/');
+    const hex = site({ '/': { status: 301, location: 'http://0x7f.1/' } });
+    await expect(hex.adapter.readSite({ domain: 'acme.com' })).rejects.toMatchObject({ status: 400 });
+    expect(hex.seen.map((s) => s.url).some((u) => u.includes('127.0.0.1'))).toBe(false);
+  });
+
+  it('follows up to 3 redirects and records the page where it ended', async () => {
+    const ok = site({ '/': { status: 301, location: 'https://www.acme.com/' }, 'https://www.acme.com/': { status: 302, location: '/home' }, 'https://www.acme.com/home': HOME });
+    const { pages } = await ok.adapter.readSite({ domain: 'acme.com' });
+    expect(pages[0]!.url).toBe('https://www.acme.com/home');
+    const loop = site({ '/': { status: 302, location: '/a' }, '/a': { status: 302, location: '/b' }, '/b': { status: 302, location: '/c' }, '/c': { status: 302, location: '/d' } });
+    await expect(loop.adapter.readSite({ domain: 'acme.com' })).rejects.toMatchObject({ status: 400, message: 'acme.com redirected too many times.' });
+    expect(loop.seen.map((s) => new URL(s.url).pathname)).not.toContain('/d');
+  });
+
+  it('a linked page that redirects off the site is skipped, its target never requested', async () => {
+    const { seen, adapter } = site({ '/': HOME, '/about': { status: 302, location: 'http://10.0.0.5/admin' }, '/services/': { status: 302, location: 'https://other.com/' } });
+    const { pages } = await adapter.readSite({ domain: 'acme.com' });
+    expect(pages.map((p) => p.url)).not.toContain('https://acme.com/about');
+    expect(seen.map((s) => s.url)).not.toContain('http://10.0.0.5/admin');
+    expect(seen.map((s) => s.url)).not.toContain('https://other.com/');
+  });
+
+  it('cancels the body of a page it refuses', async () => {
+    let cancelled = 0;
+    const fetchImpl = (async () => new Response(new ReadableStream({ cancel: () => void cancelled++ }), { status: 404 })) as unknown as typeof fetch;
     await expect(websiteLive({ kind: 'none', value: '', settings: {} }, fetchImpl).readSite({ domain: 'acme.com' })).rejects.toMatchObject({ status: 400 });
+    expect(cancelled).toBe(2);
   });
 
   it("needs no key to test, and can't do the paid operations", async () => {

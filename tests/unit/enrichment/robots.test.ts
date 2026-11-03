@@ -30,4 +30,21 @@ describe('robots.txt', () => {
   it('Disallow: / blocks every page', () => {
     expect(parseRobots('user-agent: *\r\ndisallow: /\r\n').allows('/')).toBe(false);
   });
+
+  it('reads * as any run of characters and a trailing $ as the end of the path', () => {
+    const r = parseRobots('User-agent: *\nDisallow: /*about\nDisallow: /*.pdf$\n');
+    expect(r.allows('/company/about-us')).toBe(false);
+    expect(r.allows('/files/brochure.pdf')).toBe(false);
+    expect(r.allows('/files/brochure.pdf?x=1')).toBe(true);
+    expect(r.allows('/services')).toBe(true);
+  });
+
+  it('the longest matching rule decides, and Allow wins a tie (RFC 9309)', () => {
+    const r = parseRobots('User-agent: *\nDisallow: /about\nAllow: /about/team\nAllow: /x\nDisallow: /x\nDisallow: /\nAllow: /$\n');
+    expect(r.allows('/about/team/lead')).toBe(true);
+    expect(r.allows('/about/history')).toBe(false);
+    expect(r.allows('/x')).toBe(true);
+    expect(r.allows('/')).toBe(true);
+    expect(r.allows('/contact')).toBe(false);
+  });
 });

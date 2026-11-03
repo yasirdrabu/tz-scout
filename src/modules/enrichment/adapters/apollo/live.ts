@@ -34,8 +34,19 @@ function query(params: Params): string {
   return q.toString();
 }
 
-// Response shapes. Everything Apollo sends is parsed before use.
+// Response shapes. Everything Apollo sends is parsed before use. In a list, an item that does not parse is dropped
+// and the rest are kept; only a bad envelope fails the answer.
 const s = z.string().nullish();
+const list = <T>(item: z.ZodType<T>) =>
+  z
+    .array(z.unknown())
+    .nullish()
+    .transform((items) =>
+      (items ?? []).flatMap((i) => {
+        const r = item.safeParse(i);
+        return r.success ? [r.data] : [];
+      }),
+    );
 const orgSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -54,17 +65,13 @@ const orgSchema = z.object({
 });
 const enrichSchema = z.object({ organization: orgSchema.nullish() });
 const jobsSchema = z.object({
-  organization_job_postings: z
-    .array(z.object({ id: z.string(), title: z.string(), url: s, city: s, state: s, country: s, posted_at: s, last_seen_at: s }))
-    .nullish(),
+  organization_job_postings: list(z.object({ id: z.string(), title: z.string(), url: s, city: s, state: s, country: s, posted_at: s, last_seen_at: s })),
 });
 const newsSchema = z.object({
-  news_articles: z
-    .array(z.object({ id: z.string(), title: z.string(), url: s, snippet: s, published_at: z.string(), event_categories: z.array(z.string()).nullish() }))
-    .nullish(),
+  news_articles: list(z.object({ id: z.string(), title: z.string(), url: s, snippet: s, published_at: z.string(), event_categories: z.array(z.string()).nullish() })),
 });
 const searchSchema = z.object({
-  people: z.array(z.object({ id: z.string(), first_name: z.string(), last_name_obfuscated: s, title: s, seniority: s })).nullish(),
+  people: list(z.object({ id: z.string(), first_name: z.string(), last_name_obfuscated: s, title: s, seniority: s })),
 });
 const matchSchema = z.object({
   person: z
@@ -98,9 +105,14 @@ export function apolloLive(creds: LiveCredentials, fetchImpl: typeof fetch = fet
       headers: { 'x-api-key': creds.value, 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', accept: 'application/json' },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (res.status === 401) throw new ProviderError(401, KEY_REJECTED);
-    if (res.status === 403) throw new ProviderError(403, MASTER_KEY_NEEDED);
-    if (res.status === 429) throw new RateLimitedError('Apollo asked us to slow down.', retryAfterMs(res.headers.get('retry-after')));
+    // An answer refused unread has its body cancelled, so the connection is not held.
+    const refuse = async (e: Error): Promise<never> => {
+      await res.body?.cancel().catch(() => undefined);
+      throw e;
+    };
+    if (res.status === 401) await refuse(new ProviderError(401, KEY_REJECTED));
+    if (res.status === 403) await refuse(new ProviderError(403, MASTER_KEY_NEEDED));
+    if (res.status === 429) await refuse(new RateLimitedError('Apollo asked us to slow down.', retryAfterMs(res.headers.get('retry-after'))));
     if (!res.ok) {
       const body = await res.text();
       if (/insufficient credits/i.test(body)) throw new OutOfCreditsError(PROVIDER, res.status);

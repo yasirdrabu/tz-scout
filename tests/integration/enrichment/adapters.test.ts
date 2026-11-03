@@ -15,8 +15,12 @@ vi.mock('@/platform/config', async (orig) => {
   };
 });
 
+// The live website reader's transport, so no test reaches the network.
+const transport = vi.hoisted(() => vi.fn<(input: string, init?: RequestInit) => Promise<Response>>());
+vi.mock('@/modules/enrichment/adapters/website/live-transport', () => ({ guardedFetch: () => transport }));
+
 import '@/entry/compose';
-import { setMockFailure, type EnrichmentAdapter } from '@/modules/enrichment';
+import { readWebsite, readWebsiteInput, setMockFailure, type EnrichmentAdapter } from '@/modules/enrichment';
 import { NOT_LIVE_YET, gateway, listCaps, markConnectionFailing, setDisabled, setMode, testConnection } from '@/modules/integrations';
 import { callLog, connection } from '@/modules/integrations/db/schema';
 import { adminDb } from '@/platform/db/client';
@@ -27,7 +31,7 @@ const connOf = async (tenantId: string, provider: string) =>
 const credits = { module: 'enrichment', unit: 'credits' } as const;
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  transport.mockReset();
   setMockFailure(null);
 });
 
@@ -71,14 +75,14 @@ describe('Apollo through the gateway', () => {
 });
 
 describe('the company website', () => {
-  it('goes live with no credential, and reads with a stubbed fetch', async () => {
+  const page = (body: string, status = 200) => new Response(body, { status, headers: { 'content-type': 'text/html' } });
+
+  it('goes live with no credential, and reads through the stubbed transport', async () => {
     const t = await freshTenant();
     const seen: string[] = [];
-    vi.stubGlobal('fetch', async (input: string) => {
+    transport.mockImplementation(async (input: string) => {
       seen.push(input);
-      const path = new URL(input).pathname;
-      if (path !== '/') return new Response('', { status: 404 });
-      return new Response('<title>Acme</title><meta name="description" content="Acme moves freight.">', { headers: { 'content-type': 'text/html' } });
+      return new URL(input).pathname === '/' ? page('<title>Acme</title><meta name="description" content="Acme moves freight.">') : page('', 404);
     });
     const tested = await t.run((ctx) => testConnection(ctx, 'website'));
     expect(tested.ok).toBe(true);
@@ -90,26 +94,45 @@ describe('the company website', () => {
     expect(await connOf(t.tenantId, 'website')).toMatchObject({ mode: 'live', status: 'connected', credentialId: null });
   });
 
+  it("failed reads never move the website connection's health", async () => {
+    const t = await freshTenant();
+    await t.run((ctx) => testConnection(ctx, 'website'));
+    await t.run((ctx) => setMode(ctx, 'website', 'live'));
+    transport.mockImplementation(async () => page('', 404));
+    for (let i = 0; i < 3; i++) {
+      await expect(
+        t.run((ctx) => gateway.call(ctx, 'website', 'website.read', (a) => (a as EnrichmentAdapter).readSite({ domain: 'dead-site.example' }))),
+      ).rejects.toMatchObject({ status: 400, message: "Scout couldn't reach dead-site.example." });
+    }
+    expect(await connOf(t.tenantId, 'website')).toMatchObject({ status: 'connected', consecutiveFailures: 0, lastError: null });
+    expect(await adminDb.select().from(callLog).where(eq(callLog.tenantId, t.tenantId))).toHaveLength(4);
+  });
+
   it('defaults to the two sample pages', async () => {
     const t = await freshTenant();
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
     const read = await t.run((ctx) => gateway.call(ctx, 'website', 'website.read', (a) => (a as EnrichmentAdapter).readSite({ domain: 'acme.com' })));
     expect(read.pages.map((p) => p.url)).toEqual(['https://acme.com/', 'https://acme.com/about']);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it('stays on sample pages for a test key even when live', async () => {
     const t = await freshTenant();
     await t.run((ctx) => testConnection(ctx, 'website'));
     await t.run((ctx) => setMode(ctx, 'website', 'live'));
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
     const read = await t.run((ctx) =>
       gateway.call({ ...ctx, environment: 'test' }, 'website', 'website.read', (a) => (a as EnrichmentAdapter).readSite({ domain: 'acme.com' })),
     );
     expect(read.pages).toHaveLength(2);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('reads the sample pages with the read_website task, keeping only cited items', async () => {
+    const t = await freshTenant();
+    const { pages } = await t.run((ctx) => gateway.call(ctx, 'website', 'website.read', (a) => (a as EnrichmentAdapter).readSite({ domain: 'acme.com' })));
+    const r = await t.run((ctx) => readWebsite(ctx, readWebsiteInput('acme.com', pages), { subject: { type: 'account', id: 'acc_x' } }));
+    expect(r.mode).toBe('mock');
+    expect(r.output.technologies.map((x) => x.name)).toEqual(['WordPress', 'HubSpot']);
+    expect(r.output.description?.url).toBe('https://acme.com/');
   });
 });
 

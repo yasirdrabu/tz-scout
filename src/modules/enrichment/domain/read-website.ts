@@ -107,3 +107,16 @@ export function rulesRead(i: ReadWebsiteInput): ReadWebsiteOutput {
     facts: home?.title ? [{ key: 'website_title', value: home.title, url: home.url }] : [],
   };
 }
+
+/** The output with every item whose `url` is not one of the input pages dropped (Claude may cite a page it wasn't given). */
+export function citedOnly(i: ReadWebsiteInput, o: ReadWebsiteOutput): ReadWebsiteOutput {
+  const urls = new Set(i.pages.map((p) => p.url));
+  const ok = <T extends { url: string }>(x: T) => urls.has(x.url);
+  return {
+    description: o.description && ok(o.description) ? o.description : null,
+    industry_guess: o.industry_guess && ok(o.industry_guess) ? o.industry_guess : null,
+    size_clues: o.size_clues.filter(ok),
+    technologies: o.technologies.filter(ok),
+    facts: o.facts.filter(ok),
+  };
+}

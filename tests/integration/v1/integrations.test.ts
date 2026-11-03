@@ -110,8 +110,11 @@ describe('GET /api/v1/integrations (integrations:manage)', () => {
       errors_today: 1,
       avg_ms: 200,
       credentials: [],
+      needs_credential: true,
     });
     expect(Date.parse(apollo.last_call_at)).toBeGreaterThan(Date.now() - 60_000);
+    // The company website needs no key, so the screen can hide the key field.
+    expect(body.data.find((r: { key: string }) => r.key === 'website')).toMatchObject({ name: 'Company website', group: 'Data and enrichment', needs_credential: false });
 
     const hubspot = body.data.find((r: { key: string }) => r.key === 'hubspot');
     expect(hubspot).toMatchObject({
@@ -402,7 +405,9 @@ describe("another tenant's integrations stay apart", () => {
     expect((await putDisabled(as(owner, '/integrations/vibe/disabled', { method: 'PUT', body: { disabled: true } }))).status).toBe(200);
     const res = await action(as(owner, '/integrations/vibe:disconnect', { method: 'POST' }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ key: 'vibe', mode: 'mock', status: 'disabled' });
+    expect(await res.json()).toMatchObject({ key: 'vibe', mode: 'mock', status: 'disabled', needs_credential: true });
+    const website = await putDisabled(as(owner, '/integrations/website/disabled', { method: 'PUT', body: { disabled: false } }));
+    expect(await website.json()).toMatchObject({ key: 'website', needs_credential: false, credentials: [] });
     const [conn] = await adminDb
       .select()
       .from(connection)

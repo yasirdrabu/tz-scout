@@ -2,7 +2,7 @@
 // params), response parsing into arrival-shaped values, and the error mapping `classifyError` reads.
 import { describe, expect, it } from 'vitest';
 import { RateLimitedError } from '@/modules/integrations';
-import { apolloLive } from '@/modules/enrichment/adapters/apollo/live';
+import { MASTER_KEY_NEEDED, apolloLive } from '@/modules/enrichment/adapters/apollo/live';
 import { classifyError } from '@/modules/enrichment/domain/errors';
 
 type Call = { url: URL; init: RequestInit };
@@ -125,9 +125,31 @@ describe('Apollo live adapter', () => {
     expect((await stub({}, 401).adapter.test()).ok).toBe(false);
   });
 
-  it("a 403 says people search needs a master key", async () => {
+  it('a 403 says people search needs a master key: a bad request with that message, not retried', async () => {
     const e = await failure(stub({}, 403).adapter.peopleSearch({ domain: 'x.com', titles: [], max: 1 }));
     expect(e).toMatchObject({ status: 403, message: expect.stringMatching(/People search needs a master API key/) });
+    expect(classifyError(e, 'Apollo')).toEqual({ kind: 'bad_request', message: MASTER_KEY_NEEDED, retry: false });
+  });
+
+  it('drops list items that do not parse and keeps the rest; a bad envelope still fails', async () => {
+    const { adapter } = stub({
+      '/job_postings': { organization_job_postings: [{ id: 'j1', title: null }, { id: 'j2', title: 'Dispatcher', posted_at: '2026-10-01' }, 'junk'] },
+      '/mixed_people/api_search': { people: [{ id: 'p1', first_name: null }, { id: 'p2', first_name: 'Kai' }] },
+      '/news_articles/search': { news_articles: 'not a list' },
+    });
+    expect((await adapter.jobPostings({ domain: 'x.com', orgId: 'o1' })).value.map((s) => s.title)).toEqual(['Hiring: Dispatcher']);
+    expect((await adapter.peopleSearch({ domain: 'x.com', titles: [], max: 5 })).value.map((p) => p.provider_ref)).toEqual(['p2']);
+    await expect(adapter.news({ domain: 'x.com', orgId: 'o1' })).rejects.toThrow(/could not read/);
+  });
+
+  it('cancels the body of an answer it refuses without reading', async () => {
+    let cancelled = 0;
+    const fetchImpl = (async () => {
+      const body = new ReadableStream({ cancel: () => void cancelled++ });
+      return new Response(body, { status: 401 });
+    }) as unknown as typeof fetch;
+    await expect(apolloLive({ kind: 'api_key', value: 'k', settings: {} }, fetchImpl).companyEnrich({ domain: 'x.com' })).rejects.toMatchObject({ status: 401 });
+    expect(cancelled).toBe(1);
   });
 
   it('a 429 is a RateLimitedError with the Retry-After in milliseconds', async () => {
