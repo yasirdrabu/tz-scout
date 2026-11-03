@@ -25,7 +25,7 @@ export function capLines(rows: Integration[], date: (iso: string) => string): st
     if (!c || c.level === 'ok') return [];
     if (c.overage) return [{ rank: 1, text: `${r.name} is allowed over its limit until ${date(c.resets_at)}.` }];
     if (c.level === 'blocked') return [{ rank: 0, text: `${r.name} reached its ${periodWord(c)} limit. Scout stopped calling it until ${date(c.resets_at)}.` }];
-    return [{ rank: 2, text: `${r.name} has used ${Math.floor((c.used * 100) / c.limit)}% of its ${periodWord(c)} limit.` }];
+    return [{ rank: 2, text: `${r.name} has used ${Math.floor(((c.used + c.reserved) * 100) / c.limit)}% of its ${periodWord(c)} limit.` }];
   });
   return lines.sort((a, b) => a.rank - b.rank).map((l) => l.text);
 }

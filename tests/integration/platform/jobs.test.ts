@@ -69,7 +69,7 @@ const ctxOf = (tenantId: string, tx: ModuleContext['tx'], correlationId = newId(
   tx,
 });
 
-function start(jobs: JobHandlerDef[], extra: { concurrency?: number; busyRetryMs?: number } = {}) {
+function start(jobs: JobHandlerDef[], extra: { concurrency?: number; busyRetryMs?: number; capJitterMs?: number } = {}) {
   const ac = new AbortController();
   let ready!: () => void;
   const readyP = new Promise<void>((r) => (ready = r));
@@ -261,7 +261,7 @@ describe('jobs', () => {
       }
       done++;
     });
-    const w = start([h], { busyRetryMs: 30 });
+    const w = start([h], { busyRetryMs: 30, capJitterMs: 0 });
     try {
       await w.ready;
       const t = newId('t');

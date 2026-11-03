@@ -90,6 +90,8 @@ export type WorkerOptions = {
    * and do not count toward maxDeliver.
    */
   busyRetryMs?: number;
+  /** The most random delay added to a wait for a usage limit (Ruling 10). Default 60000; tests pass 0. */
+  capJitterMs?: number;
   /** Called once every durable consumer exists and is being consumed. */
   onReady?: () => void;
   /** Test hooks. `beforeAck` returning false skips the ack (simulates a crash after commit). */
@@ -117,15 +119,18 @@ type Sub = {
 
 const BUSY_RETRY_CAP_MS = 30_000;
 const CAP_WAIT_MAX_MS = 15 * 60_000;
+export const CAP_WAIT_JITTER_MS = 60_000;
 
 /**
  * Ruling 10: how long a job refused by a usage limit waits before it comes again. Until the limit
- * resets, at most 15 minutes (so a raised limit resumes the work), never below `minMs`.
+ * resets, at most 15 minutes (so a raised limit resumes the work), never below `minMs`. Up to a
+ * minute of `jitterMs` (random by default) is added, so the jobs waiting on a limit do not all come back at once.
  */
-export function capWaitMs(resetsAt: unknown, nowMs: number, minMs: number): number {
+export function capWaitMs(resetsAt: unknown, nowMs: number, minMs: number, jitterMs = Math.random() * CAP_WAIT_JITTER_MS): number {
   const at = typeof resetsAt === 'string' ? Date.parse(resetsAt) : NaN;
   const wait = Number.isNaN(at) ? CAP_WAIT_MAX_MS : Math.min(at - nowMs, CAP_WAIT_MAX_MS);
-  return Math.max(minMs, wait);
+  const jitter = Math.min(Math.max(0, jitterMs), CAP_WAIT_JITTER_MS);
+  return Math.max(minMs, Math.floor(wait + jitter));
 }
 
 /** Give up now: dead-letter without further retries. */
@@ -260,6 +265,7 @@ type Runtime = {
   workspaceSlots?: KeyedSlots;
   busyLockTimeoutMs: number;
   busyRetryMs: number;
+  capJitterMs: number;
 };
 
 function fromConsumer(c: ConsumerDef): Sub {
@@ -534,7 +540,7 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
     // Refused by a usage limit (Ruling 10): the transaction rolled back, so nothing happened. It waits for
     // the limit like a closed workspace, and the run counted as it started is taken back.
     if (e instanceof ScoutError && e.slug === 'blocked_by_cap') {
-      const delay = capWaitMs(e.extensions?.resets_at, Date.now(), rt.busyRetryMs);
+      const delay = capWaitMs(e.extensions?.resets_at, Date.now(), rt.busyRetryMs, Math.random() * rt.capJitterMs);
       if (redelivery && runs > runsBefore) {
         await uncountRun(s, envelope).catch((e2) => lg.warn({ countErr: errorText(e2) }, 'worker: could not take back the run'));
       }
@@ -674,6 +680,7 @@ export async function startWorker(opts: WorkerOptions): Promise<void> {
       ...(workspaceInFlightCap() !== null ? { workspaceSlots: new KeyedSlots(workspaceInFlightCap()!) } : {}),
       busyLockTimeoutMs: opts.busyLockTimeoutMs ?? 2000,
       busyRetryMs: opts.busyRetryMs ?? 1000,
+      capJitterMs: opts.capJitterMs ?? CAP_WAIT_JITTER_MS,
     };
     for (const s of subs) stops.push(await runSub(nats, s, opts, rt));
     log.info({ consumers: subs.map((s) => s.durable) }, 'worker: consuming');

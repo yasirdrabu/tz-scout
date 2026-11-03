@@ -165,6 +165,16 @@ export async function runUndo(ctx: ModuleContext, handoffId: string, now: Date, 
   } catch (e) {
     if (transactionClosed(e)) throw e;
     const f = classifyPushError(e);
+    if (f.wait) {
+      // Refused by a usage limit: the run is taken back and the job waits for the limit (Ruling 10).
+      await withTenant(ctx.tenantId, (tx) =>
+        tx
+          .update(handoff)
+          .set({ undoAttempts: sql`greatest(${handoff.undoAttempts} - 1, 0)` })
+          .where(and(byId(ctx, handoffId), isNull(handoff.undone))),
+      );
+      throw e;
+    }
     if (f.unexpected) log.error({ err: e, tenantId: ctx.tenantId, handoffId }, 'crm: handoff undo failed unexpectedly');
     if (f.retryable && run.undoAttempts < UNDO_MAX_ATTEMPTS) throw e;
     if (!(await failUndo(ctx, handoffId, now, f.retryable ? RETRIES_FAILED : f.reason, cause))) throw e;

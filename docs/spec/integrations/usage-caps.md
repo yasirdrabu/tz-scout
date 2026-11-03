@@ -87,6 +87,19 @@ Build rulings:
 - A settle failure never loses the call-log row. A lost settle leaves the reservation held until the
   period ends.
 - Calls today, errors today and the response average leave out `blocked_by_cap` rows.
+- A `calls` limit counts one per gateway call (one adapter operation), not one per HTTP request the
+  adapter makes to the service; an operation that pages or retries inside the adapter still counts 1.
+- R2b-2 enrichment callers must pass the amount up front (`units` with `unit: 'credits'`), so a call
+  that would pass the limit is refused before it spends. A credits call without it is only counted
+  afterwards (`recordUsage`) and is never refused.
+- A job refused by a limit waits (Ruling 10) with up to 60 seconds of random delay added, so the jobs
+  waiting on one limit do not all come back at the reset. Jobs that count their own runs (the HubSpot
+  push and undo) take the run back, and are never marked failed by a refusal. The 15-minute activity
+  poll queues no syncs while the CRM's limit is reached.
+- The AI runner records a refused call as an `ai_run` with status `refused_by_cap`. A task with no
+  rules (or `allowRules: false`) rethrows `blocked_by_cap`, so its job waits and a route returns 429.
+- A new limit that puts the current period below a level it had reached clears that level's flag, so
+  reaching it again publishes `integrations.usage.threshold_reached` again.
 
 ## Stories
 

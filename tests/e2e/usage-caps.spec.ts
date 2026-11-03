@@ -6,6 +6,15 @@ import { shows, signInAs } from './helpers';
 
 const OWNER = 'zach.wiant@taazaa.com';
 
+// Puts HubSpot's limit back through the API with the page's session, so a failed step never leaves it at 1.
+test.afterEach(async ({ page, baseURL }) => {
+  const res = await page.request.put('/api/v1/integrations/hubspot/cap', {
+    data: { limit: 50000 },
+    headers: { 'x-scout-tenant': 'taazaa', origin: baseURL!, 'idempotency-key': crypto.randomUUID() },
+  });
+  expect(res.status()).toBe(200);
+});
+
 test('a service reaching its limit shows a banner, and the owner can allow going over', async ({ page }) => {
   await signInAs(page, OWNER);
   await page.goto('/t/taazaa/settings/integrations');
@@ -22,24 +31,22 @@ test('a service reaching its limit shows a banner, and the owner can allow going
   const usage = panel.getByRole('region', { name: 'Usage limit' });
   await expect(usage.getByText(/^[\d,]+ of 50,000 calls today\. Resets [A-Z][a-z]{2} \d{1,2}\.$/)).toBeVisible();
 
-  try {
-    await usage.getByLabel('Limit per day').fill('1');
-    await usage.getByRole('button', { name: 'Save limit' }).click();
-    await shows(page, 'Limit saved.');
-    await expect(usage.getByText(/ of 1 calls today\. Resets /)).toBeVisible();
+  await usage.getByLabel('Limit per day').fill('1');
+  await usage.getByRole('button', { name: 'Save limit' }).click();
+  await shows(page, 'Limit saved.');
+  await expect(usage.getByText(/ of 1 calls today\. Resets /)).toBeVisible();
 
-    // The credential save and test already used the one call, so this one is refused.
-    await panel.getByRole('button', { name: 'Test connection' }).click();
-    await shows(page, /^HubSpot reached its daily limit\. Scout stopped calling it until [A-Z][a-z]{2} \d{1,2}\.$/);
+  // The credential save and test already used the one call, so this one is refused.
+  await panel.getByRole('button', { name: 'Test connection' }).click();
+  await shows(page, /^HubSpot reached its daily limit\. Scout stopped calling it until [A-Z][a-z]{2} \d{1,2}\.$/);
 
-    await usage.getByRole('button', { name: /^Allow until / }).click();
-    await shows(page, /^HubSpot can go over its limit until [A-Z][a-z]{2} \d{1,2}\.$/);
-    await shows(page, /^HubSpot is allowed over its limit until [A-Z][a-z]{2} \d{1,2}\.$/);
-    await expect(page.getByText(/Scout stopped calling it until/)).toHaveCount(0);
-  } finally {
-    await usage.getByLabel('Limit per day').fill('50000');
-    await usage.getByRole('button', { name: 'Save limit' }).click();
-    await shows(page, 'Limit saved.');
-  }
+  await usage.getByRole('button', { name: /^Allow until / }).click();
+  await shows(page, /^HubSpot can go over its limit until [A-Z][a-z]{2} \d{1,2}\.$/);
+  await shows(page, /^HubSpot is allowed over its limit until [A-Z][a-z]{2} \d{1,2}\.$/);
+  await expect(page.getByText(/Scout stopped calling it until/)).toHaveCount(0);
+
+  await usage.getByLabel('Limit per day').fill('50000');
+  await usage.getByRole('button', { name: 'Save limit' }).click();
+  await shows(page, 'Limit saved.');
   await expect(usage.getByText(/ of 50,000 calls today\. Resets /)).toBeVisible();
 });

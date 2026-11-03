@@ -210,6 +210,28 @@ describe('setCapLimit and allowOverage', () => {
     expect(rows[0]).toMatchObject({ subjectType: 'usage_cap', subjectId: 'apollo', before: { limit: 2000 }, after: { limit: 3000 } });
   });
 
+  it('a raised limit clears the flags it drops below, so the thresholds publish again', async () => {
+    const t = await withLimit(10);
+    await t.run(async (ctx) => settle(ctx, await reserve(ctx, 'apollo', 10, NOV), 10));
+    expect(await thresholds(t.tenantId, 'blocked')).toHaveLength(1);
+    expect(await thresholds(t.tenantId, 'warn')).toHaveLength(1);
+    await t.run((ctx) => setCapLimit(ctx, 'apollo', 100, NOV));
+    const a = await t.run((ctx) => reserve(ctx, 'apollo', 85, NOV));
+    expect(a.level).toBe('warn');
+    expect(await thresholds(t.tenantId, 'warn')).toHaveLength(2);
+    await t.run((ctx) => settle(ctx, a, 85));
+    await t.run(async (ctx) => settle(ctx, await reserve(ctx, 'apollo', 5, NOV), 5));
+    expect(await thresholds(t.tenantId, 'blocked')).toHaveLength(2);
+  });
+
+  it('a limit raised only out of blocked keeps the warn flag', async () => {
+    const t = await withLimit(10);
+    await t.run(async (ctx) => settle(ctx, await reserve(ctx, 'apollo', 10, NOV), 10));
+    await t.run((ctx) => setCapLimit(ctx, 'apollo', 12, NOV));
+    const [row] = await adminDb.select().from(usagePeriod).where(eq(usagePeriod.tenantId, t.tenantId));
+    expect(row).toMatchObject({ warned: true, blocked: false });
+  });
+
   it('overage lets usage pass the limit until the period resets (Review Focus 5)', async () => {
     const t = await withLimit(10);
     await t.run(async (ctx) => settle(ctx, await reserve(ctx, 'apollo', 10, NOV), 10));

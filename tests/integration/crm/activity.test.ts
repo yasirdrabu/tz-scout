@@ -5,7 +5,9 @@ import { upsertFromArrival } from '@/modules/accounts';
 import { activityObserved, checkFollowThrough, followThrough, hubspotMock, pollActivity, seedMockCrm, syncAccount, syncJob, syncOwners } from '@/modules/crm';
 import { activity, followThrough as followThroughTable, handoff, link } from '@/modules/crm/db/schema';
 import { mockAddActivity, mockCompleteTask, setMockFailure } from '@/modules/crm/fixtures';
+import { setCapLimit } from '@/modules/integrations';
 import { callLog } from '@/modules/integrations/db/schema';
+import { recordUsage } from '@/modules/integrations/services/caps';
 import { assign } from '@/modules/routing';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -172,6 +174,23 @@ describe('the activity poll (Ruling 17)', () => {
     expect(await t3.run((ctx) => pollActivity(ctx, new Date()))).toBe(2);
     expect(await calls()).toBe(before);
     expect((await unsentSyncs(t3)).sort()).toEqual([a, b].sort());
+  });
+
+  it('queues nothing while the HubSpot usage limit is reached, and queues again once it is raised', async () => {
+    const t5 = await routingTenant();
+    const s5 = await member(t5, 'seller');
+    await t5.run((ctx) => seedMockCrm(ctx));
+    await t5.run((ctx) => syncOwners(ctx));
+    const [a, b] = [await handedOff(t5, s5), await handedOff(t5, s5)];
+    await t5.run(async (ctx) => {
+      await setCapLimit(ctx, 'hubspot', 1);
+      await recordUsage(ctx, 'hubspot', 1, ctx.tx);
+    });
+    expect(await t5.run((ctx) => pollActivity(ctx, new Date()))).toBe(0);
+    expect(await unsentSyncs(t5)).toEqual([]);
+    await t5.run((ctx) => setCapLimit(ctx, 'hubspot', 50000));
+    expect(await t5.run((ctx) => pollActivity(ctx, new Date()))).toBe(2);
+    expect((await unsentSyncs(t5)).sort()).toEqual([a, b].sort());
   });
 
   it('an account whose sync keeps failing does not stay first (final review C1)', async () => {

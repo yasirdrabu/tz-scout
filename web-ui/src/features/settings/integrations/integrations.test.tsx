@@ -308,6 +308,12 @@ describe('usage limits', () => {
     expect(await screen.findByText('HubSpot has used 29% of its daily limit.')).toBeInTheDocument();
   });
 
+  it('counts held usage in the percent, as the level does', async () => {
+    serve([{ ...HUBSPOT, cap: cap({ used: 30000, reserved: 12000, level: 'warn' }) }]);
+    renderApp('/t/taazaa/settings/integrations');
+    expect(await screen.findByText('HubSpot has used 84% of its daily limit.')).toBeInTheDocument();
+  });
+
   it.each([
     ['America/New_York', 'Dec 1'],
     ['America/Los_Angeles', 'Nov 30'],

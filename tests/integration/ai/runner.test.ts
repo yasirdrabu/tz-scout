@@ -24,6 +24,7 @@ import { registerAdapter, saveCredential, setCapLimit, setDisabled, setMode, tes
 import { callLog, connection, usagePeriod } from '@/modules/integrations/db/schema';
 import { periodBounds } from '@/modules/integrations/domain/caps';
 import { adminDb } from '@/platform/db/client';
+import { ScoutError } from '@/platform/errors';
 import { outbox } from '@/platform/db/schema';
 import { accountBriefTask } from '@/modules/playbooks/tasks/account-brief';
 import type { BriefInput } from '@/modules/playbooks/domain/brief-io';
@@ -238,6 +239,26 @@ describe('runTask', () => {
     expect(r).toMatchObject({ mode: 'rules', output: { echoed: 'hi' } });
     const calls = await adminDb.select().from(callLog).where(eq(callLog.tenantId, t.tenantId));
     expect(calls.map((c) => c.outcome)).toEqual(['blocked_by_cap']);
+    const runs = await runsOf(t.tenantId);
+    expect(runs.map((x) => [x.mode, x.status])).toEqual([
+      ['mock', 'refused_by_cap'],
+      ['rules', 'ok'],
+    ]);
+  });
+
+  it('with no rules, Claude at its monthly limit rethrows blocked_by_cap and keeps the refused run', async () => {
+    const t = await freshTenant();
+    await t.run((ctx) => setCapLimit(ctx, 'anthropic', 100));
+    await adminDb
+      .insert(usagePeriod)
+      .values({ tenantId: t.tenantId, providerKey: 'anthropic', periodStart: periodBounds('month', new Date(), 'UTC').start, used: 100 });
+    const err = await t.run((ctx) => runTask(ctx, noRules, { text: 'hi' }, { subject })).catch((e) => e as ScoutError);
+    expect(err).toBeInstanceOf(ScoutError);
+    expect(err).toMatchObject({ slug: 'blocked_by_cap', status: 429, extensions: { resets_at: expect.any(String) } });
+    // Recorded in its own transaction, so it is kept though the caller rolled back.
+    expect((await runsOf(t.tenantId)).map((x) => x.status)).toEqual(['refused_by_cap']);
+    // allowRules: false has no rules to fall back on either.
+    await expect(t.run((ctx) => runTask(ctx, echo, { text: 'zz' }, { subject, allowRules: false }))).rejects.toMatchObject({ slug: 'blocked_by_cap' });
   });
 
   it('rejects invalid input, and lists, gets and totals runs', async () => {

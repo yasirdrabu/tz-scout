@@ -52,6 +52,9 @@ function capBlocked(providerKey: string, period: string, resetsAt: Date, now: Da
   });
 }
 
+/** Whether `e` is a usage-limit refusal (Ruling 8): a job should wait for the limit (Ruling 10), not record a failure. */
+export const isCapWait = (e: unknown): e is ScoutError => e instanceof ScoutError && e.slug === 'blocked_by_cap';
+
 const noCap = (providerKey: string) =>
   new ScoutError({ slug: 'not-found', status: 404, title: `${providerName(providerKey)} has no usage limit.` });
 
@@ -294,8 +297,11 @@ export async function recordUsage(ctx: ModuleContext, providerKey: string, measu
   await (tx ? run(tx) : withTenant(ctx.tenantId, run));
 }
 
-/** Ruling 9: an owner sets the limit, a whole number of 1 or more. Takes effect for the next reservation. */
-export async function setCapLimit(ctx: ModuleContext, providerKey: string, limit: number): Promise<void> {
+/**
+ * Ruling 9: an owner sets the limit, a whole number of 1 or more. Takes effect for the next reservation. A level
+ * the current period no longer reaches under the new limit has its flag cleared, so reaching it publishes again.
+ */
+export async function setCapLimit(ctx: ModuleContext, providerKey: string, limit: number, now = new Date()): Promise<void> {
   if (!Number.isSafeInteger(limit) || limit < 1) {
     throw new ScoutError({
       slug: 'validation',
@@ -310,6 +316,13 @@ export async function setCapLimit(ctx: ModuleContext, providerKey: string, limit
     .update(usageCap)
     .set({ limit, updatedBy: ctx.actor.id, updatedAt: sql`now()` })
     .where(and(eq(usageCap.tenantId, ctx.tenantId), eq(usageCap.providerKey, providerKey)));
+  const b = boundsOf(cap, now, await tenantTimezone(ctx));
+  const [row] = await ctx.tx.select().from(usagePeriod).where(periodKey(ctx.tenantId, providerKey, b.start)).for('update');
+  if (row) {
+    const level = levelOf(row.used, row.reserved, limit, cap.overagePeriodStart === b.start);
+    const clear = { ...(level === 'ok' && row.warned ? { warned: false } : {}), ...(level !== 'blocked' && row.blocked ? { blocked: false } : {}) };
+    if (Object.keys(clear).length > 0) await ctx.tx.update(usagePeriod).set(clear).where(periodKey(ctx.tenantId, providerKey, b.start));
+  }
   await audit(ctx, {
     action: 'integrations.cap.set',
     subject: { type: 'usage_cap', id: providerKey },

@@ -43,6 +43,7 @@ export {
   LIMIT_INVALID,
   allowOverage,
   checkCap,
+  isCapWait,
   listCaps,
   reserve,
   setCapLimit,
