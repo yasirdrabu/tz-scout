@@ -1,15 +1,15 @@
 # SRC-E5 Warm intros
 
-Status: Draft · Release: R1 (basic) and R2 (confirmation and rules UI)
+Status: Draft · Release: R1 (basic) and R2 (confirmation and rules UI, shipped)
 
 Release split (spec's call, D24): **R1** ships declaring a warm intro with an arrival (API, MCP, CSV,
 "Add account"), relationship mapping, relationship default points, the unconfirmed-counts-half rule,
 strongest-intro-counts, and points as a scoring input (SRC-E5-S1-AC1, SRC-E5-S2-AC2, SRC-E5-S3).
 **R2** ships the Confirm flow (SRC-E5-S1-AC2) and the Settings screen for relationship defaults and
 per-introducer rules (SRC-E5-S2-AC1). In R1 defaults are seeded and editable only by a platform admin.
-These R2 items (the Confirm flow, the introducer rules screen, and a rescore when points change) are
-not in R2a. They get their own plan after R2a, because screens.md has no section for them yet
-(Claude's call, 2026-11-02).
+R2 shipped the Confirm flow, the Settings, Warm intros tab, and a rescore when points change (plan
+docs/plans/2026-11-02-r2-warm-intros.md; screens.md §4a and §21i). The R2 rulings below are Claude's
+calls, 2026-11-02.
 This model is canonical; Scoring reads its result and keeps no points of its own.
 
 ## Why
@@ -49,9 +49,38 @@ skips review.
 - Several intros on one account: the highest points count, not the sum.
 - Points travel in `intake.arrival.resolved.warmIntro` and are read with `getWarmIntro(accountId)`;
   SCO adds them to priority (it owns how).
-- Changing an introducer rule or a relationship default republishes `intake.source.trust_changed`
-  (`cause: warm_intro_points`) for the affected introducer's person source, so SCO rescores their
-  accounts.
+- **Repricing** (Claude's call, 2026-11-02): changing a relationship default or an introducer rule reprices the intros
+  already recorded. `points` is recomputed with the current rule or default, and `effective_points`
+  is halved unless confirmed. This replaces R1's "intros keep the points they were given", because
+  SRC-E5-S2-AC1 requires the affected accounts to rescore. A default does not reprice intros a rule
+  covers. Each intro whose `points` or `effective_points` changed is stamped with a change id
+  (`repriced_change_id`, `wic_`); a later change overwrites the stamp.
+- **Dedicated event** (Claude's call, 2026-11-02): a points change publishes `intake.warm_intro.repriced` v1
+  `{changeId}`, not `intake.source.trust_changed`. An introducer with only an email has no person
+  source, and the trust event reaches accounts by arrival sender, not by introducer. SCO rescores the
+  distinct accounts stamped with the change id, cause `warm_intro`. The `warm_intro_points` cause stays
+  in the trust_changed enum but is never published.
+- **Who edits** (Claude's call, 2026-11-02): the Settings tab and its API need `scoring:manage` (owners and operators by
+  default), because points are a scoring input like the weights. It is no longer platform-admin-only.
+- **Confirm** (Claude's call, 2026-11-02): `POST /api/v1/warm-intros/{id}:confirm`, people only, allowed for `review:act`
+  or for the user whose id is the intro's `introducer_user_id`. An account the caller cannot see is a
+  404. Confirming sets `confirmed`, `effective_points = points`, `confirmed_by` and `confirmed_at`,
+  writes the audit row `intake.warm_intro.confirm` and publishes `intake.warm_intro.confirmed`
+  (with a `changeId`), on which SCO rescores that account with cause `warm_intro`. Confirming an intro
+  that is already confirmed returns it unchanged, with no event and no audit row.
+- **One save** (Claude's call, 2026-11-02): Settings saves with one `PUT /api/v1/settings/warm-intros` carrying the whole
+  config `{relationships:[{key, points}], rules:[{id?, introducer_user_id?, introducer_email?,
+  introducer_name?, relationship_key, points}]}`. Rules in the body replace the stored rules: a
+  missing id is deleted, a rule without an id is created. The same introducer and relationship twice
+  is a 400 and saves nothing. `PUT /settings/warm-intros/{key}` does not exist.
+- **Rules for anyone** (Claude's call, 2026-11-02): a rule names a workspace member (`introducer_user_id`) or an outside
+  person (`introducer_email` plus `introducer_name`). The rule stores `introducer_name`, and keeps
+  its introducer after they leave the workspace.
+- **The account-page line** (Claude's call, 2026-11-02) comes from the live intake intro, not the stored score
+  explanation, so it changes as soon as someone confirms. The score's own warm line, the tiles and the
+  queue read `account_score` and catch up when the rescore lands.
+- **Relationship labels are fixed** (Claude's call, 2026-11-02): the six keys and labels are not editable in R2; only
+  their points are.
 
 ## Stories
 
@@ -66,7 +95,7 @@ As an AE, I want to say who introduced an account and how, so that it gets the p
 As an owner, I want to set how much an intro from a given person is worth, so that intros from our
 best connectors rank higher.
 - SRC-E5-S2-AC1 Settings, Warm intros lists relationship defaults and introducer rules; editing points
-  publishes `intake.source.trust_changed` with `cause: warm_intro_points`, and affected accounts are
+  reprices the recorded intros and publishes `intake.warm_intro.repriced`, and affected accounts are
   rescored within a minute.
 - SRC-E5-S2-AC2 Unit test: introducer rule beats relationship default; unconfirmed halves; highest of
   several intros wins; points are clamped to 0..20.
