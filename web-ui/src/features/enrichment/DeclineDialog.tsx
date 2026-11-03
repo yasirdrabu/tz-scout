@@ -76,6 +76,7 @@ export function DeclineDialog({ tenant, request, onClose }: { tenant: string; re
               {...c}
               className="input"
               rows={3}
+              aria-required="true"
               maxLength={REASON_MAX}
               value={reason}
               onChange={(e) => {

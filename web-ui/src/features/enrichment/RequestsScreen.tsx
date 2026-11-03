@@ -35,13 +35,12 @@ export function RequestsScreen() {
   const actions = canDecide && waiting;
 
   async function approveRow(r: EnrichmentRequest) {
-    const ok = await approve.run(() => approveRequest(tenant, r.id), approvedText(r.account_name ?? 'the account'));
-    if (ok) {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['enrichment-requests', tenant] }),
-        queryClient.invalidateQueries({ queryKey: ['account', tenant, r.account_id] }),
-      ]);
-    }
+    await approve.run(() => approveRequest(tenant, r.id), approvedText(r.account_name ?? 'the account'));
+    // Refetch on a failure too (a 409 means someone else decided it), so the row doesn't go stale.
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['enrichment-requests', tenant] }),
+      queryClient.invalidateQueries({ queryKey: ['account', tenant, r.account_id] }),
+    ]);
   }
 
   return (
@@ -61,7 +60,7 @@ export function RequestsScreen() {
       ) : (
         <>
           <div className={table.wrap}>
-            <table className={table.table}>
+            <table className={table.table} aria-label="Enrichment requests">
               <thead>
                 <tr>
                   <th scope="col">Account</th>
@@ -89,8 +88,8 @@ export function RequestsScreen() {
                     <td>{r.kind_label}</td>
                     <td>{r.provider_name}</td>
                     <td>{r.requested_by_label}</td>
-                    <td>{r.reason}</td>
-                    <td>{r.estimate?.text}</td>
+                    <td>{r.reason || '—'}</td>
+                    <td>{r.estimate?.text || '—'}</td>
                     <td>{waiting ? ageText(r.created_at) : r.status_text}</td>
                     {actions && (
                       <td>

@@ -113,6 +113,25 @@ describe('Enrichment requests (§22)', () => {
     expect(await screen.findByText('Someone already decided this.')).toBeInTheDocument();
   });
 
+  it('refetches the list when approving fails, so the row does not go stale', async () => {
+    const lists = serve(APPROVER);
+    server.use(http.post(exactly('/api/v1/enrichment-requests/enr_1:approve'), () => problem(409, 'Someone already decided this.')));
+    const user = userEvent.setup();
+    renderApp(URL_);
+    await user.click(await screen.findByRole('button', { name: 'Approve' }));
+    await screen.findByText('Someone already decided this.');
+    const before = lists.length;
+    await waitFor(() => expect(lists.length).toBeGreaterThan(before - 1));
+    expect(lists.length).toBeGreaterThan(1);
+  });
+
+  it('names the table and shows a dash for an empty reason or estimate', async () => {
+    serve(APPROVER, { rows: [{ ...FLAGGED, reason: null, estimate: null }] });
+    renderApp(URL_);
+    const t = await screen.findByRole('table', { name: 'Enrichment requests' });
+    expect(within(t).getAllByText('—')).toHaveLength(2);
+  });
+
   it('says what an empty Waiting tab and an empty All tab mean', async () => {
     serve(APPROVER, { rows: [] });
     const user = userEvent.setup();
