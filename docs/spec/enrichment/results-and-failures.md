@@ -90,12 +90,14 @@ Claude's calls, 2026-11-03 (the numbering is the plan's; the other rulings are i
   message.
 
   **Stuck requests (final review I1).** The daily `enrichment.request.expire` job also fails every
-  request `approved` or `running`, with no `waiting_reason`, whose `updated_at` is 24 hours old or
-  more: its job dead-lettered or was lost. It becomes `failed` with `error {kind: 'unknown', message:
-  'This enrichment stopped without finishing. Try again.'}` and publishes `enrichment.request.failed`
-  (credits 0: what the lost run spent is not known), so the queue chip clears, the account notice stops
-  polling and a new request of the kind is no longer joined to it. A request waiting on a limit is left
-  alone: that wait lasts until the limit resets or is raised.
+  request `approved` or `running` whose `updated_at` is 24 hours old or more: its job dead-lettered or
+  was lost. It becomes `failed` with `error {kind: 'unknown', message: 'This enrichment stopped without
+  finishing. Try again.'}`, `waiting_reason` cleared, and publishes `enrichment.request.failed` (credits
+  0: what the lost run spent is not known), so the queue chip clears, the account notice stops polling
+  and a new request of the kind is no longer joined to it. This includes a request with a
+  `waiting_reason`: one really waiting on a limit is delivered again at least every ~16 minutes and each
+  try rewrites `updated_at`, so it is never this stale, while one whose job died during the wait would
+  otherwise stay open for ever.
 
   **Intake refusing the arrival (final review I2).** Besides the paused source and the daily arrival
   limit (Ruling 8), any other 4xx from intake (a body `arrival.v1` will not take) fails the request

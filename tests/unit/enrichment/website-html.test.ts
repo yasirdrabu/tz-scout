@@ -19,6 +19,9 @@ const ADVERSARIAL: [string, string][] = [
   ['tags with no end', fill('<<a href="')],
   ['quotes that never close', fill(`<a href="'`)],
   ['entities with no semicolon', fill('&amp&#x41')],
+  // Each unclosed anchor's text runs to the next `<a`; one `</a>` after them all is looked up once (review residual).
+  ['unclosed anchors before one closer', `${'<a href="/x">text '.repeat(14_000)}</a>${'x'.repeat(MB2)}`],
+  ['one unclosed anchor and a long text', `<a href="/about">${'about '.repeat(MB2 / 6)}`],
 ];
 
 describe('website HTML readers', () => {
@@ -31,6 +34,16 @@ describe('website HTML readers', () => {
     metaDescription(html);
     fingerprints(html);
     expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  it('an anchor never closed keeps its link, with its text up to the next anchor, and later links are still found', () => {
+    const html = '<nav><a href="/">Home <img src="logo.png"> <a href="/about">About us</a> <a href="/contact">Contact</a></nav>';
+    expect(linksOf(html)).toEqual([
+      { href: '/', text: 'Home' },
+      { href: '/about', text: 'About us' },
+      { href: '/contact', text: 'Contact' },
+    ]);
+    expect(linksOf(`<a href="/x">${'y'.repeat(5000)}`)).toEqual([{ href: '/x', text: 'y'.repeat(1000) }]);
   });
 
   it('look at the first 256 KB only', () => {

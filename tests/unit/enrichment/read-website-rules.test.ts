@@ -123,7 +123,7 @@ describe('read_website facts (review I3)', () => {
       { key: 'employees', value: 1200, url: page },
       { key: 'hq_city', value: 'Columbus', url: page },
       { key: 'hq_state', value: 'OH', url: page },
-      { key: 'hq_country', value: 'United States', url: page },
+      { key: 'hq_country', value: 'US', url: page },
       { key: 'keywords', value: ['freight', 'logistics', 'trucking'], url: page },
     ]);
   });
@@ -135,6 +135,7 @@ describe('read_website facts (review I3)', () => {
       { key: 'founded_year', value: 'since 1998' },
       { key: 'founded_year', value: '3020' },
       { key: 'hq_city', value: '   ' },
+      { key: 'hq_country', value: 'Narnia' },
     ].map((x) => ({ ...x, url: page }));
     expect(websiteFacts({ ...base, facts })).toEqual([]);
   });

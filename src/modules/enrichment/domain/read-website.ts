@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { countryCode } from '@/modules/intake';
 import type { SitePage } from '../contracts/adapter';
 import { attrOf, capHtml, decodeEntities, tagsOf } from '../adapters/website/html';
 
@@ -62,7 +63,8 @@ export const WEBSITE_FACT_KEYS: Record<string, (v: string) => unknown> = {
   employees: asWhole,
   hq_city: asText,
   hq_state: asText,
-  hq_country: asText,
+  // As intake stores it ("United States" is "US"), so it agrees with other sources instead of opening a conflict.
+  hq_country: (v) => countryCode(v) ?? undefined,
   keywords: asList,
 };
 

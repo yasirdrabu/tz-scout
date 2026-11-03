@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lte } from 'drizzle-orm';
+import { and, eq, inArray, lte } from 'drizzle-orm';
 import { recordSourceFeedback } from '@/modules/intake';
 import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
@@ -7,7 +7,7 @@ import { request } from '../db/schema';
 
 /** A request flagged this long without an answer is cancelled (Ruling 7). */
 export const EXPIRE_AFTER_DAYS = 14;
-/** A request approved or running this long unchanged, and not waiting on a limit, has stopped (review I1). */
+/** A request approved or running this long unchanged has stopped (review I1). */
 export const STUCK_AFTER_HOURS = 24;
 export const STOPPED = 'This enrichment stopped without finishing. Try again.';
 const DAY_MS = 86_400_000;
@@ -36,10 +36,11 @@ export async function expireFlagged(ctx: ModuleContext, now: Date): Promise<numb
 }
 
 /**
- * Fails the requests `approved` or `running` unchanged for 24 hours or more as of `now` and not waiting on a limit
- * (their job dead-lettered or was lost), and publishes `enrichment.request.failed`: the queue chip clears, the notice
- * stops polling, and a new request of the kind is no longer joined to them. A wait on a limit can last until the
- * limit resets, so it is left alone. Returns how many.
+ * Fails the requests `approved` or `running` unchanged for 24 hours or more as of `now` (their job dead-lettered or
+ * was lost), and publishes `enrichment.request.failed`: the queue chip clears, the notice stops polling, and a new
+ * request of the kind is no longer joined to them. A request really waiting on a limit is delivered again at least
+ * every ~16 minutes and each try rewrites `updated_at`, so it is never this stale; one whose job died while it waited
+ * keeps its `waiting_reason` and would otherwise stay open for ever. Returns how many.
  */
 export async function failStuck(ctx: ModuleContext, now: Date): Promise<number> {
   const cutoff = new Date(now.getTime() - STUCK_AFTER_HOURS * HOUR_MS);
@@ -50,7 +51,6 @@ export async function failStuck(ctx: ModuleContext, now: Date): Promise<number> 
       and(
         eq(request.tenantId, ctx.tenantId),
         inArray(request.status, ['approved', 'running']),
-        isNull(request.waitingReason),
         lte(request.updatedAt, cutoff),
       ),
     )
@@ -58,7 +58,7 @@ export async function failStuck(ctx: ModuleContext, now: Date): Promise<number> 
     .for('update');
   const error = { kind: 'unknown' as const, message: STOPPED };
   for (const r of stuck) {
-    await ctx.tx.update(request).set({ status: 'failed', error, finishedAt: now, updatedAt: now }).where(eq(request.id, r.id));
+    await ctx.tx.update(request).set({ status: 'failed', error, waitingReason: null, finishedAt: now, updatedAt: now }).where(eq(request.id, r.id));
     await publish(
       ctx,
       requestFailed,

@@ -122,22 +122,27 @@ export function tagsOf(html: string, name: string): string[] {
   return out;
 }
 
-/** Every `<a href>` with its link text. An anchor never closed ends the list. */
+/**
+ * Every `<a href>` with its link text: up to its `</a>`, or for an anchor never closed up to the next `<a` (at most
+ * 1,000 characters either way). The scan only moves forward, so it stays linear.
+ */
 export function linksOf(html: string): { href: string; text: string }[] {
   const h = capHtml(html);
   const lc = lower(h);
+  const closeAt = finder(lc, '</a>');
   const out: { href: string; text: string }[] = [];
-  let p = 0;
-  for (let i = openAt(lc, 'a', 0); i >= 0; i = openAt(lc, 'a', p)) {
+  let i = openAt(lc, 'a', 0);
+  while (i >= 0) {
     const gt = lc.indexOf('>', i);
     if (gt < 0) break;
-    p = gt + 1;
+    const start = gt + 1;
+    const next = openAt(lc, 'a', start);
+    const close = closeAt(start);
+    const closed = close >= 0 && (next < 0 || close < next);
+    const end = Math.min(closed ? close : next < 0 ? h.length : next, start + LINK_TEXT_MAX);
     const href = gt - i < TAG_MAX ? attrOf(h.slice(i, gt + 1), 'href') : undefined;
-    if (href === undefined) continue;
-    const end = lc.indexOf('</a>', p);
-    if (end < 0) break;
-    out.push({ href: decodeEntities(href.trim()), text: textOf(h.slice(p, Math.min(end, p + LINK_TEXT_MAX))) });
-    p = end + 4;
+    if (href !== undefined) out.push({ href: decodeEntities(href.trim()), text: textOf(h.slice(start, end)) });
+    i = next;
   }
   return out;
 }
