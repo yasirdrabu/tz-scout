@@ -118,3 +118,20 @@ export const feedbackRecorded = defineEvent(
     note: z.string().nullable(),
   }),
 );
+
+/** A reviewer or the named introducer confirmed a warm intro, so it now counts in full. `changeId` (wic_) is stamped on the intro. */
+export const warmIntroConfirmed = defineEvent(
+  'intake.warm_intro.confirmed',
+  1,
+  z.object({
+    warmIntroId: z.string(),
+    accountId: z.string(),
+    arrivalId: z.string(),
+    relationshipKey: z.string(),
+    points: z.number().int(), // the full points, which now count
+    changeId: z.string(),
+  }),
+);
+
+/** A relationship default or introducer rule changed and moved some intros' points; those intros carry `changeId` (wic_). */
+export const warmIntroRepriced = defineEvent('intake.warm_intro.repriced', 1, z.object({ changeId: z.string() }));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isConfirmed, relationshipKey, strongest, warmIntroFullPoints, warmIntroPoints } from '@/modules/intake/domain/warm-intro';
+import { isConfirmed, pickRule, relationshipKey, strongest, warmIntroFullPoints, warmIntroPoints } from '@/modules/intake/domain/warm-intro';
 
 const defaults = {
   customer_referral: 15,
@@ -70,5 +70,20 @@ describe('isConfirmed', () => {
     expect(isConfirmed({ declaredBy: 'person_key' })).toBe(true);
     expect(isConfirmed({ declaredBy: 'agent' })).toBe(false);
     expect(isConfirmed({ declaredBy: 'vendor' })).toBe(false);
+  });
+});
+
+describe('pickRule', () => {
+  const byEmail = { id: 'e', introducerUserId: null, introducerEmail: 'ash@example.com', points: 4 };
+  const byUser = { id: 'u', introducerUserId: 'usr_ash', introducerEmail: null, points: 12 };
+  it('lets a rule for the user beat a rule for their email', () => {
+    expect(pickRule([byEmail, byUser], { userId: 'usr_ash', email: 'ash@example.com' })).toBe(byUser);
+  });
+  it('falls back to the email rule', () => {
+    expect(pickRule([byEmail, byUser], { userId: null, email: 'ash@example.com' })).toBe(byEmail);
+  });
+  it('is undefined when nothing matches', () => {
+    expect(pickRule([byEmail, byUser], { userId: 'usr_bo', email: 'bo@example.com' })).toBeUndefined();
+    expect(pickRule([byEmail], { userId: null, email: null })).toBeUndefined();
   });
 });

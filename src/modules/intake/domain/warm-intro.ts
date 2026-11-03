@@ -37,6 +37,13 @@ export function strongest<T extends { effectivePoints: number }>(intros: readonl
   return intros.reduce<T | null>((best, i) => (best === null || i.effectivePoints > best.effectivePoints ? i : best), null);
 }
 
+type RuleWho = { introducerUserId: string | null; introducerEmail: string | null };
+
+/** The introducer's rule among `rules` (one relationship's): a rule for their user wins over one for their email. */
+export function pickRule<T extends RuleWho>(rules: readonly T[], who: { userId: string | null | undefined; email: string | null | undefined }): T | undefined {
+  return (who.userId ? rules.find((r) => r.introducerUserId === who.userId) : undefined) ?? (who.email ? rules.find((r) => r.introducerEmail === who.email) : undefined);
+}
+
 /** A person, or a person source's key with `warm_intro:declare`, confirms their own intro. An agent or vendor does not. */
 export function isConfirmed(a: { declaredBy: 'person' | 'person_key' | 'agent' | 'vendor' }): boolean {
   return a.declaredBy === 'person' || a.declaredBy === 'person_key';

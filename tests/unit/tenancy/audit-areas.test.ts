@@ -17,6 +17,8 @@ describe('areaOf', () => {
     ['accounts.exclusion_rule.set', 'settings'],
     ['crm.property_setup', 'settings'],
     ['intake.relationship_default.set', 'settings'],
+    ['intake.warm_intro_rule.create', 'settings'],
+    ['intake.warm_intro.confirm', 'other'],
     ['accounts.account.merge', 'other'],
     ['intake.arrival.skip', 'other'],
   ])('%s is %s', (action, area) => {

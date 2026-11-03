@@ -18,6 +18,7 @@ const PREFIXES: Record<Exclude<AuditArea, 'other'>, string[]> = {
     'scoring.',
     'accounts.exclusion_',
     'intake.relationship_default.',
+    'intake.warm_intro_rule.',
   ],
 };
 
