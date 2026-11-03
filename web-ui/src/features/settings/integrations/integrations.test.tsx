@@ -4,7 +4,7 @@ import { delay, http, HttpResponse } from 'msw';
 import { exactly, problem } from '../../../test/http';
 import { renderApp, serveMe } from '../../../test/renderApp';
 import { server } from '../../../test/server';
-import type { Call, Integration } from './api';
+import type { Call, Cap, Integration } from './api';
 
 const service = (s: Partial<Integration> & Pick<Integration, 'key' | 'name'>): Integration => ({
   used_for: '',
@@ -19,6 +19,7 @@ const service = (s: Partial<Integration> & Pick<Integration, 'key' | 'name'>): I
   errors_today: 0,
   avg_ms: null,
   credentials: [],
+  cap: null,
   ...s,
 });
 
@@ -267,5 +268,138 @@ describe('last 50 calls', () => {
     server.use(http.get('/api/v1/integrations/govspend/calls', () => problem(500, 'Something went wrong', { ref: 'cor_c1' })));
     await userEvent.click(within(drawer).getByRole('tab', { name: 'Errors only' }));
     expect(await within(drawer).findByText("Calls didn't load")).toBeInTheDocument();
+  });
+});
+
+const cap = (c: Partial<Cap>): Cap => ({
+  provider_key: 'hubspot',
+  unit: 'calls',
+  period: 'day',
+  limit: 50000,
+  used: 0,
+  reserved: 0,
+  level: 'ok',
+  resets_at: '2026-11-03T12:00:00Z',
+  overage: false,
+  ...c,
+});
+const MONTH_END = '2026-12-01T12:00:00Z';
+
+describe('usage limits', () => {
+  it('lists blocked, then overage, then warn lines', async () => {
+    serve([
+      { ...HUBSPOT, cap: cap({ used: 42000, level: 'warn' }) },
+      { ...APOLLO, cap: cap({ provider_key: 'apollo', unit: 'credits', period: 'month', limit: 2000, used: 2000, level: 'blocked', resets_at: MONTH_END }) },
+      { ...GOVSPEND, cap: cap({ provider_key: 'govspend', used: 60000, level: 'warn', overage: true }) },
+    ]);
+    renderApp('/t/taazaa/settings/integrations');
+    await screen.findByRole('heading', { name: '1 of 2 services working' });
+    const lines = screen.getAllByRole('listitem').map((li) => li.textContent);
+    expect(lines.slice(0, 3)).toEqual([
+      'Apollo reached its monthly limit. Scout stopped calling it until Dec 1.',
+      'GovSpend is allowed over its limit until Nov 3.',
+      'HubSpot has used 84% of its daily limit.',
+    ]);
+  });
+
+  it('rounds the percent down without float error', async () => {
+    serve([{ ...HUBSPOT, cap: cap({ used: 29, limit: 100, level: 'warn' }) }]);
+    renderApp('/t/taazaa/settings/integrations');
+    expect(await screen.findByText('HubSpot has used 29% of its daily limit.')).toBeInTheDocument();
+  });
+
+  it('counts held usage in the percent, as the level does', async () => {
+    serve([{ ...HUBSPOT, cap: cap({ used: 30000, reserved: 12000, level: 'warn' }) }]);
+    renderApp('/t/taazaa/settings/integrations');
+    expect(await screen.findByText('HubSpot has used 84% of its daily limit.')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['America/New_York', 'Dec 1'],
+    ['America/Los_Angeles', 'Nov 30'],
+  ])('writes the reset date in the tenant timezone (%s)', async (timezone, date) => {
+    serve([{ ...HUBSPOT, cap: cap({ used: 50000, level: 'blocked', period: 'month', resets_at: '2026-12-01T05:00:00Z' }) }]);
+    serveMe({ taazaa: { scopes: ['integrations:manage'], tenant: { id: 'taazaa', slug: 'taazaa', name: 'taazaa', timezone } } });
+    renderApp('/t/taazaa/settings/integrations');
+    expect(await screen.findByText(`HubSpot reached its monthly limit. Scout stopped calling it until ${date}.`)).toBeInTheDocument();
+  });
+
+  it('shows no limit lines when everything is ok', async () => {
+    serve([{ ...HUBSPOT, cap: cap({ used: 10 }) }]);
+    renderApp('/t/taazaa/settings/integrations');
+    await screen.findByRole('heading', { name: '1 of 1 services working' });
+    expect(screen.queryByText(/limit\./)).toBeNull();
+  });
+
+  it('shows the usage line with thousands separators, and money for cost_cents', async () => {
+    serve([HUBSPOT, { ...APOLLO, key: 'anthropic', name: 'Anthropic', cap: cap({ provider_key: 'anthropic', unit: 'cost_cents', period: 'month', limit: 20000, used: 1240, resets_at: MONTH_END }) }]);
+    const drawer = await openService('Manage Anthropic');
+    expect(within(drawer).getByText('$12.40 of $200.00 this month. Resets Dec 1.')).toBeInTheDocument();
+    expect(within(drawer).getByLabelText('Limit per month')).toHaveValue('20000');
+  });
+
+  it('shows calls today, and No limit.', async () => {
+    serve([{ ...HUBSPOT, cap: cap({}) }, GOVSPEND]);
+    const drawer = await openService('Manage HubSpot');
+    expect(within(drawer).getByText('0 of 50,000 calls today. Resets Nov 3.')).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await userEvent.click(screen.getByRole('button', { name: 'Connect GovSpend' }));
+    const gov = await screen.findByRole('dialog', { name: 'GovSpend' });
+    expect(within(gov).getByText('No limit.')).toBeInTheDocument();
+  });
+
+  it('saves a new limit and toasts', async () => {
+    serve([{ ...HUBSPOT, cap: cap({}) }]);
+    let body: unknown;
+    server.use(http.put('/api/v1/integrations/hubspot/cap', async ({ request }) => {
+      body = await request.json();
+      return HttpResponse.json({ cap: cap({ limit: 60000 }) });
+    }));
+    const drawer = await openService('Manage HubSpot');
+    const input = within(drawer).getByLabelText('Limit per day');
+    await userEvent.clear(input);
+    await userEvent.type(input, '60000');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Save limit' }));
+    expect(await screen.findByText('Limit saved.')).toBeInTheDocument();
+    expect(body).toEqual({ limit: 60000 });
+  });
+
+  it('refuses an invalid limit without sending, and shows a server error', async () => {
+    serve([{ ...HUBSPOT, cap: cap({}) }]);
+    let calls = 0;
+    server.use(http.put('/api/v1/integrations/hubspot/cap', () => {
+      calls += 1;
+      return HttpResponse.json(
+        { type: 'https://scout.taazaa.ai/problems/validation', title: 'Invalid', status: 400, correlation_id: 'cor_v1', errors: [{ path: 'limit', message: 'Enter a whole number of 1 or more.' }] },
+        { status: 400, headers: { 'content-type': 'application/problem+json' } },
+      );
+    }));
+    const drawer = await openService('Manage HubSpot');
+    const input = within(drawer).getByLabelText('Limit per day');
+    await userEvent.clear(input);
+    await userEvent.type(input, '0');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Save limit' }));
+    expect(input).toHaveAccessibleDescription('Enter a whole number of 1 or more.');
+    expect(calls).toBe(0);
+
+    await userEvent.clear(input);
+    await userEvent.type(input, '5');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Save limit' }));
+    await waitFor(() => expect(calls).toBe(1));
+    expect(input).toHaveAccessibleDescription('Enter a whole number of 1 or more.');
+  });
+
+  it('allows overage when blocked', async () => {
+    serve([{ ...HUBSPOT, cap: cap({ used: 50000, level: 'blocked' }) }]);
+    let posted = 0;
+    server.use(http.post(exactly('/api/v1/integrations/hubspot/cap:allow-overage'), () => {
+      posted += 1;
+      return HttpResponse.json({ cap: cap({ used: 50000, level: 'blocked', overage: true }) });
+    }));
+    const drawer = await openService('Manage HubSpot');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Allow until Nov 3' }));
+    expect(await screen.findByText('HubSpot can go over its limit until Nov 3.')).toBeInTheDocument();
+    expect(posted).toBe(1);
   });
 });

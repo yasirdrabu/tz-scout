@@ -9,8 +9,8 @@ who asked for it and why, turned into money, and stopped at the caps the owner s
 
 ## Rules
 
-- **Check before spending.** Before a run, ENR calls INT `checkCap(capKey, amount)` with the estimate
-  for every cap that applies:
+- **Check before spending.** Before a run, ENR calls INT `checkCap(ctx, providerKey, amount)` with the
+  estimate (it returns `{status, used, limit, resetsAt}`; R2b-1) for every cap that applies:
   - the provider connection's monthly credit cap;
   - the requesting key's enrichment credit cap, only when a key itself starts spend. API keys default
     to **0** enrichment credits, so in this version keys never spend; a request an agent flagged and a
@@ -51,4 +51,5 @@ As an owner, I want spending to stop at the limits I set, so that a busy week ca
 - ENR-E3-S2-AC3 Crossing 80% publishes `integrations.usage.threshold_reached` (INT) once per month per
   cap.
 - ENR-E3-S2-AC4 Two runs that each fit but together pass the cap: the second is blocked (INT's
-  `checkCap` is atomic; integration test).
+  `reserve` locks the period row, so the hold is atomic; `checkCap` is the read-only check; integration
+  test).

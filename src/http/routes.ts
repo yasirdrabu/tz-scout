@@ -75,6 +75,7 @@ import * as v1HandoffMessagesId from './routes/v1/handoff-messages/[id]/route';
 import * as v1ImportsId from './routes/v1/imports/[id]/route';
 import * as v1Imports from './routes/v1/imports/route';
 import * as v1InboundHubspotConnectionId from './routes/v1/inbound/hubspot/[connectionId]/route';
+import * as v1IntegrationsKeyCap from './routes/v1/integrations/[key]/[cap]/route';
 import * as v1IntegrationsKeyCalls from './routes/v1/integrations/[key]/calls/route';
 import * as v1IntegrationsKeyCredential from './routes/v1/integrations/[key]/credential/route';
 import * as v1IntegrationsKeyDisabled from './routes/v1/integrations/[key]/disabled/route';
@@ -217,6 +218,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/imports/:id`, module: v1ImportsId },
   { path: `${V1}/imports`, module: v1Imports },
   { path: `${V1}/inbound/hubspot/:connectionId`, module: v1InboundHubspotConnectionId },
+  { path: `${V1}/integrations/:key/:cap`, module: v1IntegrationsKeyCap },
   { path: `${V1}/integrations/:key/calls`, module: v1IntegrationsKeyCalls },
   { path: `${V1}/integrations/:key/credential`, module: v1IntegrationsKeyCredential },
   { path: `${V1}/integrations/:key/disabled`, module: v1IntegrationsKeyDisabled },

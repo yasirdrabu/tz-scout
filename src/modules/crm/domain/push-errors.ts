@@ -1,3 +1,4 @@
+import { isCapWait } from '@/modules/integrations';
 import { ScoutError } from '@/platform/errors';
 
 // What a failed push run means (Ruling 4): retry it, or stop and show the reason in plain words. Pure and tested.
@@ -17,6 +18,8 @@ export class NotPushable extends Error {}
 export type PushFailure = {
   retryable: boolean;
   reason: string;
+  /** Refused by a usage limit (Ruling 10): put the run back as it was and rethrow, so the job waits for the limit. Also retryable, for callers that only ask that. */
+  wait?: true;
   /** Not an error the push expects; worth logging in full. */
   unexpected?: boolean;
 };
@@ -31,6 +34,7 @@ const isSqlState = (code: unknown): code is string => typeof code === 'string' &
 
 export function classifyPushError(e: unknown): PushFailure {
   const retry: PushFailure = { retryable: true, reason: RETRIES_FAILED };
+  if (isCapWait(e)) return { retryable: true, wait: true, reason: e.message.slice(0, REASON_LIMIT) };
   if (e instanceof NotPushable || e instanceof ScoutError) return { retryable: false, reason: e.message.slice(0, REASON_LIMIT) };
   const o = (e && typeof e === 'object' ? e : {}) as Shape;
   const message = typeof o.message === 'string' ? o.message : '';

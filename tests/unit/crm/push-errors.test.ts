@@ -58,6 +58,11 @@ describe('classifyPushError (Ruling 4)', () => {
     expect(classifyPushError(new NotPushable('x'.repeat(400))).reason).toHaveLength(300);
   });
 
+  it('a usage-limit refusal is a wait, not a failure (Ruling 10)', () => {
+    const e = new ScoutError({ slug: 'blocked_by_cap', status: 429, title: 'HubSpot reached its daily limit.', extensions: { resets_at: '2026-11-04T00:00:00.000Z' } });
+    expect(classifyPushError(e)).toEqual({ retryable: true, wait: true, reason: 'HubSpot reached its daily limit.' });
+  });
+
   it('anything else is not retried and is flagged as unexpected', () => {
     expect(classifyPushError(new Error('undefined is not a function'))).toEqual({ retryable: false, reason: SOMETHING_WRONG, unexpected: true });
     expect(classifyPushError('a string')).toEqual({ retryable: false, reason: SOMETHING_WRONG, unexpected: true });

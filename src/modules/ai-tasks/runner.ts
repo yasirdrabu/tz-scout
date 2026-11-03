@@ -71,7 +71,7 @@ export function canonicalJson(v: unknown): string {
 export const inputHash = (input: unknown): string => createHash('sha256').update(canonicalJson(input)).digest('hex');
 
 /** Gateway refusals that mean "no live Claude right now": the task falls back to rules. */
-const FALLBACK_SLUGS = new Set(['connection_not_ready', 'connection_disabled', 'credential_unreadable', 'blocked_by_cap']);
+const FALLBACK_SLUGS = new Set(['connection_not_ready', 'connection_disabled', 'credential_unreadable']);
 const actorText = (ctx: ModuleContext) => `${ctx.actor.kind}:${ctx.actor.id}`;
 
 type Draft = Omit<
@@ -280,6 +280,8 @@ export async function runTask<I, O>(
       module: 'ai-tasks',
       unit: 'tokens',
       requestSummary: { task: task.name, promptVersion: task.promptVersion, model },
+      // Held against Claude's monthly cost limit before the call; mock calls hold it too, so the limit works locally.
+      reserveCents: worstCaseCents(model, Math.ceil((task.system.length + user.length) / 4), task.maxTokens),
       // Both attempts' tokens are counted. Cost is only logged for live calls.
       measure: (a: Attempt) => ({
         units: a.usage.inputTokens + a.usage.outputTokens + a.usage.cacheReadTokens,
@@ -354,7 +356,19 @@ export async function runTask<I, O>(
       });
     } catch (e) {
       if (e instanceof ScoutError && e.slug === 'invalid_output') throw e;
-      if (!entered && e instanceof ScoutError && FALLBACK_SLUGS.has(e.slug)) {
+      if (!entered && e instanceof ScoutError && e.slug === 'blocked_by_cap') {
+        // Claude's usage limit is reached: recorded, then rules below; with no rules the refusal stands, so a job waits (Ruling 10).
+        await record(ctx, task, hash, opts.subject, {
+          mode,
+          model,
+          status: 'refused_by_cap',
+          output: null,
+          error: e.message.slice(0, 500),
+          durationMs: Math.round(performance.now() - started),
+          ...noUsage,
+        }, noRules);
+        if (noRules) throw e;
+      } else if (!entered && e instanceof ScoutError && FALLBACK_SLUGS.has(e.slug)) {
         // No live Claude right now: continue to rules below.
       } else {
         const message = e instanceof Error ? e.message : String(e);

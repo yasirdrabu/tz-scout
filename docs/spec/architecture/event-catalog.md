@@ -65,8 +65,8 @@ module adds an event or tool.
 | `analytics.cost.recorded` | ANL | A cost line was added | ANL |
 | `analytics.diagnosis.created` | ANL | Weekly diagnosis stored | owners (notify) |
 | `integrations.connection.changed` / `.tested` | INT | Connection added, edited, tested | Admin |
-| `integrations.usage.threshold_reached` | INT | 80% or 100% of a cap | owners (notify) |
-| `integrations.usage.recorded` | INT | An outside call with a cost (credits, tokens) finished | ANL (automatic cost lines) |
+| `integrations.usage.threshold_reached` | INT | 80% (`warn`) or 100% (`blocked`) of a provider limit, once per level per period | Settings, Integrations banner (in-app only; email later) |
+| `integrations.usage.recorded` | INT | An outside call with a cost (credits, tokens) finished. Not published yet: moves to R3a | ANL (automatic cost lines) |
 | `ai.run.completed` | AI | An AI task ran (cost, tokens) | ANL (cost) |
 | `platform.job.dead` | PLT | A job exhausted its retries | Admin |
 

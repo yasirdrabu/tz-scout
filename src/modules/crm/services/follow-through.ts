@@ -1,10 +1,11 @@
 import { and, desc, eq, gte, inArray, max, ne, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds } from '@/modules/accounts';
-import { gateway } from '@/modules/integrations';
+import { checkCap, gateway } from '@/modules/integrations';
 import { userForCrmOwner } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { enqueueJob, publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
+import { log } from '@/platform/log';
 import type { CrmAdapter } from '../contracts/adapter';
 import { activityObserved } from '../contracts/events';
 import { syncJob } from '../contracts/jobs';
@@ -144,9 +145,15 @@ async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternal
  * handoff is under 180 days old, least recently checked or queued first, at most `limit`, stamps `sync_queued_at` on
  * them and queues one `crm.sync` per account. It takes no account lock and makes no CRM call: each sync runs in its own
  * job, with its own time limit. An account whose sync keeps failing moves to the back, since its queue stamp is newer
- * than the others' checks. Returns how many were queued.
+ * than the others' checks. While the CRM's usage limit is reached it queues nothing, so the syncs do not pile up
+ * and all run at the reset (Ruling 10). Returns how many were queued.
  */
 export async function pollActivity(ctx: ModuleContext, now: Date, limit: number = POLL_LIMIT): Promise<number> {
+  const system = await crmSystem(ctx);
+  if ((await checkCap(ctx, system, 1, now)).status === 'blocked') {
+    log.info({ tenantId: ctx.tenantId, system }, 'crm: activity poll skipped, the usage limit is reached');
+    return 0;
+  }
   const latest = ctx.tx
     .selectDistinctOn([handoff.accountId], { accountId: handoff.accountId, handoffId: handoff.id, completedAt: handoff.completedAt })
     .from(handoff)

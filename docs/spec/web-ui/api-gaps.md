@@ -899,7 +899,10 @@ Files: `src/app/t/[tenant]/settings/integrations/{page,actions}.tsx` (server sid
 | 21b | "Connected by {name} on {date}" | SMALL GAP | `connected_by`, `connected_at` | `connection.created_by` (id) and `credential.created_at`; join the name. |
 | 21b | Tiles calls today, errors today, response average | SMALL GAP | `GET /api/v1/integrations/{provider}` -> `usage{calls_today, errors_today, avg_ms}` | `call_log` has `outcome`, `duration_ms`, `at`; only `calls_today` is aggregated. |
 | 21b | Last 50 calls with Errors only | SERVER ACTION ONLY | `GET /api/v1/integrations/{provider}/calls?outcome=&limit=50` | `recentCalls(ctx, provider, limit)` (max 200): `{id, at, operation, outcome, status_code, duration_ms, error_message}`. `operation` is e.g. `hubspot.test`, not method and path (redacted `request_summary` is not selected). Add the `outcome` filter. |
-| 21b | "Calls today (n of cap/day)" | LATER (R1d) | `calls_today_cap` | Usage caps are R1d (`checkCap`). Count only until then. |
+| 21b | "Calls today (n of cap/day)" | READY (R2b-1) | `calls_today_cap` on each list row | Set only for a daily calls limit (HubSpot); other rows show the count alone. |
+| 21b | Usage limits: banner and Usage limit section | READY (R2b-1) | `cap` (or null) on each service: `{provider_key, unit, period, limit, used, reserved, level, resets_at, overage}` | Level `ok`, `warn`, `blocked`. Defaults are read in memory until first stored. |
+| 21b | Save limit | READY (R2b-1) | `PUT /api/v1/integrations/{key}/cap` `{limit}` -> the cap (`integrations:manage`, people only) | Whole number of 1 or more, else 400 at `limit`; 404 for a service with no limit; audited `integrations.cap.set`. |
+| 21b | `Allow until {date}` | READY (R2b-1) | `POST /api/v1/integrations/{key}/cap:allow-overage` -> the cap (`integrations:manage`, people only) | Audited `integrations.cap.overage`. Route file is `[key]/[cap]/route.ts`. |
 | 21b | Apollo, Vibe live | LATER (R1d) | none | Mock-only adapters; `live-unavailable`. |
 | 21b | Google Workspace row | LATER (unscheduled) | none | No provider. |
 

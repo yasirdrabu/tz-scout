@@ -23,6 +23,7 @@ export function useFormat() {
   return useMemo(
     () => ({
       money: (minor: number) => formatMoney(minor, currency),
+      moneyFixed: (minor: number) => formatMoney(minor, currency, true),
       date: (when: string | number | Date) => formatDate(when, timeZone),
       day: (when: string | number | Date) => formatDay(when, timeZone),
       monthDay: (when: string | number | Date) => formatMonthDay(when, timeZone),

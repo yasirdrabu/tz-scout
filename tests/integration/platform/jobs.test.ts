@@ -18,6 +18,7 @@ import { runRelay } from '@/platform/relay';
 import { defineJobHandler, type JobHandlerDef } from '@/platform/runtime/jobs';
 import { startWorker } from '@/platform/runtime/worker';
 import { TransactionClosedError } from '@/platform/db/guarded-tx';
+import { ScoutError } from '@/platform/errors';
 import { sleep, waitFor } from '../helpers/wait';
 
 const alwaysFails = defineJob('test.always_fails', z.object({ n: z.number() }), { maxDeliver: 3, backoffMs: [50, 50] });
@@ -34,6 +35,7 @@ const lateWriter = defineJob('test.late_writer', z.object({ mode: z.enum(['late'
 });
 const envProbe = defineJob('test.env_probe', z.object({ n: z.number() }), { maxDeliver: 1 });
 const discardable = defineJob('test.discardable', z.object({ n: z.number() }), { maxDeliver: 1 });
+const capped = defineJob('test.capped', z.object({ n: z.number() }), { maxDeliver: 3, backoffMs: [50] });
 
 let nats: Nats;
 let relayAc: AbortController;
@@ -67,7 +69,7 @@ const ctxOf = (tenantId: string, tx: ModuleContext['tx'], correlationId = newId(
   tx,
 });
 
-function start(jobs: JobHandlerDef[], extra: { concurrency?: number } = {}) {
+function start(jobs: JobHandlerDef[], extra: { concurrency?: number; busyRetryMs?: number; capJitterMs?: number } = {}) {
   const ac = new AbortController();
   let ready!: () => void;
   const readyP = new Promise<void>((r) => (ready = r));
@@ -235,6 +237,48 @@ describe('jobs', () => {
       const t0 = Date.now();
       await withTenant(t, (tx) => tx.execute(sql`select 1`));
       expect(Date.now() - t0).toBeLessThan(500);
+    } finally {
+      await w.stop();
+    }
+  }, 20000);
+
+  it('a job refused by a usage limit waits: never dead-lettered, no run counted, runs once allowed (Ruling 10, Review Focus 4)', async () => {
+    let refusing = true;
+    const seenRuns: number[] = []; // run_attempts recorded when each delivery starts
+    let done = 0;
+    const h = defineJobHandler(capped, async (e) => {
+      const rows = await adminDb.execute(
+        sql`select run_attempts from platform.delivery_attempt where consumer_name = 'jobs.test.capped' and event_id = ${e.id}`,
+      );
+      seenRuns.push((rows[0] as { run_attempts: number } | undefined)?.run_attempts ?? 0);
+      if (refusing) {
+        throw new ScoutError({
+          slug: 'blocked_by_cap',
+          status: 429,
+          title: 'Apollo reached its daily limit.',
+          extensions: { resets_at: new Date(Date.now() + 20).toISOString() },
+        });
+      }
+      done++;
+    });
+    const w = start([h], { busyRetryMs: 30, capJitterMs: 0 });
+    try {
+      await w.ready;
+      const t = newId('t');
+      await withTenant(t, (tx) => enqueueJob(ctxOf(t, tx), capped, { n: 1 }));
+      // Ten refusals: more than maxDeliver (3).
+      await waitFor(async () => seenRuns.length >= 10, 10000);
+      refusing = false;
+      await waitFor(async () => done === 1, 5000);
+      await sleep(200);
+      expect(done).toBe(1);
+      expect(await deadRowsFor(t)).toHaveLength(0);
+      // A redelivery counts its own run as it starts; no refused run before it stayed counted.
+      expect(Math.max(...seenRuns)).toBeLessThanOrEqual(1);
+      const left = await adminDb.execute(
+        sql`select count(*)::int as n from platform.delivery_attempt where consumer_name = 'jobs.test.capped'`,
+      );
+      expect((left[0] as { n: number }).n).toBe(0);
     } finally {
       await w.stop();
     }

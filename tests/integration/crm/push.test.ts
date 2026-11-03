@@ -18,7 +18,9 @@ import {
 import { followThrough, handoff, link, mockCompany, mockNote, mockPerson, mockTask } from '@/modules/crm/db/schema';
 import { mockAddDeal, setMockFailure } from '@/modules/crm/fixtures';
 import { assign, assignmentCreated, bulk } from '@/modules/routing';
+import { setCapLimit } from '@/modules/integrations';
 import { callLog } from '@/modules/integrations/db/schema';
+import { recordUsage } from '@/modules/integrations/services/caps';
 import { addMember } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { guardTx } from '@/platform/db/guarded-tx';
@@ -427,5 +429,25 @@ describe('a handler that outlived its time limit (fix round 2)', () => {
     expect((await handoffsOf(a))[0]).toMatchObject({ status: 'completed', lastError: null });
     expect(await events(handoffFailed.type, a)).toHaveLength(0);
     expect(await events(handoffCompleted.type, a)).toHaveLength(0);
+  });
+});
+
+describe('a push refused by the HubSpot usage limit (Ruling 10)', () => {
+  it('stays queued with its attempts unchanged, and completes once the limit is raised', async () => {
+    const a = await account();
+    await queued(a);
+    await t.run(async (ctx) => {
+      await setCapLimit(ctx, 'hubspot', 1);
+      await recordUsage(ctx, 'hubspot', 1, ctx.tx);
+    });
+    try {
+      await expect(runOutbox(t.tenantId)).rejects.toMatchObject({ slug: 'blocked_by_cap' });
+      expect((await handoffsOf(a))[0]).toMatchObject({ status: 'queued', attempts: 0, lastError: null });
+      expect(await events(handoffFailed.type, a)).toHaveLength(0);
+    } finally {
+      await t.run((ctx) => setCapLimit(ctx, 'hubspot', 50000));
+    }
+    await runOutbox(t.tenantId);
+    expect((await handoffsOf(a))[0]).toMatchObject({ status: 'completed', attempts: 1 });
   });
 });

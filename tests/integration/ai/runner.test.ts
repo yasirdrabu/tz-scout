@@ -20,9 +20,11 @@ import { anthropicMock, registerAnthropicAdapter } from '@/modules/ai-tasks/adap
 import { aiRun } from '@/modules/ai-tasks/db/schema';
 import { costCents } from '@/modules/ai-tasks/pricing';
 import { canonicalJson } from '@/modules/ai-tasks/runner';
-import { registerAdapter, saveCredential, setDisabled, setMode, testConnection } from '@/modules/integrations';
-import { connection } from '@/modules/integrations/db/schema';
+import { registerAdapter, saveCredential, setCapLimit, setDisabled, setMode, testConnection } from '@/modules/integrations';
+import { callLog, connection, usagePeriod } from '@/modules/integrations/db/schema';
+import { periodBounds } from '@/modules/integrations/domain/caps';
 import { adminDb } from '@/platform/db/client';
+import { ScoutError } from '@/platform/errors';
 import { outbox } from '@/platform/db/schema';
 import { accountBriefTask } from '@/modules/playbooks/tasks/account-brief';
 import type { BriefInput } from '@/modules/playbooks/domain/brief-io';
@@ -225,6 +227,38 @@ describe('runTask', () => {
     expect(r.mode).toBe('rules');
     expect(complete).not.toHaveBeenCalled();
     expect((await runsOf(t.tenantId)).map((x) => x.status).sort()).toEqual(['ok', 'refused_by_cap']);
+  });
+
+  it('falls back to rules when Claude reached its monthly limit (blocked_by_cap)', async () => {
+    const t = await freshTenant();
+    await t.run((ctx) => setCapLimit(ctx, 'anthropic', 100));
+    await adminDb
+      .insert(usagePeriod)
+      .values({ tenantId: t.tenantId, providerKey: 'anthropic', periodStart: periodBounds('month', new Date(), 'UTC').start, used: 100 });
+    const r = await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject }));
+    expect(r).toMatchObject({ mode: 'rules', output: { echoed: 'hi' } });
+    const calls = await adminDb.select().from(callLog).where(eq(callLog.tenantId, t.tenantId));
+    expect(calls.map((c) => c.outcome)).toEqual(['blocked_by_cap']);
+    const runs = await runsOf(t.tenantId);
+    expect(runs.map((x) => [x.mode, x.status])).toEqual([
+      ['mock', 'refused_by_cap'],
+      ['rules', 'ok'],
+    ]);
+  });
+
+  it('with no rules, Claude at its monthly limit rethrows blocked_by_cap and keeps the refused run', async () => {
+    const t = await freshTenant();
+    await t.run((ctx) => setCapLimit(ctx, 'anthropic', 100));
+    await adminDb
+      .insert(usagePeriod)
+      .values({ tenantId: t.tenantId, providerKey: 'anthropic', periodStart: periodBounds('month', new Date(), 'UTC').start, used: 100 });
+    const err = await t.run((ctx) => runTask(ctx, noRules, { text: 'hi' }, { subject })).catch((e) => e as ScoutError);
+    expect(err).toBeInstanceOf(ScoutError);
+    expect(err).toMatchObject({ slug: 'blocked_by_cap', status: 429, extensions: { resets_at: expect.any(String) } });
+    // Recorded in its own transaction, so it is kept though the caller rolled back.
+    expect((await runsOf(t.tenantId)).map((x) => x.status)).toEqual(['refused_by_cap']);
+    // allowRules: false has no rules to fall back on either.
+    await expect(t.run((ctx) => runTask(ctx, echo, { text: 'zz' }, { subject, allowRules: false }))).rejects.toMatchObject({ slug: 'blocked_by_cap' });
   });
 
   it('rejects invalid input, and lists, gets and totals runs', async () => {

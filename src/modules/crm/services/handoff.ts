@@ -118,12 +118,12 @@ export async function runPush(ctx: ModuleContext, handoffId: string, now: Date =
   const run = await withTenant(ctx.tenantId, async (tx) => {
     const [row] = await tx.select().from(handoff).where(and(byId(ctx, handoffId), inArray(handoff.status, OPEN))).for('update');
     if (!row) return null; // already finished
-    if (row.attempts >= MAX_ATTEMPTS) return { h: row, giveUp: true };
+    if (row.attempts >= MAX_ATTEMPTS) return { h: row, giveUp: true, was: row.status };
     const [h] = await tx.update(handoff).set({ attempts: sql`${handoff.attempts} + 1`, status: 'running' }).where(byId(ctx, handoffId)).returning();
-    return { h: h!, giveUp: false };
+    return { h: h!, giveUp: false, was: row.status };
   });
   if (!run) return;
-  const { h } = run;
+  const { h, was } = run;
   if (run.giveUp) return fail(ctx, h, h.lastError ?? RETRIES_FAILED, true);
   try {
     await lockAccount(ctx, h.accountId);
@@ -136,6 +136,16 @@ export async function runPush(ctx: ModuleContext, handoffId: string, now: Date =
       return;
     }
     const f = classifyPushError(e);
+    if (f.wait) {
+      // Refused by a usage limit: the run is taken back and the job waits for the limit (Ruling 10).
+      await withTenant(ctx.tenantId, (tx) =>
+        tx
+          .update(handoff)
+          .set({ attempts: sql`greatest(${handoff.attempts} - 1, 0)`, status: was })
+          .where(and(byId(ctx, handoffId), eq(handoff.status, 'running'))),
+      );
+      throw e;
+    }
     if (f.unexpected) log.error({ err: e, tenantId: ctx.tenantId, handoffId }, 'crm: handoff push failed unexpectedly');
     if (f.retryable && h.attempts < MAX_ATTEMPTS) throw e;
     await fail(ctx, h, f.retryable ? RETRIES_FAILED : f.reason, f.retryable);

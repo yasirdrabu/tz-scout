@@ -24,3 +24,19 @@ export const connectionTested = defineEvent(
     durationMs: z.number(),
   }),
 );
+
+/** R2b-1 Ruling 7: published once per level per period. `resetsAt` is ISO, `periodStart` the local date. */
+export const usageThresholdReached = defineEvent(
+  'integrations.usage.threshold_reached',
+  1,
+  z.object({
+    providerKey: z.string(),
+    unit: z.enum(['calls', 'credits', 'cost_cents']),
+    period: z.enum(['day', 'month']),
+    periodStart: z.string(),
+    level: z.enum(['warn', 'blocked']),
+    used: z.number(),
+    limit: z.number(),
+    resetsAt: z.string(),
+  }),
+);

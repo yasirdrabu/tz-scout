@@ -7,6 +7,18 @@ export type IntegrationStatus = 'not_set_up' | 'connected' | 'failing' | 'disabl
 
 export type Credential = { kind: string; label: string; last4: string | null; saved_at: string };
 
+export type Cap = {
+  provider_key: string;
+  unit: string;
+  period: 'day' | 'month';
+  limit: number;
+  used: number;
+  reserved: number;
+  level: 'ok' | 'warn' | 'blocked';
+  resets_at: string;
+  overage: boolean;
+};
+
 export type Integration = {
   key: string;
   name: string;
@@ -22,6 +34,7 @@ export type Integration = {
   errors_today: number;
   avg_ms: number | null;
   credentials: Credential[];
+  cap: Cap | null;
 };
 
 export type TestResult = { ok: boolean; message: string; missing_permissions?: string[]; duration_ms: number };
@@ -60,6 +73,11 @@ export const setMode = (tenant: string, key: string, mode: 'mock' | 'live') =>
 
 export const setDisabled = (tenant: string, key: string, disabled: boolean) =>
   apiFetch<Integration>(`${path(key)}/disabled`, { tenant, method: 'PUT', body: { disabled } });
+
+export const setCapLimit = (tenant: string, key: string, limit: number) =>
+  apiFetch<unknown>(`${path(key)}/cap`, { tenant, method: 'PUT', body: { limit } });
+
+export const allowOverage = (tenant: string, key: string) => apiFetch<unknown>(`${path(key)}/cap:allow-overage`, { tenant, method: 'POST' });
 
 export const disconnect = (tenant: string, key: string) => apiFetch<Integration>(`${path(key)}:disconnect`, { tenant, method: 'POST' });
 

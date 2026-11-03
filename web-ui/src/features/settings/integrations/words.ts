@@ -1,5 +1,5 @@
 import type { PillTone } from '../../../ui/Pill';
-import type { Integration } from './api';
+import type { Cap, Integration } from './api';
 
 /** The status dot and words for a service row. */
 export function statusOf(s: Integration): { tone: PillTone; text: string } {
@@ -15,6 +15,20 @@ export const modeText = (s: Integration) => (s.mode === 'live' ? 'Live' : 'Using
 /** "Calls today": "{n}", or "{n} of {cap}/day" with usage caps (R1d). */
 export const callsText = (s: Integration, n: (x: number) => string) =>
   s.calls_today_cap === null ? n(s.calls_today) : `${n(s.calls_today)} of ${n(s.calls_today_cap)}/day`;
+
+const periodWord = (c: Cap) => (c.period === 'day' ? 'daily' : 'monthly');
+
+/** Banner lines for the Integrations tab: blocked first, then overage, then warn. `date` formats a reset like "Dec 1". */
+export function capLines(rows: Integration[], date: (iso: string) => string): string[] {
+  const lines = rows.flatMap((r) => {
+    const c = r.cap;
+    if (!c || c.level === 'ok') return [];
+    if (c.overage) return [{ rank: 1, text: `${r.name} is allowed over its limit until ${date(c.resets_at)}.` }];
+    if (c.level === 'blocked') return [{ rank: 0, text: `${r.name} reached its ${periodWord(c)} limit. Scout stopped calling it until ${date(c.resets_at)}.` }];
+    return [{ rank: 2, text: `${r.name} has used ${Math.floor(((c.used + c.reserved) * 100) / c.limit)}% of its ${periodWord(c)} limit.` }];
+  });
+  return lines.sort((a, b) => a.rank - b.rank).map((l) => l.text);
+}
 
 /** "{n} of {m} services working" and one sentence per issue. Services nobody has set up don't count. */
 export function summaryOf(rows: Integration[]): { line: string; issues: string[] } {

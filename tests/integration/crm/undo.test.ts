@@ -5,7 +5,9 @@ import { getAccount, upsertFromArrival, type ArrivalForAccounts } from '@/module
 import { RETRIES_FAILED, handoffCancelled, hubspotMock, runPush, runUndo, seedMockCrm, syncOwners } from '@/modules/crm';
 import { handoff, mockCompany, mockNote, mockPerson, mockTask } from '@/modules/crm/db/schema';
 import { mockAddDeal, mockCompleteTask, setMockFailure } from '@/modules/crm/fixtures';
+import { setCapLimit } from '@/modules/integrations';
 import { callLog } from '@/modules/integrations/db/schema';
+import { recordUsage } from '@/modules/integrations/services/caps';
 import { assign, decline, withdraw } from '@/modules/routing';
 import { addMember, members, tenantTimezone } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
@@ -473,5 +475,29 @@ describe('a reassign (withdrawn with replacedBy)', () => {
     await runOutbox(t.tenantId);
     expect((await companyAt(d)).ownerExternalId).toBe(vijay);
     expect((await handoffOf(mikes!.assignmentId)).undone).toMatchObject({ ownerReturnedTo: vijay });
+  });
+});
+
+describe('an undo refused by the HubSpot usage limit (Ruling 10)', () => {
+  it('keeps its attempts and records nothing, and finishes once the limit is raised', async () => {
+    const d = domain();
+    await crmCompany(d, vijay);
+    const { asg } = await pushed({ domain: d });
+    await t.run(async (ctx) => {
+      await setCapLimit(ctx, 'hubspot', 1);
+      await recordUsage(ctx, 'hubspot', 1, ctx.tx);
+    });
+    try {
+      await declineAs(ash, asg);
+      await expect(runOutbox(t.tenantId)).rejects.toMatchObject({ slug: 'blocked_by_cap' });
+      expect(await handoffOf(asg)).toMatchObject({ undoAttempts: 0, undone: null });
+    } finally {
+      await t.run((ctx) => setCapLimit(ctx, 'hubspot', 50000));
+    }
+    await runOutbox(t.tenantId);
+    const after = await handoffOf(asg);
+    expect(after.undoAttempts).toBe(1);
+    expect(after.undone).toMatchObject({ ownerReturnedTo: vijay });
+    expect(after.undone).not.toHaveProperty('failed', true);
   });
 });
