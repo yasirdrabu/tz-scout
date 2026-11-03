@@ -9,7 +9,7 @@ import {
   personUpdated,
   signalRecorded,
 } from '@/modules/accounts/contracts/events';
-import { arrivalRejected, arrivalResolved, sourceTrustChanged } from '@/modules/intake/contracts/events';
+import { arrivalRejected, arrivalResolved, sourceTrustChanged, warmIntroConfirmed, warmIntroRepriced } from '@/modules/intake/contracts/events';
 import { getOffer } from '@/modules/offers';
 import { offerApproved, offerArchived, offerChanged } from '@/modules/offers/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
@@ -155,6 +155,24 @@ export const rescoreOnTrustChanged = defineConsumer({
   },
 });
 
+/** A confirmed intro moves its account; the change id stamped on the row finds it. */
+export const rescoreOnWarmIntroConfirmed = defineConsumer({
+  name: 'scoring.rescore_warm_intro_confirmed',
+  event: warmIntroConfirmed,
+  handle: async (e, ctx) => {
+    await startRescore(ctx, { warmIntroChangeId: e.data.changeId }, 'warm_intro');
+  },
+});
+
+/** A points change moves the accounts whose intros it repriced. */
+export const rescoreOnWarmIntroRepriced = defineConsumer({
+  name: 'scoring.rescore_warm_intro_repriced',
+  event: warmIntroRepriced,
+  handle: async (e, ctx) => {
+    await startRescore(ctx, { warmIntroChangeId: e.data.changeId }, 'warm_intro');
+  },
+});
+
 /** Every scoring consumer, for the worker's list. */
 export const scoringConsumers = [
   scoringTenantDefaults,
@@ -173,4 +191,6 @@ export const scoringConsumers = [
   rescoreOnOfferChanged,
   rescoreOnRulesChanged,
   rescoreOnTrustChanged,
+  rescoreOnWarmIntroConfirmed,
+  rescoreOnWarmIntroRepriced,
 ];

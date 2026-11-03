@@ -9,12 +9,13 @@ export const rescoreAccountsJob = defineJob(
   { timeoutMs: 300_000 },
 );
 
-/** No field means every account. `includeNoPractice` adds accounts with no practice to a `practiceId` filter. `sourceId` and `offerId` (accounts holding a match for it) each stand alone. */
+/** No field means every account. `includeNoPractice` adds accounts with no practice to a `practiceId` filter. `sourceId`, `offerId` (accounts holding a match for it) and `warmIntroChangeId` (accounts a warm-intro change stamped) each stand alone. */
 export const rescoreFilterSchema = z.object({
   practiceId: z.string().optional(),
   includeNoPractice: z.boolean().optional(),
   sourceId: z.string().optional(),
   offerId: z.string().optional(),
+  warmIntroChangeId: z.string().optional(),
 });
 export type RescoreFilter = z.infer<typeof rescoreFilterSchema>;
 

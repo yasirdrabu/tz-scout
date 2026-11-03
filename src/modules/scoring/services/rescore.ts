@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, inArray } from 'drizzle-orm';
-import { listAccountIds } from '@/modules/accounts';
-import { accountIdsForSource } from '@/modules/intake';
+import { activeAccountIds, listAccountIds } from '@/modules/accounts';
+import { accountIdsForSource, accountIdsForWarmIntroChange } from '@/modules/intake';
 import { listApprovedOffers } from '@/modules/offers';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -54,6 +54,11 @@ export async function rescoreAccounts(ctx: ModuleContext, accountIds: string[], 
 async function pageIds(ctx: ModuleContext, filter: RescoreFilter, afterId: string | undefined) {
   const cursor = afterId ? { afterId } : {};
   if (filter.sourceId) return accountIdsForSource(ctx, filter.sourceId, { ...cursor, limit: RESCORE_PAGE_SIZE });
+  if (filter.warmIntroChangeId) {
+    // Archived and merged-away accounts are dropped, as for a source; a page may come up short of the limit.
+    const raw = await accountIdsForWarmIntroChange(ctx, filter.warmIntroChangeId, { ...cursor, limit: RESCORE_PAGE_SIZE });
+    return { ids: await activeAccountIds(ctx, raw), nextAfterId: raw.length === RESCORE_PAGE_SIZE ? raw[raw.length - 1]! : null };
+  }
   if (filter.offerId) {
     const rows = await ctx.tx
       .select({ id: offerMatch.accountId })
