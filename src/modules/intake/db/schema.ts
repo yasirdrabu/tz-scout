@@ -200,20 +200,25 @@ export const warmIntro = intake.table(
     effectivePoints: integer('effective_points').notNull(), // what counts: half of points (rounded down) until confirmed
     confirmed: boolean('confirmed').notNull().default(false),
     confirmedBy: text('confirmed_by'),
+    confirmedAt: at('confirmed_at'),
+    repricedChangeId: text('repriced_change_id'), // wic_: the last points change (a reprice or a confirm) that moved this intro
     createdAt: now('created_at'),
   },
   (t) => [
     uniqueIndex('warm_intro_tenant_arrival_uq').on(t.tenantId, t.arrivalId),
     index('warm_intro_tenant_account_idx').on(t.tenantId, t.accountId),
+    index('warm_intro_tenant_change_idx').on(t.tenantId, t.repricedChangeId),
   ],
 );
 
 export const warmIntroRule = intake.table(
   'warm_intro_rule',
   {
+    id: text('id').primaryKey(), // wir_
     tenantId: text('tenant_id').notNull(),
     introducerUserId: text('introducer_user_id'),
     introducerEmail: text('introducer_email'), // stored lowercase
+    introducerName: text('introducer_name'), // an outside introducer's name; a member's comes from the member list
     relationshipKey: text('relationship_key').notNull(),
     points: integer('points').notNull(),
   },

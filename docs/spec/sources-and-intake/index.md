@@ -29,8 +29,8 @@ checks, caps and trust only work if every arrival goes through here. That includ
 | `file_blob` | `storage_key` (`blob_`), `tenant_id`, `content` (`bytea`), `size_bytes` | Uploaded files live in Postgres, so nightly backups cover them |
 | `relationship_default` | `tenant_id`, `relationship_key`, `label`, `points` | The tenant's default points per warm-intro relationship (SRC-E5) |
 | `column_mapping` | `id` (`map_`), `tenant_id`, `source_id`, `header_signature`, `mapping`, `created_by`, `last_used_at` | Saved mappings, reused automatically |
-| `warm_intro` | `id` (`wi_`), `arrival_id`, `account_id`, `introducer_user_id`, `introducer_name`, `introducer_email`, `relationship_text`, `relationship_key`, `note`, `points`, `effective_points` (what counts: half of `points`, rounded down, until confirmed), `confirmed`, `confirmed_by` | One per arrival that declares an intro |
-| `warm_intro_rule` | `tenant_id`, `introducer_user_id` or `introducer_email`, `relationship_key`, `points` | Points per introducer and relationship |
+| `warm_intro` | `id` (`wi_`), `arrival_id`, `account_id`, `introducer_user_id`, `introducer_name`, `introducer_email`, `relationship_text`, `relationship_key`, `note`, `points`, `effective_points` (what counts: half of `points`, rounded down, until confirmed), `confirmed`, `confirmed_by`, `confirmed_at`, `repriced_change_id` (`wic_`) | One per arrival that declares an intro |
+| `warm_intro_rule` | `id` (`wir_`), `tenant_id`, `introducer_user_id` or `introducer_email`, `introducer_name`, `relationship_key`, `points` | Points per introducer and relationship |
 | `arrival_outcome` | `arrival_id`, `account_id`, source chain ids, `max_stage`, `declined`, `conflicts_lost`, `updated_at` | Read model for trust, built from events |
 | `source_feedback` | `id` (`fb_`), `source_id`, `arrival_id`, `account_id`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`), `reason_key`, `note`, `cause`, `created_at` | What a source is told about its arrivals. One row (and one event) per distinct source in the chain for each cause, pinned to that source's latest resolved arrival: unique on (tenant, source, kind, cause). A seller's decline carries the seller's reason key and note |
 
@@ -86,7 +86,7 @@ definition behind the `own_source` data limit.
 | SRC-E2 Arrivals and batches | [arrivals-and-batches.md](arrivals-and-batches.md) | R1 |
 | SRC-E3 Resolve pipeline and duplicate checks | [resolve-pipeline-and-duplicates.md](resolve-pipeline-and-duplicates.md) | R1 |
 | SRC-E4 File import and column mapping | [file-import-and-column-mapping.md](file-import-and-column-mapping.md) | R1 |
-| SRC-E5 Warm intros | [warm-intros.md](warm-intros.md) | R1 (basic), R2 (confirm, rules screen) |
+| SRC-E5 Warm intros | [warm-intros.md](warm-intros.md) | R1 (basic), R2 (confirm, rules screen; shipped) |
 | SRC-E6 Inbound webhooks: qualified leads and web forms | [inbound-webhooks.md](inbound-webhooks.md) | R1 (HubSpot), R2 (forms) |
 
 ## Events published
@@ -100,7 +100,8 @@ definition behind the `own_source` data limit.
 | `intake.arrival.rejected` | `arrivalId`, `batchId?`, `reason` (`invalid`, `excluded`, `daily_cap_reached`, `duplicate_in_batch`), `detail`, `accountId?` (set for `excluded`) |
 | `intake.batch.completed` | `batchId`, `counts {resolved, rejected, newAccounts, alreadyKnown}`, `reportedCost? {credits, costCents, currency}` |
 | `intake.source.trust_changed` | `sourceId`, `level` (`person`, `agent`, `vendor`), `from`, `to`, `sampleSize`, `cause` (`outcomes`, `conflict_lost`, `warm_intro_points`) |
-| `intake.warm_intro.confirmed` | `warmIntroId`, `arrivalId`, `accountId`, `points`, `confirmedBy` |
+| `intake.warm_intro.confirmed` | `warmIntroId`, `arrivalId`, `accountId`, `relationshipKey`, `points`, `changeId` |
+| `intake.warm_intro.repriced` | `changeId` |
 | `intake.feedback.recorded` | `sourceId`, `arrivalId`, `accountId`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`), `reasonKey`, `note` |
 
 ## API endpoints

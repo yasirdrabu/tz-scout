@@ -91,7 +91,16 @@ export const SCORE: AccountScore = {
     { key: 'revenue_potential', label: 'Revenue potential', value: null, max: null, note: 'Arrives with enrichment' },
     { key: 'source_trust', label: 'Source trust', value: null, max: null, note: 'Not enough data yet' },
   ],
-  warm_intro: { introducer_name: 'Ash Patel', points: 8 },
+  warm_intro: {
+    warm_intro_id: 'wi_1',
+    introducer_name: 'Ash Patel',
+    relationship_key: 'team_knows',
+    relationship_label: 'Someone on our team knows them',
+    points: 8,
+    full_points: 8,
+    confirmed: true,
+    can_confirm: false,
+  },
 };
 
 export const FACTS: Fact[] = [

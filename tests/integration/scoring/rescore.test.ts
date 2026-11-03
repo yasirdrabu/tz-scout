@@ -21,7 +21,7 @@ import '@/entry/compose';
 import { mergeAccounts, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { account } from '@/modules/accounts/db/schema';
 import { accountUpdated, signalRecorded } from '@/modules/accounts/contracts/events';
-import { getArrival, intakeSourceInfo, registerSource, submitArrival } from '@/modules/intake';
+import { accountIdsForWarmIntroChange, confirmWarmIntro, getArrival, getWarmIntro, getWarmIntroSettings, intakeSourceInfo, registerSource, saveWarmIntroSettings, submitArrival } from '@/modules/intake';
 import { arrivalRejected, arrivalResolved, sourceTrustChanged } from '@/modules/intake/contracts/events';
 import { approveOffer, archiveOffer, createOffer, createPractice, listApprovedOffers } from '@/modules/offers';
 import { offerChanged } from '@/modules/offers/contracts/events';
@@ -586,5 +586,107 @@ describe('scoring with merged ids', () => {
     const both = await t.run((ctx) => scoreAccount(ctx, survivor.accountId, 'new_fact', undefined, { now: NOW, alsoAccountIds: [otherId] }));
     expect(both.score.warmPoints).toBeGreaterThan(0);
     expect(both.score).toMatchObject({ trustSourceId: agentId, warmIntroducerName: 'Ash' });
+  });
+});
+
+describe('fan-out on warm intros', () => {
+  async function warmWorld() {
+    const { t, practice } = await world();
+    await approved(t, practice.id, 'Lead');
+    await runOutbox(t.tenantId);
+    const agentId = await t.run(async (ctx) => {
+      const person = await registerSource(ctx, { kind: 'person', name: 'Ash' });
+      return (await registerSource(ctx, { kind: 'agent', name: 'Ash agent', parentId: person.id })).id;
+    });
+    /** An account with an agent-declared (unconfirmed) intro: employee_network is 8, so 4 until confirmed. */
+    const intro = async (key = 'employee_network') => {
+      const sent = await t.run((ctx) =>
+        submitArrival(
+          { ...ctx, access: { sourceId: agentId, dataLimit: { kind: 'own_source' } } },
+          { account: { name: 'Warm Co', domain: domain(), industry: 'Logistics' }, warm_intro: { introducer_name: 'Ash', relationship_key: key } },
+          { channel: 'api' },
+        ),
+      );
+      await runOutbox(t.tenantId);
+      const accountId = (await t.run((ctx) => getArrival(ctx, sent.arrivalId)))!.accountId!;
+      const view = (await t.run((ctx) => getWarmIntro(ctx, accountId)))!;
+      return { accountId, warmIntroId: view.warmIntroId };
+    };
+    return { t, intro };
+  }
+  const reprice = async (t: Tenant, points: number) => {
+    const s = await t.run((ctx) => getWarmIntroSettings(ctx));
+    return t.run((ctx) =>
+      saveWarmIntroSettings(ctx, {
+        relationships: s.relationships.map((r) => ({ key: r.key, points: r.key === 'employee_network' ? points : r.points })),
+        rules: [],
+      }),
+    );
+  };
+
+  it('confirming an intro rescores its account: warm points go from 4 to 8 and the run finishes 1/1', async () => {
+    const { t, intro } = await warmWorld();
+    const { accountId, warmIntroId } = await intro();
+    expect((await current(t, accountId))!.warmPoints).toBe(4);
+    await t.run((ctx) => confirmWarmIntro(ctx, warmIntroId, { canReview: true }));
+    await runOutbox(t.tenantId);
+    expect((await current(t, accountId))!.warmPoints).toBe(8);
+    expect((await changes(t, accountId)).some((c) => c.cause === 'warm_intro')).toBe(true);
+    const run = (await t.run((ctx) => ctx.tx.select().from(rescoreRun).where(eq(rescoreRun.cause, 'warm_intro'))))[0]!;
+    expect(run).toMatchObject({ total: 1, done: 1 });
+    expect(run.finishedAt).not.toBeNull();
+  });
+
+  it('a default change rescores only the stamped accounts: the run total is rescoringAccountCount', async () => {
+    const { t, intro } = await warmWorld();
+    const a = await intro('employee_network');
+    const b = await intro('employee_network');
+    const c = await intro('event_meeting');
+    const before = await current(t, c.accountId);
+    const out = await reprice(t, 12);
+    expect(out.rescoringAccountCount).toBe(2);
+    await runOutbox(t.tenantId);
+    const run = (await t.run((ctx) => ctx.tx.select().from(rescoreRun).where(eq(rescoreRun.cause, 'warm_intro'))))[0]!;
+    expect(run).toMatchObject({ total: 2, done: 2 });
+    expect((await current(t, a.accountId))!.warmPoints).toBe(6);
+    expect((await current(t, b.accountId))!.warmPoints).toBe(6);
+    expect((await current(t, c.accountId))!.computedAt).toEqual(before!.computedAt);
+  });
+
+  it('Review Focus 5: a reprice after a merge rescores the survivor, and the merged-away account is not listed', async () => {
+    const { t, intro } = await warmWorld();
+    const merged = await intro('employee_network');
+    const survivor = await seed(t);
+    await score(t, survivor.accountId);
+    const person = { userId: 'usr_leader', sourceId: 'src_leader', dataLimit: { kind: 'all' as const } };
+    await t.run((ctx) => mergeAccounts({ ...ctx, access: person } as ModuleContext, survivor.accountId, merged.accountId));
+    await runOutbox(t.tenantId);
+    const out = await reprice(t, 12);
+    expect(out.rescoringAccountCount).toBe(1);
+    const { changeId } = (await outboxOf(t, 'intake.warm_intro.repriced'))[0]!.data as { changeId: string };
+    expect(await t.run((ctx) => accountIdsForWarmIntroChange(ctx, changeId, { limit: 50 }))).toEqual([survivor.accountId]);
+    await runOutbox(t.tenantId);
+    expect((await current(t, survivor.accountId))!.warmPoints).toBe(6);
+    expect(await current(t, merged.accountId)).toBeUndefined();
+  });
+
+  it('a stamped intro still on a merged-away account rescores the survivor, not nothing', async () => {
+    const { t, intro } = await warmWorld();
+    const merged = await intro('employee_network');
+    const survivor = await seed(t);
+    await score(t, survivor.accountId);
+    const person = { userId: 'usr_leader', sourceId: 'src_leader', dataLimit: { kind: 'all' as const } };
+    await t.run((ctx) => mergeAccounts({ ...ctx, access: person } as ModuleContext, survivor.accountId, merged.accountId));
+    await runOutbox(t.tenantId);
+    // The merge window: the intro has not moved to the survivor yet when the save stamps it.
+    await adminDb.execute(sql`update intake.warm_intro set account_id = ${merged.accountId} where id = ${merged.warmIntroId}`);
+    const out = await reprice(t, 12);
+    expect(out.rescoringAccountCount).toBe(1);
+    const { changeId } = (await outboxOf(t, 'intake.warm_intro.repriced'))[0]!.data as { changeId: string };
+    expect(await t.run((ctx) => accountIdsForWarmIntroChange(ctx, changeId, { limit: 50 }))).toEqual([merged.accountId]);
+    await runOutbox(t.tenantId);
+    const run = (await t.run((ctx) => ctx.tx.select().from(rescoreRun).where(eq(rescoreRun.cause, 'warm_intro'))))[0]!;
+    expect(run).toMatchObject({ total: 1, done: 1 });
+    expect(run.finishedAt).not.toBeNull();
   });
 });

@@ -180,7 +180,12 @@ step.
    conflicting fact: Contract value." `Resolve` jumps to the fact; after: "Facts agree. {label} set to
    {value}.", for example "Facts agree. Contract value set to $18,400,000."; money shows the full
    amount, not "$18.4M"), committee gaps (R2; "Buying committee has no IT, security or
-   technical buyer." `Find with Enrich`), warm intros ("Warm intro available through Ash Patel.").
+   technical buyer." `Find with Enrich`), warm intros (R2, Claude's call, 2026-11-02; read from the live
+   intake intro, so it changes the moment someone confirms: confirmed "Warm intro from Ash Patel (someone
+   on our team knows them), +8"; unconfirmed "Warm intro from Ash Patel (someone on our team knows them)
+   · Unconfirmed, +4 of 8", which omits the base points, with a `Confirm` button only when the API says
+   `can_confirm`; with no name "Warm intro ({label}), +{points}"; confirm toast "Warm intro confirmed.
+   It now counts all 8 points." This replaces "Warm intro available through {name}.").
 3. **Score strip**, five tiles with bar and a note, as the scoring model returns them: Priority (note
    from the API's tier cutoffs, for example "Act now tier starts at 75"), Fit ("County transit agency
    with 3,000+ staff"), Buying intent ("RFP re-issue expected in December"), Revenue potential
@@ -642,8 +647,8 @@ playbook when an AE accepts them." Offer, tier checkboxes with "Already uses thi
 **Route** `/t/:tenant/settings/:tab` · Tabs in order, each shown with its permission: Members
 (`members:read`), Integrations (`integrations:manage`), API keys (`keys:manage`), Review statuses
 (`settings:manage`), Pipeline stages (`settings:manage`, once the stages plan lands), Scoring weights
-(`scoring:manage`, once the scoring redesign lands), Audit log (`audit:read`), AI runs
-(`settings:manage`).
+(`scoring:manage`, once the scoring redesign lands), Warm intros (`scoring:manage`; Claude's call,
+2026-11-02), Audit log (`audit:read`), AI runs (`settings:manage`).
 
 ### 21a. Members
 
@@ -808,6 +813,32 @@ This workspace's own runs, as the old Settings, AI page (`GET /api/v1/ai-runs`, 
 list without the tenant column, tiles or search: filters Status and Task (in the URL), the expandable
 row (what Scout sent, what came back, the error), "Showing {n} runs, newest first", and a This month
 table of runs, tokens and cost per task from the API. Empty "No AI runs yet"; filtered "No runs match".
+
+### 21i. Warm intros
+
+**Tag** R2 (SRC-E5-S2, plan docs/plans/2026-11-02-r2-warm-intros.md) · **Who** `scoring:manage`
+(Claude's call, 2026-11-02: points are a scoring input, like the weights)
+
+There is no mockup; the layout follows Pipeline stages (§21e). The tab sits after Scoring weights.
+"Warm intros add points to an account's priority, from 0 to 20. An intro gets its relationship's
+points unless the introducer has a rule of their own. An intro an agent or vendor declared counts
+half until someone confirms it. Only the strongest intro on an account counts."
+- **Relationships**: Relationship (the six fixed labels, for example "Someone on our team knows
+  them"), Points (whole number 0 to 20), Intros ("{n}" recorded with that relationship).
+- **Introducer rules** ("Give one person's intros more or fewer points than their relationship."):
+  Introducer (name and email), Relationship, Points, Intros, remove ("Remove rule for {name}"). Empty
+  "No introducer rules yet. Every intro gets its relationship's points." `Add a rule` adds a row:
+  introducer select ("Pick a person": people who made intros, then members) or "Someone else" with
+  Name and Email; relationship select; points.
+- Errors: "Points must be a whole number from 0 to 20."; "{name} already has a rule for
+  {relationship}."; "Enter the person's name and email."
+- `Discard`, `Save warm intros` (toast "Warm intros saved. Rescoring {n} accounts.", "Rescoring 1
+  account.", or "Warm intros saved." when no intro changed). The queue banner (§2) shows the run.
+  `Save warm intros` is enabled whenever the draft differs from what is saved; errors show on the save
+  attempt, not while typing (Claude's call, 2026-11-02). A rule keeps its introducer's name after that
+  person leaves the workspace.
+  Footnote "Saving rescores only the accounts whose intros change. Tiers someone set by hand stay as
+  they are."
 
 ## 22. Admin: Tenants
 

@@ -43,6 +43,13 @@
       "when": 1793519175557,
       "tag": "0005_arrival_superseded_by",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793666018483,
+      "tag": "0006_warm_intro_r2",
+      "breakpoints": true
     }
   ]
 }

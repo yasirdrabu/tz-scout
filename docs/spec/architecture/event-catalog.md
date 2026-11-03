@@ -18,9 +18,10 @@ module adds an event or tool.
 | `intake.arrival.resolved` | SRC | Arrival matched to an existing account or created one | SCO (scores the account once for the whole arrival), REV, ANL, webhooks |
 | `intake.arrival.rejected` | SRC | Arrival could not be used (invalid, excluded, over cap) | ANL, webhooks |
 | `intake.batch.completed` | SRC | Every arrival in a batch is resolved or rejected | ANL, webhooks |
-| `intake.source.trust_changed` | SRC | A source's trust score moved, or an introducer's warm-intro points changed (`cause`) | SCO (rescores that source's accounts with cause `trust_changed`) |
+| `intake.source.trust_changed` | SRC | A source's trust score moved (`cause`; `warm_intro_points` is never published, warm-intro points use `intake.warm_intro.repriced`) | SCO (rescores that source's accounts with cause `trust_changed`) |
 | `intake.arrival.waiting` | SRC | An arrival needs a person (website, company, possible duplicate); stays `resolving` | REV (queue badge), webhooks |
-| `intake.warm_intro.confirmed` | SRC | An agent-declared warm intro was confirmed | SCO (rescore) |
+| `intake.warm_intro.confirmed` | SRC | An agent-declared warm intro was confirmed. Data: `warmIntroId`, `accountId`, `arrivalId`, `relationshipKey`, `points`, `changeId` | SCO (rescores that account, cause `warm_intro`) |
+| `intake.warm_intro.repriced` | SRC | A relationship default or introducer rule changed and moved some recorded intros' points. Data: `changeId` (`wic_`, stamped on each repriced intro) (Claude's call, 2026-11-02) | SCO (rescores the distinct accounts stamped with the change id, cause `warm_intro`) |
 | `intake.feedback.recorded` | SRC | A source was told why its arrival lost a conflict, was sent back or declined at review, or was declined by a seller. One per distinct source in the chain, per cause. Data: `sourceId`, `arrivalId`, `accountId`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`), `reasonKey`, `note` | webhooks |
 | `accounts.account.exclusion_changed` | ACC | Account ruled out, or a person overrode a rule. Optional `arrivalId` | SCO (rescore), REV |
 | `enrichment.search.completed` | ENR | A saved-search run finished (maybe partial) | ANL (counts only; cost comes from INT usage) |

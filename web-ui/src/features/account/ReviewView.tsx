@@ -10,7 +10,7 @@ import { useToast } from '../../ui/Toast';
 import type { AccountReview } from '../review/api';
 import { Flag } from '../review/parts';
 import { errorText } from '../settings/shared';
-import { briefQuery, conflictsQuery, factsQuery, resolveConflict, scoreQuery, type AccountDetail, type Conflict, type ConflictFact, type Fact } from './api';
+import { briefQuery, confirmWarmIntro, conflictsQuery, factsQuery, resolveConflict, scoreQuery, type AccountDetail, type Conflict, type ConflictFact, type Fact, type WarmIntro } from './api';
 import { BriefCard, notDrafted, Recommendation } from './BriefCard';
 import styles from './Account.module.css';
 import { BuyingCommittee, InHubSpot, Notes, WhereFrom } from './RightRail';
@@ -41,6 +41,39 @@ function useAccountConflicts(tenant: string, id: string) {
   return { conflicts, list, open: list.filter((c) => c.status === 'open') };
 }
 
+/** §4a 2. The live warm intro: who, how they know them, its points, and Confirm while it counts half. */
+function WarmIntroLine({ tenant, id, intro }: { tenant: string; id: string; intro: WarmIntro }) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const how = intro.relationship_label.charAt(0).toLowerCase() + intro.relationship_label.slice(1);
+  const text = `${intro.introducer_name ? `Warm intro from ${intro.introducer_name}` : 'Warm intro'} (${how})`;
+
+  async function confirm() {
+    setBusy(true);
+    try {
+      await confirmWarmIntro(tenant, intro.warm_intro_id);
+      toast.show(`Warm intro confirmed. It now counts all ${intro.full_points} points.`);
+      await queryClient.invalidateQueries({ queryKey: ['account', tenant, id] });
+    } catch (e) {
+      toast.show(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <p className={styles.dotRow}>
+      <span>{intro.confirmed ? `${text}, +${intro.points}` : `${text} · Unconfirmed, +${intro.points} of ${intro.full_points}`}</span>
+      {!intro.confirmed && intro.can_confirm && (
+        <button type="button" className={styles.textButton} disabled={busy} onClick={() => void confirm()}>
+          Confirm
+        </button>
+      )}
+    </p>
+  );
+}
+
 const anchorOf = (c: Conflict) => `conflict-${c.id}`;
 
 /** §4a 2. Before you approve: unresolved conflicts (or "Facts agree" after) and the warm intro; no card without either. */
@@ -49,11 +82,11 @@ function BeforeYouApprove({ tenant, id }: { tenant: string; id: string }) {
   const score = useQuery(scoreQuery(tenant, id));
   const facts = useQuery(factsQuery(tenant, id));
   const { list, open } = useAccountConflicts(tenant, id);
-  const name = score.data?.warm_intro?.introducer_name;
+  const intro = score.data?.warm_intro;
   const settled = open.length === 0 ? list.find((c) => c.status === 'resolved') : undefined;
   // An edit's kept fact is not one of the conflict's facts; the key's current fact is.
   const settledFact = settled && (settled.facts.find((x) => x.id === settled.kept_fact_id) ?? facts.data?.data.find((x) => x.key === settled.key && x.person_id === null));
-  if (!name && open.length === 0 && !settledFact) return null;
+  if (!intro && open.length === 0 && !settledFact) return null;
 
   function jump() {
     const row = document.getElementById(anchorOf(open[0]!));
@@ -72,7 +105,7 @@ function BeforeYouApprove({ tenant, id }: { tenant: string; id: string }) {
         </p>
       )}
       {settled && settledFact && <p className={styles.dotRow}>{`Facts agree. ${settled.label} set to ${value(settledFact.value, settled.key)}.`}</p>}
-      {name && <p className={styles.dotRow}>{`Warm intro available through ${name}.`}</p>}
+      {intro && <WarmIntroLine tenant={tenant} id={id} intro={intro} />}
     </Card>
   );
 }

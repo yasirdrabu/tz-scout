@@ -81,9 +81,9 @@ names it.
 **Effective trust of an arrival** (what the account page and scoring see):
 `0.4 × person + 0.3 × agent + 0.3 × vendor`, re-weighted over the levels that are present.
 
-A change of 0.02 or more publishes `intake.source.trust_changed`. It is also republished (with
-`from = to`) when a warm-intro introducer's points change, so SCO rescores that introducer's accounts
-(SRC-E5).
+A change of 0.02 or more publishes `intake.source.trust_changed`. A change to a warm-intro
+introducer's points does not use it: it publishes the dedicated `intake.warm_intro.repriced` (SRC-E5;
+Claude's call, 2026-11-02), because an introducer with only an email has no person source.
 
 **How scoring uses trust** (owned by SCO, stated here so both sides agree): source trust moves
 priority by at most ±5 points and never changes fit or intent. SCO reads it with `getTrust(chain)`.

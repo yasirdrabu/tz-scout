@@ -15,8 +15,6 @@ import { POST as conflictAction } from '@/http/routes/v1/conflicts/[id]/route';
 import { GET as getExclusions } from '@/http/routes/v1/settings/exclusions/route';
 import { PUT as putRule } from '@/http/routes/v1/settings/exclusions/rules/[key]/route';
 import { PUT as putList } from '@/http/routes/v1/settings/exclusions/lists/[kind]/route';
-import { GET as getWarmIntros } from '@/http/routes/v1/settings/warm-intros/route';
-import { PUT as putWarmIntro } from '@/http/routes/v1/settings/warm-intros/[key]/route';
 import { getAccount, getSignals, listConflicts, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { account } from '@/modules/accounts/db/schema';
 import { listMappings, saveMapping, submitBatch } from '@/modules/intake';
@@ -364,24 +362,5 @@ describe('settings', () => {
     expect(await list.json()).toEqual({ kind: 'parent_domain', values: ['big.example.com'] });
     expect((await as('owner', putList, 'settings/exclusions/lists/nope', 'PUT', { values: [] })).status).toBe(400);
     expect((await as('operator', putList, 'settings/exclusions/lists/parent_domain', 'PUT', { values: [] })).status).toBe(403);
-  });
-
-  it('warm-intro defaults: a platform admin changes them; an owner who is not one gets the copy', async () => {
-    const list = await as('owner', getWarmIntros, 'settings/warm-intros', 'GET');
-    expect(list.status).toBe(403);
-    expect(JSON.stringify(await list.json())).toContain('Only a platform admin can change these in this release.');
-
-    const refused = await as('owner', putWarmIntro, 'settings/warm-intros/other', 'PUT', { points: 4 });
-    expect(refused.status).toBe(403);
-    expect(JSON.stringify(await refused.json())).toContain('Only a platform admin can change these in this release.');
-
-    const all = await as('admin', getWarmIntros, 'settings/warm-intros', 'GET');
-    expect(all.status).toBe(200);
-    expect((await all.json()).data.find((d: { relationship_key: string }) => d.relationship_key === 'other')).toMatchObject({ points: 3 });
-    const ok = await as('admin', putWarmIntro, 'settings/warm-intros/other', 'PUT', { points: 4 });
-    expect(ok.status).toBe(200);
-    expect(await ok.json()).toMatchObject({ relationship_key: 'other', points: 4 });
-    expect((await as('admin', putWarmIntro, 'settings/warm-intros/other', 'PUT', { points: 21 })).status).toBe(400);
-    expect((await as('admin', putWarmIntro, 'settings/warm-intros/nope', 'PUT', { points: 5 })).status).toBe(404);
   });
 });

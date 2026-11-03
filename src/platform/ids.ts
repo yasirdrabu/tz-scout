@@ -57,6 +57,8 @@ export type IdPrefix =
   | 'nte'
   | 'loc'
   | 'cfl'
+  | 'wir'
+  | 'wic'
   | 'rsr';
 
 const ulid = monotonicFactory();

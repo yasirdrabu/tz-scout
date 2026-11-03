@@ -73,9 +73,10 @@ As an owner, I want introductions from some people to count more than others, so
 outranks a cold list.
 - SCO-E2-S2-AC1 Warm points are the value returned by SRC's `getWarmIntro(accountId)` (SRC-E5 rules),
   capped at `warm_intro_cap`. SCO keeps no points table of its own.
-- SCO-E2-S2-AC2 Changing an introducer's points rescores every account they introduced (via
-  `intake.source.trust_changed` or a dedicated SRC event; whichever SRC publishes for introducer
-  changes).
+- SCO-E2-S2-AC2 Changing an introducer's points, or a relationship default, rescores the accounts whose
+  intros moved. SRC publishes the dedicated event `intake.warm_intro.repriced` `{changeId}` (Claude's
+  call, 2026-11-02), and SCO rescores the accounts stamped with that change id (cause `warm_intro`).
+  `intake.warm_intro.confirmed` rescores that one account the same way.
 - SCO-E2-S2-AC3 The explanation shows "Warm intro from <name>: +<n>".
 
 ### SCO-E2-S3 Trust as a visible modifier

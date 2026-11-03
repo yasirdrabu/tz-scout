@@ -16,6 +16,8 @@ export {
   batchCreated,
   feedbackRecorded,
   sourceTrustChanged,
+  warmIntroConfirmed,
+  warmIntroRepriced,
 } from './contracts/events';
 export { normaliseDomain } from './domain/normalise';
 export { importRunJob, qualifiedLeadsPollJob, resolveJob, waitingExpireJob } from './contracts/jobs';
@@ -35,7 +37,14 @@ export {
   type SyncStatus,
 } from './services/qualified-leads';
 export { DEFAULT_VENDOR_SOURCES, RELATIONSHIP_DEFAULTS, seedIntakeDefaults } from './defaults';
-export { listRelationshipDefaults, setRelationshipDefault, type RelationshipDefaultView } from './services/settings';
+export {
+  getWarmIntroSettings,
+  listRelationshipDefaults,
+  saveWarmIntroSettings,
+  type RelationshipDefaultView,
+  type WarmIntroSettings,
+  type WarmIntroSettingsInput,
+} from './services/settings';
 export { checkArrivalCap, type CapCheck } from './services/caps';
 export {
   LIST_HAS_NO_KEYS,
@@ -90,7 +99,16 @@ export {
   type RejectReason,
 } from './services/resolve';
 export type { ResolutionInput } from './domain/normalise-arrival';
-export { getWarmIntro, recordWarmIntro, type DeclaredBy, type WarmIntroInput, type WarmIntroView } from './services/warm-intros';
+export {
+  accountIdsForWarmIntroChange,
+  confirmWarmIntro,
+  getWarmIntro,
+  recordWarmIntro,
+  type DeclaredBy,
+  type WarmIntroInput,
+  type WarmIntroView,
+} from './services/warm-intros';
+export { pickRule } from './domain/warm-intro';
 export {
   isStrictChannel,
   submitArrival,

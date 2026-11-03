@@ -55,7 +55,23 @@ export const accountQuery = (tenant: string, id: string) =>
 
 export type Tile = { key: string; label: string; value: number | null; max: number | null; note: string };
 
-export type AccountScore = { tiles: Tile[]; warm_intro: { introducer_name: string | null; points: number } | null };
+export type WarmIntro = {
+  warm_intro_id: string;
+  introducer_name: string | null;
+  relationship_key: string;
+  relationship_label: string;
+  /** What counts now: half of `full_points` until someone confirms. */
+  points: number;
+  full_points: number;
+  confirmed: boolean;
+  can_confirm: boolean;
+};
+
+export type AccountScore = { tiles: Tile[]; warm_intro: WarmIntro | null };
+
+/** Confirms an agent-declared warm intro so it counts in full. */
+export const confirmWarmIntro = (tenant: string, warmIntroId: string) =>
+  apiFetch<{ warm_intro: WarmIntro }>(`/warm-intros/${encodeURIComponent(warmIntroId)}:confirm`, { tenant, method: 'POST' });
 
 /** A 404 here means Scout has not scored the account yet. */
 export const scoreQuery = (tenant: string, id: string) =>

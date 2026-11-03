@@ -62,6 +62,7 @@ describe('nav', () => {
       'review-statuses',
       'pipeline-stages',
       'scoring-weights',
+      'warm-intros',
       'ai-runs',
     ]);
   });
