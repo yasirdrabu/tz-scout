@@ -14,6 +14,8 @@ import { useToast } from '../../ui/Toast';
 import { facetsQuery, queueQuery, retryPush, reviewQuery, statusesQuery, type AccountReview, type DialogAccount, type QueueFilters, type ReviewStatus } from '../review/api';
 import { AssignDialog } from '../review/AssignDialog';
 import { SendBackDialog } from '../review/SendBackDialog';
+import { AccountEnrichment } from '../enrichment/AccountEnrichment';
+import { EnrichDialog } from '../enrichment/EnrichDialog';
 import { errorText } from '../settings/shared';
 import { accountQuery, BUSY_REFRESH_MS, handoffsQuery, PAGE_REFRESH_MS } from './api';
 import styles from './Account.module.css';
@@ -93,6 +95,7 @@ function Account({ tenant, id, me }: { tenant: string; id: string; me: Me }) {
   const [sendBack, setSendBack] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [enriching, setEnriching] = useState(false);
 
   // C14: a refetch that shows someone else's assignment, send back or decline swaps the actions for who did it.
   // Adjusted while rendering when a new review arrives, so nothing waits for an effect.
@@ -214,8 +217,10 @@ function Account({ tenant, id, me }: { tenant: string; id: string; me: Me }) {
         onSendBack={() => setSendBack(true)}
         onAssign={() => setAssigning(true)}
         onRetry={() => void retry()}
+        onEnrich={() => setEnriching(true)}
         onMoved={() => void changed()}
       />
+      {hasScope(me, 'enrichment:request') && <AccountEnrichment tenant={tenant} id={id} />}
       {handoffs.data?.conflict && <ConflictNotice />}
       <StageTracker tenant={tenant} review={r} reviewer={hasScope(me, 'review:act')} />
       {r.current_assignment ? <AssignedView tenant={tenant} me={me} account={a} review={r} /> : <ReviewView tenant={tenant} me={me} account={a} review={r} />}
@@ -235,6 +240,7 @@ function Account({ tenant, id, me }: { tenant: string; id: string; me: Me }) {
           }}
         />
       )}
+      {enriching && <EnrichDialog tenant={tenant} me={me} accountId={a.id} name={a.name} onClose={() => setEnriching(false)} />}
       {assigning && (
         <AssignDialog
           tenant={tenant}

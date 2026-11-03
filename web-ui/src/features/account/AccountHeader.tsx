@@ -29,6 +29,7 @@ export type HeaderProps = {
   onSendBack: () => void;
   onAssign: () => void;
   onRetry: () => void;
+  onEnrich: () => void;
   /** After the account was moved to a stage by hand. */
   onMoved: () => void;
 };
@@ -95,12 +96,19 @@ export function AccountHeader(props: HeaderProps) {
           .join(' · ')
       : null;
 
+  const enrich = hasScope(me, 'enrichment:request') && (
+    <Button size="sm" variant="secondary" onClick={props.onEnrich}>
+      Enrich
+    </Button>
+  );
+
   const actions = decided ? (
     <span className={styles.decided} role="status">
       {decided}
     </span>
   ) : assignment ? (
     <>
+      {enrich}
       {handoff?.state === 'failed' && hasScope(me, 'crm:push') && (
         <Button size="sm" variant="secondary" disabled={props.busy} onClick={props.onRetry}>
           Retry sending
@@ -119,6 +127,7 @@ export function AccountHeader(props: HeaderProps) {
     </>
   ) : (
     <>
+      {enrich}
       {hasScope(me, 'review:act') && (
         <Button size="sm" variant="secondary" onClick={props.onSendBack}>
           Send back
