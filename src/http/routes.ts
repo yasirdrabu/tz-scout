@@ -15,6 +15,8 @@ import * as v1AccountsIdBrief from './routes/v1/accounts/[id]/brief/route';
 import * as v1AccountsIdChanges from './routes/v1/accounts/[id]/changes/route';
 import * as v1AccountsIdConflicts from './routes/v1/accounts/[id]/conflicts/route';
 import * as v1AccountsIdCrmCheck from './routes/v1/accounts/[id]/crm-check/route';
+import * as v1AccountsIdEnrichmentEstimate from './routes/v1/accounts/[id]/enrichment-estimate/route';
+import * as v1AccountsIdEnrichmentRequests from './routes/v1/accounts/[id]/enrichment-requests/route';
 import * as v1AccountsIdExclusionOverride from './routes/v1/accounts/[id]/exclusion-override/route';
 import * as v1AccountsIdFacts from './routes/v1/accounts/[id]/facts/route';
 import * as v1AccountsIdHandoffs from './routes/v1/accounts/[id]/handoffs/route';
@@ -68,6 +70,8 @@ import * as v1CaseStudies from './routes/v1/case-studies/route';
 import * as v1ConflictsId from './routes/v1/conflicts/[id]/route';
 import * as v1CrmResource from './routes/v1/crm/[resource]/route';
 import * as v1DevUsers from './routes/v1/dev/users/route';
+import * as v1EnrichmentRequestsId from './routes/v1/enrichment-requests/[id]/route';
+import * as v1EnrichmentRequests from './routes/v1/enrichment-requests/route';
 import * as v1Feedback from './routes/v1/feedback/route';
 import * as v1HandoffBatchesId from './routes/v1/handoff-batches/[id]/route';
 import * as v1HandoffBatches from './routes/v1/handoff-batches/route';
@@ -158,6 +162,8 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/accounts/:id/changes`, module: v1AccountsIdChanges },
   { path: `${V1}/accounts/:id/conflicts`, module: v1AccountsIdConflicts },
   { path: `${V1}/accounts/:id/crm-check`, module: v1AccountsIdCrmCheck },
+  { path: `${V1}/accounts/:id/enrichment-estimate`, module: v1AccountsIdEnrichmentEstimate },
+  { path: `${V1}/accounts/:id/enrichment-requests`, module: v1AccountsIdEnrichmentRequests },
   { path: `${V1}/accounts/:id/exclusion-override`, module: v1AccountsIdExclusionOverride },
   { path: `${V1}/accounts/:id/facts`, module: v1AccountsIdFacts },
   { path: `${V1}/accounts/:id/handoffs`, module: v1AccountsIdHandoffs },
@@ -211,6 +217,8 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/conflicts/:id`, module: v1ConflictsId },
   { path: `${V1}/crm/:resource`, module: v1CrmResource },
   { path: `${V1}/dev/users`, module: v1DevUsers },
+  { path: `${V1}/enrichment-requests/:id`, module: v1EnrichmentRequestsId },
+  { path: `${V1}/enrichment-requests`, module: v1EnrichmentRequests },
   { path: `${V1}/feedback`, module: v1Feedback },
   { path: `${V1}/handoff-batches/:id`, module: v1HandoffBatchesId },
   { path: `${V1}/handoff-batches`, module: v1HandoffBatches },
