@@ -95,6 +95,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   { tab: 'review-statuses', label: 'Review statuses', section: '21d', tag: 'R1', rule: { all: ['settings:manage'] } },
   { tab: 'pipeline-stages', label: 'Pipeline stages', section: '21e', tag: 'R1', rule: { all: ['settings:manage'] } },
   { tab: 'scoring-weights', label: 'Scoring weights', section: '21f', tag: 'R1', rule: { all: ['scoring:manage'] } },
+  { tab: 'warm-intros', label: 'Warm intros', section: '21i', tag: 'R2', rule: { all: ['scoring:manage'] } },
   { tab: 'audit-log', label: 'Audit log', section: '21g', tag: 'R1', rule: { all: ['audit:read'] } },
   { tab: 'ai-runs', label: 'AI runs', section: '21h', tag: 'R1', rule: { all: ['settings:manage'] } },
 ];
