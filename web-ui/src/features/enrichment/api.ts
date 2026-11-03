@@ -1,4 +1,4 @@
-import { queryOptions } from '@tanstack/react-query';
+import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 import { apiFetch } from '../../api/client';
 
 // Enrichment requests (src/http/routes/v1/enrichment-requests, accounts/[id]/enrichment-*). Labels,
@@ -61,3 +61,27 @@ export const accountRequestsQuery = (tenant: string, id: string) =>
 /** 201 for a new request; 200 with `joined` when it joined the open one of the same kind. */
 export const createRequest = (tenant: string, id: string, body: NewRequest) =>
   apiFetch<EnrichmentRequest & { joined: boolean }>(path(id, '/enrichment-requests'), { tenant, method: 'POST', body });
+
+export type RequestsPage = { data: EnrichmentRequest[]; next_cursor: string | null };
+
+/** The requests screen's list: `flagged` for the Waiting tab, none for All. */
+export const requestsQuery = (tenant: string, status?: EnrichmentStatus) =>
+  infiniteQueryOptions({
+    queryKey: ['enrichment-requests', tenant, status ?? 'all'],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => {
+      const q = new URLSearchParams();
+      if (status) q.set('status', status);
+      if (pageParam) q.set('cursor', pageParam);
+      const qs = q.toString();
+      return apiFetch<RequestsPage>(`/enrichment-requests${qs ? `?${qs}` : ''}`, { tenant });
+    },
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+  });
+
+/** 202: the run is queued. */
+export const approveRequest = (tenant: string, id: string) =>
+  apiFetch<EnrichmentRequest>(`/enrichment-requests/${encodeURIComponent(id)}:approve`, { tenant, method: 'POST' });
+
+export const declineRequest = (tenant: string, id: string, reason: string) =>
+  apiFetch<EnrichmentRequest>(`/enrichment-requests/${encodeURIComponent(id)}:decline`, { tenant, method: 'POST', body: { reason } });

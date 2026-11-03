@@ -59,3 +59,13 @@
   font-size: var(--text-sm);
   list-style: none;
 }
+
+.link {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.rowActions {
+  display: flex;
+  gap: 8px;
+}

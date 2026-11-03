@@ -37,3 +37,15 @@ export function shownInNotice(r: EnrichmentRequest, now = Date.now()): boolean {
 
 /** Still moving on its own: worth asking again soon. */
 export const isRunning = (r: EnrichmentRequest) => r.status === 'approved' || r.status === 'running';
+
+export const DECLINE_NEEDED = "Say why you're declining.";
+export const approvedText = (account: string) => `Approved. Enrichment started for ${account}.`;
+export const declinedText = (requester: string | null) => `Declined. ${requester ?? 'The requester'} will see your reason.`;
+export const WAITING_EMPTY = 'Nothing waiting. Requests from sellers and agents show here for a leader to approve.';
+export const ALL_EMPTY = 'No enrichment requests yet.';
+
+/** "Today", "1 day", "3 days" since the request was made. */
+export function ageText(createdAt: string, now = Date.now()): string {
+  const days = Math.max(0, Math.floor((now - Date.parse(createdAt)) / 86_400_000));
+  return days === 0 ? 'Today' : days === 1 ? '1 day' : `${days} days`;
+}

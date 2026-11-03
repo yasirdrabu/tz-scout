@@ -25,6 +25,12 @@ export const myRoute = createRoute({
   component: lazyRouteComponent(() => import('../features/accounts/MyAccountsScreen'), 'MyAccountsScreen'),
 });
 
+export const enrichmentRoute = createRoute({
+  getParentRoute: () => tenantRoute,
+  path: 'enrichment',
+  component: lazyRouteComponent(() => import('../features/enrichment/RequestsScreen'), 'RequestsScreen'),
+});
+
 /** All accounts' stage tab, search and filters (`owner` is a user id or `unassigned`), so the URL keeps them (C10). */
 export type AccountsSearch = { stage?: string; q?: string; owner?: string; practice?: string; source?: string; offer?: string };
 

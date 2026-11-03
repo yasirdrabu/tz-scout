@@ -29,6 +29,12 @@ describe('nav', () => {
     ]);
   });
 
+  it('shows Enrichment to anyone who can request or approve it', () => {
+    expect(labels(meWith(['enrichment:request']))).toEqual(['Enrichment']);
+    expect(labels(meWith(['enrichment:approve']))).toEqual(['Enrichment']);
+    expect(labels(meWith(['accounts:read']))).not.toContain('Enrichment');
+  });
+
   it('needs both scopes for Sources and either for Batches', () => {
     expect(labels(meWith(['sources:manage']))).toEqual([]);
     expect(labels(meWith(['sources:manage', 'arrivals:read']))).toEqual(['Sources', 'Batches and imports']);
