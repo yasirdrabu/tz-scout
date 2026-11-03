@@ -49,6 +49,7 @@ export type QueueRow = {
   flags: RowFlags;
   conflict_count: number;
   enrichment_requested: boolean;
+  enrichment_requested_by: string | null;
   source: SourceRef | null;
   lead_offer: LeadOffer | null;
   previous_tier: string | null;

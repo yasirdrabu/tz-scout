@@ -287,7 +287,7 @@ function Body({ tenant, me, row, onChanged, onSendBack, tiers, statuses }: PeekP
         <div className={styles.detail}>
           <span>Flags</span>
           <div className={cx(styles.detailValue, styles.plain)}>
-            {hasFlags ? <RowFlags row={row} date={f.date} /> : <span className={styles.muted}>None</span>}
+            {hasFlags ? <RowFlags row={row} date={f.date} showRequester /> : <span className={styles.muted}>None</span>}
             {declined && <span className={styles.muted}>{`Declined by ${declined.seller_name} on ${f.date(declined.at)}: ${declined.reason_label}`}</span>}
             {handoff?.state === 'failed' && hasScope(me, 'crm:push') && (
               <span>
