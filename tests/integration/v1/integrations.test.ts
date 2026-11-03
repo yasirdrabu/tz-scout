@@ -19,7 +19,8 @@ import { PUT as putCredential } from '@/http/routes/v1/integrations/[key]/creden
 import { PUT as putMode } from '@/http/routes/v1/integrations/[key]/mode/route';
 import { PUT as putDisabled } from '@/http/routes/v1/integrations/[key]/disabled/route';
 import { GET as calls } from '@/http/routes/v1/integrations/[key]/calls/route';
-import { webhookSecret } from '@/modules/integrations';
+import { PUT as putCapRoute, POST as postCapRoute } from '@/http/routes/v1/integrations/[key]/[cap]/route';
+import { reserve, settle, webhookSecret } from '@/modules/integrations';
 import { registerDemoAdapter } from '@/modules/integrations/adapters/demo/mock';
 import { DEMO_PROVIDER, registerAdapter } from '@/modules/integrations/providers';
 import { callLog, connection, credential } from '@/modules/integrations/db/schema';
@@ -407,5 +408,72 @@ describe("another tenant's integrations stay apart", () => {
       .from(connection)
       .where(and(eq(connection.tenantId, t.tenantId), eq(connection.provider, 'vibe')));
     expect(conn).toMatchObject({ mode: 'mock', status: 'disabled' });
+  });
+});
+
+describe('usage limits: cap on the list, PUT /cap and POST /cap:allow-overage', () => {
+  const putCap = (p: Person, key: string, body: unknown) => putCapRoute(as(p, `/integrations/${key}/cap`, { method: 'PUT', body }));
+  const overage = (p: Person, key: string) => postCapRoute(as(p, `/integrations/${key}/cap:allow-overage`, { method: 'POST' }));
+  const capAudit = (action: string) =>
+    adminDb.select().from(auditLog).where(and(eq(auditLog.tenantId, t.tenantId), eq(auditLog.action, action)));
+
+  it('puts a cap on each list row that has a limit, null on the rest', async () => {
+    const body = await (await list(as(owner, '/integrations'))).json();
+    const apollo = body.data.find((r: { key: string }) => r.key === 'apollo');
+    expect(apollo.cap).toMatchObject({ unit: 'credits', period: 'month', limit: 2000, used: 0, level: 'ok', overage: false });
+    expect(typeof apollo.cap.resets_at).toBe('string');
+    expect(body.data.some((r: { cap: unknown }) => r.cap === null)).toBe(true);
+  });
+
+  it('lets an owner set the limit and audits it', async () => {
+    const res = await putCap(owner, 'vibe', { limit: 1500 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ unit: 'credits', limit: 1500, level: 'ok' });
+    const rows = await capAudit('integrations.cap.set');
+    expect(rows.some((r) => (r.after as { limit?: number } | null)?.limit === 1500)).toBe(true);
+  });
+
+  it('400s a limit of 0 or 2.5 with the copy', async () => {
+    for (const limit of [0, 2.5]) {
+      const res = await putCap(owner, 'vibe', { limit });
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(await res.json())).toContain('Enter a whole number of 1 or more.');
+    }
+    expect((await putCap(owner, 'vibe', { limit: 5, extra: 1 })).status).toBe(400);
+  });
+
+  it('refuses a leader and an API key, even one holding integrations:manage', async () => {
+    expect((await putCap(leader, 'vibe', { limit: 10 })).status).toBe(403);
+    expect((await overage(leader, 'vibe')).status).toBe(403);
+    const k = await inTenant(t.tenantId, owner.actor, (ctx) =>
+      createApiKey(ctx, { name: 'cap key', environment: 'live', scopes: ['integrations:manage'] }, SYSTEM_GRANTOR),
+    );
+    const headers = { authorization: `Bearer ${k.secret}`, 'content-type': 'application/json' };
+    const put = await putCapRoute(new Request('http://x/api/v1/integrations/vibe/cap', { method: 'PUT', headers, body: JSON.stringify({ limit: 10 }) }));
+    const post = await postCapRoute(new Request('http://x/api/v1/integrations/vibe/cap:allow-overage', { method: 'POST', headers }));
+    expect([put.status, post.status]).toEqual([403, 403]);
+  });
+
+  it('allow-overage clears the blocked level and audits it', async () => {
+    expect((await putCap(owner, 'hubspot', { limit: 3 })).status).toBe(200);
+    await inTenant(t.tenantId, owner.actor, async (ctx) => {
+      await settle(ctx, await reserve(ctx, 'hubspot', 3), 3);
+    });
+    const blocked = await (await putCap(owner, 'hubspot', { limit: 3 })).json();
+    expect(blocked.level).toBe('blocked');
+    const res = await overage(owner, 'hubspot');
+    expect(res.status).toBe(200);
+    const cap = await res.json();
+    expect(cap.overage).toBe(true);
+    expect(cap.level).not.toBe('blocked');
+    expect((await capAudit('integrations.cap.overage')).length).toBeGreaterThan(0);
+  });
+
+  it('404s an unknown service, a service with no limit and an unknown cap path', async () => {
+    expect((await putCap(owner, 'nope', { limit: 5 })).status).toBe(404);
+    expect((await overage(owner, 'nope')).status).toBe(404);
+    expect((await putCap(owner, 'demo', { limit: 5 })).status).toBe(404);
+    expect((await putCapRoute(as(owner, '/integrations/vibe/other', { method: 'PUT', body: { limit: 5 } }))).status).toBe(404);
+    expect((await postCapRoute(as(owner, '/integrations/vibe/cap:explode', { method: 'POST' }))).status).toBe(404);
   });
 });
