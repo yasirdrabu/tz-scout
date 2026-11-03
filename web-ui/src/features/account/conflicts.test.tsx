@@ -35,7 +35,7 @@ describe('Conflicting facts on the account page', () => {
 
     const before = await checklist();
     expect(await within(before).findByText('Resolve 1 conflicting fact: Contract value.')).toBeInTheDocument();
-    expect(before).toHaveTextContent('Warm intro available through Ash Patel.');
+    expect(before).toHaveTextContent('Warm intro from Ash Patel (someone on our team knows them), +8');
     await userEvent.click(within(before).getByRole('button', { name: 'Resolve' }));
     expect(document.activeElement).toHaveAttribute('id', 'conflict-cfl_1');
     expect(document.activeElement).toHaveTextContent('Contract valueSources disagree');

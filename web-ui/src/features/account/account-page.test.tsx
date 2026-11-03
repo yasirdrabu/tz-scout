@@ -125,7 +125,7 @@ describe('Review view sections', () => {
     expect(rec).toHaveTextContent('The cancelled transit software RFP is being re-issued in December.');
     expect(rec).toHaveTextContent('Written by Claude');
 
-    expect(await screen.findByRole('region', { name: 'Before you approve' })).toHaveTextContent('Warm intro available through Ash Patel.');
+    expect(await screen.findByRole('region', { name: 'Before you approve' })).toHaveTextContent('Warm intro from Ash Patel (someone on our team knows them), +8');
 
     const scores = await screen.findByRole('region', { name: 'Scores' });
     expect(await within(scores).findByText('Arrives with enrichment')).toBeInTheDocument();
