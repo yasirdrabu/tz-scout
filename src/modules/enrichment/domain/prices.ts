@@ -22,3 +22,9 @@ export const OPERATIONS: Record<string, Partial<Record<EnrichmentKind, readonly 
   vibe: CREDIT_OPERATIONS,
   website: { website_read: ['website.read'] },
 };
+
+/**
+ * The most a website read's Claude call may cost, in cents. A constant until the `read_website` AI task exists
+ * (Task 3); then its worst case can replace it.
+ */
+export const WEBSITE_READ_WORST_CENTS = 5;

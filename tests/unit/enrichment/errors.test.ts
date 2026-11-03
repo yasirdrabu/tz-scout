@@ -19,6 +19,12 @@ describe('classifyError (Ruling 9)', () => {
     });
   });
 
+  it('reads `statusCode` as the gateway does', () => {
+    expect(classifyError(withProps('Unauthorized', { statusCode: 401 }), 'Apollo')).toMatchObject({ kind: 'auth', retry: false });
+    expect(classifyError(withProps('Too many', { statusCode: 429 }), 'Apollo')).toMatchObject({ kind: 'rate_limited', retry: true });
+    expect(classifyError(withProps('Bad domain', { statusCode: 422 }), 'Apollo')).toMatchObject({ kind: 'bad_request', message: 'Bad domain' });
+  });
+
   it('a rate limit retries', () => {
     expect(classifyError(new RateLimitedError(), 'Apollo')).toMatchObject({ kind: 'rate_limited', retry: true });
     expect(classifyError(withProps('Too many', { status: 429 }), 'Apollo')).toMatchObject({ kind: 'rate_limited', retry: true });

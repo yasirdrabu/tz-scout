@@ -390,6 +390,24 @@ export async function ensurePersonSource(ctx: ModuleContext, userId: string): Pr
   }
 }
 
+/**
+ * The vendor source whose `settings.key` is `key`, created as `unvetted` on first use like the seeded vendors (R2b-2
+ * Ruling 8: the `website` vendor for website reads, which existing workspaces were not seeded with). Returns its id.
+ */
+export async function ensureVendorSource(ctx: ModuleContext, key: string, name: string): Promise<string> {
+  await ctx.tx.execute(sql`select pg_advisory_xact_lock(hashtext(${ctx.tenantId} || ':vendor:' || ${key}))`);
+  const [found] = await ctx.tx
+    .select({ id: source.id })
+    .from(source)
+    .where(and(eq(source.tenantId, ctx.tenantId), eq(source.kind, 'vendor'), ne(source.status, 'removed'), sql`${source.settings}->>'key' = ${key}`))
+    .orderBy(asc(source.createdAt), asc(source.id))
+    .limit(1);
+  if (found) return found.id;
+  const id = newId('src');
+  await ctx.tx.insert(source).values({ id, tenantId: ctx.tenantId, kind: 'vendor', name, initialReviewStatusKey: DEFAULT_REVIEW_STATUS.vendor, settings: { key } });
+  return id;
+}
+
 function limitSourceIds(limit: DataLimit): string[] {
   if (limit.kind === 'sources') return limit.ids;
   if (limit.kind === 'any_of') return limit.limits.flatMap(limitSourceIds);

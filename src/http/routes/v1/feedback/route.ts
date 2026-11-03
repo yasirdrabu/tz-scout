@@ -22,6 +22,8 @@ function feedbackSummary(kind: string, reason: string | null, by: string | null,
       return `Lost a conflict to ${note ?? 'another source'}`;
     case 'enrichment_declined':
       return 'Enrichment declined';
+    case 'enrichment_expired':
+      return 'Enrichment request expired';
     default:
       return kind;
   }
