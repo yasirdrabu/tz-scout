@@ -11,6 +11,7 @@ import { CallsList } from './CallsList';
 import { CredentialSection } from './CredentialSection';
 import { ModeSwitch } from './ModeSwitch';
 import { TestSection } from './TestSection';
+import { UsageLimit } from './UsageLimit';
 
 type Props = { service: Integration; tenant: string; onClose: () => void };
 
@@ -69,6 +70,7 @@ export function ManagePanel({ service, tenant, onClose }: Props) {
         <Tile label="Errors today" value={f.number(service.errors_today)} />
         <Tile label="Response average" value={service.avg_ms === null ? 'No calls' : `${f.number(service.avg_ms)} ms`} />
       </div>
+      <UsageLimit service={service} tenant={tenant} onChanged={refresh} />
       <CallsList tenant={tenant} serviceKey={service.key} />
       <ConfirmDialog
         open={confirm}

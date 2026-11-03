@@ -226,3 +226,23 @@
 .segment input:focus-visible + label {
   box-shadow: var(--ring);
 }
+
+.meter {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--ink-100);
+}
+
+.meterFill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.meterFillWarn {
+  background: var(--near);
+}
+
+.meterFillBlocked {
+  background: var(--bad);
+}

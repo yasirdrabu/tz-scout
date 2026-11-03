@@ -10,10 +10,11 @@ import { LoadFailed, LoadingRows } from '../shared';
 import styles from '../Settings.module.css';
 import { integrationsQuery, type Integration } from './api';
 import { ManagePanel } from './ManagePanel';
-import { callsText, modeText, statusOf, summaryOf } from './words';
+import { callsText, capLines, modeText, statusOf, summaryOf } from './words';
 
 /** §21b Integrations: the summary, services by group, and the manage panel for the open one. */
 export function IntegrationsTab({ tenant, open, setOpen }: TabProps) {
+  const f = useFormat();
   const list = useQuery(integrationsQuery(tenant));
   if (list.isPending) return <LoadingRows>Loading integrations</LoadingRows>;
   if (list.isError) return <LoadFailed title="Integrations didn't load" error={list.error} onRetry={() => void list.refetch()} />;
@@ -27,15 +28,16 @@ export function IntegrationsTab({ tenant, open, setOpen }: TabProps) {
   }
 
   const { line, issues } = summaryOf(rows);
+  const notices = [...capLines(rows, f.monthDay), ...issues];
   const groups = [...new Set(rows.map((r) => r.group))];
   const selected = open ? rows.find((r) => r.key === open) : undefined;
   return (
     <>
       <div className={styles.section}>
         <h2 className={styles.sectionTitle}>{line}</h2>
-        {issues.length > 0 && (
+        {notices.length > 0 && (
           <ul className={styles.note}>
-            {issues.map((i) => (
+            {notices.map((i) => (
               <li key={i}>{i}</li>
             ))}
           </ul>

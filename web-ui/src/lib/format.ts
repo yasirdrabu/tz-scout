@@ -6,14 +6,14 @@ type When = string | number | Date;
 const toDate = (when: When) => (when instanceof Date ? when : new Date(when));
 
 /** Money from integer minor units (cents) in the tenant's currency: 118300 USD is "$1,183", 118350 is "$1,183.50". */
-export function formatMoney(minor: number, currency: string): string {
+export function formatMoney(minor: number, currency: string, fixed = false): string {
   const digits = new Intl.NumberFormat(LOCALE, { style: 'currency', currency }).resolvedOptions().maximumFractionDigits ?? 2;
   const amount = minor / 10 ** digits;
   const whole = Number.isInteger(amount);
   return new Intl.NumberFormat(LOCALE, {
     style: 'currency',
     currency,
-    minimumFractionDigits: whole ? 0 : digits,
+    minimumFractionDigits: whole && !fixed ? 0 : digits,
     maximumFractionDigits: digits,
   }).format(amount);
 }
