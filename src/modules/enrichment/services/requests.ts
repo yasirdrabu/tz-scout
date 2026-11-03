@@ -131,7 +131,7 @@ async function requesterLabel(ctx: ModuleContext, p: Principal): Promise<string>
 // ---- Checking a request and its estimate ----
 
 /** The connection's money per credit and whether it answers with sample data. An unknown provider is sample data. */
-async function connectionFacts(ctx: ModuleContext, provider: string): Promise<{ sample: boolean; centsPerCredit?: number }> {
+export async function connectionFacts(ctx: ModuleContext, provider: string): Promise<{ sample: boolean; centsPerCredit?: number }> {
   if (!PROVIDERS.some((p) => p.key === provider)) return { sample: true };
   const { mode } = await connectionStatus(ctx, provider);
   const cents = (await connectionSettings(ctx, provider)).cents_per_credit;

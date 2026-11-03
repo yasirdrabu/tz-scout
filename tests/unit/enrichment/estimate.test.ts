@@ -58,12 +58,14 @@ describe('kinds (Ruling 4)', () => {
 });
 
 describe('the run (Ruling 8)', () => {
-  it('searches the best offer’s titles, else the role’s default titles, else its label', () => {
-    expect(searchTitles('technical_buyer', 'Technical buyer', ['COO', 'CIO'])).toEqual(['COO', 'CIO']);
-    expect(searchTitles('technical_buyer', 'Technical buyer', [])).toEqual(['CTO', 'VP Engineering', 'IT Director', 'Head of IT']);
-    expect(searchTitles('business_owner', 'Business owner', [])).toEqual(['Owner', 'CEO', 'President', 'Founder']);
-    expect(searchTitles('commercial_buyer', 'Commercial buyer', [])).toEqual(['VP Sales', 'Head of Procurement', 'CFO']);
-    expect(searchTitles('champion', 'Champion', [])).toEqual(['Champion']);
+  it('searches each role by its own titles (else its label), adding the lead offer’s titles only for a role it targets', () => {
+    const offer = { targetTitles: ['CIO', 'CTO'], targetBuyingRoles: ['technical_buyer'] };
+    expect(searchTitles('technical_buyer', 'Technical buyer', null)).toEqual(['CTO', 'VP Engineering', 'IT Director', 'Head of IT']);
+    expect(searchTitles('technical_buyer', 'Technical buyer', offer)).toEqual(['CTO', 'VP Engineering', 'IT Director', 'Head of IT', 'CIO']);
+    expect(searchTitles('business_owner', 'Business owner', offer)).toEqual(['Owner', 'CEO', 'President', 'Founder']);
+    expect(searchTitles('commercial_buyer', 'Commercial buyer', null)).toEqual(['VP Sales', 'Head of Procurement', 'CFO']);
+    expect(searchTitles('champion', 'Champion', null)).toEqual(['Champion']);
+    expect(searchTitles('champion', 'Champion', { targetTitles: ['Ops Lead'], targetBuyingRoles: ['champion'] })).toEqual(['Champion', 'Ops Lead']);
   });
 
   it('says what nothing found means', () => {

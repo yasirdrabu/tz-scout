@@ -46,4 +46,12 @@ describe('statusText (Global Constraints)', () => {
     expect(statusText(row({ status: 'cancelled' }))).toBe('Cancelled');
     expect(statusText(row({ status: 'cancelled', declineReason: 'expired' }))).toBe('Expired after 14 days');
   });
+
+  it('a running request shows the limit it waits on, else the error its retry is waiting out', () => {
+    const waiting = 'Waiting for budget: Apollo monthly limit reached';
+    expect(statusText(row({ status: 'running', waitingReason: waiting }))).toBe(waiting);
+    expect(statusText(row({ status: 'running', error: { kind: 'unknown', message: 'Something went wrong. Try again.' } }))).toBe(
+      'Something went wrong. Try again.',
+    );
+  });
 });

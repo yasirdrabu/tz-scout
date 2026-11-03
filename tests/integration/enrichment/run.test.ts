@@ -18,9 +18,12 @@ import { request } from '@/modules/enrichment/db/schema';
 import { listCaps, registerAdapter, setCapLimit } from '@/modules/integrations';
 import { callLog, connection, usageCap } from '@/modules/integrations/db/schema';
 import { ensureVendorSource, submitArrival } from '@/modules/intake';
-import { arrival } from '@/modules/intake/db/schema';
+import { accountSummary } from '@/modules/accounts/db/schema';
+import { arrival, source } from '@/modules/intake/db/schema';
+import { createOffer, createPractice } from '@/modules/offers';
 import type { Principal } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
+import { newId } from '@/platform/ids';
 import { enqueueJob } from '@/platform/events/outbox';
 import { runOutbox } from '../helpers/run-outbox';
 import { accountFrom, as, enrichmentTenant, messagesFor, type Tenant } from './helpers';
@@ -82,7 +85,8 @@ describe('people for buying roles (ENR-E3-S1-AC1)', () => {
     expect(result.found).toBe(added.length);
     expect(result.credits_used).toBe((await apolloUsed(t)) - before);
     expect(result.credits_used).toBe(added.length);
-    expect(result.cost_cents).toBe(0);
+    // At the rate the estimate used: Apollo's default 10 cents a credit.
+    expect(result.cost_cents).toBe(added.length * 10);
     for (const p of added) {
       expect(p.emailStatus).toBe('verified');
       expect(p.email).toMatch(/@/);
@@ -112,7 +116,7 @@ describe('people for buying roles (ENR-E3-S1-AC1)', () => {
         arrivalIds: [a!.id],
         found: added.length,
         creditsUsed: added.length,
-        costCents: 0,
+        costCents: added.length * 10,
         currency: 'USD',
         requestedBy: owner.id,
       },
@@ -144,6 +148,126 @@ describe('people for buying roles (ENR-E3-S1-AC1)', () => {
     expect((await viewOf(t, id))!.statusText).toBe('Found 2. Apollo is out of credits.');
     expect(await messagesFor(t, 'enrichment.request.completed', id)).toHaveLength(1);
   });
+
+  it('out of credits before anyone is found fails', async () => {
+    threeFound();
+    setMockFailure('out_of_credits', 0);
+    const { accountId } = await accountFrom(t, agentSourceId);
+    const id = await approved(t, owner, accountId, technical);
+    await runOutbox(t.tenantId);
+    expect(await rowOf(t, id)).toMatchObject({ status: 'failed', error: { kind: 'out_of_credits', message: 'Apollo is out of credits.' }, result: null });
+    expect(await arrivalsOf(t, id)).toHaveLength(0);
+    expect(await messagesFor(t, 'enrichment.request.failed', id)).toHaveLength(1);
+  });
+
+  it('two roles search by their own titles, the offer’s titles only for the role it targets, and tag people by role', async () => {
+    const { accountId } = await accountFrom(t, agentSourceId);
+    // A lead offer that targets technical buyers.
+    const practice = await t.run((ctx) => createPractice(ctx, { name: 'Run Practice', slug: `run-${newId('prc').slice(-8).toLowerCase()}` }));
+    const o = await t.run((ctx) =>
+      createOffer(ctx, { name: 'Data platform', promise: 'One data platform', practiceId: practice.id, targetTitles: ['Chief Data Officer'], targetBuyingRoles: ['technical_buyer'] }),
+    );
+    await adminDb
+      .update(accountSummary)
+      .set({ leadOfferOverrideId: o!.id })
+      .where(and(eq(accountSummary.tenantId, t.tenantId), eq(accountSummary.accountId, accountId)));
+    const mock = apolloMock();
+    const searched: string[][] = [];
+    registerAdapter('apollo', {
+      mock: () => ({
+        ...mock,
+        peopleSearch: async (input: Parameters<EnrichmentAdapter['peopleSearch']>[0]) => {
+          searched.push(input.titles);
+          return mock.peopleSearch(input);
+        },
+      }),
+    });
+    const peopleBefore = (await t.run((ctx) => listPeople(ctx, accountId))).length;
+    const id = await approved(t, owner, accountId, { kind: 'people_for_roles', providerKey: 'apollo', roles: ['business_owner', 'technical_buyer'] });
+    await runOutbox(t.tenantId);
+
+    expect(searched).toEqual([
+      ['Owner', 'CEO', 'President', 'Founder'],
+      ['CTO', 'VP Engineering', 'IT Director', 'Head of IT', 'Chief Data Officer'],
+    ]);
+    const added = (await t.run((ctx) => listPeople(ctx, accountId))).slice(peopleBefore);
+    expect(new Set(added.map((p) => p.id)).size).toBe(added.length);
+    const owners = added.filter((p) => p.roles.some((r) => r.key === 'business_owner'));
+    const technical = added.filter((p) => p.roles.some((r) => r.key === 'technical_buyer'));
+    expect(owners.length).toBeGreaterThan(0);
+    expect(technical.length).toBeGreaterThan(0);
+    // The sample finds different people for different titles, so no one holds both roles here.
+    for (const p of owners) expect(searched[0]).toContain(p.title);
+    for (const p of technical) expect(searched[1]).toContain(p.title);
+    expect(owners.filter((p) => technical.includes(p))).toEqual([]);
+    expect((await resultOf(t, id)).found).toBe(added.length);
+  });
+
+  it('a person found for two roles is revealed once and keeps both roles', async () => {
+    const mock = apolloMock();
+    const same = [{ name: 'Dana', first_name: 'Dana', title: 'CEO', provider_ref: 'stub-same' }];
+    registerAdapter('apollo', { mock: () => ({ ...mock, peopleSearch: async () => ({ value: same, creditsUsed: 0 }) }) });
+    const { accountId } = await accountFrom(t, agentSourceId);
+    const peopleBefore = (await t.run((ctx) => listPeople(ctx, accountId))).length;
+    const id = await approved(t, owner, accountId, { kind: 'people_for_roles', providerKey: 'apollo', roles: ['business_owner', 'technical_buyer'] });
+    await runOutbox(t.tenantId);
+    const added = (await t.run((ctx) => listPeople(ctx, accountId))).slice(peopleBefore);
+    expect(added).toHaveLength(1);
+    expect(added[0]!.roles.map((r) => r.key).sort()).toEqual(['business_owner', 'technical_buyer']);
+    expect(await resultOf(t, id)).toMatchObject({ found: 1, credits_used: 1 });
+  });
+});
+
+describe('the vendor source (submit failures)', () => {
+  const setSource = (set: { status?: string; dailyArrivalCap?: number }) => adminDb.update(source).set(set).where(eq(source.id, apolloSourceId));
+  const paidCalls = async (id: string) =>
+    (await adminDb.select().from(callLog).where(eq(callLog.tenantId, t.tenantId))).filter((c) => (c.requestSummary as { requestId?: string } | null)?.requestId === id);
+  const paused = 'The Apollo source is paused. An owner can turn it back on in Sources.';
+  const full = 'The Apollo source reached its daily arrival limit. Try again tomorrow.';
+  afterEach(() => setSource({ status: 'active', dailyArrivalCap: 500 }));
+
+  it('a paused source fails before any paid call', async () => {
+    const { accountId } = await accountFrom(t, agentSourceId);
+    await setSource({ status: 'paused' });
+    const id = await approved(t, owner, accountId, technical);
+    await runOutbox(t.tenantId);
+    expect(await rowOf(t, id)).toMatchObject({ status: 'failed', error: { message: paused } });
+    expect(await paidCalls(id)).toHaveLength(0);
+    expect(await messagesFor(t, 'enrichment.request.failed', id)).toHaveLength(1);
+  });
+
+  it('a source at its daily arrival limit fails before any paid call', async () => {
+    const { accountId } = await accountFrom(t, agentSourceId);
+    await setSource({ dailyArrivalCap: 0 });
+    const id = await approved(t, owner, accountId, technical);
+    await runOutbox(t.tenantId);
+    expect(await rowOf(t, id)).toMatchObject({ status: 'failed', error: { message: full } });
+    expect(await paidCalls(id)).toHaveLength(0);
+  });
+
+  it.each([
+    ['paused', { status: 'paused' }, paused],
+    ['at its limit', { dailyArrivalCap: 0 }, full],
+  ] as const)('a source %s by the time the arrival is sent fails the request instead of retrying', async (_, set, message) => {
+    const mock = apolloMock();
+    registerAdapter('apollo', {
+      mock: () => ({
+        ...mock,
+        revealEmail: async (input: Parameters<EnrichmentAdapter['revealEmail']>[0]) => {
+          await setSource(set);
+          return mock.revealEmail(input);
+        },
+      }),
+    });
+    const { accountId } = await accountFrom(t, agentSourceId);
+    const id = await approved(t, owner, accountId, technical);
+    await runOutbox(t.tenantId);
+    const row = await rowOf(t, id);
+    expect(row).toMatchObject({ status: 'failed', error: { message } });
+    expect(row.result).toBeNull();
+    expect(await arrivalsOf(t, id)).toHaveLength(0);
+    expect(await paidCalls(id)).not.toHaveLength(0);
+  });
 });
 
 describe('the other kinds', () => {
@@ -170,6 +294,17 @@ describe('the other kinds', () => {
     expect((await t.run((ctx) => getAccount(ctx, accountId)))!.industry).toBeTruthy();
   });
 
+  it('company facts the account already holds are nothing new', async () => {
+    const { accountId } = await accountFrom(t, agentSourceId);
+    const first = await approved(t, owner, accountId, { kind: 'company_firmographics', providerKey: 'apollo' });
+    await runOutbox(t.tenantId);
+    expect((await resultOf(t, first)).found).toBeGreaterThan(0);
+    const again = await approved(t, owner, accountId, { kind: 'company_firmographics', providerKey: 'apollo' });
+    await runOutbox(t.tenantId);
+    expect(await resultOf(t, again)).toMatchObject({ found: 0, credits_used: 1, message: 'Apollo found nothing new' });
+    expect((await viewOf(t, again))!.statusText).toBe('Apollo found nothing new');
+  });
+
   it('email reveal adds the email to the same person, not a new one', async () => {
     const { accountId } = await accountFrom(t, agentSourceId);
     const before = await t.run((ctx) => listPeople(ctx, accountId));
@@ -193,13 +328,31 @@ describe('the other kinds', () => {
     expect((row.result as Result).found).toBeGreaterThan(0); // the sample company always has at least one job posting
   });
 
+  it('a signals refresh that finds no company stops after the lookup and finds nothing new', async () => {
+    const mock = apolloMock();
+    let calls = 0;
+    registerAdapter('apollo', {
+      mock: () => ({
+        ...mock,
+        companyEnrich: async () => ({ value: null, creditsUsed: 1 }),
+        jobPostings: async (i: Parameters<EnrichmentAdapter['jobPostings']>[0]) => (calls++, mock.jobPostings(i)),
+        news: async (i: Parameters<EnrichmentAdapter['news']>[0]) => (calls++, mock.news(i)),
+      }),
+    });
+    const { accountId } = await accountFrom(t, agentSourceId);
+    const id = await approved(t, owner, accountId, { kind: 'signals_refresh', providerKey: 'apollo' });
+    await runOutbox(t.tenantId);
+    expect(await rowOf(t, id)).toMatchObject({ status: 'completed', result: { found: 0, credits_used: 1, message: 'Apollo found nothing new' } });
+    expect(calls).toBe(0);
+  });
+
   it('a website read on mock adds a description with its page and reads "Read by rules"', async () => {
     const { accountId } = await accountFrom(t, agentSourceId);
     const domain = (await t.run((ctx) => getAccount(ctx, accountId)))!.domain!;
     const id = await approved(t, owner, accountId, { kind: 'website_read', providerKey: 'website' });
     await runOutbox(t.tenantId);
     const row = await rowOf(t, id);
-    expect(row.status).toBe('completed');
+    expect(row).toMatchObject({ status: 'completed', error: null });
     expect(row.result).toMatchObject({ credits_used: 0, read_by: 'rules', message: 'Read by rules' });
     const [description] = await t.run((ctx) => getFacts(ctx, accountId, { key: 'description' }));
     expect(description).toMatchObject({ url: `https://${domain}/`, value: expect.stringContaining('runs back-office operations') });
@@ -254,6 +407,22 @@ describe('errors (Ruling 9)', () => {
     await runOutbox(t.tenantId);
     expect(await rowOf(t, id)).toMatchObject({ status: 'completed', error: null });
   });
+
+  it.each([
+    ['timeout', 'timeout', 'Apollo took too long to answer.'],
+    ['500', 'unknown', 'Something went wrong. Try again.'],
+  ] as const)('a %s is retried: running with the error, and the next delivery completes', async (failure, kind, message) => {
+    setMockFailure(failure);
+    const { accountId } = await accountFrom(t, agentSourceId);
+    const id = await approved(t, owner, accountId, technical);
+    await expect(runOutbox(t.tenantId)).rejects.toThrow();
+    expect(await rowOf(t, id)).toMatchObject({ status: 'running', error: { kind, message } });
+    expect((await viewOf(t, id))!.statusText).toBe(message);
+    expect(await messagesFor(t, 'enrichment.request.failed', id)).toHaveLength(0);
+    setMockFailure(null);
+    await runOutbox(t.tenantId);
+    expect(await rowOf(t, id)).toMatchObject({ status: 'completed', error: null });
+  });
 });
 
 describe('usage limits and redelivery', () => {
@@ -288,7 +457,7 @@ describe('usage limits and redelivery', () => {
     const mock = apolloMock();
     let reveals = 0;
     threeFound({
-      revealEmail: async (input) => {
+      revealEmail: async (input: Parameters<EnrichmentAdapter['revealEmail']>[0]) => {
         const r = await mock.revealEmail(input);
         // Another request spends the rest of the limit while this one runs.
         if (++reveals === 1) await adminDb.update(usageCap).set({ limit: 1 }).where(and(eq(usageCap.tenantId, t2.tenantId), eq(usageCap.providerKey, 'apollo')));
