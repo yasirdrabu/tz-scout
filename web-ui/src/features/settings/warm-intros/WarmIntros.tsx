@@ -11,7 +11,7 @@ import { useToast } from '../../../ui/Toast';
 import type { TabProps } from '../SettingsScreen';
 import { errorText, LoadFailed, LoadingRows } from '../shared';
 import { afterSave, saveWarmIntros, savedToast, warmIntrosQuery, type WarmIntrosView } from './api';
-import { check, errorsByField, introducerValue, isDirty, newRule, OTHER, personLabel, pickPerson, ruleName, toDraft, toEdit, type Draft, type RuleRow } from './draft';
+import { check, errorsByField, introducerValue, isDirty, newRule, OTHER, personLabel, pickPerson, pointsValid, ruleName, toDraft, toEdit, type Draft, type RuleRow } from './draft';
 import styles from './WarmIntros.module.css';
 
 /** Settings > Warm intros (screens.md §21i): points per relationship and per-introducer rules, saved in one PUT. */
@@ -42,7 +42,7 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: WarmIntrosView }) 
 
   const dirty = isDirty(draft, base);
   const mine = check(draft, attempted);
-  const pointsBad = [...check(draft, false).keys()].length > 0;
+  const pointsBad = !pointsValid(draft);
   const blocker = useBlocker({ shouldBlockFn: () => dirty && !busy, enableBeforeUnload: () => dirty, withResolver: true });
   const byField = errorsByField(apiErrors);
 
@@ -101,9 +101,9 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: WarmIntrosView }) 
         </div>
       </div>
 
-      {failure && (
+      {failure && (apiErrors.length === 0 || byField.rest.length > 0) && (
         <div role="alert" className={styles.failure}>
-          {byField.rest.length === 0 && <p>{failure}</p>}
+          {apiErrors.length === 0 && <p>{failure}</p>}
           {byField.rest.map((e) => (
             <p key={`${e.path}:${e.message}`}>{e.message}</p>
           ))}
@@ -187,7 +187,7 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: WarmIntrosView }) 
               </thead>
               <tbody>
                 {draft.rules.map((r, i) => {
-                  const name = ruleName(r);
+                  const name = ruleName(r, i);
                   return (
                     <tr key={r.id}>
                       <td>
@@ -214,7 +214,7 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: WarmIntrosView }) 
                               <>
                                 <input
                                   className={`input ${styles.text}`}
-                                  aria-label="Name of the new introducer"
+                                  aria-label={`Name of the new introducer, rule ${i + 1}`}
                                   placeholder="Name"
                                   value={r.name}
                                   disabled={busy}
@@ -223,7 +223,7 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: WarmIntrosView }) 
                                 <input
                                   className={`input ${styles.text}`}
                                   type="email"
-                                  aria-label="Email of the new introducer"
+                                  aria-label={`Email of the new introducer, rule ${i + 1}`}
                                   placeholder="Email"
                                   value={r.email}
                                   disabled={busy}

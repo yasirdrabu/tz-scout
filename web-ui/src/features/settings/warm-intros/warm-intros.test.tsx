@@ -142,14 +142,14 @@ describe('Settings > Warm intros', () => {
     await open();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Add a rule' }));
-    const pick = screen.getByRole('combobox', { name: 'Introducer for the new rule' });
+    const pick = screen.getByRole('combobox', { name: 'Introducer for the new rule, rule 2' });
     expect(within(pick).getByRole('option', { name: 'Pick a person' })).toBeInTheDocument();
     expect(within(pick).getByRole('option', { name: 'Bo Chen · bo@taazaa.com' })).toBeInTheDocument();
     expect(within(pick).getByRole('option', { name: 'Pat Outside · pat@partner.com' })).toBeInTheDocument();
     expect(within(pick).getByRole('option', { name: 'Someone else' })).toBeInTheDocument();
     await user.selectOptions(pick, 'Bo Chen · bo@taazaa.com');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Relationship for Bo Chen' }), 'Referred by a partner');
-    await user.type(screen.getByRole('spinbutton', { name: 'Points for Bo Chen, Referred by a partner' }), '18');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Relationship for the new rule, rule 2' }), 'Referred by a partner');
+    await user.type(screen.getByRole('spinbutton', { name: 'Points for the new rule, rule 2, Referred by a partner' }), '18');
     await user.click(screen.getByRole('button', { name: 'Save warm intros' }));
     expect(await screen.findByText('Warm intros saved. Rescoring 3 accounts.')).toBeInTheDocument();
     expect(puts[0]!.relationships).toHaveLength(6);
@@ -166,8 +166,8 @@ describe('Settings > Warm intros', () => {
     await open();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Add a rule' }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Introducer for the new rule' }), 'Pat Outside · pat@partner.com');
-    await user.type(screen.getByRole('spinbutton', { name: /^Points for Pat Outside/ }), '5');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Introducer for the new rule, rule 2' }), 'Pat Outside · pat@partner.com');
+    await user.type(screen.getByRole('spinbutton', { name: /^Points for the new rule, rule 2/ }), '5');
     await user.click(screen.getByRole('button', { name: 'Save warm intros' }));
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0]!.rules[1]).toEqual({ introducer_email: 'pat@partner.com', introducer_name: 'Pat Outside', relationship_key: 'customer', points: 5 });
@@ -178,13 +178,13 @@ describe('Settings > Warm intros', () => {
     await open();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Add a rule' }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Introducer for the new rule' }), 'Someone else');
-    await user.type(screen.getByRole('spinbutton', { name: /^Points for the new rule/ }), '3');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Introducer for the new rule, rule 2' }), 'Someone else');
+    await user.type(screen.getByRole('spinbutton', { name: /^Points for the new rule, rule 2/ }), '3');
     await user.click(screen.getByRole('button', { name: 'Save warm intros' }));
     expect(await screen.findByText("Enter the person's name and email.")).toBeInTheDocument();
     expect(puts).toHaveLength(0);
-    await user.type(screen.getByRole('textbox', { name: 'Name of the new introducer' }), 'Cleo Fox');
-    await user.type(screen.getByRole('textbox', { name: 'Email of the new introducer' }), 'cleo@fox.io');
+    await user.type(screen.getByRole('textbox', { name: 'Name of the new introducer, rule 2' }), 'Cleo Fox');
+    await user.type(screen.getByRole('textbox', { name: 'Email of the new introducer, rule 2' }), 'cleo@fox.io');
     await user.click(screen.getByRole('button', { name: 'Save warm intros' }));
     expect(await screen.findByText('Warm intros saved. Rescoring 1 account.')).toBeInTheDocument();
     expect(puts[0]!.rules[1]).toEqual({ introducer_email: 'cleo@fox.io', introducer_name: 'Cleo Fox', relationship_key: 'customer', points: 3 });
@@ -232,5 +232,53 @@ describe('Settings > Warm intros', () => {
     server.use(http.get('/api/v1/settings/warm-intros', () => problem(500, 'Boom')));
     renderApp('/t/taazaa/settings/warm-intros');
     expect(await screen.findByText("Warm intros didn't load")).toBeInTheDocument();
+  });
+
+  it('a new rule shows its points error only after a save attempt, and Save waits for points', async () => {
+    serve();
+    await open();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Add a rule' }));
+    expect(screen.queryByText('Points must be a whole number from 0 to 20.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Save warm intros' })).toBeDisabled();
+    await user.type(screen.getByRole('spinbutton', { name: /^Points for the new rule, rule 2/ }), '30');
+    expect(await screen.findByText('Points must be a whole number from 0 to 20.')).toBeInTheDocument();
+  });
+
+  it('gives each new rule its own control names, by position', async () => {
+    serve();
+    await open();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Add a rule' }));
+    await user.click(screen.getByRole('button', { name: 'Add a rule' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Introducer for the new rule, rule 2' }), 'Someone else');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Introducer for the new rule, rule 3' }), 'Someone else');
+    await user.type(screen.getByRole('textbox', { name: 'Name of the new introducer, rule 2' }), 'Cleo');
+    expect(screen.getByRole('textbox', { name: 'Name of the new introducer, rule 3' })).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Remove rule for the new rule, rule 2' })).toBeInTheDocument();
+  });
+
+  it('shows a field-routed 400 at its row only, not in the banner', async () => {
+    serve({
+      put: () =>
+        HttpResponse.json(
+          {
+            type: 'https://scout.taazaa.ai/problems/validation',
+            title: 'Bad',
+            status: 400,
+            correlation_id: 'cor_1',
+            errors: [{ path: 'rules[0].points', message: 'Nope.' }],
+          },
+          { status: 400, headers: { 'content-type': 'application/problem+json' } },
+        ),
+    });
+    await open();
+    const user = userEvent.setup();
+    const pts = screen.getByRole('spinbutton', { name: 'Points for Ash Patel, Someone on our team knows them' });
+    await user.clear(pts);
+    await user.type(pts, '9');
+    await user.click(screen.getByRole('button', { name: 'Save warm intros' }));
+    expect(await screen.findByText('Nope.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

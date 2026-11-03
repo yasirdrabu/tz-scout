@@ -66,23 +66,29 @@ export function pickPerson(row: RuleRow, value: string, people: Introducer[]): R
   return { ...row, pick: value, user_id: p?.user_id ?? null, email: p?.email ?? '', name: p?.name ?? '' };
 }
 
-/** What the row is called in labels. */
-export const ruleName = (r: RuleRow) => r.name.trim() || r.email.trim() || 'the new rule';
+/** What the row is called in labels: a stored rule by its person, a new one by its place (never by text being typed). */
+export const ruleName = (r: RuleRow, index: number) => (r.key ? r.name.trim() || r.email.trim() || 'this rule' : `the new rule, rule ${index + 1}`);
 
 export const isWholePoints = (p: string) => /^\d+$/.test(p.trim()) && Number(p.trim()) <= 20;
 
 export const POINTS_MESSAGE = 'Points must be a whole number from 0 to 20.';
 export const PERSON_MESSAGE = "Enter the person's name and email.";
 
-/** The client's own checks, by place: `relationships.{i}.points`, `rules.{i}.points`, `rules.{i}.person`. */
-export function check(d: Draft, withPerson: boolean): Map<string, string> {
+/** Is every points field a whole number from 0 to 20? Save waits for this. */
+export const pointsValid = (d: Draft) => d.relationships.every((r) => isWholePoints(r.points)) && d.rules.every((r) => isWholePoints(r.points));
+
+/**
+ * The client's own checks to show, by place: `relationships.{i}.points`, `rules.{i}.points`, `rules.{i}.person`.
+ * A new rule's blank points and missing person show only after a save attempt.
+ */
+export function check(d: Draft, attempted: boolean): Map<string, string> {
   const out = new Map<string, string>();
   d.relationships.forEach((r, i) => {
     if (!isWholePoints(r.points)) out.set(`relationships.${i}.points`, POINTS_MESSAGE);
   });
   d.rules.forEach((r, i) => {
-    if (!isWholePoints(r.points)) out.set(`rules.${i}.points`, POINTS_MESSAGE);
-    if (!withPerson || r.key) return;
+    if (!isWholePoints(r.points) && (attempted || r.key || r.points.trim() !== '')) out.set(`rules.${i}.points`, POINTS_MESSAGE);
+    if (!attempted || r.key) return;
     const typed = r.name.trim() !== '' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim());
     if (r.pick === '' || (r.pick === OTHER && !typed)) out.set(`rules.${i}.person`, PERSON_MESSAGE);
   });
@@ -109,12 +115,13 @@ export function errorsByField(errors: { path: string; message: string }[]) {
   const rest: { path: string; message: string }[] = [];
   for (const e of errors) {
     const m = e.path.match(/^(rules|relationships)(?:\[(\d+)\]|\.(\d+))(?:\.(\w+))?$/);
-    if (!m) {
+    const field = m?.[4] ?? '';
+    const place = field.startsWith('introducer_') ? 'person' : field === 'key' ? 'relationship_key' : field;
+    // Only the places the tables show; anything else goes to the banner.
+    if (!m || !['points', 'person', 'relationship_key', 'id'].includes(place)) {
       rest.push(e);
       continue;
     }
-    const field = m[4] ?? '';
-    const place = field.startsWith('introducer_') ? 'person' : field === 'key' ? 'relationship_key' : field;
     const k = `${m[1]}.${m[2] ?? m[3]}.${place}`;
     fields.set(k, [...(fields.get(k) ?? []), e.message]);
   }
