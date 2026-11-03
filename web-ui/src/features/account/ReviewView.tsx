@@ -47,7 +47,7 @@ function WarmIntroLine({ tenant, id, intro }: { tenant: string; id: string; intr
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const how = intro.relationship_label.charAt(0).toLowerCase() + intro.relationship_label.slice(1);
-  const text = `${intro.introducer_name ? `Warm intro from ${intro.introducer_name}` : 'Warm intro'} (${how}), +${intro.points}`;
+  const text = `${intro.introducer_name ? `Warm intro from ${intro.introducer_name}` : 'Warm intro'} (${how})`;
 
   async function confirm() {
     setBusy(true);
@@ -64,7 +64,7 @@ function WarmIntroLine({ tenant, id, intro }: { tenant: string; id: string; intr
 
   return (
     <p className={styles.dotRow}>
-      <span>{intro.confirmed ? text : `${text} · Unconfirmed, +${intro.points} of ${intro.full_points}`}</span>
+      <span>{intro.confirmed ? `${text}, +${intro.points}` : `${text} · Unconfirmed, +${intro.points} of ${intro.full_points}`}</span>
       {!intro.confirmed && intro.can_confirm && (
         <button type="button" className={styles.textButton} disabled={busy} onClick={() => void confirm()}>
           Confirm

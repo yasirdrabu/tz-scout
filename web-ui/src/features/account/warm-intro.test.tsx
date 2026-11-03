@@ -52,7 +52,7 @@ describe('Warm intro on the account page', () => {
     const invalidate = vi.spyOn(app.queryClient, 'invalidateQueries');
     const before = await checklist();
     expect(await within(before).findByText(/Unconfirmed, \+4 of 8/)).toHaveTextContent(
-      'Warm intro from Ash Patel (someone on our team knows them), +4 · Unconfirmed, +4 of 8',
+      'Warm intro from Ash Patel (someone on our team knows them) · Unconfirmed, +4 of 8',
     );
     const seen = gets;
     await userEvent.click(within(before).getByRole('button', { name: 'Confirm' }));
