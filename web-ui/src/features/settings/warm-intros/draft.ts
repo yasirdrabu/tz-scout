@@ -74,9 +74,6 @@ export const isWholePoints = (p: string) => /^\d+$/.test(p.trim()) && Number(p.t
 export const POINTS_MESSAGE = 'Points must be a whole number from 0 to 20.';
 export const PERSON_MESSAGE = "Enter the person's name and email.";
 
-/** Is every points field a whole number from 0 to 20? Save waits for this. */
-export const pointsValid = (d: Draft) => d.relationships.every((r) => isWholePoints(r.points)) && d.rules.every((r) => isWholePoints(r.points));
-
 /**
  * The client's own checks to show, by place: `relationships.{i}.points`, `rules.{i}.points`, `rules.{i}.person`.
  * A new rule's blank points and missing person show only after a save attempt.

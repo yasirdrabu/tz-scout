@@ -11,7 +11,7 @@ import { useToast } from '../../../ui/Toast';
 import type { TabProps } from '../SettingsScreen';
 import { errorText, LoadFailed, LoadingRows } from '../shared';
 import { afterSave, saveWarmIntros, savedToast, warmIntrosQuery, type WarmIntrosView } from './api';
-import { check, errorsByField, introducerValue, isDirty, newRule, OTHER, personLabel, pickPerson, pointsValid, ruleName, toDraft, toEdit, type Draft, type RuleRow } from './draft';
+import { check, errorsByField, introducerValue, isDirty, newRule, OTHER, personLabel, pickPerson, ruleName, toDraft, toEdit, type Draft, type RuleRow } from './draft';
 import styles from './WarmIntros.module.css';
 
 /** Settings > Warm intros (screens.md §21i): points per relationship and per-introducer rules, saved in one PUT. */
@@ -42,7 +42,6 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: WarmIntrosView }) 
 
   const dirty = isDirty(draft, base);
   const mine = check(draft, attempted);
-  const pointsBad = !pointsValid(draft);
   const blocker = useBlocker({ shouldBlockFn: () => dirty && !busy, enableBeforeUnload: () => dirty, withResolver: true });
   const byField = errorsByField(apiErrors);
 
@@ -95,7 +94,7 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: WarmIntrosView }) 
           <Button variant="secondary" onClick={discard} disabled={busy || !dirty}>
             Discard
           </Button>
-          <Button onClick={() => void save()} disabled={busy || !dirty || pointsBad}>
+          <Button onClick={() => void save()} disabled={busy || !dirty}>
             Save warm intros
           </Button>
         </div>

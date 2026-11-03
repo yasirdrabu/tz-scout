@@ -123,7 +123,7 @@ describe('Settings > Warm intros', () => {
     expect(screen.getByRole('button', { name: 'Save warm intros' })).toBeDisabled();
   });
 
-  it('points outside 0 to 20 show the error and block saving', async () => {
+  it('points outside 0 to 20 show the error and a save attempt sends nothing', async () => {
     serve();
     await open();
     const user = userEvent.setup();
@@ -131,7 +131,7 @@ describe('Settings > Warm intros', () => {
     await user.clear(input);
     await user.type(input, '21');
     expect(await screen.findByText('Points must be a whole number from 0 to 20.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save warm intros' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Save warm intros' }));
     await user.clear(screen.getByRole('spinbutton', { name: 'Points for Ash Patel, Someone on our team knows them' }));
     expect(screen.getAllByText('Points must be a whole number from 0 to 20.')).toHaveLength(2);
     expect(puts).toHaveLength(0);
@@ -234,15 +234,18 @@ describe('Settings > Warm intros', () => {
     expect(await screen.findByText("Warm intros didn't load")).toBeInTheDocument();
   });
 
-  it('a new rule shows its points error only after a save attempt, and Save waits for points', async () => {
+  it('a new rule shows its points error only after a save attempt, and the attempt sends nothing', async () => {
     serve();
     await open();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Add a rule' }));
     expect(screen.queryByText('Points must be a whole number from 0 to 20.')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Save warm intros' })).toBeDisabled();
-    await user.type(screen.getByRole('spinbutton', { name: /^Points for the new rule, rule 2/ }), '30');
+    const save = screen.getByRole('button', { name: 'Save warm intros' });
+    expect(save).toBeEnabled();
+    await user.click(save);
     expect(await screen.findByText('Points must be a whole number from 0 to 20.')).toBeInTheDocument();
+    expect(screen.getByText("Enter the person's name and email.")).toBeInTheDocument();
+    expect(puts).toHaveLength(0);
   });
 
   it('gives each new rule its own control names, by position', async () => {
