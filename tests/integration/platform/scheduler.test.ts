@@ -60,6 +60,22 @@ describe('scheduler', () => {
     expect((await row(id)).cron).toBe('*/5 * * * *');
   });
 
+  it('two first-ever ensureSchedule calls at once both resolve to one row and one audit row', async () => {
+    const input = { tenantId: 't_platform', jobName: job.name, cron: '*/5 * * * *', timezone: 'UTC', payload: {} };
+    // Several rounds of several callers, so the race between the check and the insert is actually hit.
+    for (let round = 0; round < 4; round++) {
+      await adminDb.execute(sql`delete from platform.schedule`);
+      const ids = await Promise.all(Array.from({ length: 6 }, () => ensureSchedule(admin, input)));
+      expect(new Set(ids).size).toBe(1);
+    }
+    const [a, b] = await Promise.all([ensureSchedule(admin, input), ensureSchedule(admin, input)]);
+    expect(a).toBe(b);
+    const rows = await adminDb.select().from(schedule).where(and(eq(schedule.tenantId, 't_platform'), eq(schedule.jobName, job.name)));
+    expect(rows.map((r) => r.id)).toEqual([a]);
+    const audits = await adminDb.select().from(auditLog).where(and(eq(auditLog.subjectId, a), eq(auditLog.action, 'platform.schedule.upserted')));
+    expect(audits).toHaveLength(1);
+  });
+
   it('two concurrent ticks publish one job in total', async () => {
     await dueRow();
     const now = new Date();
