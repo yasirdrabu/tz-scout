@@ -8,6 +8,7 @@ import { POST as rescore } from '@/http/routes/v1/rescore/route';
 import { POST as previewProfile } from '@/http/routes/v1/scoring/[profile]/route';
 import { POST as resetProfile } from '@/http/routes/v1/scoring/profile/reset/route';
 import { GET as getLastRescore } from '@/http/routes/v1/scoring/last-rescore/route';
+import { GET as getLatestRescore } from '@/http/routes/v1/scoring/rescores/latest/route';
 import { GET as getProfile, PUT as putProfile } from '@/http/routes/v1/scoring/profile/route';
 import { upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { approveOffer, createOffer, createPractice, replaceSignalRules } from '@/modules/offers';
@@ -383,7 +384,7 @@ describe('POST /api/v1/rescore', () => {
     for (const body of ['', {}, { practice_id: w.practice.id }, { source_id: w.ash.agentId }]) {
       const res = await call(rescore, key, 'rescore', { method: 'POST', body });
       expect(res.status).toBe(202);
-      expect(await json(res)).toEqual({ job_id: expect.any(String) });
+      expect(await json(res)).toEqual({ job_id: expect.any(String), rescore_id: expect.stringMatching(/^rsr_/) });
     }
     await runOutbox(w.t.tenantId);
   });
@@ -395,6 +396,33 @@ describe('POST /api/v1/rescore', () => {
     expect(both.status).toBe(400);
     expect((await json(both)).title).toBe('Choose a practice or a source, not both.');
     expect((await call(rescore, key, 'rescore', { body: { nope: 1 } })).status).toBe(400);
+  });
+});
+
+describe('GET /api/v1/scoring/rescores/latest (Ruling 12)', () => {
+  it('is null before a run, then the run POST /rescore started with its progress; review:act or scoring:manage', async () => {
+    const w = await workspace('Progress Co');
+    const leader = await w.person('leader', { name: 'Dana Ruiz' });
+    const seller = await w.person('seller', { name: 'Sam Seller' });
+    const empty = await w.as(leader, getLatestRescore, 'scoring/rescores/latest');
+    expect(empty.status).toBe(200);
+    expect(await json(empty)).toEqual({ data: null });
+
+    const started = await w.as(w.owner, rescore, 'rescore', 'POST', {});
+    expect(started.status).toBe(202);
+    const { rescore_id } = await json(started);
+    const running = (await json(await w.as(leader, getLatestRescore, 'scoring/rescores/latest'))).data;
+    expect(running).toEqual({ id: rescore_id, cause: 'manual_rescore', total: 0, done: 0, started_at: expect.any(String), finished_at: null, stalled: false });
+
+    await w.deliver();
+    const manage = await keyFor(w.tenant, ['scoring:manage'], ALL);
+    const finished = (await json(await call(getLatestRescore, manage, 'scoring/rescores/latest'))).data;
+    expect(finished).toMatchObject({ id: rescore_id, started_at: running.started_at, finished_at: expect.any(String) });
+    expect(finished.done).toBe(finished.total);
+
+    expect((await w.as(seller, getLatestRescore, 'scoring/rescores/latest')).status).toBe(403);
+    const reader = await keyFor(w.tenant, ['accounts:read'], ALL);
+    expect((await call(getLatestRescore, reader, 'scoring/rescores/latest')).status).toBe(403);
   });
 });
 

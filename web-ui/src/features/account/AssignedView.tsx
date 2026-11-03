@@ -111,7 +111,7 @@ function ReviewRecord({ tenant, me, account, review }: ViewProps) {
           <>
             <ScoreStrip tenant={tenant} id={account.id} />
             <WhyNow account={account} />
-            <AccountFacts tenant={tenant} id={account.id} />
+            <AccountFacts tenant={tenant} id={account.id} readOnly />
             <BriefCard tenant={tenant} me={me} id={account.id} readOnly />
           </>
         ) : (

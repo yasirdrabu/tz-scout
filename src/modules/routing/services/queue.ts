@@ -21,7 +21,7 @@ export type QueueFilters = {
   sourceId?: string;
   batchId?: string;
   tier?: string;
-  /** One of the review flags, such as `declined_by_seller`. */
+  /** One of the review flags, such as `declined_by_seller`, or `conflicts` for accounts with an open conflict. */
   flag?: string;
   arrivedSince?: Date;
   /** Rows changed since, for the "{n} updates" bar (C14). */
@@ -43,7 +43,7 @@ export type QueueRow = SearchRow & {
   crm: { exists: boolean; ownerName: string | null; lifecycle: string } | null;
   /** The flag details: who declined and why, which source a new arrival came from ("New from <source>"). */
   flags: Omit<ReviewFlags, 'newFrom'> & { newFrom?: NonNullable<ReviewFlags['newFrom']> & { sourceName: string | null } };
-  /** Conflicting facts and enrichment requests are R2; until then there are none. */
+  /** Open conflicts between sources. Enrichment requests are R2b; until then there are none. */
   conflictCount: number;
   enrichmentRequested: boolean;
   /** The source the account first came from, and the rest of its chain ("via"). */
@@ -79,7 +79,8 @@ async function queryFor(ctx: ModuleContext, f: QueueFilters, statuses: StatusDef
     tier: f.tier,
     arrivedSince: f.arrivedSince,
     updatedSince: f.updatedSince,
-    reviewFlags: f.flag ? [f.flag] : undefined,
+    reviewFlags: f.flag && f.flag !== 'conflicts' ? [f.flag] : undefined,
+    hasOpenConflicts: f.flag === 'conflicts' ? true : undefined,
     accountIds: f.batchId ? await batchFilterIds(ctx, f.batchId) : undefined,
   };
   if (f.statusKeys?.length) q.reviewStatusKeys = f.statusKeys;
@@ -125,7 +126,7 @@ export async function listQueue(ctx: ModuleContext, f: QueueFilters = {}): Promi
         insightsAt: review?.insightsAt ?? null,
         crm: check ? { exists: check.exists, ownerName: check.ownerName, lifecycle: check.lifecycle } : null,
         flags: newFrom ? { ...flags, newFrom: { ...newFrom, sourceName: newFromNames.get(newFrom.sourceId) ?? null } } : flags,
-        conflictCount: 0,
+        conflictCount: r.openConflictCount,
         enrichmentRequested: false,
         source: source ? { sourceId: source.sourceId, name: source.name, kind: source.kind, via: source.via } : null,
         practiceName: names.practice(r.practiceId),

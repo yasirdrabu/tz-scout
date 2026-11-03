@@ -54,7 +54,37 @@ export async function recordFeedback(
     .orderBy(asc(arrival.receivedAt), asc(arrival.id));
   const latest = new Map<string, string>();
   for (const a of arrivals) for (const sourceId of [a.person, a.agent, a.vendor]) if (sourceId) latest.set(sourceId, a.id);
-  const values = [...latest].map(([sourceId, arrivalId]) => ({
+  return writeFeedback(ctx, f, latest);
+}
+
+/**
+ * Ruling 8 (R2a): a person kept another source's value, so each losing source is told on the arrival its losing
+ * fact came with, with the winner's source name as the note. A source in the chain of a losing arrival that is
+ * not in `losingSourceIds` (it is also in the winner's chain) is not told. Idempotent per cause event.
+ */
+export async function recordConflictLost(
+  ctx: ModuleContext,
+  f: { accountId: string; factArrivalIds: string[]; losingSourceIds: string[]; winnerSourceName: string | null; byUserId?: string | null; causeEventId: string },
+): Promise<number> {
+  if (f.factArrivalIds.length === 0 || f.losingSourceIds.length === 0) return 0;
+  const arrivals = await ctx.tx
+    .select({ id: arrival.id, person: arrival.personSourceId, agent: arrival.agentSourceId, vendor: arrival.vendorSourceId })
+    .from(arrival)
+    .where(and(eq(arrival.tenantId, ctx.tenantId), inArray(arrival.id, f.factArrivalIds)))
+    .orderBy(asc(arrival.receivedAt), asc(arrival.id));
+  const losing = new Set(f.losingSourceIds);
+  const bySource = new Map<string, string>();
+  for (const a of arrivals) for (const sourceId of [a.person, a.agent, a.vendor]) if (sourceId && losing.has(sourceId)) bySource.set(sourceId, a.id);
+  return writeFeedback(ctx, { ...f, kind: 'conflict_lost', reasonKey: null, note: f.winnerSourceName }, bySource);
+}
+
+/** One row per (source, arrival) and `intake.feedback.recorded` for each new one; returns how many were new. */
+async function writeFeedback(
+  ctx: ModuleContext,
+  f: { accountId: string; kind: FeedbackKind; reasonKey: string | null; note: string | null; byUserId?: string | null; causeEventId: string },
+  arrivalBySource: Map<string, string>,
+): Promise<number> {
+  const values = [...arrivalBySource].map(([sourceId, arrivalId]) => ({
     id: newId('fb'),
     tenantId: ctx.tenantId,
     sourceId,

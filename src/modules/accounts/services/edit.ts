@@ -7,8 +7,9 @@ import { accountExclusionChanged, accountUpdated, personUpdated } from '../contr
 import type { ArrivalAccountFields, ArrivalPerson, SourceChain } from '../contracts/types';
 import { account, accountAlias, person, personRole, signal } from '../db/schema';
 import { matchName } from '../domain/names';
+import { closeByEdit } from './conflicts';
 import { applyExclusion } from './exclusion';
-import { ACCOUNT_COLUMNS, PERSON_COLUMNS, keepReplacedDomain, recordFacts, reproject, type FactInput } from './facts';
+import { ACCOUNT_COLUMNS, PERSON_COLUMNS, keepReplacedDomain, recordFacts, reproject, reprojectPerson, type FactInput } from './facts';
 import { lockAccount } from './lock';
 import { resolveAccountId } from './match';
 import { repickPrimary } from './primary';
@@ -60,6 +61,7 @@ export async function editAccount(ctx: ModuleContext, accountId: string, patch: 
   await recordFacts(ctx, id, null, facts, chain, undefined, userId);
   const keys = facts.map((f) => f.key);
   await reproject(ctx, id, keys);
+  await closeByEdit(ctx, id, null, keys);
   const domain = facts.find((f) => f.key === 'domain')?.value;
   if (typeof domain === 'string') {
     await assertDomainTaken(ctx, id, domain);
@@ -73,24 +75,6 @@ export type PersonPatch = Pick<
   ArrivalPerson,
   'firstName' | 'lastName' | 'title' | 'seniority' | 'email' | 'emailStatus' | 'phone' | 'mobilePhone' | 'linkedinUrl' | 'decisionNote' | 'roleKeys'
 >;
-
-/** SQLSTATE 23505 on the named index, whether the driver error is wrapped or not. */
-function isUniqueViolation(e: unknown, constraint: string): boolean {
-  const err = e as { code?: string; constraint_name?: string; cause?: { code?: string; constraint_name?: string } } | null;
-  return [err, err?.cause].some((x) => x?.code === '23505' && x.constraint_name === constraint);
-}
-
-/** Re-picks values; a person's email that another person at the account already has is a 409. */
-export async function reprojectPerson(ctx: ModuleContext, accountId: string, keys: string[]): Promise<void> {
-  try {
-    await ctx.tx.transaction((tx) => reproject({ ...ctx, tx }, accountId, keys));
-  } catch (e) {
-    if (isUniqueViolation(e, 'person_tenant_account_email_uq')) {
-      throw new ScoutError({ slug: 'conflict', status: 409, title: 'That email is already on another person at this account.' });
-    }
-    throw e;
-  }
-}
 
 /**
  * Pins each given person field as a fact from the editor. `roleKeys` is the full set of roles the person should have;
@@ -110,6 +94,7 @@ export async function editPerson(ctx: ModuleContext, personId: string, patch: Pe
   if (facts.length) {
     await recordFacts(ctx, accountId, personId, facts, chain, undefined, userId);
     await reprojectPerson(ctx, accountId, changedKeys);
+    await closeByEdit(ctx, accountId, personId, changedKeys);
   }
 
   let rolesChanged = false;

@@ -4,8 +4,7 @@ import { newId } from '@/platform/ids';
 import type { ArrivalPerson, SourceChain } from '../contracts/types';
 import { fact, person, personRole } from '../db/schema';
 import { ScoutError } from '@/platform/errors';
-import { reprojectPerson } from './edit';
-import { PERSON_COLUMNS, recordFacts, reproject, type FactInput } from './facts';
+import { PERSON_COLUMNS, recordFacts, reproject, reprojectPerson, type FactInput } from './facts';
 
 type PersonRow = typeof person.$inferSelect;
 
@@ -16,6 +15,8 @@ export type PersonResult = {
   /** Fact keys recorded, plus `roles` when a role was added. Empty for a new person. */
   changedKeys: string[];
   roleKeys: string[];
+  /** Conflicts the person's new facts opened or extended. */
+  conflictIds: string[];
 };
 
 const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
@@ -101,7 +102,7 @@ export async function matchOrAddPerson(
   const recordedKeys = factIds.length
     ? [...new Set((await ctx.tx.select({ key: fact.key }).from(fact).where(inArray(fact.id, factIds))).map((f) => f.key))]
     : [];
-  if (recordedKeys.length) await reproject(ctx, accountId, recordedKeys);
+  const conflictIds = recordedKeys.length ? await reproject(ctx, accountId, recordedKeys, { detectFor: factIds }) : [];
 
   const wanted = [...new Set([...(input.roleKeys ?? []), ...(opts.extraRoleKeys ?? [])])];
   const added = wanted.length
@@ -122,6 +123,7 @@ export async function matchOrAddPerson(
     factIds,
     changedKeys: match ? [...recordedKeys, ...(added.length ? ['roles'] : [])] : [],
     roleKeys: roles.map((r) => r.roleKey).sort(),
+    conflictIds,
   };
 }
 
@@ -148,10 +150,10 @@ export async function updatePersonFromArrival(
   const keys = factIds.length
     ? [...new Set((await ctx.tx.select({ key: fact.key }).from(fact).where(inArray(fact.id, factIds))).map((f) => f.key))]
     : [];
-  if (keys.length) await reprojectPerson(ctx, accountId, keys);
+  const conflictIds = keys.length ? await reprojectPerson(ctx, accountId, keys, { detectFor: factIds }) : [];
   const roles = await ctx.tx
     .select({ roleKey: personRole.roleKey })
     .from(personRole)
     .where(and(eq(personRole.tenantId, ctx.tenantId), eq(personRole.personId, personId)));
-  return { personId, existing: true, factIds, changedKeys: keys, roleKeys: roles.map((r) => r.roleKey).sort() };
+  return { personId, existing: true, factIds, changedKeys: keys, roleKeys: roles.map((r) => r.roleKey).sort(), conflictIds };
 }

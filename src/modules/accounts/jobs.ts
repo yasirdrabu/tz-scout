@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { enqueueJob } from '@/platform/events/outbox';
 import { defineJob } from '@/platform/events/registry';
 import { defineJobHandler } from '@/platform/runtime/jobs';
+import { conflictExplainJob } from './contracts/jobs';
 import { account } from './db/schema';
+import { explainConflict } from './services/explain';
 import { applyExclusion } from './services/exclusion';
 import { lockAccount } from './services/lock';
 
@@ -25,4 +27,9 @@ export const exclusionsRecheckHandler = defineJobHandler(exclusionsRecheckJob, a
     await applyExclusion(ctx, id);
   }
   if (page.length === RECHECK_PAGE_SIZE) await enqueueJob(ctx, exclusionsRecheckJob, { cursor: page[page.length - 1]!.id });
+});
+
+/** Explains one open conflict (Ruling 9). */
+export const conflictExplainHandler = defineJobHandler(conflictExplainJob, async (e, ctx) => {
+  await explainConflict(ctx, e.data.conflictId);
 });

@@ -51,13 +51,15 @@ export {
   type FloorBasics,
   type ScoringView,
 } from './services/read';
-export { exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';
+export { conflictExplainHandler, exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';
+export { conflictExplainJob } from './contracts/jobs';
 export { mergeAccounts } from './services/merge';
 export { countAccounts, countAccountsBy, oldestCreatedAt, search, type FacetKey, type SearchQuery, type SearchRow, type SearchSort } from './services/search';
 export { listExclusionLists, listExclusionRules, setExclusionList, setExclusionRule, type ExclusionRuleView } from './services/settings';
 export { filterVisibleAccountIds, visibleAccounts } from './services/visibility';
 export { setPractices } from './services/practices';
 export { stageCountsBySource, type SourceGroup } from './services/source-stats';
+export { getConflict, listConflicts, resolveConflict, type ConflictFactView, type ConflictView } from './services/conflicts';
 export { addNote, listNotes, MAX_NOTE, type NoteView } from './services/notes';
 export { upsertFromArrival, type UpsertResult } from './services/upsert';
 export type {

@@ -78,7 +78,7 @@ export type AccountRow = {
   lead_offer: LeadOffer | null;
   source: SourceRef | null;
   last_activity: Activity | null;
-  value: { amount_cents: number | null; currency: string | null; kind: 'won' | 'open_deal'; deal_name: string } | null;
+  value: { amount_cents: number | null; currency: string | null; kind: 'won' | 'open_deal' | 'estimated'; deal_name: string | null } | null;
 };
 
 export type AccountFacets = {

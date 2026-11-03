@@ -11,12 +11,13 @@ import { POST as accountAction } from '@/http/routes/v1/accounts/[id]/route';
 import { PUT as putPractices } from '@/http/routes/v1/accounts/[id]/practices/route';
 import { DELETE as deleteOverride } from '@/http/routes/v1/accounts/[id]/exclusion-override/route';
 import { POST as signalAction } from '@/http/routes/v1/signals/[id]/route';
+import { POST as conflictAction } from '@/http/routes/v1/conflicts/[id]/route';
 import { GET as getExclusions } from '@/http/routes/v1/settings/exclusions/route';
 import { PUT as putRule } from '@/http/routes/v1/settings/exclusions/rules/[key]/route';
 import { PUT as putList } from '@/http/routes/v1/settings/exclusions/lists/[kind]/route';
 import { GET as getWarmIntros } from '@/http/routes/v1/settings/warm-intros/route';
 import { PUT as putWarmIntro } from '@/http/routes/v1/settings/warm-intros/[key]/route';
-import { getAccount, getSignals, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
+import { getAccount, getSignals, listConflicts, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
 import { account } from '@/modules/accounts/db/schema';
 import { listMappings, saveMapping, submitBatch } from '@/modules/intake';
 import { archivePractice, createPractice } from '@/modules/offers';
@@ -249,6 +250,35 @@ describe('accounts', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ id: keep });
     expect((await run((ctx) => getAccount(ctx, gone)))?.mergedInto).toBe(keep);
+  });
+
+  it('settles a conflict: a person succeeds, an API key gets the people-only copy', async () => {
+    const accountId = await seedAccount({ account: { name: 'Disputed Co', domain: domain(), employees: 1000 } });
+    await run((ctx) =>
+      upsertFromArrival(
+        ctx,
+        { arrivalId: newId('arr'), receivedAt: new Date('2026-10-26T16:00:00Z'), sourceChain: { agentSourceId: bo.agentId }, account: { employees: 2000 }, people: [], signals: [], facts: [], research: {}, soleProprietor: false, externalIds: [] },
+        accountId,
+      ),
+    );
+    const [c] = await run((ctx) => listConflicts(ctx, accountId));
+    const kept = c!.facts.find((f) => f.value === 2000)!.id;
+    const key = (
+      await run((ctx) => createApiKey(ctx, { name: 'k', environment: 'live', scopes: ['review:act', 'accounts:read'], sourceId: ash.agentId }, SYSTEM_GRANTOR))
+    ).secret;
+    const viaKey = await conflictAction(
+      new Request(`http://x/api/v1/conflicts/${c!.id}:resolve`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ kept_fact_id: kept }),
+      }),
+    );
+    expect(viaKey.status).toBe(403);
+    expect(JSON.stringify(await viaKey.json())).toContain('Only a person can settle a disagreement between sources.');
+
+    const res = await as('owner', conflictAction, `conflicts/${c!.id}:resolve`, 'POST', { kept_fact_id: kept });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: c!.id, status: 'resolved', kept_fact_id: kept });
   });
 
   it('sets practices', async () => {

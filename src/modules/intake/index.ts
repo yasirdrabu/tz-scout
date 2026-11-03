@@ -19,8 +19,8 @@ export {
 } from './contracts/events';
 export { normaliseDomain } from './domain/normalise';
 export { importRunJob, qualifiedLeadsPollJob, resolveJob, waitingExpireJob } from './contracts/jobs';
-export { intakeAccountMerged, intakeLeadQualified, intakeSellerDeclineFeedback, intakeStatusFeedback, intakeTenantDefaults } from './consumers';
-export { feedbackForArrival, listFeedback, recordFeedback, type ArrivalFeedback, type FeedbackKind, type FeedbackView } from './services/feedback';
+export { intakeAccountMerged, intakeConflictFeedback, intakeLeadQualified, intakeSellerDeclineFeedback, intakeStatusFeedback, intakeTenantDefaults } from './consumers';
+export { feedbackForArrival, listFeedback, recordConflictLost, recordFeedback, type ArrivalFeedback, type FeedbackKind, type FeedbackView } from './services/feedback';
 export { importRunHandler, qualifiedLeadsPollHandler, resolveHandler, waitingExpireHandler } from './jobs';
 export {
   FIRST_POLL_LOOKBACK_MS,

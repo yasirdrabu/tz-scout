@@ -2,10 +2,10 @@ import { z } from 'zod';
 import { defineJob } from '@/platform/events/registry';
 import { scoreCauseSchema } from './types';
 
-/** Rescores up to 200 accounts, each in its own savepoint. */
+/** Rescores up to 200 accounts, each in its own savepoint. `runId` (absent on messages queued before R2a) counts them into a rescore run. */
 export const rescoreAccountsJob = defineJob(
   'scoring.rescore.accounts',
-  z.object({ accountIds: z.array(z.string()).min(1).max(200), cause: scoreCauseSchema }),
+  z.object({ accountIds: z.array(z.string()).min(1).max(200), cause: scoreCauseSchema, runId: z.string().optional() }),
   { timeoutMs: 300_000 },
 );
 
@@ -21,7 +21,7 @@ export type RescoreFilter = z.infer<typeof rescoreFilterSchema>;
 /** Lists 200 account ids matching `filter` after `afterId`, enqueues a rescore.accounts message for them and re-enqueues itself with the cursor. */
 export const rescorePageJob = defineJob(
   'scoring.rescore.page',
-  z.object({ filter: rescoreFilterSchema, cause: scoreCauseSchema, afterId: z.string().optional() }),
+  z.object({ filter: rescoreFilterSchema, cause: scoreCauseSchema, afterId: z.string().optional(), runId: z.string().optional() }),
   {},
 );
 

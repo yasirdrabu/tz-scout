@@ -8,6 +8,7 @@ import { mergeGuard } from '../contracts/ports';
 import type { SignalKind } from '../contracts/types';
 import { account, accountAlias, accountSummary, fact, person, personAlias, personRole, signal } from '../db/schema';
 import { signalDedupKeys } from '../domain/signals';
+import { moveConflicts } from './conflicts';
 import { applyExclusion } from './exclusion';
 import { reproject } from './facts';
 import { lockAccounts } from './lock';
@@ -205,6 +206,7 @@ export async function mergeAccounts(ctx: ModuleContext, survivorId: string, merg
   await applyExclusion(ctx, survivorId);
   await writeSummary(ctx, survivorId, { addSourceIds: mergedSummary?.sourceIds ?? [] });
   await moveNotes(ctx, survivorId, mergedId);
+  await moveConflicts(ctx, survivorId, mergedId, collapsed);
 
   await audit(ctx, {
     action: 'accounts.account.merge',

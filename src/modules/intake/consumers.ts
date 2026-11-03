@@ -1,12 +1,14 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { accountMerged } from '@/modules/accounts/contracts/events';
+import { getConflict } from '@/modules/accounts';
+import { accountMerged, conflictResolved } from '@/modules/accounts/contracts/events';
 import { leadQualified } from '@/modules/crm/contracts/events';
 import { assignmentDeclined, statusChanged } from '@/modules/routing/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { seedIntakeDefaults } from './defaults';
 import { arrival, sourceFeedback, warmIntro } from './db/schema';
-import { recordFeedback } from './services/feedback';
+import { recordConflictLost, recordFeedback } from './services/feedback';
+import { sourceNames } from './services/sources';
 import { takeQualifiedLead } from './services/qualified-leads';
 
 /** Gives a new tenant its vendor sources, relationship defaults and waiting-expiry schedule. */
@@ -61,4 +63,33 @@ export const intakeLeadQualified = defineConsumer({
   event: leadQualified,
   orderedBy: (e) => e.data.contactId,
   handle: async (e, ctx) => takeQualifiedLead(ctx, e.data.connectionId, e.data.contactId),
+});
+
+/**
+ * A person kept one source's value over others (Ruling 8): each losing source hears about it on the arrival its
+ * fact came with, named after the winner (its vendor, else agent, else person). An edit names no loser.
+ */
+export const intakeConflictFeedback = defineConsumer({
+  name: 'intake.conflict_feedback',
+  event: conflictResolved,
+  orderedBy: (e) => e.data.accountId,
+  handle: async ({ id, data }, ctx) => {
+    if (data.losingSourceIds.length === 0) return;
+    const conflict = await getConflict(ctx, data.conflictId);
+    // Gone when a merge folded it into the survivor's open conflict on the same key: no feedback is written then.
+    if (!conflict) return;
+    const facts = new Map(conflict.facts.map((f) => [f.id, f]));
+    const winner = facts.get(data.keptFactId)?.sourceChain ?? {};
+    const names = await sourceNames(ctx, [winner.vendorSourceId, winner.agentSourceId, winner.personSourceId].filter((x): x is string => !!x));
+    const name = (sourceId?: string) => (sourceId ? names.get(sourceId) : undefined);
+    const factArrivalIds = data.archivedFactIds.map((f) => facts.get(f)?.arrivalId).filter((x): x is string => !!x);
+    await recordConflictLost(ctx, {
+      accountId: conflict.accountId,
+      factArrivalIds,
+      losingSourceIds: data.losingSourceIds,
+      winnerSourceName: name(winner.vendorSourceId) ?? name(winner.agentSourceId) ?? name(winner.personSourceId) ?? null,
+      byUserId: data.resolvedBy,
+      causeEventId: id,
+    });
+  },
 });

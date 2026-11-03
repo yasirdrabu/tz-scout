@@ -33,13 +33,13 @@ calls ACC); ACC's endpoints below are routed to SRC by the API layer, not by ACC
 | `person_role` | `person_id`, `role_key`, `origin` (`stated`, `guessed_from_title`, `set_by_person`), `set_by`, `set_at` | Many roles per person |
 | `person_alias` | `person_id`, `kind` (`email`, `merged_id`, `external_id`), `value`, `system` | |
 | `fact` | `id` (`fct_`), `tenant_id`, `account_id`, `person_id?`, `key`, `value` (JSON), `value_type`, `kind` (`firmographic`, `contact`, `research`, `custom`, `form_answer`), source chain ids, `arrival_id`, `url`, `note`, `observed_at`, `recorded_at`, `status` (`current`, `candidate`, `superseded`, `archived`), `pinned_by`, `pinned_at` | Every value ever said about an account or person |
-| `conflict` | `id` (`cfl_`), `tenant_id`, `account_id`, `person_id?`, `key`, `fact_ids[]`, `status` (`open`, `resolved`), `kept_fact_id`, `resolved_by`, `resolved_at`, `note` | |
+| `conflict` | `id` (`cfl_`), `tenant_id`, `account_id`, `person_id?`, `key`, `fact_ids[]`, `status` (`open`, `resolved`), `resolution` (`kept`, `edited`), `kept_fact_id`, `resolved_by`, `resolved_at`, `note`, `explanation`, `explanation_fact_ids[]`, `created_at` | One open conflict per (account, person, key), enforced by a partial unique index (ACC-E3) |
 | `signal` | `id` (`sig_`), `tenant_id`, `account_id`, `type`, `kind`, `title`, `detail`, `url`, `value`, `confidence` (0 to 1, from the source), `occurred_at`, source chain ids, `arrival_id`, `external_id`, `recorded_at`, `archived_at` | Dated reasons to buy |
 | `custom_field` | `tenant_id`, `key`, `label`, `type`, `options`, `practice_ids[]`, `show_in_brief`, `sort` | Definitions (ACC-E6) |
 | `buying_role` | `tenant_id`, `key`, `label`, `sort`, `archived` | Configurable list, seeded with defaults |
 | `exclusion_rule` | `tenant_id`, `key`, `label`, `kind`, `params`, `enabled` | ACC-E7 |
 | `exclusion_list` | `tenant_id`, `kind` (`vendor_keyword`, `parent_domain`, `parent_name`, `do_not_contact_domain`), `value` | The lists the exclusion rules read; editing one queues `accounts.exclusions.recheck` |
-| `account_summary` | `account_id`, `priority`, `fit`, `intent`, `tier`, `best_offer_id`, `practice_id`, `review_status_key`, `owner_user_id`, `stage`, `source_ids[]`, `last_signal_at`, `updated_at` | Read model for search, built from SCO, REV, SRC and CRM events. Also `score_version` and `review_version` (a scoring or routing snapshot applies only when its version is newer), `owner_history_user_ids[]` (current and past owners, for `own_accounts`), `review_flags[]` and `has_open_assignment` |
+| `account_summary` | `account_id`, `priority`, `fit`, `intent`, `tier`, `best_offer_id`, `practice_id`, `review_status_key`, `owner_user_id`, `stage`, `source_ids[]`, `last_signal_at`, `updated_at` | Read model for search, built from SCO, REV, SRC and CRM events. Also `score_version` and `review_version` (a scoring or routing snapshot applies only when its version is newer), `owner_history_user_ids[]` (current and past owners, for `own_accounts`), `review_flags[]`, `has_open_assignment` and `open_conflict_count` (written in the same transaction as detecting and resolving) |
 
 New id prefix: `cfl_` (conflict).
 
@@ -96,7 +96,7 @@ New id prefix: `cfl_` (conflict).
 | `accounts.fact.recorded` | `accountId`, `personId?`, `factId`, `key`, `kind`, `sourceChain`, `becameCurrent`, `arrivalId?` |
 | `accounts.signal.recorded` | `accountId`, `signalId`, `type` (fine type or null), `kind` (`research`, `trigger`, `pain`), `occurredAt`, `value?`, `confidence?`, `sourceChain`, `arrivalId?` |
 | `accounts.conflict.detected` | `conflictId`, `accountId`, `personId?`, `key`, `factIds[]`, `sourceIds[]` |
-| `accounts.conflict.resolved` | `conflictId`, `accountId`, `key`, `keptFactId`, `archivedFactIds[]`, `winningSourceIds[]`, `losingSourceIds[]`, `resolvedBy`, `note?` |
+| `accounts.conflict.resolved` | `conflictId`, `accountId`, `key`, `keptFactId`, `archivedFactIds[]`, `winningSourceIds[]`, `losingSourceIds[]`, `resolvedBy`, `resolution` (`kept`, or `edited` with no losing sources), `note?` |
 
 `arrivalId` is set when an arrival caused the event, so scoring can score that arrival once. The primary contact re-pick reads the best offer's target titles from Offers, so every caller gets the same answer.
 
@@ -114,8 +114,8 @@ As fixed in [public-api/index.md](../public-api/index.md):
 | `PATCH /api/v1/people/{id}` | `people:write` | Roles, title, contact fields, decision note |
 | `POST /api/v1/accounts/{id}/signals` | `signals:write` | Inline targeted arrival through SRC; returns `signal_id` |
 | `GET /api/v1/accounts/{id}/facts?field=` | `accounts:read` | All values with provenance |
-| `GET /api/v1/accounts/{id}/conflicts` | `accounts:read` | |
-| `POST /api/v1/conflicts/{id}:resolve` | `review:act` (people only) | `kept_fact_id`, `note` |
+| `GET /api/v1/accounts/{id}/conflicts` | `accounts:read` | Open conflicts and those resolved in the last 30 days; person contact conflicts need `people:read` |
+| `POST /api/v1/conflicts/{id}:resolve` | `review:act` (people only) | `kept_fact_id`, `note`. `400` when the fact is not in the conflict, `409` when the value was replaced; on a resolved conflict it switches the kept value |
 
 Committee coverage reaches agents through `get_account_brief` (PLB) and is not a separate endpoint.
 Merging is web-app only.
@@ -131,8 +131,9 @@ counts toward its trust, and the ids come back at once. Behaviour in
 ## AI tasks
 
 `conflict_explanation` (ACC-E3): a one-line, plain explanation of why two values may differ (different
-dates, one includes modules the other doesn't), citing the fact ids it relies on. With
-the Claude connection mode = mock, no explanation is shown.
+dates, one includes modules the other doesn't), citing the fact ids it relies on. It never names a
+winner and has no rules fallback: with the Claude connection mode = rules or mock, no explanation is
+stored or shown (Claude's call, 2026-11-02).
 
 ## Open questions
 

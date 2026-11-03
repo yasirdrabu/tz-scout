@@ -4,6 +4,7 @@ import { delay, http, HttpResponse } from 'msw';
 import { problem } from '../../test/http';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
+import type { RescoreRun } from './api';
 import { COASTLINE, COLUMNS, FACETS, MIAMI, PINEGATE, RESCORE, row, serveQueue } from './testing';
 
 const params = (href: string) => new URL(href, 'http://app').searchParams;
@@ -123,6 +124,84 @@ describe('Review queue', () => {
     expect(await screen.findByRole('region', { name: 'Scoring change' })).toHaveTextContent(
       'Priorities were recalculated with Fit 60%, buying intent 40%. 1 account changed tier.',
     );
+  });
+
+  const run: RescoreRun = { id: 'rsr_1', cause: 'rules_changed', total: 450, done: 120, started_at: new Date().toISOString(), finished_at: null, stalled: false };
+
+  it.each([
+    ['has found no accounts yet', { total: 0, done: 0 }],
+    ['has stalled', { stalled: true }],
+  ])('a run that %s shows the last-rescore summary, not progress', async (_, over) => {
+    serveQueue({ rescore: RESCORE, run: { ...run, ...over } });
+    renderApp('/t/taazaa/queue');
+    expect(await screen.findByRole('region', { name: 'Scoring change' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Rescore progress' })).toBeNull();
+    expect(screen.queryByText(/^Rescoring/)).toBeNull();
+  });
+
+  it.each([
+    ['keeps asking about a run with no accounts yet', { total: 0, done: 0 }, true],
+    ['stops asking about a stalled run', { stalled: true }, false],
+  ])('%s', async (_, over, polls) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const seen = serveQueue({ rescore: RESCORE, run: { ...run, ...over } });
+      renderApp('/t/taazaa/queue');
+      await screen.findByRole('region', { name: 'Scoring change' });
+      const before = seen['/api/v1/scoring/rescores/latest']!.length;
+      await act(() => vi.advanceTimersByTimeAsync(9_000));
+      const asked = seen['/api/v1/scoring/rescores/latest']!.length - before;
+      if (polls) expect(asked).toBeGreaterThanOrEqual(2);
+      else expect(asked).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says "1 account" for a run of one', async () => {
+    serveQueue({ run: { ...run, total: 1, done: 0 } });
+    renderApp('/t/taazaa/queue');
+    const progress = await screen.findByRole('region', { name: 'Rescore progress' });
+    expect(progress).toHaveTextContent(/^Rescoring 1 account0 of 1 rescored$/);
+  });
+
+  it('shows a running rescore with its progress every 3 seconds, then the last-rescore summary once it finishes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const seen = serveQueue({ rescore: null, run });
+      renderApp('/t/taazaa/queue');
+      const progress = await screen.findByRole('region', { name: 'Rescore progress' });
+      expect(progress).toHaveTextContent('Rescoring 450 accounts');
+      expect(progress).toHaveTextContent('120 of 450 rescored');
+      expect(screen.queryByRole('region', { name: 'Scoring change' })).toBeNull();
+
+      serveQueue({ rescore: null, run: { ...run, done: 400 } });
+      await act(() => vi.advanceTimersByTimeAsync(3_000));
+      expect(await screen.findByText('400 of 450 rescored')).toBeInTheDocument();
+
+      const later = serveQueue({ rescore: RESCORE, run: { ...run, done: 450, finished_at: new Date().toISOString() } });
+      await act(() => vi.advanceTimersByTimeAsync(3_000));
+      const banner = await screen.findByRole('region', { name: 'Scoring change' });
+      expect(banner).toHaveTextContent('Priorities were recalculated with Fit 60%, buying intent 40%. 12 accounts changed tier.');
+      expect(screen.queryByRole('region', { name: 'Rescore progress' })).toBeNull();
+      expect(seen['/api/v1/scoring/last-rescore']).toHaveLength(1);
+      expect(later['/api/v1/scoring/last-rescore']).toHaveLength(1);
+
+      // Finished: no more polling.
+      const after = later['/api/v1/scoring/rescores/latest']!.length;
+      await act(() => vi.advanceTimersByTimeAsync(9_000));
+      expect(later['/api/v1/scoring/rescores/latest']).toHaveLength(after);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not ask about rescore progress without review:act or scoring:manage', async () => {
+    const seen = serveQueue({ rescore: RESCORE, run, scopes: ['accounts:read'] });
+    renderApp('/t/taazaa/queue');
+    await screen.findByRole('region', { name: 'Scoring change' });
+    expect(seen['/api/v1/scoring/rescores/latest']).toBeUndefined();
+    expect(screen.queryByRole('region', { name: 'Rescore progress' })).toBeNull();
   });
 
   it('the banner links to Scoring weights only for scoring:manage', async () => {

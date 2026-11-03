@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, min, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, gt, gte, ilike, inArray, isNotNull, isNull, lte, min, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { account, accountAlias, accountSummary, signal } from '../db/schema';
@@ -49,6 +49,8 @@ export type SearchQuery = {
   accountIds?: string[];
   /** Accounts carrying any of these review flags. */
   reviewFlags?: string[];
+  /** Only accounts with a conflict still open. */
+  hasOpenConflicts?: boolean;
   /** The default queue view: no open assignment and (a status in unreviewedStatusKeys, or the declined_by_seller flag). Accounts doesn't know which statuses count as reviewed, so the caller passes the ones that don't. */
   queueDefault?: boolean;
   unreviewedStatusKeys?: string[];
@@ -82,6 +84,7 @@ export type SearchRow = {
   /** The offer someone picked over Scout's best (Decision 5), or null. */
   leadOfferOverrideId: string | null;
   noteCount: number;
+  openConflictCount: number;
 };
 
 /** The offer an account leads with (Decision 5): someone's pick, else Scout's best. The offer filter and facet use it. */
@@ -223,6 +226,7 @@ function filters(ctx: ModuleContext, q: SearchQuery): (SQL | undefined)[] {
     q.updatedSince ? gte(accountSummary.updatedAt, q.updatedSince) : undefined,
     q.accountIds ? (q.accountIds.length ? inArray(account.id, q.accountIds) : sql`false`) : undefined,
     q.reviewFlags ? (q.reviewFlags.length ? overlaps(accountSummary.reviewFlags, q.reviewFlags) : sql`false`) : undefined,
+    q.hasOpenConflicts ? gt(accountSummary.openConflictCount, 0) : undefined,
     q.queueDefault
       ? and(
           eq(accountSummary.hasOpenAssignment, false),
@@ -333,6 +337,7 @@ export async function search(ctx: ModuleContext, q: SearchQuery = {}): Promise<{
       sourceIds: accountSummary.sourceIds,
       leadOfferOverrideId: accountSummary.leadOfferOverrideId,
       noteCount: accountSummary.noteCount,
+      openConflictCount: accountSummary.openConflictCount,
       cursorKey: sql<string | null>`(${spec.expr})::text`,
     })
     .from(accountSummary)

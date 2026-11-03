@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, index, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, boolean, index, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Scoring schema. Every table here is a tenant table: `tenant_id` not null, row level security
@@ -113,4 +113,34 @@ export const scoreChange = scoring.table(
     at: at('at').notNull().defaultNow(),
   },
   (t) => [index('score_change_account_at_idx').on(t.tenantId, t.accountId, sql`${t.at} desc`)],
+);
+
+/** One tenant-wide rescore (Ruling 12): how many accounts its pages found and how many are scored. A count, no account data. */
+export const rescoreRun = scoring.table(
+  'rescore_run',
+  {
+    id: text('id').primaryKey(), // rsr_
+    tenantId: text('tenant_id').notNull(),
+    cause: text('cause').notNull(),
+    filter: jsonb('filter').notNull(),
+    requestedBy: text('requested_by'), // the person who asked; null when a trigger started it
+    total: integer('total').notNull().default(0), // added to by each page
+    done: integer('done').notNull().default(0), // added to by each accounts message
+    pagingDone: boolean('paging_done').notNull().default(false),
+    startedAt: at('started_at').notNull().defaultNow(),
+    finishedAt: at('finished_at'),
+    updatedAt: at('updated_at').notNull().defaultNow(), // bumped on every count, so a run that stopped counting can be seen
+  },
+  (t) => [index('rescore_run_started_idx').on(t.tenantId, sql`${t.startedAt} desc`)],
+);
+
+/** The page and accounts messages a run has counted, so a message delivered again counts once (Review Focus 5). */
+export const rescoreRunPart = scoring.table(
+  'rescore_run_part',
+  {
+    tenantId: text('tenant_id').notNull(),
+    runId: text('run_id').notNull(),
+    partKey: text('part_key').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.runId, t.partKey] })],
 );

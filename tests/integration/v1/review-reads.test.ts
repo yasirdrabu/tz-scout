@@ -1,3 +1,4 @@
+import { inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as exportRoute } from '@/http/routes/v1/accounts/export/route';
 import { GET as accountFacetsRoute } from '@/http/routes/v1/accounts/facets/route';
@@ -9,8 +10,11 @@ import { GET as accountsRoute } from '@/http/routes/v1/accounts/route';
 import { DELETE as resetColumns, GET as getColumns, PUT as putColumns } from '@/http/routes/v1/me/preferences/review-queue-columns/route';
 import { GET as facetsRoute } from '@/http/routes/v1/review-queue/facets/route';
 import { GET as queueRoute } from '@/http/routes/v1/review-queue/route';
+import { GET as conflictsRoute } from '@/http/routes/v1/accounts/[id]/conflicts/route';
+import { POST as conflictAction } from '@/http/routes/v1/conflicts/[id]/route';
 import { activity, deal } from '@/modules/crm/db/schema';
 import { stageChange } from '@/modules/routing/db/schema';
+import { accountScore } from '@/modules/scoring/db/schema';
 import { setPrincipalCacheTtl } from '@/modules/tenancy';
 import { closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
@@ -69,6 +73,22 @@ describe('GET /review-queue rows (screens.md §2)', () => {
     await w.deliver();
     row = (await json(w.as(leader, queueRoute, 'review-queue'))).data.find((r: Row) => r.account_id === a);
     expect(row).toMatchObject({ review_status_label: 'In review', review_status_color: 'amber', status_changed_by_name: 'Dana Leader' });
+  });
+
+  it('counts open conflicts, filters by flag=conflicts, and drops to 0 once resolved', async () => {
+    const domain = `${newId('acc').slice(-10).toLowerCase()}-example.com`;
+    const second = await personAndAgent(w.tenant, 'Disputer');
+    const a = await w.sent({ name: 'Disputed Co', domain, employees: 1000 });
+    expect(await w.sent({ name: 'Disputed Co', domain, employees: 2000 }, second.agentId)).toBe(a);
+    const calm = await w.sent({ name: 'Calm Co' });
+    const rowsOf = async (qs = '') => (await json(w.as(leader, queueRoute, `review-queue${qs}`))).data as Row[];
+    expect((await rowsOf()).find((r) => r.account_id === a)).toMatchObject({ conflict_count: 1 });
+    expect((await rowsOf()).find((r) => r.account_id === calm)).toMatchObject({ conflict_count: 0 });
+    expect((await rowsOf('?flag=conflicts')).map((r) => r.account_id)).toEqual([a]);
+    const [c] = (await json(w.as(leader, conflictsRoute, `accounts/${a}/conflicts`))).data as { id: string; facts: { id: string }[] }[];
+    expect((await w.as(leader, conflictAction, `conflicts/${c!.id}:resolve`, 'POST', { kept_fact_id: c!.facts[0]!.id })).status).toBe(200);
+    expect((await rowsOf()).find((r) => r.account_id === a)).toMatchObject({ conflict_count: 0 });
+    expect(await rowsOf('?flag=conflicts')).toEqual([]);
   });
 
   it('updated_since narrows to rows that changed; a bad value is a 400', async () => {
@@ -323,5 +343,54 @@ describe('All accounts: GET /accounts, /accounts/facets, /accounts/export (scree
     expect((await call(exportRoute, await keyFor(w.tenant, ['review:act']), 'accounts/export')).status).toBe(403);
     const theirs = await other.as(other.owner, exportRoute, `accounts/export?source_id=${src.agentId}`);
     expect(theirs.headers.get('x-scout-row-count')).toBe('0');
+  });
+});
+
+describe('All accounts: estimated value (Ruling 13)', () => {
+  let src: { personId: string; agentId: string };
+  let estimated: string;
+  let withDeal: string;
+  let noPotential: string;
+
+  const score = (tenantId: string, accountId: string, revenuePotentialCents: number | null) => ({
+    tenantId,
+    accountId,
+    fit: 50,
+    intent: 50,
+    matchTotal: 50,
+    priority: 50,
+    tier: 'warm',
+    tierReason: 'computed',
+    scoredTier: 'warm',
+    revenuePotentialCents,
+    revenueBand: revenuePotentialCents === null ? null : 'medium',
+    explanation: {},
+    inputsHash: 'h',
+    profileVersion: 1,
+  });
+
+  beforeAll(async () => {
+    src = await personAndAgent(w.tenant, 'Estimator');
+    estimated = await w.sent({ name: 'Estimated Co' }, src.agentId);
+    withDeal = await w.sent({ name: 'Deal Co' }, src.agentId);
+    noPotential = await w.sent({ name: 'No Size Co' }, src.agentId);
+    await w.run(async (ctx) => {
+      await ctx.tx.delete(accountScore).where(inArray(accountScore.accountId, [estimated, withDeal, noPotential]));
+      await ctx.tx.insert(accountScore).values([score(ctx.tenantId, estimated, 7_500_000), score(ctx.tenantId, withDeal, 9_900_000), score(ctx.tenantId, noPotential, null)]);
+      await ctx.tx.insert(deal).values({ id: newId('dea'), tenantId: ctx.tenantId, accountId: withDeal, system: 'hubspot', externalId: newId('evt'), name: 'Real deal', status: 'open', amountCents: 1_200_000, currency: 'USD', openedAt: new Date() });
+    });
+  });
+
+  it('a row with no deal shows the best offer deal size as an estimate; a deal wins; no deal size shows nothing', async () => {
+    const body = await json(w.as(leader, accountsRoute, `accounts?source_id=${src.agentId}`));
+    const by = (id: string) => body.data.find((r: Row) => r.account_id === id);
+    expect(by(estimated).value).toEqual({ amount_cents: 7_500_000, currency: 'USD', kind: 'estimated', deal_name: null });
+    expect(by(withDeal).value).toMatchObject({ amount_cents: 1_200_000, kind: 'open_deal' });
+    expect(by(noPotential).value).toBeNull();
+  });
+
+  it('the CSV value kind is Estimated', async () => {
+    const lines = (await (await w.as(leader, exportRoute, `accounts/export?source_id=${src.agentId}`)).text()).trim().split('\r\n');
+    expect(lines.find((l) => l.includes('Estimated Co'))).toContain('75000.00,USD,Estimated');
   });
 });

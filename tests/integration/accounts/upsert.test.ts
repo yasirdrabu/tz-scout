@@ -278,6 +278,7 @@ describe('practices, research tier, undated signals, exclusion, trust and source
         return chain.agentSourceId === 'src_high' ? 0.8 : 0.6;
       },
       sourcesForAccount: async () => [],
+      sourceNames: async () => new Map(),
     });
     const high = { personSourceId: 'src_person1', agentSourceId: 'src_high' };
     const low = { personSourceId: 'src_person1', agentSourceId: 'src_low' };

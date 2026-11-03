@@ -1,14 +1,17 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
-// A test can name accounts whose scoring throws; every other account scores as usual.
+// A test can name accounts whose scoring throws (or is refused with a 409); every other account scores as usual.
 const failing = vi.hoisted(() => new Set<string>());
+const refused = vi.hoisted(() => new Set<string>());
 vi.mock('@/modules/scoring/services/score', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/modules/scoring/services/score')>();
+  const { ScoutError } = await import('@/platform/errors');
   return {
     ...real,
     scoreAccount: (...args: Parameters<typeof real.scoreAccount>) => {
       if (failing.has(args[1])) throw new Error('boom');
+      if (refused.has(args[1])) throw new ScoutError({ slug: 'conflict', status: 409, title: 'Refused.' });
       return real.scoreAccount(...args);
     },
   };
@@ -23,8 +26,9 @@ import { arrivalRejected, arrivalResolved, sourceTrustChanged } from '@/modules/
 import { approveOffer, archiveOffer, createOffer, createPractice, listApprovedOffers } from '@/modules/offers';
 import { offerChanged } from '@/modules/offers/contracts/events';
 import { getScore, requestRescore, scoreAccount, setTierOverride, updateProfile } from '@/modules/scoring';
-import { accountScore, offerMatch, scoreChange } from '@/modules/scoring/db/schema';
+import { accountScore, offerMatch, rescoreRun, scoreChange } from '@/modules/scoring/db/schema';
 import { ageingPage, rescoreAccounts } from '@/modules/scoring/services/rescore';
+import { latestRescore } from '@/modules/scoring/services/rescore-runs';
 import type { ModuleContext } from '@/platform/context';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
@@ -37,6 +41,7 @@ afterAll(closeDbs);
 afterEach(() => {
   vi.restoreAllMocks();
   failing.clear();
+  refused.clear();
 });
 
 type Tenant = Awaited<ReturnType<typeof freshTenant>>;
@@ -94,6 +99,7 @@ const outboxOf = async (t: Tenant, type: string) =>
       sql`select payload from platform.outbox where tenant_id = ${t.tenantId} and payload->>'type' = ${type} order by seq`,
     )) as unknown as { payload: { id: string; data: Record<string, unknown> } }[]
   ).map((r) => r.payload);
+const runOf = async (t: Tenant, id: string) => (await t.run((ctx) => ctx.tx.select().from(rescoreRun).where(eq(rescoreRun.id, id))))[0]!;
 const scoredEvents = async (t: Tenant, accountId: string) =>
   (await outboxOf(t, 'scoring.account.scored')).filter((p) => p.data.accountId === accountId).map((p) => p.data);
 
@@ -409,12 +415,108 @@ describe('paging', () => {
     );
     await seed(t); // outside the practice filter
     await runOutbox(t.tenantId);
-    await t.run((ctx) => requestRescore(ctx, { practiceId: practice.id }));
+    const { runId } = await t.run((ctx) => requestRescore(ctx, { practiceId: practice.id }));
+    expect(await runOf(t, runId)).toMatchObject({ cause: 'manual_rescore', filter: { practiceId: practice.id }, total: 0, done: 0, pagingDone: false, finishedAt: null });
     await runOutbox(t.tenantId);
     const jobs = await outboxOf(t, 'jobs.scoring.rescore.accounts');
     expect(jobs.map((j) => (j.data.accountIds as string[]).length)).toEqual([200, 200, 50]);
+    expect(jobs.every((j) => j.data.runId === runId)).toBe(true);
     expect(await t.run((ctx) => ctx.tx.select().from(accountScore))).toHaveLength(450);
+    const done = await runOf(t, runId);
+    expect(done).toMatchObject({ total: 450, done: 450, pagingDone: true, finishedAt: expect.any(Date) });
+
+    // Review Focus 5: an accounts message delivered again counts nothing more.
+    await t.run((ctx) => rescoreAccounts(ctx, jobs[2]!.data.accountIds as string[], 'manual_rescore', runId));
+    expect(await runOf(t, runId)).toMatchObject({ total: 450, done: 450, finishedAt: done.finishedAt });
+    expect(await t.run((ctx) => latestRescore(ctx))).toEqual({
+      id: runId,
+      cause: 'manual_rescore',
+      total: 450,
+      done: 450,
+      startedAt: done.startedAt,
+      finishedAt: done.finishedAt,
+      stalled: false,
+    });
   }, 120_000);
+});
+
+describe('rescore runs (Ruling 12)', () => {
+  it('Review Focus 5: the last message fails and retries; done never passes total and finished_at is set once', async () => {
+    const { t, practice } = await world();
+    await approved(t, practice.id, 'Lead');
+    await runOutbox(t.tenantId);
+    const [one, bad, three] = [await seed(t, [practice.id]), await seed(t, [practice.id]), await seed(t, [practice.id])];
+    await runOutbox(t.tenantId);
+    failing.add(bad.accountId);
+    const { runId } = await t.run((ctx) => requestRescore(ctx, { practiceId: practice.id }));
+    // The page message, then the accounts message (two scored, the bad one queued alone), then that one fails.
+    await expect(runOutbox(t.tenantId)).rejects.toThrow('boom');
+    expect(await runOf(t, runId)).toMatchObject({ total: 3, done: 2, pagingDone: true, finishedAt: null });
+    failing.clear();
+    await runOutbox(t.tenantId);
+    const finished = await runOf(t, runId);
+    expect(finished).toMatchObject({ total: 3, done: 3, finishedAt: expect.any(Date) });
+    // The single-account message delivered again, and the first message again: still 3, finished at the same time.
+    await t.run((ctx) => rescoreAccounts(ctx, [bad.accountId], 'manual_rescore', runId));
+    await t.run((ctx) => rescoreAccounts(ctx, [one.accountId, bad.accountId, three.accountId], 'manual_rescore', runId));
+    expect(await runOf(t, runId)).toMatchObject({ total: 3, done: 3, finishedAt: finished.finishedAt });
+  });
+
+  it('a lone account refused with a 4xx is settled, not retried, so the run finishes', async () => {
+    const { t, practice } = await world();
+    await approved(t, practice.id, 'Lead');
+    await runOutbox(t.tenantId);
+    const [, bad] = [await seed(t, [practice.id]), await seed(t, [practice.id]), await seed(t, [practice.id])];
+    await runOutbox(t.tenantId);
+    refused.add(bad.accountId);
+    const { runId } = await t.run((ctx) => requestRescore(ctx, { practiceId: practice.id }));
+    await runOutbox(t.tenantId);
+    expect(await current(t, bad.accountId)).toBeUndefined();
+    const run = await runOf(t, runId);
+    expect(run).toMatchObject({ total: 3, done: 3, finishedAt: expect.any(Date) });
+    expect(run.updatedAt.getTime()).toBeGreaterThan(run.startedAt.getTime());
+  });
+
+  it('a run with every page listed that counts nothing for 15 minutes is stalled', async () => {
+    const { t, practice } = await world();
+    await approved(t, practice.id, 'Lead');
+    await runOutbox(t.tenantId);
+    const bad = await seed(t, [practice.id]);
+    await runOutbox(t.tenantId);
+    failing.add(bad.accountId);
+    const { runId } = await t.run((ctx) => requestRescore(ctx, { practiceId: practice.id }));
+    await expect(runOutbox(t.tenantId)).rejects.toThrow('boom');
+    const { updatedAt } = await runOf(t, runId);
+    const at = (minutes: number) => new Date(updatedAt.getTime() + minutes * 60_000);
+    expect(await t.run((ctx) => latestRescore(ctx, at(14)))).toMatchObject({ id: runId, finishedAt: null, stalled: false });
+    expect(await t.run((ctx) => latestRescore(ctx, at(16)))).toMatchObject({ id: runId, finishedAt: null, stalled: true });
+    // Still paging: not stalled, however long since the last count.
+    await t.run((ctx) => ctx.tx.update(rescoreRun).set({ pagingDone: false }).where(eq(rescoreRun.id, runId)));
+    expect(await t.run((ctx) => latestRescore(ctx, at(16)))).toMatchObject({ stalled: false });
+  });
+
+  it('an empty filter finishes at once with nothing to do; a message without a run id still scores', async () => {
+    const { t, practice } = await world();
+    const { runId } = await t.run((ctx) => requestRescore(ctx, { practiceId: practice.id }));
+    await runOutbox(t.tenantId);
+    expect(await runOf(t, runId)).toMatchObject({ total: 0, done: 0, pagingDone: true, finishedAt: expect.any(Date) });
+    const a = await seed(t);
+    await runOutbox(t.tenantId);
+    await t.run((ctx) => rescoreAccounts(ctx, [a.accountId], 'manual_rescore'));
+    expect(await current(t, a.accountId)).toBeDefined();
+  });
+
+  it('a tenant-wide trigger records a run; latest is the newest run of the last 24 hours, of this tenant only', async () => {
+    const { t } = await world();
+    const other = await world();
+    expect(await t.run((ctx) => latestRescore(ctx))).toBeNull();
+    await t.run((ctx) => updateProfile(ctx, { weights: { fit: 50, intent: 30, revenue: 10, trust: 10 } }));
+    await runOutbox(t.tenantId);
+    const latest = await t.run((ctx) => latestRescore(ctx));
+    expect(latest).toMatchObject({ id: expect.stringMatching(/^rsr_/), cause: 'rules_changed', finishedAt: expect.any(Date) });
+    expect(await other.t.run((ctx) => latestRescore(ctx))).toBeNull();
+    expect(await t.run((ctx) => latestRescore(ctx, new Date(Date.now() + 25 * 3_600_000)))).toBeNull();
+  });
 });
 
 describe('merge', () => {

@@ -41,27 +41,59 @@ pins, trust or facts change.
 
 ### Conflicts
 
-A conflict opens when a new fact from a **different** source differs from the current value beyond
-the key's tolerance:
+A conflict opens when a live fact from a **different** source chain differs from the current value
+beyond the key's tolerance:
 
-| Value type | Tolerance (default, editable per key in Settings) |
-|---|---|
-| Count (`employees`) | differs by more than 20% |
-| Money (`revenue_cents`, `contract_value_cents`) | more than 25% for revenue, 10% for other money |
-| Range (`employees_range`) | ranges don't overlap |
-| Category (`industry_key`, `hq_country`, select custom fields) | different value |
-| Email, phone, title | different value after normalising |
-| Free text, lists | never |
+| Value type | Keys | Tolerance (default) |
+|---|---|---|
+| Count | `employees` | differs by more than 20% |
+| Money | `revenue_cents` | more than 25% |
+| Money | `contract_value_cents`, `budget_cents`, `price_cents` | more than 10% |
+| Category | `industry_key`, `hq_country` | different value |
+| Contact (person) | `email`, `phone`, `mobile_phone`, `title` | different after normalising: trimmed and lower case; phones digits only |
 
+- Tolerances are defaults in code only. There is no Settings table or screen for them in R2 (Claude's
+  call, 2026-11-02).
+- Only the keys in the table can conflict. Every other key never does, including ranges
+  (`employees_min`/`max`, `revenue_min`/`max_cents`), lists and free text (Claude's call, 2026-11-02).
+- The percent difference is `|a - b| / max(|a|, |b|)`. 3,000 vs 3,500 employees is 14.3%, so no
+  conflict; $20.9M vs $18.4M contract value is 12.0%, so a conflict (Claude's call, 2026-11-02).
+- There is one open conflict per (account, person, key); further disagreeing facts join its
+  `fact_ids` (Claude's call, 2026-11-02).
+- A losing source sending again the value it lost (same chain, equal to one of its `archived` facts
+  for the key) is stored as `archived` and opens nothing (Claude's call, 2026-11-02).
+- Detection runs when facts arrive or are edited, from R2a on, for the keys the new facts touched (a
+  touched fact must take part in the conflict). There is no backfill of older facts (Claude's call,
+  2026-11-02).
 - While open, the current value follows the picking rule and the page marks it "Sources disagree".
+  `account_summary.open_conflict_count` counts open conflicts, written in the same transaction as
+  detecting and resolving; the queue shows it and `flag=conflicts` filters on it (Claude's call,
+  2026-11-02).
 - AI task `conflict_explanation` adds one line on why the values may differ ("The $20.9M figure includes
   the PASS modules; the $18.4M figure is the base contract"), citing the fact ids it used. It never
-  picks a winner.
-- Resolving: a person with `review:act` keeps one fact (API keys can't resolve conflicts, even with
-  that scope). The kept fact is pinned; the others are
-  `archived`. A note is optional.
-- `accounts.conflict.resolved` carries the winning and losing source ids; SRC records feedback to the
-  losing sources and lowers their trust by 0.01 (SRC-E1).
+  names a winner. There is no rules fallback: in `rules` or `mock` mode no explanation is stored or
+  shown, and a stored one is cleared when the conflict gains a fact (Claude's call, 2026-11-02).
+- Resolving: `POST /api/v1/conflicts/{id}:resolve` `{kept_fact_id, note?}`. A person with `review:act`
+  keeps one fact (API keys can't resolve conflicts, even with that scope). The kept fact is pinned; the
+  conflict's other facts are `archived`, and the conflict closes. A note is optional. A `kept_fact_id`
+  not in the conflict is `400`; a value replaced since the page loaded is `409` (Claude's call,
+  2026-11-02).
+- Resolving a resolved conflict switches the kept value ("Kept by {name} · Change"): the archived fact
+  becomes the pinned one and the old pin is archived (Claude's call, 2026-11-02).
+- Only the key's newest conflict can be changed. Changing an older one is `409` "A newer disagreement
+  about this value has been settled since. Change that one instead.", and the page offers `Change` on
+  the newest only (Claude's call, 2026-11-02).
+- (Claude's call, 2026-11-02) A conflict stays open until a person keeps a value, even if the sources
+  later agree.
+- A person editing a key that has an open conflict closes it with `resolution: 'edited'`. The edit's
+  fact is kept and the conflict's facts are archived. No source lost, so no source is penalised
+  (Claude's call, 2026-11-02).
+- `GET /api/v1/accounts/{id}/conflicts` lists open conflicts and those resolved in the last 30 days.
+  Person contact conflicts (`email`, `phone`, `mobile_phone`) are left out for a user without
+  `people:read`, as their facts are.
+- `accounts.conflict.resolved` carries the winning and losing source ids; SRC records `conflict_lost`
+  feedback for each losing source's arrival. In R2 that is all: the 0.01 trust drop (SRC-E1) arrives
+  with trust from outcomes in R3b (Claude's call, 2026-11-02).
 - A later fact that agrees with the kept value closes nothing new; one that differs opens a new
   conflict against the pinned value.
 
@@ -85,7 +117,7 @@ As a leader, I want Scout to flag when sources disagree, so that I don't act on 
 - ACC-E3-S3-AC1 Unit tests for each tolerance in the table, including "3,000 vs 3,500 employees" (no
   conflict) and "$20.9M vs $18.4M contract value" (conflict).
 - ACC-E3-S3-AC2 Detection publishes `accounts.conflict.detected`; the account page shows both values
-  side by side with source, date and trust, and buttons "Keep $20.9M" and "Keep $18.4M".
+  side by side with source and date, each other value with `Keep this one` (screens.md §4a).
 
 ### ACC-E3-S4 Resolve a conflict
 As a leader, I want to keep one value and archive the other, so that the account is right and the

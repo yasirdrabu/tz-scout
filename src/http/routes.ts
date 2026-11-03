@@ -13,6 +13,7 @@ import * as v1AccountsIdAssignments from './routes/v1/accounts/[id]/assignments/
 import * as v1AccountsIdBriefSectionsKey from './routes/v1/accounts/[id]/brief/sections/[key]/route';
 import * as v1AccountsIdBrief from './routes/v1/accounts/[id]/brief/route';
 import * as v1AccountsIdChanges from './routes/v1/accounts/[id]/changes/route';
+import * as v1AccountsIdConflicts from './routes/v1/accounts/[id]/conflicts/route';
 import * as v1AccountsIdCrmCheck from './routes/v1/accounts/[id]/crm-check/route';
 import * as v1AccountsIdExclusionOverride from './routes/v1/accounts/[id]/exclusion-override/route';
 import * as v1AccountsIdFacts from './routes/v1/accounts/[id]/facts/route';
@@ -64,6 +65,7 @@ import * as v1BatchesId from './routes/v1/batches/[id]/route';
 import * as v1Batches from './routes/v1/batches/route';
 import * as v1CaseStudiesId from './routes/v1/case-studies/[id]/route';
 import * as v1CaseStudies from './routes/v1/case-studies/route';
+import * as v1ConflictsId from './routes/v1/conflicts/[id]/route';
 import * as v1CrmResource from './routes/v1/crm/[resource]/route';
 import * as v1DevUsers from './routes/v1/dev/users/route';
 import * as v1Feedback from './routes/v1/feedback/route';
@@ -105,6 +107,7 @@ import * as v1RolesRole from './routes/v1/roles/[role]/route';
 import * as v1Roles from './routes/v1/roles/route';
 import * as v1ScoringProfileAction from './routes/v1/scoring/[profile]/route';
 import * as v1ScoringLastRescore from './routes/v1/scoring/last-rescore/route';
+import * as v1ScoringRescoresLatest from './routes/v1/scoring/rescores/latest/route';
 import * as v1ScoringProfileReset from './routes/v1/scoring/profile/reset/route';
 import * as v1ScoringProfile from './routes/v1/scoring/profile/route';
 import * as v1SettingsSetting from './routes/v1/settings/[setting]/route';
@@ -152,6 +155,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/accounts/:id/brief/sections/:key`, module: v1AccountsIdBriefSectionsKey },
   { path: `${V1}/accounts/:id/brief`, module: v1AccountsIdBrief },
   { path: `${V1}/accounts/:id/changes`, module: v1AccountsIdChanges },
+  { path: `${V1}/accounts/:id/conflicts`, module: v1AccountsIdConflicts },
   { path: `${V1}/accounts/:id/crm-check`, module: v1AccountsIdCrmCheck },
   { path: `${V1}/accounts/:id/exclusion-override`, module: v1AccountsIdExclusionOverride },
   { path: `${V1}/accounts/:id/facts`, module: v1AccountsIdFacts },
@@ -203,6 +207,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/batches`, module: v1Batches },
   { path: `${V1}/case-studies/:id`, module: v1CaseStudiesId },
   { path: `${V1}/case-studies`, module: v1CaseStudies },
+  { path: `${V1}/conflicts/:id`, module: v1ConflictsId },
   { path: `${V1}/crm/:resource`, module: v1CrmResource },
   { path: `${V1}/dev/users`, module: v1DevUsers },
   { path: `${V1}/feedback`, module: v1Feedback },
@@ -244,6 +249,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/roles`, module: v1Roles },
   { path: `${V1}/scoring/:profile`, module: v1ScoringProfileAction },
   { path: `${V1}/scoring/last-rescore`, module: v1ScoringLastRescore },
+  { path: `${V1}/scoring/rescores/latest`, module: v1ScoringRescoresLatest },
   { path: `${V1}/scoring/profile/reset`, module: v1ScoringProfileReset },
   { path: `${V1}/scoring/profile`, module: v1ScoringProfile },
   { path: `${V1}/settings/:setting`, module: v1SettingsSetting },

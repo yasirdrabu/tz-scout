@@ -138,6 +138,7 @@ describe('people-only edits', () => {
     registerSourceInfoProvider({
       getTrust: async (_c, chain) => (chain.agentSourceId === 'src_high' ? 0.95 : 0.6),
       sourcesForAccount: async () => [],
+      sourceNames: async () => new Map(),
     });
     await t.run((ctx) =>
       upsertFromArrival(ctx, arrival({ sourceChain: { personSourceId: 'src_p', agentSourceId: 'src_high' }, account: { employees: 900 } }), out.accountId),

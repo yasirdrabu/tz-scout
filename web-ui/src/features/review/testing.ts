@@ -2,7 +2,7 @@ import { http, HttpResponse } from 'msw';
 import { exactly } from '../../test/http';
 import { serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
-import type { Columns, LastRescore, QueueFacets, QueueRow, Reason, ReviewStatus, Sellers } from './api';
+import type { Columns, LastRescore, QueueFacets, QueueRow, Reason, RescoreRun, ReviewStatus, Sellers } from './api';
 
 // Fixtures in the API's shapes (snake_case), for the review screens' tests.
 
@@ -162,7 +162,9 @@ export const RESCORE: LastRescore = {
   tier_changed_count: 12,
 };
 
-export function serveQueue(opts: { rows?: QueueRow[]; facets?: QueueFacets; scopes?: string[]; rescore?: LastRescore | null } = {}) {
+export function serveQueue(
+  opts: { rows?: QueueRow[]; facets?: QueueFacets; scopes?: string[]; rescore?: LastRescore | null; run?: RescoreRun | null } = {},
+) {
   const seen: Record<string, URL[]> = {};
   const note = (req: Request) => {
     const u = new URL(req.url);
@@ -181,6 +183,10 @@ export function serveQueue(opts: { rows?: QueueRow[]; facets?: QueueFacets; scop
     http.get('/api/v1/scoring/last-rescore', ({ request }) => {
       note(request);
       return HttpResponse.json({ data: opts.rescore ?? null });
+    }),
+    http.get('/api/v1/scoring/rescores/latest', ({ request }) => {
+      note(request);
+      return HttpResponse.json({ data: opts.run ?? null });
     }),
     http.get('/api/v1/me/preferences/review-queue-columns', () => HttpResponse.json(COLUMNS)),
     http.get('/api/v1/settings/review/statuses', () => HttpResponse.json({ data: STATUSES })),

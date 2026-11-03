@@ -5,9 +5,10 @@ import { accepted, v1Route } from '../_lib/v1-route';
 
 const body = z.strictObject({ practice_id: z.string().optional(), source_id: z.string().optional() });
 
-/** SCO-E5-S4: rescores the whole tenant, or one practice or source. Progress is R2 (Ruling 18), so this returns the job id. */
+/** SCO-E5-S4: rescores the whole tenant, or one practice or source. Returns the job id and the run's id; GET /scoring/rescores/latest shows its progress. */
 export const POST = v1Route({ permission: 'scoring:manage' }, async (req, _principal, ctx) => {
   const empty = (await req.clone().text()).trim() === '';
   const filter = empty ? {} : await parseBody<{ practiceId?: string; sourceId?: string }>(req, body);
-  return accepted({ jobId: await requestRescore(ctx, filter) });
+  const { jobId, runId } = await requestRescore(ctx, filter);
+  return accepted({ jobId, rescoreId: runId });
 });

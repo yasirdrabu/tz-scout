@@ -5,7 +5,7 @@ import { server } from '../../test/server';
 import type { AccountReview } from '../review/api';
 import { LEADER, REASONS, SELLERS, STATUSES } from '../review/testing';
 import type { StagesView } from '../settings/stages/api';
-import type { AccountDetail, AccountScore, Brief, BriefSection, CrmCheck, Fact, Handoffs } from './api';
+import type { AccountDetail, AccountScore, Brief, BriefSection, Conflict, CrmCheck, Fact, Handoffs } from './api';
 
 // Fixtures in the API's shapes (snake_case), for the account page's tests.
 
@@ -100,6 +100,35 @@ export const FACTS: Fact[] = [
   { id: 'fct_3', person_id: 'per_jr', key: 'email', label: 'Email', value: 'jr@miamidade.gov', observed_at: '2026-10-01T12:00:00Z', source_names: { person: null, agent: null, vendor: null } },
 ];
 
+/** Contract value: GovSpend's $20.9M is current; RFP Watch's $18.4M is 12% apart (Ruling 3). */
+export const CONTRACT_FACT: Fact = {
+  id: 'fct_cv1',
+  person_id: null,
+  key: 'contract_value_cents',
+  label: 'Contract value',
+  value: 2_090_000_000,
+  observed_at: '2026-10-01T12:00:00Z',
+  source_names: { person: 'Marcus Lee', agent: null, vendor: 'GovSpend' },
+};
+
+export const CONFLICT: Conflict = {
+  id: 'cfl_1',
+  key: 'contract_value_cents',
+  label: 'Contract value',
+  person_id: null,
+  status: 'open',
+  resolution: null,
+  kept_fact_id: null,
+  resolved_by_name: null,
+  resolved_at: null,
+  note: null,
+  explanation: null,
+  facts: [
+    { id: 'fct_cv1', value: 2_090_000_000, observed_at: '2026-10-01T12:00:00Z', source_names: CONTRACT_FACT.source_names, trust: 0.6, status: 'current' },
+    { id: 'fct_cv2', value: 1_840_000_000, observed_at: '2026-10-10T12:00:00Z', source_names: { person: 'Marcus Lee', agent: 'RFP Watch', vendor: null }, trust: 0.6, status: 'candidate' },
+  ],
+};
+
 const section = (s: Partial<BriefSection> & Pick<BriefSection, 'key' | 'title'>): BriefSection => ({
   body: `${s.title} text.`,
   citations: [],
@@ -154,7 +183,7 @@ export function serveCoastline() {
   server.use(
     http.get('/api/v1/accounts/acc_ccu', () => HttpResponse.json({ ...ACCOUNT, id: 'acc_ccu', name: 'Coastline Credit Union', people: [], signals: [] })),
     http.get('/api/v1/accounts/acc_ccu/review', () => HttpResponse.json({ ...REVIEW, account_id: 'acc_ccu' })),
-    http.get(/\/api\/v1\/accounts\/acc_ccu\/(score|brief|facts|crm-check|notes)$/, () => problem(404, 'That account was not found.')),
+    http.get(/\/api\/v1\/accounts\/acc_ccu\/(score|brief|facts|conflicts|crm-check|notes)$/, () => problem(404, 'That account was not found.')),
   );
 }
 
@@ -186,6 +215,7 @@ export type Served = {
   crm?: CrmCheck;
   handoffs?: Handoffs;
   stages?: StagesView;
+  conflicts?: Conflict[];
 };
 
 /** Everything the account page reads, answered; returns the request bodies seen per path. */
@@ -196,6 +226,8 @@ export function serveAccount(opts: Served = {}) {
     const text = await req.text();
     (sent[u.pathname] ??= []).push(text ? JSON.parse(text) : null);
   };
+  // Resolving keeps the chosen fact as Zach, so the refetch reads "Kept by Zach Wiant".
+  let conflicts = opts.conflicts ?? [];
   serveMe({ taazaa: { scopes: opts.scopes ?? PAGE_LEADER, user: { id: 'usr_zach', name: 'Zach Wiant', email: 'zach@taazaa.com' } } });
   server.use(
     http.get('/api/v1/stages', () => HttpResponse.json(opts.stages ?? STAGES)),
@@ -217,6 +249,17 @@ export function serveAccount(opts: Served = {}) {
     http.get('/api/v1/settings/review/reasons', () => HttpResponse.json({ data: REASONS })),
     http.get('/api/v1/assignable-sellers', () => HttpResponse.json(SELLERS)),
     http.post(exactly('/api/v1/accounts/acc_mdc:assign-preview'), () => HttpResponse.json({ preflight: { result: 'new', message: 'New in the CRM' }, approves_to: null, replaces: null })),
+    http.get('/api/v1/accounts/acc_mdc/conflicts', () => HttpResponse.json({ data: conflicts, next_cursor: null })),
+    http.post(/\/api\/v1\/conflicts\/[^/]+:resolve$/, async ({ request }) => {
+      const { pathname } = new URL(request.url);
+      await note(request);
+      const id = decodeURIComponent(pathname.slice('/api/v1/conflicts/'.length, -':resolve'.length));
+      const { kept_fact_id } = sent[pathname]!.at(-1) as { kept_fact_id: string };
+      conflicts = conflicts.map((c) =>
+        c.id === id ? { ...c, status: 'resolved', resolution: 'kept', kept_fact_id, resolved_by_name: 'Zach Wiant', resolved_at: '2026-11-02T12:00:00Z' } : c,
+      );
+      return HttpResponse.json(conflicts.find((c) => c.id === id));
+    }),
     http.put('/api/v1/accounts/acc_mdc/brief/sections/:key', async ({ request }) => {
       await note(request);
       return HttpResponse.json({});

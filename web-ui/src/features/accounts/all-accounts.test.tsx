@@ -46,7 +46,7 @@ const FACETS: AccountFacets = {
 
 const ROWS = [
   account({ account_id: 'acc_hollis', name: 'Hollis Freight Lines' }),
-  account({ account_id: 'acc_anchor', name: 'Anchor Bay Logistics', owner_user_id: null, owner_name: null, stage: 'declined', stage_label: 'Not pursued', last_activity: null, value: null }),
+  account({ account_id: 'acc_anchor', name: 'Anchor Bay Logistics', owner_user_id: null, owner_name: null, stage: 'declined', stage_label: 'Not pursued', last_activity: null, value: { amount_cents: 7_500_000, currency: 'USD', kind: 'estimated', deal_name: null } }),
 ];
 
 function serve(rows = ROWS) {
@@ -86,6 +86,8 @@ describe('All accounts', () => {
     const anchor = screen.getByRole('link', { name: 'Anchor Bay Logistics' }).closest('tr')!;
     expect(anchor).toHaveTextContent('Unassigned');
     expect(anchor).toHaveTextContent('Not pursued');
+    expect(anchor).toHaveTextContent('$75,000');
+    expect(anchor).toHaveTextContent('Estimated');
     expect(screen.getByText('Showing 2 of 14')).toBeInTheDocument();
     expect(screen.getByText('Sorted by stage, then priority')).toBeInTheDocument();
     expect(seen[0]!.searchParams.get('sort')).toBe('stage_priority');

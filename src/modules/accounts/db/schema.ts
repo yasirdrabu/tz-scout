@@ -16,7 +16,7 @@ import {
 /**
  * Accounts schema. Every table here is a tenant table: `tenant_id` not null, row level security
  * enabled and forced with the standard `tenant_isolation` policy (added by hand in the migration).
- * Conflicts and custom fields arrive in R2.
+ * Custom fields arrive in R2.
  */
 export const accounts = pgSchema('accounts');
 
@@ -281,6 +281,8 @@ export const accountSummary = accounts.table(
     sourceIds: textArray('source_ids'),
     lastSignalAt: at('last_signal_at'),
     noteCount: integer('note_count').notNull().default(0),
+    /** Open conflicts on the account, written in the same transaction as detect and resolve. */
+    openConflictCount: integer('open_conflict_count').notNull().default(0),
     createdAt: now('created_at'),
     updatedAt: now('updated_at'),
   },
@@ -306,4 +308,34 @@ export const accountNote = accounts.table(
     at: now('at'),
   },
   (t) => [index('account_note_account_at_idx').on(t.tenantId, t.accountId, t.at)],
+);
+
+/** Sources disagreeing on one key of an account or person (ACC-E3-S3). One open conflict per (account, person, key). */
+export const conflict = accounts.table(
+  'conflict',
+  {
+    id: text('id').primaryKey(), // cfl_
+    tenantId: text('tenant_id').notNull(),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => account.id),
+    personId: text('person_id').references(() => person.id),
+    key: text('key').notNull(),
+    factIds: text('fact_ids').array().notNull(),
+    status: text('status').notNull().default('open'), // open | resolved
+    resolution: text('resolution'), // kept | edited
+    keptFactId: text('kept_fact_id'),
+    resolvedBy: text('resolved_by'),
+    resolvedAt: at('resolved_at'),
+    note: text('note'),
+    explanation: text('explanation'),
+    explanationFactIds: text('explanation_fact_ids').array(),
+    createdAt: now('created_at'),
+  },
+  (t) => [
+    index('conflict_tenant_account_status_idx').on(t.tenantId, t.accountId, t.status),
+    uniqueIndex('conflict_open_uq')
+      .on(t.tenantId, t.accountId, sql`coalesce(${t.personId}, '')`, t.key)
+      .where(sql`status = 'open'`),
+  ],
 );

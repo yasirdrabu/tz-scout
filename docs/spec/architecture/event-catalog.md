@@ -29,8 +29,8 @@ module adds an event or tool.
 | `accounts.person.added` / `.updated` | ACC | Person lifecycle, including buying role changes. Optional `arrivalId` when an arrival caused it, and optional `externalIds` (the outside ids this write added) | SCO, PLB, CRM |
 | `accounts.fact.recorded` | ACC | A fact was stored with provenance. Optional `arrivalId` | SCO |
 | `accounts.signal.recorded` | ACC | A dated signal was stored. Optional `arrivalId` | SCO |
-| `accounts.conflict.detected` | ACC | Two sources disagree on a fact | REV (shows on page) |
-| `accounts.conflict.resolved` | ACC | A person kept one value; carries the losing source | SRC (trust feedback) |
+| `accounts.conflict.detected` | ACC | Two sources disagree on a fact, or an open conflict gained a fact | none in R2a. The queue reads `accounts.account_summary.open_conflict_count`, written in the same transaction (Claude's call, 2026-11-02) |
+| `accounts.conflict.resolved` | ACC | A person kept one value; carries the winning and losing sources | SRC (intake records `conflict_lost` feedback) |
 | `enrichment.request.flagged` | ENR | An agent or person asked for enrichment | REV (queue badge) |
 | `enrichment.request.approved` / `.declined` | ENR | A person decided on spend | ENR (run job) |
 | `enrichment.request.completed` / `.failed` | ENR | Provider run finished (results reach ACC as arrivals through SRC) | ANL (counts only; cost comes from INT usage), webhooks |

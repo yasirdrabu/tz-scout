@@ -1,11 +1,13 @@
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
+import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { sourceInfoProvider } from '../contracts/ports';
 import { isKnownFactKey, type FactKind, type SourceChain } from '../contracts/types';
 import { account, accountAlias, fact, person } from '../db/schema';
 import { pickCurrent, type PickFact } from '../domain/current-value';
 import { matchName, regionKey } from '../domain/names';
+import { detectConflicts, disagreeingIds, type ConflictGroup } from './conflicts';
 
 type AccountRow = typeof account.$inferInsert;
 type PersonRow = typeof person.$inferInsert;
@@ -88,6 +90,8 @@ function valueTypeOf(value: unknown): string {
  * Stores what a source said, as `candidate` facts; `reproject` decides which are current.
  * A fact this chain already said (same key, same value, still live) is not stored again.
  * `pinnedBy` (a user id) stores them pinned; only an already pinned fact counts as said then.
+ * An unpinned value this chain already lost (equal to one of its `archived` facts for the key) is not stored
+ * again: the archived copy is its history, and it takes no part in picking or conflicts (Ruling 5).
  * Returns the ids of the facts it stored.
  */
 export async function recordFacts(
@@ -110,11 +114,13 @@ export async function recordFacts(
         eq(fact.accountId, accountId),
         personId ? eq(fact.personId, personId) : isNull(fact.personId),
         inArray(fact.key, given.map((f) => f.key)),
-        inArray(fact.status, LIVE),
+        inArray(fact.status, [...LIVE, 'archived']),
       ),
     );
-  const said = new Set(live.filter((f) => !!f.pinnedAt === !!pinnedBy).map((f) => `${f.key}\n${chainKey(chainOf(f))}\n${stableJson(f.value)}`));
-  const fresh = given.filter((f) => !said.has(`${f.key}\n${chainKey(chain)}\n${stableJson(f.value)}`));
+  const sig = (f: { key: string; value: unknown }, c: SourceChain) => `${f.key}\n${chainKey(c)}\n${stableJson(f.value)}`;
+  const said = new Set(live.filter((f) => f.status !== 'archived' && !!f.pinnedAt === !!pinnedBy).map((f) => sig(f, chainOf(f))));
+  const lost = new Set(pinnedBy ? [] : live.filter((f) => f.status === 'archived').map((f) => sig(f, chainOf(f))));
+  const fresh = given.filter((f) => !said.has(sig(f, chain)) && !lost.has(sig(f, chain)));
   if (fresh.length === 0) return [];
   const inserted = await ctx.tx
     .insert(fact)
@@ -147,8 +153,10 @@ export async function recordFacts(
  * Re-picks the current value of each key (all keys, or `keys`) for the account and its people,
  * sets fact statuses, and writes the projected columns plus `match_name` and `hq_state_key`.
  * Trust is read once per distinct source chain.
+ * `detectFor`: the facts just recorded. Only the keys they touch are checked for conflicts; without it (a merge,
+ * an edit) nothing is. Returns the ids of the conflicts opened or extended.
  */
-export async function reproject(ctx: ModuleContext, accountId: string, keys?: string[]): Promise<void> {
+export async function reproject(ctx: ModuleContext, accountId: string, keys?: string[], opts: { detectFor?: string[] } = {}): Promise<string[]> {
   const rows = await ctx.tx
     .select()
     .from(fact)
@@ -160,7 +168,7 @@ export async function reproject(ctx: ModuleContext, accountId: string, keys?: st
         keys ? inArray(fact.key, keys) : undefined,
       ),
     );
-  if (rows.length === 0) return;
+  if (rows.length === 0) return [];
 
   const trust = new Map<string, number>();
   for (const r of rows) {
@@ -194,13 +202,20 @@ export async function reproject(ctx: ModuleContext, accountId: string, keys?: st
   const status = new Map<string, string>();
   const accountSet: Partial<AccountRow> = {};
   const personSets = new Map<string, Partial<PersonRow>>();
+  const touched = new Set(opts.detectFor ?? []);
+  const disagreeing: ConflictGroup[] = [];
   for (const facts of groups.values()) {
     const { personId, key } = facts[0]!;
-    const pick = pickCurrent(
-      facts.map<PickFact>((f) => ({ id: f.id, key: f.key, value: f.value, observedAt: f.observedAt, pinned: !!f.pinnedAt, sourceChain: chainOf(f) })),
-      (f) => trust.get(chainKey(f.sourceChain)) ?? 0,
-    );
+    const picks = facts.map<PickFact>((f) => ({ id: f.id, key: f.key, value: f.value, observedAt: f.observedAt, pinned: !!f.pinnedAt, sourceChain: chainOf(f) }));
+    const pick = pickCurrent(picks, (f) => trust.get(chainKey(f.sourceChain)) ?? 0);
     const superseded = new Set(pick.supersededIds);
+    // A new fact must take part: it disagrees with the current value, or it became current and older facts disagree
+    // with it. An agreeing new fact never pulls older disagreements into a conflict (Ruling 10).
+    if (pick.currentId && touched.size) {
+      const group = { personId, key, currentId: pick.currentId, live: picks.filter((f) => !superseded.has(f.id)) };
+      const others = disagreeingIds(group);
+      if (others.some((id) => touched.has(id)) || (touched.has(pick.currentId) && others.length)) disagreeing.push(group);
+    }
     for (const f of facts) {
       const next = f.id === pick.currentId ? 'current' : superseded.has(f.id) ? 'superseded' : 'candidate';
       if (next !== f.status) status.set(f.id, next);
@@ -222,6 +237,25 @@ export async function reproject(ctx: ModuleContext, accountId: string, keys?: st
     const [before] = await ctx.tx.select().from(person).where(where);
     const changed = before && changedOnly(before, set);
     if (changed) await ctx.tx.update(person).set({ ...changed, updatedAt: new Date() }).where(where);
+  }
+  return disagreeing.length ? detectConflicts(ctx, accountId, disagreeing) : [];
+}
+
+/** SQLSTATE 23505 on the named index, whether the driver error is wrapped or not. */
+function isUniqueViolation(e: unknown, constraint: string): boolean {
+  const err = e as { code?: string; constraint_name?: string; cause?: { code?: string; constraint_name?: string } } | null;
+  return [err, err?.cause].some((x) => x?.code === '23505' && x.constraint_name === constraint);
+}
+
+/** Re-picks values in a savepoint; a person's email that another person at the account already has is a 409. */
+export async function reprojectPerson(ctx: ModuleContext, accountId: string, keys: string[], opts: { detectFor?: string[] } = {}): Promise<string[]> {
+  try {
+    return await ctx.tx.transaction((tx) => reproject({ ...ctx, tx }, accountId, keys, opts));
+  } catch (e) {
+    if (isUniqueViolation(e, 'person_tenant_account_email_uq')) {
+      throw new ScoutError({ slug: 'conflict', status: 409, title: 'That email is already on another person at this account.' });
+    }
+    throw e;
   }
 }
 

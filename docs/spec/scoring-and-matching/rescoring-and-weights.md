@@ -20,6 +20,10 @@ in Scout means recomputing scores from stored facts (D11), quickly and without a
   one signal younger than 365 days and were last scored more than 20 hours ago.
 - **Throughput target:** 10,000 accounts rescored in under 5 minutes on one worker.
 - **Concurrency:** consumers are ordered by account; two rescores of one account never run at once.
+- **Progress.** A tenant-wide rescore is a run with a count, no account data; the queue banner shows the
+  latest run. When one change starts more than one rescore (an offer change rescores the accounts that
+  hold a match and, separately, its practice), the banner shows the newest run (Claude's call,
+  2026-11-02).
 
 ## Stories
 
