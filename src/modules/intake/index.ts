@@ -41,7 +41,6 @@ export {
   getWarmIntroSettings,
   listRelationshipDefaults,
   saveWarmIntroSettings,
-  setRelationshipDefault,
   type RelationshipDefaultView,
   type WarmIntroSettings,
   type WarmIntroSettingsInput,

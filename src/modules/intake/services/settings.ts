@@ -242,21 +242,3 @@ export async function saveWarmIntroSettings(
   if (accountIds.length > 0) await publish(ctx, warmIntroRepriced, { changeId });
   return { settings: await getWarmIntroSettings(ctx), rescoringAccountCount: accountIds.length };
 }
-
-/**
- * Sets one relationship's default points (0 to 20) through the whole-tab save, so the intros already
- * recorded are repriced and their accounts rescored. Kept for `PUT /settings/warm-intros/{key}` until that route goes.
- */
-export async function setRelationshipDefault(ctx: ModuleContext, relationshipKey: string, points: number): Promise<RelationshipDefaultView> {
-  if (!validPoints(points)) throw validation([{ path: 'points', message: POINTS_MESSAGE }]);
-  const current = await getWarmIntroSettings(ctx);
-  if (!current.relationships.some((r) => r.key === relationshipKey)) {
-    throw new ScoutError({ slug: 'not-found', status: 404, title: 'That relationship was not found.' });
-  }
-  const { settings } = await saveWarmIntroSettings(ctx, {
-    relationships: current.relationships.map((r) => ({ key: r.key, points: r.key === relationshipKey ? points : r.points })),
-    rules: current.rules.map(({ introCount: _, ...r }) => r),
-  });
-  const r = settings.relationships.find((x) => x.key === relationshipKey)!;
-  return { relationshipKey: r.key, label: r.label, points: r.points };
-}
