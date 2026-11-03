@@ -268,6 +268,26 @@ describe('the vendor source (submit failures)', () => {
     expect(await arrivalsOf(t, id)).toHaveLength(0);
     expect(await paidCalls(id)).not.toHaveLength(0);
   });
+
+  it('a redelivery whose arrival was sent before the source was paused completes with that arrival', async () => {
+    const { accountId } = await accountFrom(t, agentSourceId);
+    const id = await approved(t, owner, accountId, technical);
+    // The first delivery sent its arrival, then crashed before writing the end state; then the source was paused.
+    await adminDb.update(request).set({ status: 'running', startedAt: new Date() }).where(eq(request.id, id));
+    const earlier = await t.run((ctx) =>
+      submitArrival(
+        { ...ctx, actor: { kind: 'system', id: 'enrichment' }, access: { sourceId: apolloSourceId, dataLimit: { kind: 'all' } } },
+        { target_account_id: accountId, account: { external_ref: id }, people: [{ name: 'Earlier Person', title: 'CTO' }] },
+        { channel: 'enrichment', inline: true },
+      ),
+    );
+    await setSource({ status: 'paused' });
+    await runOutbox(t.tenantId);
+    const row = await rowOf(t, id);
+    expect(row).toMatchObject({ status: 'completed', error: null });
+    expect((row.result as Result).arrival_ids).toEqual([earlier.arrivalId]);
+    expect(await arrivalsOf(t, id)).toHaveLength(1);
+  });
 });
 
 describe('the other kinds', () => {
@@ -451,6 +471,21 @@ describe('usage limits and redelivery', () => {
     await t2.run((ctx) => setCapLimit(ctx, 'apollo', 100));
     await runOutbox(t2.tenantId);
     expect(await rowOf(t2, id)).toMatchObject({ status: 'completed', waitingReason: null });
+  });
+
+  it('a request cancelled while it waits on the limit reads "Cancelled"', async () => {
+    await t2.run((ctx) => setCapLimit(ctx, 'apollo', 1));
+    const { accountId } = await accountFrom(t2, agent2);
+    const id = await approved(t2, owner2, accountId, technical);
+    await expect(runOutbox(t2.tenantId)).rejects.toMatchObject({ slug: 'blocked_by_cap' });
+    expect((await rowOf(t2, id)).waitingReason).toBe('Waiting for budget: Apollo monthly limit reached');
+    await as(t2, owner2, (ctx) => cancelRequest(ctx, owner2, id));
+    expect(await rowOf(t2, id)).toMatchObject({ status: 'cancelled', waitingReason: null });
+    expect((await viewOf(t2, id))!.statusText).toBe('Cancelled');
+    // The waiting job, delivered again, finds it cancelled and does nothing.
+    await runOutbox(t2.tenantId);
+    expect((await rowOf(t2, id)).status).toBe('cancelled');
+    await t2.run((ctx) => setCapLimit(ctx, 'apollo', 1000));
   });
 
   it('a limit hit after some people keeps them as one arrival, is partial, and a redelivery adds nothing (Review Focus 1)', async () => {

@@ -25,16 +25,14 @@ export type StatusFields = {
 };
 
 export function statusText(r: StatusFields): string {
-  // A wait on a usage limit reads the same whatever the status (approved, or running after a mid-run wait).
-  if (r.waitingReason) return r.waitingReason;
   switch (r.status) {
     case 'flagged':
       return 'Waiting for approval';
     case 'approved':
-      return 'Starting';
+      return r.waitingReason ?? 'Starting';
     case 'running':
-      // A retry's error, so a request whose job gave up does not read "Running" forever.
-      return r.error?.message ?? 'Running';
+      // A mid-run wait on a limit, else a retry's error, so a request whose job gave up does not read "Running" forever.
+      return r.waitingReason ?? r.error?.message ?? 'Running';
     case 'completed':
       return !r.result?.found && r.result?.message ? r.result.message : `Found ${r.result?.found ?? 0}`;
     case 'partial':

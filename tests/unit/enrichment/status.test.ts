@@ -54,4 +54,10 @@ describe('statusText (Global Constraints)', () => {
       'Something went wrong. Try again.',
     );
   });
+
+  it('a stale waiting reason shows only while approved or running', () => {
+    const waiting = 'Waiting for budget: Apollo monthly limit reached';
+    expect(statusText(row({ status: 'cancelled', waitingReason: waiting }))).toBe('Cancelled');
+    expect(statusText(row({ status: 'completed', waitingReason: waiting, result: { found: 2 } }))).toBe('Found 2');
+  });
 });

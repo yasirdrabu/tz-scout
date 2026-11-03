@@ -2,7 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { getAccount, getSummaries, isKnownFactKey, listBuyingRoles, type AccountView, type PersonView } from '@/modules/accounts';
 import { getRun } from '@/modules/ai-tasks';
 import { PROVIDERS, checkCap, connectionStatus, gateway, markConnectionFailing } from '@/modules/integrations';
-import { checkArrivalCap, countryCode, ensureVendorSource, normaliseDomain, readSource, submitArrival } from '@/modules/intake';
+import { checkArrivalCap, countryCode, ensureVendorSource, findArrivalByRef, normaliseDomain, readSource, submitArrival } from '@/modules/intake';
 import { getOffer } from '@/modules/offers';
 import { tenantSummary } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
@@ -241,9 +241,14 @@ async function submit(ctx: ModuleContext, r: Row, f: Found, before: AccountView 
     signals,
     facts: f.facts,
   };
+  // A redelivery whose first try sent the arrival is answered with it, even if the source was paused since:
+  // intake checks the sender before its own `external_ref` check.
+  const earlier = await findArrivalByRef(ctx, vendorSourceId, r.id);
   let out;
   try {
-    out = await submitArrival(sending, body, { channel: 'enrichment', inline: true, vendorSourceId });
+    out = earlier
+      ? { arrivalId: earlier.id, inlineResult: undefined }
+      : await submitArrival(sending, body, { channel: 'enrichment', inline: true, vendorSourceId });
   } catch (e) {
     // Intake checks the sender and its daily limit before it writes anything, so this transaction can record the failure.
     if (e instanceof ScoutError && e.status === 403) throw new SubmitRefused(sourcePaused(name));
@@ -381,9 +386,12 @@ export async function runRequest(ctx: ModuleContext, requestId: string): Promise
   const before = await getAccount(ctx, r.accountId);
   const domain = normaliseDomain(before?.domain) ?? normaliseDomain(before?.websiteUrl);
   if (!domain) return writeFailed(ctx, r, f, { kind: 'bad_request', message: 'Add the company’s website first.' }, null);
-  // Nothing is spent on results intake would refuse.
-  const refused = await sourceRefusal(ctx, r);
-  if (refused) return writeFailed(ctx, r, f, { kind: 'bad_request', message: refused }, null);
+  // Nothing is spent on results intake would refuse. A redelivery (already running) may have its arrival already:
+  // intake answers that by `external_ref` before its source checks, and the submit-time catch handles a real refusal.
+  if (r.status !== 'running') {
+    const refused = await sourceRefusal(ctx, r);
+    if (refused) return writeFailed(ctx, r, f, { kind: 'bad_request', message: refused }, null);
+  }
 
   // 2. The provider's operations.
   try {

@@ -111,6 +111,7 @@ export {
 } from './services/warm-intros';
 export { pickRule } from './domain/warm-intro';
 export {
+  findByRef as findArrivalByRef,
   isStrictChannel,
   submitArrival,
   submitBatch,

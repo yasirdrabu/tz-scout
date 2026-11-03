@@ -425,7 +425,7 @@ export async function cancelRequest(ctx: ModuleContext, principal: Principal, id
   const r = await lockVisible(ctx, id);
   if (principalRef(principal) !== r.requestedBy) requirePermission(principal, 'enrichment:approve');
   move(r, 'cancelled');
-  const [updated] = await ctx.tx.update(request).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(request.id, r.id)).returning();
+  const [updated] = await ctx.tx.update(request).set({ status: 'cancelled', waitingReason: null, updatedAt: new Date() }).where(eq(request.id, r.id)).returning();
   await publish(ctx, requestCancelled, { requestId: r.id, accountId: r.accountId, reason: 'cancelled' }, subject(r.id));
   return viewOf(ctx, updated!);
 }
