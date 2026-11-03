@@ -12,11 +12,20 @@ export const DEFAULT_CAPS: Readonly<Record<string, { limit: number; unit: CapUni
   hubspot: { limit: 50000, unit: 'calls', period: 'day' },
 };
 
-/** The instant of local midnight at the start of calendar day y-m-d in the zone (month and day may overflow). */
+/**
+ * The first instant of calendar day y-m-d in the zone (month and day may overflow): the earliest of
+ * midnight at either nearby offset that falls on that day. Where clocks skip midnight
+ * (America/Santiago, 2026-09-06) that is the transition, midnight at the offset before it.
+ */
 function midnight(year: number, month: number, day: number, timeZone: string): Date {
   const wall = Date.UTC(year, month - 1, day);
+  const target = new Date(wall);
   const first = wall - offsetAt(wall, timeZone);
-  return new Date(wall - offsetAt(first, timeZone));
+  const onDay = [wall - offsetAt(first, timeZone), first].filter((t) => {
+    const p = wallClock(t, timeZone);
+    return p.year === target.getUTCFullYear() && p.month === target.getUTCMonth() + 1 && p.day === target.getUTCDate();
+  });
+  return new Date(onDay.length ? Math.min(...onDay) : first);
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');

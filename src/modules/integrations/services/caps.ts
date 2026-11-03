@@ -22,7 +22,10 @@ export type CapView = {
   overage: boolean;
 };
 
-/** What `reserve` holds; pass it to `settle` after the call. `reservationId` is null when the provider has no limit. */
+/**
+ * What `reserve` holds; pass it to `settle` exactly once after the call (a second settle of the same
+ * object is a no-op). `reservationId` is null when the provider has no limit.
+ */
 export type Reservation =
   | { reservationId: null; level: 'ok' }
   | { reservationId: string; level: CapLevel; providerKey: string; periodStart: string; resetsAt: Date; amount: number };
@@ -50,7 +53,25 @@ function capBlocked(providerKey: string, period: string, resetsAt: Date, now: Da
 const noCap = (providerKey: string) =>
   new ScoutError({ slug: 'not-found', status: 404, title: `${providerName(providerKey)} has no usage limit.` });
 
-/** Ruling 2: the defaults are inserted the first time a tenant's caps are read or checked. */
+/** Reservations already settled, so a second settle of the same object does nothing. */
+const settled = new WeakSet<Reservation>();
+
+/** A whole, non-negative amount; fractions go `up` (reservations) or to the nearest (settled usage). */
+function wholeAmount(amount: number, round: (n: number) => number): number {
+  if (!Number.isFinite(amount) || amount < 0) throw new Error(`usage amount must be a finite number of 0 or more, got ${amount}`);
+  return round(amount);
+}
+
+const defaultRow = (tenantId: string, providerKey: string): CapRow | undefined => {
+  const d = DEFAULT_CAPS[providerKey];
+  return d && { tenantId, providerKey, ...d, overagePeriodStart: null, updatedBy: null, updatedAt: new Date() };
+};
+
+/**
+ * Ruling 2: the defaults are stored the first time a reservation or an owner action needs the row.
+ * Reads fall back to `DEFAULT_CAPS` in memory: an insert in the caller's transaction would make the
+ * reservation's own transaction wait on it.
+ */
 async function ensureDefaults(tx: Tx, tenantId: string): Promise<void> {
   await tx
     .insert(usageCap)
@@ -58,13 +79,18 @@ async function ensureDefaults(tx: Tx, tenantId: string): Promise<void> {
     .onConflictDoNothing();
 }
 
-async function findCap(tx: Tx, tenantId: string, providerKey: string): Promise<CapRow | undefined> {
-  await ensureDefaults(tx, tenantId);
+/** The stored cap, or the default one when none is stored yet. Never writes. */
+async function readCap(tx: Tx, tenantId: string, providerKey: string): Promise<CapRow | undefined> {
   const [cap] = await tx
     .select()
     .from(usageCap)
     .where(and(eq(usageCap.tenantId, tenantId), eq(usageCap.providerKey, providerKey)));
-  return cap;
+  return cap ?? defaultRow(tenantId, providerKey);
+}
+
+async function findCap(tx: Tx, tenantId: string, providerKey: string): Promise<CapRow | undefined> {
+  await ensureDefaults(tx, tenantId);
+  return readCap(tx, tenantId, providerKey);
 }
 
 const periodKey = (tenantId: string, providerKey: string, start: string) =>
@@ -72,15 +98,24 @@ const periodKey = (tenantId: string, providerKey: string, start: string) =>
 
 const boundsOf = (cap: CapRow, now: Date, timeZone: string) => periodBounds(cap.period as CapPeriod, now, timeZone);
 
-/** Publishes the level's threshold event unless this period already did (Ruling 7). The row must be locked. */
+/**
+ * Publishes each threshold event `level` reaches that this period has not yet published (Ruling 7):
+ * a period that goes straight to blocked publishes warn first, so warn never follows blocked. The row must be locked.
+ */
 async function notify(ctx: ModuleContext, cap: CapRow, bounds: Bounds, row: PeriodRow, level: CapLevel): Promise<void> {
-  if (level === 'ok') return;
-  const flag = level === 'warn' ? 'warned' : 'blocked';
-  if (row[flag]) return;
-  await ctx.tx
-    .update(usagePeriod)
-    .set({ [flag]: true })
-    .where(periodKey(ctx.tenantId, cap.providerKey, bounds.start));
+  const reached = level === 'blocked' ? (['warn', 'blocked'] as const) : level === 'warn' ? (['warn'] as const) : [];
+  for (const l of reached) {
+    const flag = l === 'warn' ? 'warned' : 'blocked';
+    if (row[flag]) continue;
+    await ctx.tx
+      .update(usagePeriod)
+      .set({ [flag]: true })
+      .where(periodKey(ctx.tenantId, cap.providerKey, bounds.start));
+    await publishThreshold(ctx, cap, bounds, row, l);
+  }
+}
+
+async function publishThreshold(ctx: ModuleContext, cap: CapRow, bounds: Bounds, row: PeriodRow, level: 'warn' | 'blocked') {
   await publish(
     ctx,
     usageThresholdReached,
@@ -101,8 +136,11 @@ async function notify(ctx: ModuleContext, cap: CapRow, bounds: Bounds, row: Peri
 /** Every limit the tenant has, with the current period's usage. */
 export async function listCaps(ctx: ModuleContext, now = new Date()): Promise<CapView[]> {
   const timeZone = await tenantTimezone(ctx);
-  await ensureDefaults(ctx.tx, ctx.tenantId);
-  const caps = await ctx.tx.select().from(usageCap).where(eq(usageCap.tenantId, ctx.tenantId)).orderBy(usageCap.providerKey);
+  const stored = await ctx.tx.select().from(usageCap).where(eq(usageCap.tenantId, ctx.tenantId));
+  const missing = Object.keys(DEFAULT_CAPS)
+    .filter((key) => !stored.some((c) => c.providerKey === key))
+    .map((key) => defaultRow(ctx.tenantId, key)!);
+  const caps = [...stored, ...missing].sort((a, b) => a.providerKey.localeCompare(b.providerKey));
   const bounds = new Map(caps.map((c) => [c.providerKey, boundsOf(c, now, timeZone)]));
   const starts = [...new Set([...bounds.values()].map((b) => b.start))];
   const rows = starts.length
@@ -139,7 +177,7 @@ export async function checkCap(
   now = new Date(),
 ): Promise<{ status: CapLevel; used: number; limit: number | null; resetsAt: Date | null }> {
   const timeZone = await tenantTimezone(ctx);
-  const cap = await findCap(ctx.tx, ctx.tenantId, providerKey);
+  const cap = await readCap(ctx.tx, ctx.tenantId, providerKey);
   if (!cap) return { status: 'ok', used: 0, limit: null, resetsAt: null };
   const b = boundsOf(cap, now, timeZone);
   const [row] = await ctx.tx.select().from(usagePeriod).where(periodKey(ctx.tenantId, providerKey, b.start));
@@ -157,7 +195,8 @@ export async function checkCap(
  * callers see it. The period row is locked, so two reservations that together pass the limit cannot
  * both succeed. Throws `blocked_by_cap` (Ruling 8) when the reservation would pass the limit.
  */
-export async function reserve(ctx: ModuleContext, providerKey: string, amount: number, now = new Date()): Promise<Reservation> {
+export async function reserve(ctx: ModuleContext, providerKey: string, requested: number, now = new Date()): Promise<Reservation> {
+  const amount = wholeAmount(requested, Math.ceil);
   const timeZone = await tenantTimezone(ctx);
   const out = await withTenant(ctx.tenantId, async (tx) => {
     const cap = await findCap(tx, ctx.tenantId, providerKey);
@@ -196,8 +235,9 @@ export async function reserve(ctx: ModuleContext, providerKey: string, amount: n
  * Ruling 6: after the call, success or not, `used += actual` and the reservation is released. Pass
  * `tx` to commit with the caller's transaction (the gateway's call log); otherwise it commits on its own.
  */
-export async function settle(ctx: ModuleContext, reservation: Reservation, actual: number, tx?: Tx): Promise<void> {
-  if (reservation.reservationId === null) return;
+export async function settle(ctx: ModuleContext, reservation: Reservation, measured: number, tx?: Tx): Promise<void> {
+  const actual = wholeAmount(measured, Math.round);
+  if (reservation.reservationId === null || settled.has(reservation)) return;
   const r = reservation;
   const run = async (t: Tx) => {
     const [row] = await t
@@ -218,12 +258,18 @@ export async function settle(ctx: ModuleContext, reservation: Reservation, actua
     await notify({ ...ctx, tx: t }, cap, { start: r.periodStart, resetsAt: r.resetsAt }, row, level);
   };
   await (tx ? run(tx) : withTenant(ctx.tenantId, run));
+  settled.add(reservation);
 }
 
 /** Ruling 9: an owner sets the limit, a whole number of 1 or more. Takes effect for the next reservation. */
 export async function setCapLimit(ctx: ModuleContext, providerKey: string, limit: number): Promise<void> {
   if (!Number.isSafeInteger(limit) || limit < 1) {
-    throw new ScoutError({ slug: 'validation', status: 400, title: LIMIT_INVALID });
+    throw new ScoutError({
+      slug: 'validation',
+      status: 400,
+      title: LIMIT_INVALID,
+      errors: [{ path: 'limit', message: LIMIT_INVALID }],
+    });
   }
   const cap = await findCap(ctx.tx, ctx.tenantId, providerKey);
   if (!cap) throw noCap(providerKey);

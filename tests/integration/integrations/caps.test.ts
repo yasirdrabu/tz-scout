@@ -48,6 +48,47 @@ describe('reserve and settle', () => {
     expect(await t.run((ctx) => checkCap(ctx, 'demo', 5, NOV))).toEqual({ status: 'ok', used: 0, limit: null, resetsAt: null });
   });
 
+  it('on a fresh tenant, checkCap then reserve in one transaction does not deadlock', async () => {
+    const t = await freshTenant();
+    const r = await t.run(async (ctx) => {
+      expect((await checkCap(ctx, 'apollo', 1, NOV)).limit).toBe(2000);
+      expect((await listCaps(ctx, NOV)).length).toBe(4);
+      return reserve(ctx, 'apollo', 1, NOV);
+    });
+    expect(r.reservationId).not.toBeNull();
+  });
+
+  it('a second settle of the same reservation is a no-op', async () => {
+    const t = await withLimit(100);
+    const r = await t.run((ctx) => reserve(ctx, 'apollo', 10, NOV));
+    await t.run((ctx) => settle(ctx, r, 4));
+    await t.run((ctx) => settle(ctx, r, 4));
+    expect(await capOf(t, 'apollo')).toMatchObject({ used: 4, reserved: 0 });
+  });
+
+  it('rejects bad amounts and rounds fractional ones', async () => {
+    const t = await withLimit(100);
+    for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(t.run((ctx) => reserve(ctx, 'apollo', bad, NOV))).rejects.toThrow();
+    }
+    const r = await t.run((ctx) => reserve(ctx, 'apollo', 2.1, NOV));
+    expect(await capOf(t, 'apollo')).toMatchObject({ reserved: 3 });
+    await expect(t.run((ctx) => settle(ctx, r, -1))).rejects.toThrow();
+    await t.run((ctx) => settle(ctx, r, 2.4));
+    expect(await capOf(t, 'apollo')).toMatchObject({ used: 2, reserved: 0 });
+  });
+
+  it('straight to blocked publishes warn first, then blocked', async () => {
+    const t = await withLimit(10);
+    await expect(t.run((ctx) => reserve(ctx, 'apollo', 11, NOV))).rejects.toMatchObject({ slug: 'blocked_by_cap' });
+    await t.run(async (ctx) => settle(ctx, await reserve(ctx, 'apollo', 9, NOV), 9));
+    const warns = await thresholds(t.tenantId, 'warn');
+    const blocks = await thresholds(t.tenantId, 'blocked');
+    expect(warns).toHaveLength(1);
+    expect(blocks).toHaveLength(1);
+    expect(warns[0]!.id < blocks[0]!.id).toBe(true);
+  });
+
   it('reserve holds the amount; settle moves the actual amount to used', async () => {
     const t = await withLimit(100);
     const r = await t.run((ctx) => reserve(ctx, 'apollo', 10, NOV));
@@ -72,9 +113,11 @@ describe('reserve and settle', () => {
         throw new Error('rolled back');
       }),
     ).rejects.toThrow('rolled back');
+    // The rolled-back settle leaves the reservation held (Ruling 6); a committed one moves it to used.
     expect(await capOf(t, 'apollo')).toMatchObject({ used: 0, reserved: 10 });
-    await t.run((ctx) => settle(ctx, r, 10, ctx.tx));
-    expect(await capOf(t, 'apollo')).toMatchObject({ used: 10, reserved: 0 });
+    const next = await t.run((ctx) => reserve(ctx, 'apollo', 5, NOV));
+    await t.run((ctx) => settle(ctx, next, 5, ctx.tx));
+    expect(await capOf(t, 'apollo')).toMatchObject({ used: 5, reserved: 10 });
   });
 
   it('two concurrent reservations that together pass the limit: one is refused (Review Focus 1)', async () => {
@@ -153,6 +196,7 @@ describe('setCapLimit and allowOverage', () => {
       await expect(t.run((ctx) => setCapLimit(ctx, 'apollo', bad))).rejects.toMatchObject({
         status: 400,
         message: 'Enter a whole number of 1 or more.',
+        errors: [{ path: 'limit', message: 'Enter a whole number of 1 or more.' }],
       });
     }
     await expect(t.run((ctx) => setCapLimit(ctx, 'microsoft', 5))).rejects.toMatchObject({ status: 404 });

@@ -36,6 +36,15 @@ describe('periodBounds', () => {
     );
   });
 
+  it('America/Santiago: midnight 2026-09-06 does not exist, the day starts at 01:00 (-03)', () => {
+    const tz = 'America/Santiago';
+    expect(periodBounds('day', new Date('2026-09-05T12:00:00Z'), tz).resetsAt).toEqual(new Date('2026-09-06T04:00:00Z'));
+    expect(periodBounds('day', new Date('2026-09-06T12:00:00Z'), tz)).toEqual({
+      start: '2026-09-06',
+      resetsAt: new Date('2026-09-07T03:00:00Z'),
+    });
+  });
+
   it('Asia/Kolkata (+05:30)', () => {
     const tz = 'Asia/Kolkata';
     // 2026-11-30 19:00 UTC is 2026-12-01 00:30 in Kolkata.
