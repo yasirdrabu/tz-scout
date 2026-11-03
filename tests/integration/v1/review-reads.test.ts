@@ -67,6 +67,7 @@ describe('GET /review-queue rows (screens.md §2)', () => {
       warm_intro: null,
       conflict_count: 0,
       enrichment_requested: false,
+      enrichment_requested_by: null,
     });
     expect(row.status_changed_at).toEqual(expect.any(String));
     expect((await w.as(leader, patchReviewStatus, `accounts/${a}/review-status`, 'PATCH', { to: 'needs_review' })).status).toBe(200);

@@ -50,6 +50,13 @@
       "when": 1793576588610,
       "tag": "0006_pipeline_stages",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793742412150,
+      "tag": "0007_enrichment_open",
+      "breakpoints": true
     }
   ]
 }

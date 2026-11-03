@@ -7,7 +7,7 @@ import { getPreference, setPreference, clearPreference } from '@/modules/tenancy
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import type { ReviewFlags } from '../contracts/types';
-import { accountReview, statusChange } from '../db/schema';
+import { accountReview, enrichmentOpen, statusChange } from '../db/schema';
 import { columnProblems, columnsView, type ColumnChoice, type ColumnsView } from '../domain/columns';
 import { leadOffer, loadNames } from './lookups';
 import { loadStatuses, requirePerson, type StatusDef } from './review';
@@ -43,9 +43,11 @@ export type QueueRow = SearchRow & {
   crm: { exists: boolean; ownerName: string | null; lifecycle: string } | null;
   /** The flag details: who declined and why, which source a new arrival came from ("New from <source>"). */
   flags: Omit<ReviewFlags, 'newFrom'> & { newFrom?: NonNullable<ReviewFlags['newFrom']> & { sourceName: string | null } };
-  /** Open conflicts between sources. Enrichment requests are R2b; until then there are none. */
+  /** Open conflicts between sources. */
   conflictCount: number;
   enrichmentRequested: boolean;
+  /** Who asked, from the most recent open request; null when none is open. */
+  enrichmentRequestedBy: string | null;
   /** The source the account first came from, and the rest of its chain ("via"). */
   source: { sourceId: string; name: string; kind: string; via: string | null } | null;
   /** The practice of the best offer. */
@@ -91,6 +93,19 @@ async function queryFor(ctx: ModuleContext, f: QueueFilters, statuses: StatusDef
   return q;
 }
 
+/** The requester of each account's most recent open enrichment request; an account with none is absent. */
+async function openEnrichmentBy(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, string>> {
+  if (!accountIds.length) return new Map();
+  const rows = await ctx.tx
+    .select({ accountId: enrichmentOpen.accountId, label: enrichmentOpen.requestedByLabel })
+    .from(enrichmentOpen)
+    .where(and(eq(enrichmentOpen.tenantId, ctx.tenantId), inArray(enrichmentOpen.accountId, accountIds), sql`${enrichmentOpen.closedAt} is null`))
+    .orderBy(desc(enrichmentOpen.createdAt));
+  const out = new Map<string, string>();
+  for (const r of rows) if (!out.has(r.accountId)) out.set(r.accountId, r.label);
+  return out;
+}
+
 /** The review queue: priority first, then newest arrival, with everything a row shows (screens.md §2). */
 export async function listQueue(ctx: ModuleContext, f: QueueFilters = {}): Promise<{ data: QueueRow[]; nextCursor: string | null }> {
   const statuses = await loadStatuses(ctx);
@@ -104,6 +119,7 @@ export async function listQueue(ctx: ModuleContext, f: QueueFilters = {}): Promi
   const sources = await firstSources(ctx, ids);
   const tiers = await tierDetails(ctx, ids);
   const names = await loadNames(ctx);
+  const enrichment = await openEnrichmentBy(ctx, ids);
   return {
     data: page.data.map((r) => {
       const check = checks.get(r.accountId);
@@ -127,7 +143,8 @@ export async function listQueue(ctx: ModuleContext, f: QueueFilters = {}): Promi
         crm: check ? { exists: check.exists, ownerName: check.ownerName, lifecycle: check.lifecycle } : null,
         flags: newFrom ? { ...flags, newFrom: { ...newFrom, sourceName: newFromNames.get(newFrom.sourceId) ?? null } } : flags,
         conflictCount: r.openConflictCount,
-        enrichmentRequested: false,
+        enrichmentRequested: enrichment.has(r.accountId),
+        enrichmentRequestedBy: enrichment.get(r.accountId) ?? null,
         source: source ? { sourceId: source.sourceId, name: source.name, kind: source.kind, via: source.via } : null,
         practiceName: names.practice(r.practiceId),
         leadOffer: leadOffer(names, review?.leadOfferOverrideId ?? null, r.bestOfferId),
