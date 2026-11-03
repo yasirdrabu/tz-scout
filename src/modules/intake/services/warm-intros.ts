@@ -50,9 +50,17 @@ const view = (r: Row, labels: Map<string, string>): WarmIntroView => ({
   confirmedAt: r.confirmedAt,
 });
 
+/** The tenant's relationship rows in key order, optionally locked (always in the same order, so two lockers can't deadlock). */
+export function loadDefaults(ctx: ModuleContext, lock?: 'share' | 'update') {
+  const q = ctx.tx.select().from(relationshipDefault).where(eq(relationshipDefault.tenantId, ctx.tenantId)).orderBy(asc(relationshipDefault.relationshipKey));
+  return lock ? q.for(lock) : q;
+}
+
+const pointsByKey = (rows: { relationshipKey: string; points: number }[]) => Object.fromEntries(rows.map((d) => [d.relationshipKey, d.points]));
+
 /** Each relationship key's label: the tenant's, else the built-in one. */
 async function relationshipLabels(ctx: ModuleContext): Promise<Map<string, string>> {
-  const rows = await ctx.tx.select().from(relationshipDefault).where(eq(relationshipDefault.tenantId, ctx.tenantId));
+  const rows = await loadDefaults(ctx);
   return new Map([...RELATIONSHIP_DEFAULTS.map((d) => [d.relationshipKey, d.label] as const), ...rows.map((d) => [d.relationshipKey, d.label] as const)]);
 }
 
@@ -92,8 +100,7 @@ export async function recordWarmIntro(
 
   const email = input.introducerEmail?.trim().toLowerCase() || undefined;
   const userId = await introducerUser(ctx, email);
-  const defaultRows = await ctx.tx.select().from(relationshipDefault).where(eq(relationshipDefault.tenantId, ctx.tenantId)).for('share');
-  const defaults = Object.fromEntries(defaultRows.map((d) => [d.relationshipKey, d.points]));
+  const defaults = pointsByKey(await loadDefaults(ctx, 'share'));
   const rules = await ctx.tx
     .select()
     .from(warmIntroRule)
@@ -196,9 +203,7 @@ export async function repriceWarmIntros(ctx: ModuleContext): Promise<{ changeId:
   const changeId = newId('wic');
   const rows = await ctx.tx.select().from(warmIntro).where(eq(warmIntro.tenantId, ctx.tenantId)).orderBy(asc(warmIntro.id)).for('update');
   const rules = await ctx.tx.select().from(warmIntroRule).where(eq(warmIntroRule.tenantId, ctx.tenantId));
-  const defaults = Object.fromEntries(
-    (await ctx.tx.select().from(relationshipDefault).where(eq(relationshipDefault.tenantId, ctx.tenantId))).map((d) => [d.relationshipKey, d.points]),
-  );
+  const defaults = pointsByKey(await loadDefaults(ctx));
   const accountIds = new Set<string>();
   for (const r of rows) {
     const next = priced(r, rules, defaults);

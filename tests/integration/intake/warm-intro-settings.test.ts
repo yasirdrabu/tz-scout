@@ -9,7 +9,7 @@ import {
   type WarmIntroSettingsInput,
 } from '@/modules/intake';
 import { warmIntro } from '@/modules/intake/db/schema';
-import { addMember } from '@/modules/tenancy';
+import { addMember, removeMember } from '@/modules/tenancy';
 import { adminDb } from '@/platform/db/client';
 import { auditLog } from '@/platform/db/schema';
 import { ScoutError } from '@/platform/errors';
@@ -19,23 +19,23 @@ import { asSource, freshTenant, personAndAgent, type Tenant } from './helpers';
 
 let t: Tenant;
 let src: { personId: string; agentId: string };
-let sel: { id: string; email: string };
+let sel: { id: string; email: string; membershipId: string };
 
 beforeEach(async () => {
   t = await freshTenant();
   await runOutbox(t.tenantId); // relationship defaults
   src = await personAndAgent(t, 'Ash');
-  sel = await seedUser({ email: `sel-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}@example.com` });
-  await t.run((ctx) => addMember(ctx, { email: sel.email, role: 'seller' }));
+  const u = await seedUser({ email: `sel-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}@example.com` });
+  sel = { ...u, membershipId: await t.run((ctx) => addMember(ctx, { email: u.email, role: 'seller' })) };
 });
 
 let n = 0;
 const uniqueDomain = () => `wis${Date.now().toString(36)}${++n}.com`;
 
 /** Records an intro on a new account, by the agent (unconfirmed) or the person (confirmed); returns its row. */
-async function intro(warm: Record<string, unknown>, by: 'agent' | 'person' = 'agent') {
+async function intro(warm: Record<string, unknown>, by: 'agent' | 'person' = 'agent', domain = uniqueDomain()) {
   const out = await asSource(t, by === 'agent' ? src.agentId : src.personId, (ctx) =>
-    submitArrival(ctx, { account: { name: 'Warm Co', domain: uniqueDomain() }, warm_intro: warm }, { channel: 'api' }),
+    submitArrival(ctx, { account: { name: 'Warm Co', domain }, warm_intro: warm }, { channel: 'api' }),
   );
   await runOutbox(t.tenantId);
   const accountId = (await t.run((ctx) => getArrival(ctx, out.arrivalId)))!.accountId!;
@@ -227,5 +227,37 @@ describe('saveWarmIntroSettings', () => {
     expect((await refused({ ...input, rules: [{ introducerUserId: 'usr_nobody', relationshipKey: 'other', points: 3 }] })).errors![0]!.path).toBe(
       'rules[0].introducer_user_id',
     );
+  });
+});
+
+describe('saveWarmIntroSettings, follow-ups', () => {
+  it('counts an account once when two of its intros are repriced', async () => {
+    const domain = uniqueDomain();
+    const a = await intro({ introducer_name: 'Ash', relationship_key: 'employee_network' }, 'agent', domain);
+    const b = await intro({ introducer_name: 'Bo', relationship_key: 'employee_network' }, 'person', domain);
+    expect(b.accountId).toBe(a.accountId);
+    const out = await save(withDefault(await asInput(), 'employee_network', 10));
+    expect(out.rescoringAccountCount).toBe(1);
+    expect([(await row(a.arrivalId)).effectivePoints, (await row(b.arrivalId)).effectivePoints]).toEqual([5, 10]);
+  });
+
+  it("keeps a former member's rule through later saves, with their name, but refuses a new rule for them; a null id is a new rule", async () => {
+    await intro({ introducer_name: 'Sel Ahn', introducer_email: sel.email, relationship_key: 'employee_network' });
+    const created = await save({ ...(await asInput()), rules: [{ id: null, introducerUserId: sel.id, relationshipKey: 'employee_network', points: 12 }] });
+    const rule = created.settings.rules[0]!;
+    expect(rule.id).toMatch(/^wir_/);
+    await t.run((ctx) => removeMember(ctx, sel.membershipId));
+
+    const after = await save(withDefault(await asInput(), 'other', 4));
+    expect(after.settings.rules).toEqual([expect.objectContaining({ id: rule.id, introducerUserId: sel.id, introducerName: rule.introducerName, points: 12 })]);
+    expect(rule.introducerName).toEqual(expect.any(String));
+    const audits = await t.run((ctx) =>
+      ctx.tx.select().from(auditLog).where(and(eq(auditLog.tenantId, ctx.tenantId), like(auditLog.action, 'intake.warm_intro_rule.%'))),
+    );
+    expect(audits.map((x) => x.action)).toEqual(['intake.warm_intro_rule.create']);
+
+    const input = await asInput();
+    const again = await refused({ ...input, rules: [...input.rules, { introducerUserId: sel.id, relationshipKey: 'other', points: 3 }] });
+    expect(again.errors).toEqual([{ path: 'rules[1].introducer_user_id', message: 'Pick a person in this workspace.' }]);
   });
 });

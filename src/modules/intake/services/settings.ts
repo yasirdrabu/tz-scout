@@ -9,7 +9,7 @@ import { warmIntroRepriced } from '../contracts/events';
 import { relationshipDefault, warmIntro, warmIntroRule } from '../db/schema';
 import { RELATIONSHIP_DEFAULTS } from '../defaults';
 import { pickRule } from '../domain/warm-intro';
-import { repriceWarmIntros } from './warm-intros';
+import { loadDefaults, repriceWarmIntros } from './warm-intros';
 
 export type RelationshipDefaultView = { relationshipKey: string; label: string; points: number };
 
@@ -32,7 +32,7 @@ export type WarmIntroSettings = {
 export type WarmIntroSettingsInput = {
   relationships: { key: string; points: number }[];
   rules: {
-    id?: string;
+    id?: string | null;
     introducerUserId?: string | null;
     introducerEmail?: string | null;
     introducerName?: string | null;
@@ -68,7 +68,7 @@ export async function listRelationshipDefaults(ctx: ModuleContext): Promise<Rela
 
 /** The Warm intros tab (§21i): the relationships' points, the introducer rules, and the people a rule can name, with intro counts. */
 export async function getWarmIntroSettings(ctx: ModuleContext): Promise<WarmIntroSettings> {
-  const defaults = await ctx.tx.select().from(relationshipDefault).where(eq(relationshipDefault.tenantId, ctx.tenantId));
+  const defaults = await loadDefaults(ctx);
   const rules = await ctx.tx.select().from(warmIntroRule).where(eq(warmIntroRule.tenantId, ctx.tenantId)).orderBy(asc(warmIntroRule.id));
   const intros = await ctx.tx
     .select({ userId: warmIntro.introducerUserId, email: warmIntro.introducerEmail, name: warmIntro.introducerName, relationshipKey: warmIntro.relationshipKey })
@@ -77,6 +77,9 @@ export async function getWarmIntroSettings(ctx: ModuleContext): Promise<WarmIntr
     .orderBy(asc(warmIntro.createdAt));
   const people = await members(ctx);
   const memberName = new Map(people.map((m) => [m.userId, m.name]));
+  // A former member keeps a name: the one stored on their rule, else the one on their first recorded intro.
+  const introName = new Map<string, string>();
+  for (const i of intros) if (i.userId && i.name && !introName.has(i.userId)) introName.set(i.userId, i.name);
 
   const byRelationship = new Map<string, number>();
   const byRule = new Map<string, number>();
@@ -114,7 +117,7 @@ export async function getWarmIntroSettings(ctx: ModuleContext): Promise<WarmIntr
       id: r.id,
       introducerUserId: r.introducerUserId,
       introducerEmail: r.introducerEmail,
-      introducerName: (r.introducerUserId ? memberName.get(r.introducerUserId) : undefined) ?? r.introducerName,
+      introducerName: (r.introducerUserId ? memberName.get(r.introducerUserId) : undefined) ?? r.introducerName ?? (r.introducerUserId ? introName.get(r.introducerUserId) : undefined) ?? null,
       relationshipKey: r.relationshipKey,
       points: r.points,
       introCount: byRule.get(r.id) ?? 0,
@@ -133,6 +136,8 @@ const ruleAudit = (r: RuleRow) => ({
   relationshipKey: r.relationshipKey,
   points: r.points,
 });
+/** What makes a rule changed: a member's stored name follows the member list, so it alone is not an edit. */
+const ruleIdentity = (r: RuleRow) => ({ ...ruleAudit(r), introducerName: r.introducerUserId ? null : r.introducerName });
 
 /**
  * Saves the whole Warm intros tab (SRC-E5-S2): validates it (400 with each field's sentence, nothing saved), updates the
@@ -145,7 +150,7 @@ export async function saveWarmIntroSettings(
   ctx: ModuleContext,
   input: WarmIntroSettingsInput,
 ): Promise<{ settings: WarmIntroSettings; rescoringAccountCount: number }> {
-  const defaults = await ctx.tx.select().from(relationshipDefault).where(eq(relationshipDefault.tenantId, ctx.tenantId)).for('update');
+  const defaults = await loadDefaults(ctx, 'update');
   const stored = await ctx.tx.select().from(warmIntroRule).where(eq(warmIntroRule.tenantId, ctx.tenantId));
   const people = new Map((await members(ctx)).map((m) => [m.userId, m.name]));
   const labels = new Map(defaults.map((d) => [d.relationshipKey, d.label]));
@@ -166,12 +171,17 @@ export async function saveWarmIntroSettings(
   input.rules.forEach((r, i) => {
     const at = (field: string) => `rules[${i}].${field}`;
     const problems = errors.length;
-    if (r.id !== undefined && (!storedById.has(r.id) || seenIds.has(r.id))) errors.push({ path: at('id'), message: 'That rule was not found.' });
-    if (r.id) seenIds.add(r.id);
+    const id = r.id ?? undefined;
+    if (id !== undefined && (!storedById.has(id) || seenIds.has(id))) errors.push({ path: at('id'), message: 'That rule was not found.' });
+    if (id) seenIds.add(id);
+    const before = id ? storedById.get(id) : undefined;
     const userId = r.introducerUserId || null;
     const email = userId ? null : r.introducerEmail?.trim().toLowerCase() || null;
-    const name = userId ? null : r.introducerName?.trim() || null;
-    if (userId && !people.has(userId)) errors.push({ path: at('introducer_user_id'), message: 'Pick a person in this workspace.' });
+    // A member's name is kept on their rule too, so the rule still has one if they leave.
+    const name = userId ? (people.get(userId) ?? before?.introducerName ?? null) : r.introducerName?.trim() || null;
+    // A stored rule keeps its person after they leave the workspace; a new or changed one must name a current member.
+    const sameUser = before?.introducerUserId === userId;
+    if (userId && !people.has(userId) && !sameUser) errors.push({ path: at('introducer_user_id'), message: 'Pick a person in this workspace.' });
     if (!userId && (!email || !EMAIL.test(email))) errors.push({ path: at('introducer_email'), message: NAME_AND_EMAIL });
     else if (!userId && !name) errors.push({ path: at('introducer_name'), message: NAME_AND_EMAIL });
     const label = labels.get(r.relationshipKey);
@@ -180,13 +190,13 @@ export async function saveWarmIntroSettings(
     if (errors.length > problems) return;
     const who = `${userId ? `u:${userId}` : `e:${email}`}|${r.relationshipKey}`;
     if (seenRules.has(who)) {
-      const message = `${(userId ? people.get(userId) : name) ?? email} already has a rule for ${lowerFirst(label!)}.`;
+      const message = `${name ?? email} already has a rule for ${lowerFirst(label!)}.`;
       errors.push({ path: at('relationship_key'), message });
       return;
     }
     seenRules.add(who);
     rules.push({
-      id: r.id ?? newId('wir'),
+      id: id ?? newId('wir'),
       tenantId: ctx.tenantId,
       introducerUserId: userId,
       introducerEmail: email,
@@ -223,7 +233,7 @@ export async function saveWarmIntroSettings(
     const before = storedById.get(r.id);
     const subject = { type: 'warm_intro_rule', id: r.id };
     if (!before) await audit(ctx, { action: 'intake.warm_intro_rule.create', subject, after: ruleAudit(r) });
-    else if (JSON.stringify(ruleAudit(before)) !== JSON.stringify(ruleAudit(r))) {
+    else if (JSON.stringify(ruleIdentity(before)) !== JSON.stringify(ruleIdentity(r))) {
       await audit(ctx, { action: 'intake.warm_intro_rule.update', subject, before: ruleAudit(before), after: ruleAudit(r) });
     }
   }
