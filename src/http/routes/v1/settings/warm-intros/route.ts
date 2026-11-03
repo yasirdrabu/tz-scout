@@ -19,7 +19,7 @@ const body = z.strictObject({
 type Body = { relationships: { key: string; points: number }[]; rules: z.infer<typeof rule>[] };
 
 /** SRC-E5-S2: the Warm intros tab: relationship points, introducer rules, and the people a rule can name. People only (it lists member emails). */
-export const GET = v1Route({ permission: 'scoring:manage', peopleOnly: true },async (_req, _principal, ctx) => getWarmIntroSettings(ctx));
+export const GET = v1Route({ permission: 'scoring:manage', peopleOnly: true }, async (_req, _principal, ctx) => getWarmIntroSettings(ctx));
 
 /**
  * Saves the whole tab: rules in the body replace the stored ones, and the intros already recorded are repriced.
