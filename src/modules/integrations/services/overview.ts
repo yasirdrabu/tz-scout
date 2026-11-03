@@ -23,7 +23,7 @@ export type IntegrationRow = {
   lastError: string | null;
   lastTestedAt: Date | null;
   lastCallAt: Date | null;
-  /** Calls since the tenant's local midnight, not counting calls a limit refused. */
+  /** Calls since the tenant's local midnight, not counting calls a limit refused; with a daily calls limit, the limit's own count. */
   callsToday: number;
   /** The limit of a daily calls limit, else null. */
   callsTodayCap: number | null;
@@ -81,6 +81,7 @@ async function rowsFor(ctx: ModuleContext, keys: string[]): Promise<IntegrationR
     const usage = today.find((u) => u.provider === key);
     const last = lasts.find((l) => l.provider === key);
     const cap = caps.find((c) => c.providerKey === key) ?? null;
+    const dailyCalls = cap?.unit === 'calls' && cap.period === 'day' ? cap : null;
     return {
       key,
       name: p?.name ?? providerName(key),
@@ -91,8 +92,9 @@ async function rowsFor(ctx: ModuleContext, keys: string[]): Promise<IntegrationR
       lastError: row?.lastError ? scrubError(row.lastError) : null,
       lastTestedAt: row?.lastTestedAt ?? null,
       lastCallAt: last ? new Date(last.at) : null,
-      callsToday: usage?.n ?? 0,
-      callsTodayCap: cap?.unit === 'calls' && cap.period === 'day' ? cap.limit : null,
+      // With a daily calls limit, "n of cap" counts what the limit counts, so the two never disagree.
+      callsToday: dailyCalls ? dailyCalls.used : (usage?.n ?? 0),
+      callsTodayCap: dailyCalls ? dailyCalls.limit : null,
       cap,
       errorsToday: usage?.errors ?? 0,
       avgMs: usage ? usage.avg : null,

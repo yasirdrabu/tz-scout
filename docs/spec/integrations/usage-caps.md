@@ -86,7 +86,7 @@ Build rulings:
   (`recordUsage`).
 - A settle failure never loses the call-log row. A lost settle leaves the reservation held until the
   period ends.
-- Calls today, errors today and the response average leave out `blocked_by_cap` rows.
+- Calls today, errors today and the response average leave out `blocked_by_cap` rows. With a daily calls limit, Calls today is the limit's own count, so "{n} of {cap}/day" never disagrees with the limit (Claude's call, 2026-11-03, found on scout-verify: calls logged before the upgrade made the row read "7 of 2/day").
 - A `calls` limit counts one per gateway call (one adapter operation), not one per HTTP request the
   adapter makes to the service; an operation that pages or retries inside the adapter still counts 1.
 - R2b-2 enrichment callers must pass the amount up front (`units` with `unit: 'credits'`), so a call

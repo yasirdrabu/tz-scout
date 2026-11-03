@@ -165,4 +165,14 @@ describe('Integrations overview with limits', () => {
     const apollo = (await t.run((ctx) => listIntegrations(ctx))).find((r) => r.key === 'apollo')!;
     expect(apollo.callsToday).toBe(1);
   });
+
+  it('with a daily calls limit, Calls today is the limit’s own count, so "n of cap" never disagrees', async () => {
+    const t = await freshTenant();
+    // A call logged before the limit counted anything (for example, earlier on the day of the upgrade).
+    await adminDb.insert(callLog).values({ id: newId('call'), tenantId: t.tenantId, provider: 'hubspot', operation: 'findCompany', outcome: 'ok', durationMs: 10 });
+    const hubspot = (await t.run((ctx) => listIntegrations(ctx))).find((r) => r.key === 'hubspot')!;
+    expect(hubspot.callsToday).toBe(0);
+    expect(hubspot.cap?.used).toBe(0);
+    expect(hubspot.errorsToday).toBe(0);
+  });
 });
