@@ -42,10 +42,10 @@ const runCleanup = (t: Awaited<ReturnType<typeof freshTenant>>) =>
   t.run((ctx) => credentialsCleanupHandler.handle({ data: {} } as never, ctx));
 
 describe('listConnections', () => {
-  it('returns all 15 providers as mock and not set up for a fresh tenant, without demo', async () => {
+  it('returns all 16 providers as mock and not set up for a fresh tenant, without demo', async () => {
     const t = await freshTenant();
     const list = await t.run((ctx) => listConnections(ctx));
-    expect(list).toHaveLength(15);
+    expect(list).toHaveLength(16);
     expect(list.every((c) => c.mode === 'mock' && c.status === 'not_set_up')).toBe(true);
     expect(list.map((c) => c.provider)).not.toContain('demo');
     expect(list.map((c) => c.provider)).toContain('hubspot');

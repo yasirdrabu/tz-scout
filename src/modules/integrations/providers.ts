@@ -7,6 +7,8 @@ export type Provider = {
   usedFor: string;
   interfaceOwner: string;
   release: 'R0' | 'R1' | 'R2' | 'R4';
+  /** False for a service that needs no key (the company website): it goes live without a credential. */
+  needsCredential?: boolean;
 };
 
 export const PROVIDERS: readonly Provider[] = [
@@ -25,6 +27,7 @@ export const PROVIDERS: readonly Provider[] = [
   { key: 'booking', name: 'Booking', usedFor: 'Tracks booked meetings', interfaceOwner: 'campaigns', release: 'R4' },
   { key: 'sms', name: 'SMS', usedFor: 'Sends text messages', interfaceOwner: 'campaigns', release: 'R4' },
   { key: 'company_data', name: 'Company data', usedFor: 'Adds company details to leads', interfaceOwner: 'enrichment', release: 'R2' },
+  { key: 'website', name: 'Company website', usedFor: 'Reads company websites', interfaceOwner: 'enrichment', release: 'R2', needsCredential: false },
 ];
 
 /** Test-only provider that backs the integration tests. Never listed to users. */
@@ -32,6 +35,8 @@ export const DEMO_PROVIDER = 'demo';
 
 export const isKnownProvider = (key: string): boolean => key === DEMO_PROVIDER || PROVIDERS.some((p) => p.key === key);
 export const providerName = (key: string): string => PROVIDERS.find((p) => p.key === key)?.name ?? key;
+/** Whether going live needs a saved credential: every provider but those marked `needsCredential: false`. */
+export const needsCredential = (key: string): boolean => PROVIDERS.find((p) => p.key === key)?.needsCredential !== false;
 
 /** `facts` are non-secret details a passing test learned (HubSpot: `portal_id`, `portal_name`); they are merged into `connection.settings`. */
 export type TestResult = { ok: boolean; message: string; missingPermissions?: string[]; facts?: Record<string, string> };

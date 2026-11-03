@@ -7,7 +7,7 @@ import { log } from '@/platform/log';
 import { config } from '@/platform/config';
 import { registerInboundRoute } from '@/modules/tenancy';
 import { callLog, connection, credential } from './db/schema';
-import { adapterFactories, isKnownProvider, providerName, type Adapter } from './providers';
+import { adapterFactories, isKnownProvider, needsCredential, providerName, type Adapter } from './providers';
 import { capUnit, LOCK_TIMEOUT, recordUsage, reserve, settle, type Reservation } from './services/caps';
 import type { CapUnit } from './domain/caps';
 import { credentialAad, openValue } from './services/vault';
@@ -198,8 +198,11 @@ export async function runCall<T>(
   }
   const mockOnly = config.forceMock || ctx.environment === 'test';
   const { conn, cred } = await prepare(ctx, provider, !mockOnly && !!factories.live);
+  // A provider that needs no key (the company website) is ready without a credential.
+  const keyless = !needsCredential(provider);
+  const ready = !!cred || keyless;
 
-  if (!mockOnly && mode === 'normal' && conn.mode === 'live' && (!cred || !factories.live)) {
+  if (!mockOnly && mode === 'normal' && conn.mode === 'live' && (!ready || !factories.live)) {
     throw new ScoutError({
       slug: 'connection_not_ready',
       status: 409,
@@ -207,7 +210,7 @@ export async function runCall<T>(
       detail: 'Save a credential and test the connection.',
     });
   }
-  const useLive = !mockOnly && !!factories.live && !!cred && (mode === 'test' || conn.mode === 'live');
+  const useLive = !mockOnly && !!factories.live && ready && (mode === 'test' || conn.mode === 'live');
   const logBase = {
     tenantId: ctx.tenantId,
     connectionId: conn.id,
@@ -278,6 +281,8 @@ export async function runCall<T>(
         value,
         settings: (conn.settings ?? {}) as Record<string, unknown>,
       });
+    } else if (useLive && factories.live) {
+      adapter = factories.live({ kind: 'none', value: '', settings: (conn.settings ?? {}) as Record<string, unknown> });
     } else adapter = factories.mock(ctx);
     result = await fn(adapter, { scrub });
     try {
@@ -346,7 +351,7 @@ export async function runCall<T>(
           .set({
             consecutiveFailures: 0,
             lastError: null,
-            status: sql`case when ${connection.status} = 'disabled' then 'disabled' when ${connection.credentialId} is not null then 'connected' else 'not_set_up' end`,
+            status: sql`case when ${connection.status} = 'disabled' then 'disabled' when ${connection.credentialId} is not null or ${keyless}::boolean then 'connected' else 'not_set_up' end`,
             updatedAt: sql`now()`,
           })
           .where(where);

@@ -1,0 +1,68 @@
+// The `read_website` task's input building and its rules (Ruling 3): title, meta description and technologies from
+// a fixed fingerprint list, each citing its page; no industry guess.
+import { describe, expect, it } from 'vitest';
+import { PAGE_TEXT_MAX, readWebsiteInput, rulesRead } from '@/modules/enrichment/domain/read-website';
+import { readWebsiteTask } from '@/modules/enrichment/tasks/read-website';
+
+const home = {
+  url: 'https://acme.com/',
+  title: 'Acme Freight',
+  text: 'We move freight.',
+  html: `<html><head><title>Acme Freight</title><meta content="Freight &amp; logistics for the Midwest." name="description">
+<link rel="stylesheet" href="/wp-content/themes/acme/style.css"></head><body>We move freight.</body></html>`,
+};
+const about = {
+  url: 'https://acme.com/about',
+  title: 'About',
+  text: 'x'.repeat(10_000),
+  html: '<html><head><title>About</title></head><body><script src="//js.hs-scripts.com/123.js"></script><script src="/wp-includes/js/x.js"></script></body></html>',
+};
+
+describe('read_website input', () => {
+  const input = readWebsiteInput('acme.com', [home, about]);
+
+  it('pre-extracts the meta description and fingerprints, and caps page text', () => {
+    expect(input.domain).toBe('acme.com');
+    expect(input.pages[0]).toEqual({ url: 'https://acme.com/', title: 'Acme Freight', text: 'We move freight.', description: 'Freight & logistics for the Midwest.', technologies: ['WordPress'] });
+    expect(input.pages[1]!.technologies).toEqual(['WordPress', 'HubSpot']);
+    expect(input.pages[1]!.description).toBeNull();
+    expect(input.pages[1]!.text).toHaveLength(PAGE_TEXT_MAX);
+    expect(PAGE_TEXT_MAX).toBe(6000);
+    expect(readWebsiteTask.input.safeParse(input).success).toBe(true);
+  });
+
+  it('keeps no raw HTML in the prompt', () => {
+    expect(JSON.stringify(input)).not.toContain('<html>');
+    expect(readWebsiteTask.buildUser(input)).toContain('https://acme.com/about');
+  });
+});
+
+describe('read_website rules', () => {
+  const out = rulesRead(readWebsiteInput('acme.com', [home, about]));
+
+  it('reads the title and meta description, each with its URL, and guesses no industry', () => {
+    expect(out.description).toEqual({ text: 'Freight & logistics for the Midwest.', url: 'https://acme.com/' });
+    expect(out.facts).toEqual([{ key: 'website_title', value: 'Acme Freight', url: 'https://acme.com/' }]);
+    expect(out.industry_guess).toBeNull();
+    expect(out.size_clues).toEqual([]);
+  });
+
+  it('names the WordPress and HubSpot fingerprints with the first page each is on', () => {
+    expect(out.technologies).toEqual([
+      { name: 'WordPress', url: 'https://acme.com/' },
+      { name: 'HubSpot', url: 'https://acme.com/about' },
+    ]);
+  });
+
+  it('is valid task output, and the sample is the rules output', () => {
+    const input = readWebsiteInput('acme.com', [home, about]);
+    expect(readWebsiteTask.output.safeParse(out).success).toBe(true);
+    expect(readWebsiteTask.rules!(input)).toEqual(out);
+    expect(readWebsiteTask.mock!(input)).toEqual(out);
+    expect(readWebsiteTask.name).toBe('read_website');
+  });
+
+  it('an empty site reads as nothing', () => {
+    expect(rulesRead({ domain: 'acme.com', pages: [] })).toEqual({ description: null, industry_guess: null, size_clues: [], technologies: [], facts: [] });
+  });
+});

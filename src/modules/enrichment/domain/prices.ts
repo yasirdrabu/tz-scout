@@ -23,8 +23,5 @@ export const OPERATIONS: Record<string, Partial<Record<EnrichmentKind, readonly 
   website: { website_read: ['website.read'] },
 };
 
-/**
- * The most a website read's Claude call may cost, in cents. A constant until the `read_website` AI task exists
- * (Task 3); then its worst case can replace it.
- */
+/** The most a website read's Claude call may cost, in cents: the `read_website` task's per-run cap. */
 export const WEBSITE_READ_WORST_CENTS = 5;

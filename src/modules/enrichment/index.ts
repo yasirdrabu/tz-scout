@@ -32,3 +32,19 @@ export {
 } from './services/requests';
 export { EXPIRE_AFTER_DAYS, expireFlagged } from './services/expire';
 export { enrichmentJobHandlers, expireRequestsHandler } from './jobs';
+export {
+  EMAIL_STATUSES,
+  type CompanyFacts,
+  type EmailStatus,
+  type EnrichmentAdapter,
+  type Paid,
+  type Person,
+  type Signal,
+  type SitePage,
+} from './contracts/adapter';
+export { registerApolloAdapter } from './adapters/apollo/register';
+export { registerVibeAdapter } from './adapters/vibe/register';
+export { registerWebsiteAdapter } from './adapters/website/register';
+export { setMockFailure, type MockFailureKind } from './adapters/mock-failure';
+export { readWebsiteTask } from './tasks/read-website';
+export { readWebsiteInput, rulesRead, type ReadWebsiteInput, type ReadWebsiteOutput } from './domain/read-website';

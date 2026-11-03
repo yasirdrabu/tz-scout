@@ -6,10 +6,11 @@ import { withTenant } from '@/platform/db/tenant';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
+import { scrubError } from '@/platform/scrub-error';
 import { connectionChanged, connectionTested } from '../contracts/events';
 import { callLog, connection, credential } from '../db/schema';
 import { ensureConnection, runCall } from '../gateway';
-import { PROVIDERS, adapterFactories, isKnownProvider, type TestResult } from '../providers';
+import { PROVIDERS, adapterFactories, isKnownProvider, needsCredential, type TestResult } from '../providers';
 import { credentialAad, openValue, sealValue } from './vault';
 
 export type ConnectionMode = 'mock' | 'live';
@@ -229,7 +230,7 @@ export async function testConnection(ctx: ModuleContext, provider: string): Prom
   const durationMs = Math.round(performance.now() - started);
 
   const conn = await ensureConnection(ctx.tx, ctx.tenantId, provider, ctx.actor.id);
-  const status: ConnectionStatus = !result.ok ? 'failing' : conn.credentialId ? 'connected' : 'not_set_up';
+  const status: ConnectionStatus = !result.ok ? 'failing' : conn.credentialId || !needsCredential(provider) ? 'connected' : 'not_set_up';
   await ctx.tx
     .update(connection)
     .set({
@@ -325,7 +326,7 @@ export async function setConnectionSettings(
   return after;
 }
 
-/** Live needs a credential and a passing test in the last 10 minutes. */
+/** Live needs a credential (unless the provider needs none) and a passing test in the last 10 minutes. */
 export async function setMode(ctx: ModuleContext, provider: string, mode: ConnectionMode): Promise<void> {
   requireProvider(provider);
   if (mode === 'live') {
@@ -338,7 +339,7 @@ export async function setMode(ctx: ModuleContext, provider: string, mode: Connec
   if (mode === 'live') {
     const result = conn.lastTestResult as TestResult | null;
     const fresh = conn.lastTestedAt && Date.now() - conn.lastTestedAt.getTime() <= TEST_VALID_MS;
-    if (!conn.credentialId || !result?.ok || !fresh) {
+    if ((!conn.credentialId && needsCredential(provider)) || !result?.ok || !fresh) {
       throw new ScoutError({ slug: 'test-first', status: 409, title: TEST_FIRST });
     }
   }
@@ -360,12 +361,29 @@ export async function setMode(ctx: ModuleContext, provider: string, mode: Connec
   );
 }
 
+/**
+ * Marks a connection `failing` at once with `message` as its last error, creating the row when there is none. For a
+ * failure one call proves, such as a rejected key (ENR-E4). A turned-off connection stays turned off.
+ */
+export async function markConnectionFailing(ctx: ModuleContext, provider: string, message: string): Promise<void> {
+  requireProvider(provider);
+  const conn = await ensureConnection(ctx.tx, ctx.tenantId, provider, ctx.actor.id);
+  await ctx.tx
+    .update(connection)
+    .set({
+      status: sql`case when ${connection.status} = 'disabled' then 'disabled' else 'failing' end`,
+      lastError: scrubError(message),
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(connection.tenantId, ctx.tenantId), eq(connection.id, conn.id)));
+}
+
 /** Turns a connection off without deleting it; `gateway.call` then refuses it with `connection_disabled`. */
 export async function setDisabled(ctx: ModuleContext, provider: string, disabled: boolean): Promise<void> {
   requireProvider(provider);
   const conn = await ensureConnection(ctx.tx, ctx.tenantId, provider, ctx.actor.id);
   const lastOk = (conn.lastTestResult as TestResult | null)?.ok === true;
-  const status: ConnectionStatus = disabled ? 'disabled' : conn.credentialId && lastOk ? 'connected' : 'not_set_up';
+  const status: ConnectionStatus = disabled ? 'disabled' : (conn.credentialId || !needsCredential(provider)) && lastOk ? 'connected' : 'not_set_up';
   await ctx.tx
     .update(connection)
     .set({ status, consecutiveFailures: 0, updatedAt: sql`now()` })
