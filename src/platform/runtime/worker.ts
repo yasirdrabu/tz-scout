@@ -116,6 +116,17 @@ type Sub = {
 };
 
 const BUSY_RETRY_CAP_MS = 30_000;
+const CAP_WAIT_MAX_MS = 15 * 60_000;
+
+/**
+ * Ruling 10: how long a job refused by a usage limit waits before it comes again. Until the limit
+ * resets, at most 15 minutes (so a raised limit resumes the work), never below `minMs`.
+ */
+export function capWaitMs(resetsAt: unknown, nowMs: number, minMs: number): number {
+  const at = typeof resetsAt === 'string' ? Date.parse(resetsAt) : NaN;
+  const wait = Number.isNaN(at) ? CAP_WAIT_MAX_MS : Math.min(at - nowMs, CAP_WAIT_MAX_MS);
+  return Math.max(minMs, wait);
+}
 
 /** Give up now: dead-letter without further retries. */
 class Permanent extends Error {}
@@ -431,6 +442,14 @@ async function countRun(s: Sub, e: Envelope): Promise<number> {
   return (rows[0] as { run_attempts: number }).run_attempts;
 }
 
+/** Takes back one counted handler run, outside the handler's transaction. */
+async function uncountRun(s: Sub, e: Envelope): Promise<void> {
+  await (await attemptsDb(e)).execute(
+    sql`update platform.delivery_attempt set run_attempts = greatest(run_attempts - 1, 0), updated_at = now()
+        where consumer_name = ${s.processedName} and event_id = ${e.id}`,
+  );
+}
+
 async function forgetRuns(s: Sub, e: Envelope): Promise<void> {
   await (await attemptsDb(e)).execute(
     sql`delete from platform.delivery_attempt where consumer_name = ${s.processedName} and event_id = ${e.id}`,
@@ -509,6 +528,17 @@ async function processMessage(m: JsMsg, s: Sub, rt: Runtime): Promise<void> {
       const busyInARow = Math.max(0, deliveryCount - 1 - runsBefore);
       const delay = Math.min(BUSY_RETRY_CAP_MS, rt.busyRetryMs * 2 ** Math.min(busyInARow, 20));
       lg.info({ retryInMs: delay }, closed ? 'worker: the workspace is not open, put back' : 'worker: another delivery holds this message or key, put back');
+      m.nak(delay);
+      return;
+    }
+    // Refused by a usage limit (Ruling 10): the transaction rolled back, so nothing happened. It waits for
+    // the limit like a closed workspace, and the run counted as it started is taken back.
+    if (e instanceof ScoutError && e.slug === 'blocked_by_cap') {
+      const delay = capWaitMs(e.extensions?.resets_at, Date.now(), rt.busyRetryMs);
+      if (redelivery && runs > runsBefore) {
+        await uncountRun(s, envelope).catch((e2) => lg.warn({ countErr: errorText(e2) }, 'worker: could not take back the run'));
+      }
+      lg.info({ retryInMs: delay }, 'worker: refused by a usage limit, put back');
       m.nak(delay);
       return;
     }
