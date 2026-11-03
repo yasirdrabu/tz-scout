@@ -46,6 +46,17 @@ export const personLabel = (p: { name: string | null; email: string | null }) =>
 
 export const introducerValue = (i: Introducer) => (i.user_id ? `u:${i.user_id}` : `e:${i.email ?? ''}`);
 
+/** The people the picker offers, each once by value: someone with neither a user nor an email can't have a rule. */
+export function pickable(people: Introducer[]): Introducer[] {
+  const seen = new Set<string>();
+  return people.filter((p) => {
+    const v = introducerValue(p);
+    if ((!p.user_id && !p.email) || seen.has(v)) return false;
+    seen.add(v);
+    return true;
+  });
+}
+
 /** A new rule: nobody picked, no points yet. */
 export const newRule = (relationshipKey: string): RuleRow => ({
   id: localId(),

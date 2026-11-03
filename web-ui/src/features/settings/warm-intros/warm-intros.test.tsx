@@ -161,6 +161,22 @@ describe('Settings > Warm intros', () => {
     expect(screen.getByRole('button', { name: 'Save warm intros' })).toBeDisabled();
   });
 
+  it('offers each person once, with a unique value, and never a person with neither a user nor an email', async () => {
+    const introducers = [
+      ...VIEW.introducers,
+      { user_id: null, email: null, name: 'Name Only', intro_count: 3 },
+      { user_id: null, email: null, name: 'Also Name Only', intro_count: 1 },
+      { user_id: null, email: 'pat@partner.com', name: 'Pat Outside', intro_count: 1 },
+    ];
+    serve({ view: { ...VIEW, introducers } });
+    await open();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Add a rule' }));
+    const options = within(screen.getByRole('combobox', { name: 'Introducer for the new rule, rule 2' })).getAllByRole('option') as HTMLOptionElement[];
+    const values = options.map((o) => o.value);
+    expect(new Set(values).size).toBe(values.length);
+    expect(options.map((o) => o.textContent)).toEqual(['Pick a person', 'Ash Patel · ash@taazaa.com', 'Bo Chen · bo@taazaa.com', 'Pat Outside · pat@partner.com', 'Someone else']);
+  });
+
   it('a known outside introducer sends email and name', async () => {
     serve();
     await open();

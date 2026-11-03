@@ -11,7 +11,7 @@ import { useToast } from '../../../ui/Toast';
 import type { TabProps } from '../SettingsScreen';
 import { errorText, LoadFailed, LoadingRows } from '../shared';
 import { afterSave, saveWarmIntros, savedToast, warmIntrosQuery, type WarmIntrosView } from './api';
-import { check, errorsByField, introducerValue, isDirty, newRule, OTHER, personLabel, pickPerson, ruleName, toDraft, toEdit, type Draft, type RuleRow } from './draft';
+import { check, errorsByField, introducerValue, isDirty, newRule, OTHER, personLabel, pickable, pickPerson, ruleName, toDraft, toEdit, type Draft, type RuleRow } from './draft';
 import styles from './WarmIntros.module.css';
 
 /** Settings > Warm intros (screens.md §21i): points per relationship and per-introducer rules, saved in one PUT. */
@@ -202,7 +202,7 @@ function Editor({ tenant, loaded }: { tenant: string; loaded: WarmIntrosView }) 
                               onChange={(e) => changeRule(i, pickPerson(r, e.target.value, from.introducers))}
                             >
                               <option value="">Pick a person</option>
-                              {from.introducers.map((p) => (
+                              {pickable(from.introducers).map((p) => (
                                 <option key={introducerValue(p)} value={introducerValue(p)}>
                                   {personLabel(p)}
                                 </option>
