@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { upsertFromArrival } from '@/modules/accounts';
+import { getFacts, listPeople, upsertFromArrival } from '@/modules/accounts';
 import { submitArrival, submitBatch } from '@/modules/intake';
 import { arrival, batch } from '@/modules/intake/db/schema';
 import { adminDb } from '@/platform/db/client';
@@ -169,6 +169,37 @@ describe('submitArrival (SRC-E2-S1)', () => {
     // Resolved in the call (Task 14), so it is received and resolved with no job queued.
     expect(types).toEqual(expect.arrayContaining(['intake.arrival.received', 'intake.arrival.resolved']));
     expect(types).not.toContain('jobs.intake.resolve');
+  });
+
+  it('writes a person’s email status and seniority as person facts with the arrival’s provenance (Ruling 12)', async () => {
+    const target = await t.run((ctx) =>
+      upsertFromArrival(ctx, {
+        arrivalId: newId('arr'),
+        receivedAt: new Date(),
+        sourceChain: { agentSourceId: agentId },
+        account: { name: 'Status Co', domain: `status-${Date.now()}.com` },
+        people: [],
+        signals: [],
+        facts: [],
+        research: {},
+        soleProprietor: false,
+        externalIds: [],
+      }),
+    );
+    const out = await asAgent((ctx) =>
+      submitArrival(
+        ctx,
+        { target_account_id: target.accountId, people: [{ name: 'Bo Diaz', email: 'bo@status.example', email_status: 'verified', seniority: 'vp' }] },
+        { channel: 'api', inline: true },
+      ),
+    );
+    const [bo] = out.inlineResult!.personIds;
+    const [p] = await t.run((ctx) => listPeople(ctx, target.accountId));
+    expect(p).toMatchObject({ id: bo, emailStatus: 'verified', seniority: 'vp' });
+    const facts = await t.run((ctx) => getFacts(ctx, target.accountId));
+    for (const key of ['email_status', 'seniority']) {
+      expect(facts.find((f) => f.key === key)).toMatchObject({ personId: bo, arrivalId: out.arrivalId, sourceChain: { agentSourceId: agentId, personSourceId: personId } });
+    }
   });
 });
 

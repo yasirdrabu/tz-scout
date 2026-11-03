@@ -54,6 +54,17 @@ describe('normaliseArrival', () => {
     expect(normaliseArrival(parse({ sole_proprietor: true, people: [{ name: 'Sam', email: 'sam@acme.com' }] }), null).account.domain).toBeUndefined();
   });
 
+  it('carries a person’s email status and seniority (Ruling 12)', () => {
+    const n = normaliseArrival(parse({ account: { name: 'A' }, people: [{ name: 'Pat Lee', email: 'pat@acme.com', email_status: 'verified', seniority: ' vp ' }] }), null);
+    expect(n.people).toEqual([{ firstName: 'Pat', lastName: 'Lee', email: 'pat@acme.com', emailStatus: 'verified', seniority: 'vp' }]);
+  });
+
+  it('refuses an email status Accounts does not know, and a seniority over 40 characters', () => {
+    expect(ArrivalV1Schema({ strict: false }).safeParse({ people: [{ name: 'A', email_status: 'maybe' }] }).success).toBe(false);
+    expect(ArrivalV1Schema({ strict: false }).safeParse({ people: [{ name: 'A', seniority: 'x'.repeat(41) }] }).success).toBe(false);
+    expect(ArrivalV1Schema({ strict: false }).safeParse({ people: [{ name: 'A', email_status: null, seniority: null }] }).success).toBe(true);
+  });
+
   it('maps a relationship by rule, then by the AI key, else other; and asks the AI only for unmapped text', () => {
     const body = (relationship: string) => parse({ account: { name: 'A', industry: 'Widgets' }, warm_intro: { introducer_name: 'Ash', relationship } });
     expect(normaliseArrival(body('a former colleague'), null).warmIntro?.relationshipKey).toBe('employee_network');

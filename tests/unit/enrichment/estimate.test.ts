@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { estimate, estimateText } from '@/modules/enrichment/domain/estimate';
 import { KINDS, kindLabel, operationsFor } from '@/modules/enrichment/domain/kinds';
 import { DEFAULT_CENTS_PER_CREDIT } from '@/modules/enrichment/domain/prices';
+import { nothingFound, searchTitles } from '@/modules/enrichment/domain/run';
 
 describe('estimate (Rulings 4 and 5)', () => {
   it('people for 2 roles is 6 credits, about $0.60 at 10 cents a credit', () => {
@@ -14,7 +15,8 @@ describe('estimate (Rulings 4 and 5)', () => {
   it('counts each kind', () => {
     expect(estimate({ provider: 'apollo', kind: 'company_firmographics', centsPerCredit: 10 })).toEqual({ credits: 1, costCents: 10 });
     expect(estimate({ provider: 'apollo', kind: 'email_reveal', personIds: ['per_1', 'per_2', 'per_3'], centsPerCredit: 10 })).toEqual({ credits: 3, costCents: 30 });
-    expect(estimate({ provider: 'vibe', kind: 'signals_refresh', centsPerCredit: 10 })).toEqual({ credits: 2, costCents: 20 });
+    // The company lookup for its organization id, then job postings and news with it.
+    expect(estimate({ provider: 'vibe', kind: 'signals_refresh', centsPerCredit: 10 })).toEqual({ credits: 3, costCents: 30 });
   });
 
   it('falls back to the provider default cents a credit', () => {
@@ -43,7 +45,7 @@ describe('kinds (Ruling 4)', () => {
     expect(operationsFor('apollo', 'company_firmographics')).toEqual(['organizations/enrich']);
     expect(operationsFor('apollo', 'people_for_roles')).toEqual(['mixed_people/api_search', 'people/match']);
     expect(operationsFor('apollo', 'email_reveal')).toEqual(['people/match']);
-    expect(operationsFor('apollo', 'signals_refresh')).toEqual(['organizations/job_postings', 'news_articles/search']);
+    expect(operationsFor('apollo', 'signals_refresh')).toEqual(['organizations/enrich', 'organizations/job_postings', 'news_articles/search']);
     expect(operationsFor('vibe', 'email_reveal')).toEqual(['people/match']);
     expect(operationsFor('website', 'website_read')).toEqual(['website.read']);
   });
@@ -52,5 +54,23 @@ describe('kinds (Ruling 4)', () => {
     expect(operationsFor('website', 'email_reveal')).toEqual([]);
     expect(operationsFor('apollo', 'website_read')).toEqual([]);
     expect(operationsFor('hubspot', 'company_firmographics')).toEqual([]);
+  });
+});
+
+describe('the run (Ruling 8)', () => {
+  it('searches the best offer’s titles, else the role’s default titles, else its label', () => {
+    expect(searchTitles('technical_buyer', 'Technical buyer', ['COO', 'CIO'])).toEqual(['COO', 'CIO']);
+    expect(searchTitles('technical_buyer', 'Technical buyer', [])).toEqual(['CTO', 'VP Engineering', 'IT Director', 'Head of IT']);
+    expect(searchTitles('business_owner', 'Business owner', [])).toEqual(['Owner', 'CEO', 'President', 'Founder']);
+    expect(searchTitles('commercial_buyer', 'Commercial buyer', [])).toEqual(['VP Sales', 'Head of Procurement', 'CFO']);
+    expect(searchTitles('champion', 'Champion', [])).toEqual(['Champion']);
+  });
+
+  it('says what nothing found means', () => {
+    expect(nothingFound('Apollo', 'people_for_roles', ['Technical buyer'])).toBe('Apollo found no one for Technical buyer');
+    expect(nothingFound('Apollo', 'people_for_roles', ['Technical buyer', 'Champion'])).toBe('Apollo found no one for Technical buyer and Champion');
+    expect(nothingFound('Apollo', 'email_reveal', [])).toBe('Apollo found no one for the people asked about');
+    expect(nothingFound('Apollo', 'signals_refresh', [])).toBe('Apollo found nothing new');
+    expect(nothingFound('Company website', 'website_read', [])).toBe('Company website found nothing new');
   });
 });

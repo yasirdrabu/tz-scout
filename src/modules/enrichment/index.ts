@@ -31,7 +31,8 @@ export {
   type RequestView,
 } from './services/requests';
 export { EXPIRE_AFTER_DAYS, expireFlagged } from './services/expire';
-export { enrichmentJobHandlers, expireRequestsHandler } from './jobs';
+export { runRequest } from './services/run';
+export { enrichmentJobHandlers, expireRequestsHandler, runRequestHandler } from './jobs';
 export {
   EMAIL_STATUSES,
   type CompanyFacts,

@@ -14,12 +14,8 @@ type ArrivalAccount = NonNullable<ArrivalV1['account']>;
 /** `arrival.v1` account fields. `external_ref` and `notes` are the run's to set. */
 export type CompanyFacts = Omit<ArrivalAccount, 'external_ref' | 'notes'> & { provider_ref?: string | null };
 
-/** An `arrival.v1` person with the fields Ruling 12 adds (`email_status`, `seniority`). */
-export type Person = ArrivalV1['people'][number] & {
-  email_status?: EmailStatus | null;
-  seniority?: string | null;
-  provider_ref?: string | null;
-};
+/** An `arrival.v1` person (with Ruling 12's `email_status` and `seniority`) and the provider's own id for them. */
+export type Person = ArrivalV1['people'][number] & { provider_ref?: string | null };
 
 export type Signal = ArrivalV1['signals'][number];
 

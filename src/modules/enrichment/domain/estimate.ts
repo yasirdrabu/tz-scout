@@ -1,5 +1,5 @@
 import type { EnrichmentKind, Estimate } from '../contracts/types';
-import { DEFAULT_CENTS_PER_CREDIT, PEOPLE_PER_ROLE } from './prices';
+import { DEFAULT_CENTS_PER_CREDIT, PEOPLE_PER_ROLE, SIGNALS_REFRESH_CREDITS } from './prices';
 
 export type EstimateInput = {
   provider: string;
@@ -21,7 +21,7 @@ function credits(i: EstimateInput): number {
     case 'email_reveal':
       return i.personIds?.length ?? 0;
     case 'signals_refresh':
-      return 2;
+      return SIGNALS_REFRESH_CREDITS;
     case 'website_read':
       return 0;
   }

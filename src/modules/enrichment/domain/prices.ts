@@ -14,8 +14,12 @@ const CREDIT_OPERATIONS: Partial<Record<EnrichmentKind, readonly string[]>> = {
   // The search is free; each person it finds is matched for 1 credit.
   people_for_roles: ['mixed_people/api_search', 'people/match'],
   email_reveal: ['people/match'],
-  signals_refresh: ['organizations/job_postings', 'news_articles/search'],
+  // The company is looked up once for its organization id (1 credit), so job postings and news cost 1 each.
+  signals_refresh: ['organizations/enrich', 'organizations/job_postings', 'news_articles/search'],
 };
+
+/** A signals refresh: the organization lookup, job postings and news, 1 credit each. */
+export const SIGNALS_REFRESH_CREDITS = 3;
 
 export const OPERATIONS: Record<string, Partial<Record<EnrichmentKind, readonly string[]>>> = {
   apollo: CREDIT_OPERATIONS,
