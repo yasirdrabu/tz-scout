@@ -7,6 +7,8 @@ import { GET as listRoute } from '@/http/routes/v1/enrichment-requests/route';
 import { POST as actionRoute } from '@/http/routes/v1/enrichment-requests/[id]/route';
 import { SYSTEM_GRANTOR, addMember, createApiKey, createTenant, handleDevSignIn, setPrincipalCacheTtl, type Permission } from '@/modules/tenancy';
 import { membership } from '@/modules/tenancy/db/schema';
+import { request } from '@/modules/enrichment/db/schema';
+import { newId } from '@/platform/ids';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { runOutbox } from '../helpers/run-outbox';
 import { inTenant, seedUser, uniqueSlug } from '../tenancy/helpers';
@@ -16,7 +18,7 @@ import { accountFrom } from '../enrichment/helpers';
 let tenantId: string;
 let slug: string;
 let owner: Awaited<ReturnType<typeof seedUser>>;
-let cookies: Record<'owner' | 'seller' | 'other', string>;
+let cookies: Record<'owner' | 'seller' | 'other' | 'restricted', string>;
 let ash: { personId: string; agentId: string };
 let bo: { personId: string; agentId: string };
 const run = <T>(fn: Parameters<typeof inTenant<T>>[2]) => inTenant(tenantId, owner.actor, fn);
@@ -50,9 +52,9 @@ const withKey = (secret: string, handler: (r: Request) => Promise<Response>, pat
 const keyFor = async (sourceId: string, scopes: Permission[]) =>
   (await run((ctx) => createApiKey(ctx, { name: 'k', environment: 'live', scopes, sourceId }, SYSTEM_GRANTOR))).secret;
 
-async function member(role: 'seller') {
+async function member(role: 'seller', dataLimit: { kind: 'all' } | null = { kind: 'all' }) {
   const u = await seedUser({ signedIn: true });
-  await run((ctx) => addMember(ctx, { email: u.email, role, dataLimit: { kind: 'all' } }));
+  await run((ctx) => addMember(ctx, { email: u.email, role, ...(dataLimit ? { dataLimit } : {}) }));
   return signIn(u.id);
 }
 
@@ -64,7 +66,7 @@ beforeAll(async () => {
   await adminDb.update(membership).set({ status: 'active' }).where(eq(membership.id, t.ownerMembershipId));
   tenantId = t.tenantId;
   await runOutbox(tenantId);
-  cookies = { owner: await signIn(owner.id), seller: await member('seller'), other: await member('seller') };
+  cookies = { owner: await signIn(owner.id), seller: await member('seller'), other: await member('seller'), restricted: await member('seller', null) };
   ash = await personAndAgent(tenant(), 'Ash');
   bo = await personAndAgent(tenant(), 'Bo');
 });
@@ -237,5 +239,41 @@ describe('list (Review Focus 4)', () => {
     const badCursor = await as('owner', listRoute, 'enrichment-requests?cursor=enr_missing', 'GET');
     expect(badCursor.status).toBe(400);
     expect((await badCursor.json()).title).toBe('That page link is out of date. Start from the first page.');
+  });
+});
+
+describe('visibility and shape', () => {
+  it('a seller on the default data limit gets 404 for an account they cannot see, and an empty list', async () => {
+    const { accountId } = await newAccount();
+    const r = await (await as('owner', createRoute, `accounts/${accountId}/enrichment-requests`, 'POST', firmo)).json();
+    expect((await as('restricted', createRoute, `accounts/${accountId}/enrichment-requests`, 'POST', { ...firmo, reason: 'x' })).status).toBe(404);
+    expect((await as('restricted', estimateRoute, `accounts/${accountId}/enrichment-estimate` + '?kind=company_firmographics&provider_key=apollo', 'GET')).status).toBe(404);
+    expect((await as('restricted', actionRoute, `enrichment-requests/${r.id}:cancel`, 'POST')).status).toBe(404);
+    const list = await (await as('restricted', listRoute, 'enrichment-requests', 'GET')).json();
+    expect(list).toEqual({ data: [], next_cursor: null });
+  });
+
+  it('a request has exactly the documented fields, plus joined', async () => {
+    const { accountId } = await newAccount();
+    const r = await (await as('owner', createRoute, `accounts/${accountId}/enrichment-requests`, 'POST', firmo)).json();
+    expect(Object.keys(r).sort()).toEqual(
+      [
+        'id', 'account_id', 'account_name', 'kind', 'kind_label', 'provider_key', 'provider_name', 'status', 'status_text',
+        'requested_by_label', 'reason', 'estimate', 'created_at', 'decided_by_label', 'decided_at', 'decline_reason',
+        'result', 'error', 'waiting_reason', 'sample', 'joined',
+      ].sort(),
+    );
+    expect(Object.keys(r.estimate).sort()).toEqual(['cost_cents', 'credits', 'text']);
+  });
+
+  it('the list page size goes up to 200', async () => {
+    const { accountId } = await newAccount();
+    const seed = await (await as('owner', createRoute, `accounts/${accountId}/enrichment-requests`, 'POST', firmo)).json();
+    const [row] = await adminDb.select().from(request).where(eq(request.id, seed.id));
+    const rows = Array.from({ length: 119 }, () => ({ ...row!, id: newId('enr'), status: 'declined', createdAt: new Date() }));
+    await adminDb.insert(request).values(rows);
+    const page = await (await as('owner', listRoute, `enrichment-requests?account_id=${accountId}&limit=200`, 'GET')).json();
+    expect(page.data).toHaveLength(120);
+    expect(page.next_cursor).toBeNull();
   });
 });

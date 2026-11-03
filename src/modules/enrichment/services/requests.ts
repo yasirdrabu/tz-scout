@@ -237,7 +237,7 @@ export async function listRequests(
   ctx: ModuleContext,
   f: { status?: RequestStatus; accountId?: string; cursor?: string; limit?: number } = {},
 ): Promise<{ data: RequestView[]; nextCursor: string | null }> {
-  const limit = Math.min(Math.max(f.limit ?? 25, 1), 100);
+  const limit = Math.min(Math.max(f.limit ?? 25, 1), 200);
   if (f.cursor) {
     // An unknown id would match nothing and read as the end of the list.
     const [known] = await ctx.tx.select({ id: request.id }).from(request).where(and(eq(request.tenantId, ctx.tenantId), eq(request.id, f.cursor)));
