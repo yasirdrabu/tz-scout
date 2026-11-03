@@ -22,7 +22,7 @@ module adds an event or tool.
 | `intake.arrival.waiting` | SRC | An arrival needs a person (website, company, possible duplicate); stays `resolving` | REV (queue badge), webhooks |
 | `intake.warm_intro.confirmed` | SRC | An agent-declared warm intro was confirmed. Data: `warmIntroId`, `accountId`, `arrivalId`, `relationshipKey`, `points`, `changeId` | SCO (rescores that account, cause `warm_intro`) |
 | `intake.warm_intro.repriced` | SRC | A relationship default or introducer rule changed and moved some recorded intros' points. Data: `changeId` (`wic_`, stamped on each repriced intro) (Claude's call, 2026-11-02) | SCO (rescores the distinct accounts stamped with the change id, cause `warm_intro`) |
-| `intake.feedback.recorded` | SRC | A source was told why its arrival lost a conflict, was sent back or declined at review, or was declined by a seller. One per distinct source in the chain, per cause. Data: `sourceId`, `arrivalId`, `accountId`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`), `reasonKey`, `note` | webhooks |
+| `intake.feedback.recorded` | SRC | A source was told why its arrival lost a conflict, was sent back or declined at review, or was declined by a seller, or that its enrichment request was declined or expired. One per distinct source in the chain, per cause; an enrichment decline or expiry tells only the requesting source. Data: `sourceId`, `arrivalId` (null when the source has no resolved arrival for the account, R2b-2), `accountId`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`, `enrichment_expired`), `reasonKey`, `note` | webhooks |
 | `accounts.account.exclusion_changed` | ACC | Account ruled out, or a person overrode a rule. Optional `arrivalId` | SCO (rescore), REV |
 | `enrichment.search.completed` | ENR | A saved-search run finished (maybe partial) | ANL (counts only; cost comes from INT usage) |
 | `accounts.account.created` / `.updated` / `.archived` | ACC | Account lifecycle. `created` and `updated` carry an optional `arrivalId` when an arrival caused them, and optional `externalIds` (the outside ids this write added; CRM turns them into links) | SCO, CRM, ANL |
@@ -32,9 +32,10 @@ module adds an event or tool.
 | `accounts.signal.recorded` | ACC | A dated signal was stored. Optional `arrivalId` | SCO |
 | `accounts.conflict.detected` | ACC | Two sources disagree on a fact, or an open conflict gained a fact | none in R2a. The queue reads `accounts.account_summary.open_conflict_count`, written in the same transaction (Claude's call, 2026-11-02) |
 | `accounts.conflict.resolved` | ACC | A person kept one value; carries the winning and losing sources | SRC (intake records `conflict_lost` feedback) |
-| `enrichment.request.flagged` | ENR | An agent or person asked for enrichment | REV (queue badge) |
-| `enrichment.request.approved` / `.declined` | ENR | A person decided on spend | ENR (run job) |
-| `enrichment.request.completed` / `.failed` | ENR | Provider run finished (results reach ACC as arrivals through SRC) | ANL (counts only; cost comes from INT usage), webhooks |
+| `enrichment.request.flagged` | ENR | An agent or person asked for enrichment and it waits for approval. Carries `requestedByLabel` | REV (queue chip, `routing.enrichment_open`) |
+| `enrichment.request.approved` / `.declined` | ENR | A person decided on spend, or an approver started a request. `approved` carries `requestedByLabel`; the run job is enqueued in the same transaction, not from this event | REV (queue chip) |
+| `enrichment.request.cancelled` | ENR | A request was cancelled from `flagged` or `approved`, or expired after 14 days flagged (`reason: 'expired'`). New in R2b-2 | REV (queue chip) |
+| `enrichment.request.completed` / `.failed` | ENR | Provider run finished (results reach ACC as arrivals through SRC); `completed` also for a `partial` run | REV (queue chip), ANL (counts only; cost comes from INT usage), webhooks |
 | `scoring.account.scored` | SCO | New scores, tier and best offer for an account; carries `version` (`account_score.version`). Published only when priority, tier or best offer moved, or on the first score | ACC (account summary), PLB, ANL, webhooks |
 | `scoring.rules.changed` | SCO | Weights, rules or warm-intro points changed | SCO (rescore) |
 | `offers.offer.approved` / `.archived` / `.changed` | OFF | Offer lifecycle | SCO (rescore), PLB |
@@ -79,6 +80,8 @@ Jobs travel the same way as events, as `jobs.<name>` messages. Each module spec 
 | `intake.resolve` | SRC | Runs the resolve pipeline for one arrival |
 | `intake.import.run` | SRC | Reads an uploaded file with its confirmed mapping and submits companies in chunks of 500; the next chunk is queued in the same transaction, with the cursor kept on the import |
 | `intake.waiting.expire` | SRC | Rejects arrivals that waited 30 days for a person. A per-tenant schedule, daily at 04:00 UTC |
+| `enrichment.request.run` | ENR | Runs one approved request: checks the limit, calls the provider, submits one targeted arrival. Delivered up to 5 times; retries wait 30 seconds, 2 minutes, 10 minutes, then an hour; timeout 120 seconds. A usage-limit wait does not use up a try |
+| `enrichment.request.expire` | ENR | Cancels requests flagged for 14 days. A per-tenant schedule, daily at 04:00 UTC, ensured when a request is created |
 | `accounts.exclusions.recheck` | ACC | Re-evaluates exclusion across a tenant's accounts after a rule or list changed |
 | `scoring.rescore.page` | SCO | Lists up to 200 account ids matching a filter (all, practice, source or offer), queues `scoring.rescore.accounts` for them and queues the next page |
 | `scoring.rescore.accounts` | SCO | Scores up to 200 accounts, each in its own savepoint; a failed account is queued again on its own. Timeout 300 seconds |

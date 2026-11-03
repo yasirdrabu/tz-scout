@@ -148,6 +148,7 @@ The rules in `architecture/design-and-copy.md` apply, plus:
 | Work | Review queue (badge: accounts waiting) | `review:act` |
 | Work | My accounts (badge: new assignments) | `assignments:respond` |
 | Work | All accounts | `accounts:read` |
+| Work | Enrichment | `enrichment:approve` or `enrichment:request` (R2b-2) |
 | Sources | Sources | `sources:manage` and `arrivals:read` |
 | Sources | Batches and imports | `arrivals:read` or `imports:run` |
 | Plan | Offers and practices | `offers:read` |

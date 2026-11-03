@@ -507,7 +507,7 @@ Files: `src/http/routes/v1/review-queue/**`, `src/http/routes/v1/accounts/[id]/{
 | 2 | Review status list (labels, tone) for dots, filter and inline select | SMALL GAP | `GET /api/v1/settings/review` | Needs `settings:manage` (owner only); leaders and sellers cannot read it. Allow `review:act` or `assignments:respond` to read, or add `GET /api/v1/review-settings`. `getReviewSettings` returns `statuses[]` and `decline_reasons[]`. |
 | 2 | Flags the spec lacks: `declined_by_seller` (seller, reason, when), `new_from`, `handoff_needs_decision`, `handoff_failed` | READY | `QueueRow.flags` | SPA needs chips for them. |
 | 2 | Flag "{n} conflicts" | READY | `GET /api/v1/review-queue` `conflict_count` on the row; `flag=conflicts` | From `account_summary.open_conflict_count`, written with detect and resolve (R2a). |
-| 2 | Flag "Enrichment requested" | LATER (R2) | none | Enrichment requests are R2. |
+| 2 | Flag "Enrichment requested" | READY (R2b-2) | `enrichment_requested`, `enrichment_requested_by` on the queue row | From `routing.enrichment_open`, fed by the enrichment request events. The peek shows "Enrichment requested by {label}". |
 | 2 | Bulk assign (up to 50) | READY | `POST /api/v1/review-queue/bulk` `{account_ids, action:'assign', seller_user_id, notes, lead_offer_id, ownership_decision}` (`review:act` + `assign:act`) | `MAX_BULK` 50: "select all visible" with pages up to 200 must cap. `results[]` per account `{ok}` or `{ok:false,status,message}`; a `stop` preflight is a per-account 409 unless that account is kept: `ownership_decisions:{[account_id]:'keep'}` per account (or `ownership_decision` for all). Uses the stored CRM check (`fresh:false`). |
 | 2, 6 | Bulk assign warning listing each affected account | READY | `POST /api/v1/review-queue/assign-preview` `{account_ids[1..50], seller_user_id}` (`assign:act`, people only) | `{data[{account_id, ok:true, preflight, approves_to, replaces} | {account_id, ok:false, status, message}]}` in the order asked; uses the stored check (`fresh:false`), each account in its own savepoint (Ruling 17). |
 | 2, 5 | Bulk send back with one reason | SMALL GAP | `POST /api/v1/review-queue/bulk` `{action:'status', to, note, reason_key}` | Needs a `returns_to_source` status (none seeded); requires a note, not a reason. Decision 1. |
@@ -613,7 +613,7 @@ Files: `src/http/routes/v1/accounts/**`, `src/http/routes/v1/people/**`; service
 | 4a | Buying committee: people, titles, roles, notes | READY | `GET /api/v1/accounts/{id}/people` (`accounts:read`; contact fields need `people:read`) | `PersonView.roles[{key,origin}]`, `decision_note`, `is_primary`. Role labels need a lookup. |
 | 4a | Role labels | READY | `roles[].label` on the account read and `GET /api/v1/accounts/{id}/people`; `GET /api/v1/buying-roles` (`accounts:read`) `{data[{key,label}]}`, active ones by sort | |
 | 4a | `Add a person` | READY | `POST /api/v1/accounts/{id}/people` (`people:write`) | Inline arrival; returns `{arrival_id, person_id, already_known}`; roles in `role_keys`. Edit with `PATCH /api/v1/people/{id}`. |
-| 4a | Committee gap rows, `Find` | LATER (R2) | none | |
+| 4a | Committee gap rows, `Find` | LATER (R2b-3) | none | R2b-3 wires `Find` to the Enrich dialog (§4c). |
 | 3, 4a | Notes list, `Add note` | NEW ENDPOINT | `GET/POST /api/v1/accounts/{id}/notes` (read `accounts:read`, write `review:act` or `accounts:write`) | `accounts.account_note(id, tenant_id, account_id, body, by_user_id, at)`; returns `{id, body, by_name, at}`; 4,000 characters; `note_count` on `account_summary`. Decision 3. |
 | 4a | Where it came from: person, agent, vendor, batch, arrived | READY | `GET /api/v1/accounts/{id}/arrivals` (`arrivals:read`) | `ArrivalView`: source ids, `batch_id`, `received_at`. Sellers lack `arrivals:read`: use `sources[]` in `GET /api/v1/accounts/{id}/review`. |
 | 4a | Practice inline select (peek §3) | SMALL GAP | `PUT /api/v1/accounts/{id}/practices` `{practice_ids[]}` | Exists but needs `accounts:write` (not `review:act`) and sets a list; the spec has one practice. The row's practice today is the best offer's. Allow `review:act` too. |
@@ -903,7 +903,8 @@ Files: `src/app/t/[tenant]/settings/integrations/{page,actions}.tsx` (server sid
 | 21b | Usage limits: banner and Usage limit section | READY (R2b-1) | `cap` (or null) on each service: `{provider_key, unit, period, limit, used, reserved, level, resets_at, overage}` | Level `ok`, `warn`, `blocked`. Defaults are read in memory until first stored. |
 | 21b | Save limit | READY (R2b-1) | `PUT /api/v1/integrations/{key}/cap` `{limit}` -> the cap (`integrations:manage`, people only) | Whole number of 1 or more, else 400 at `limit`; 404 for a service with no limit; audited `integrations.cap.set`. |
 | 21b | `Allow until {date}` | READY (R2b-1) | `POST /api/v1/integrations/{key}/cap:allow-overage` -> the cap (`integrations:manage`, people only) | Audited `integrations.cap.overage`. Route file is `[key]/[cap]/route.ts`. |
-| 21b | Apollo, Vibe live | LATER (R1d) | none | Mock-only adapters; `live-unavailable`. |
+| 21b | Apollo, Vibe live | READY for Apollo (R2b-2); LATER for Vibe | none | Apollo has a live adapter. Vibe is sample data only (enrichment Ruling 2), so going live keeps `live-unavailable`. |
+| 21b | Company website row | READY (R2b-2) | `needs_credential: false` on the `website` service | No credential field; it goes live with no key. Test connection: "Ready to read company websites. No key is needed." |
 | 21b | Google Workspace row | LATER (unscheduled) | none | No provider. |
 
 ### Proposed changes
@@ -923,6 +924,26 @@ All under `integrations:manage`, people only for writes.
 ### Release
 
 R1: items 1 to 6. R1d: caps, Apollo and Vibe live. Later: Google Workspace.
+
+## enrichment
+
+Files: `src/modules/enrichment` (`services/requests.ts`, `services/run.ts`, `domain/*`), routes
+`src/http/routes/v1/accounts/[id]/enrichment-requests`, `accounts/[id]/enrichment-estimate`,
+`enrichment-requests` and `enrichment-requests/[id]`. Built in R2b-2 (plan
+docs/plans/2026-11-03-r2b-2-enrichment.md); behaviour in enrichment/requests-and-approval.md.
+
+| Screen § | Need | Status | Endpoint / proposed | Notes |
+|---|---|---|---|---|
+| 3, 4, 4c | `Enrich`: create a request | READY (R2b-2) | `POST /api/v1/accounts/{id}/enrichment-requests` `{kind, provider_key, roles?, person_ids?, reason?}` (`enrichment:request`) | 201 `approved` for a person with `enrichment:approve`, else 201 `flagged`; 200 `joined: true` for an open request of the same kind. 400 at `reason` "Say why this is worth the spend." when it would be flagged. |
+| 4c | Estimate line | READY (R2b-2) | `GET /api/v1/accounts/{id}/enrichment-estimate?kind=&provider_key=&roles=a,b&person_ids=` (`enrichment:request`) | `{credits, cost_cents, currency, sample, text}`; show `text`. |
+| 4c | Buying roles, people without an email | READY | `GET /api/v1/buying-roles`, `GET /api/v1/accounts/{id}` `people[]` | Roles with no person are checked to start with. |
+| 4 | Enrichment notice under the card | READY (R2b-2) | `GET /api/v1/enrichment-requests?account_id=` | Each item has `kind_label`, `provider_name`, `status_text`; refresh every 10 s while one is `approved` or `running`. |
+| 8a | Requests list, Waiting and All tabs | READY (R2b-2) | `GET /api/v1/enrichment-requests?status=flagged&cursor=` (`enrichment:request`) | `{data, next_cursor}`, newest first, within data limits; `limit` up to 200. An empty `?status=` is 400. |
+| 8a | `Approve` | READY (R2b-2) | `POST /api/v1/enrichment-requests/{id}:approve` (`enrichment:approve`, people only) | 202 with the request; 403 "Only a person can approve spend." for a key; 409 "This request is already {status}." |
+| 8a | `Decline` | READY (R2b-2) | `POST /api/v1/enrichment-requests/{id}:decline` `{reason}` (`enrichment:approve`, people only) | 400 "Say why you're declining."; records `enrichment_declined` feedback for the requesting source. |
+| none | Cancel | READY (R2b-2), no button yet | `POST /api/v1/enrichment-requests/{id}:cancel` (`enrichment:approve`, or the requester) | From `flagged` or `approved`. |
+| 4 | "Waiting on enrichment" status | LATER | none | Deferred (enrichment Ruling 14). |
+| 21 | Prices per operation (`provider_price`) | LATER | none | Credits are code constants; money per credit is the connection's `cents_per_credit` setting (default 10). |
 
 ## ai-tasks
 

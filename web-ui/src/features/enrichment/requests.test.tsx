@@ -39,7 +39,7 @@ function serve(scopes: string[], opts: { rows?: EnrichmentRequest[]; next?: stri
 
 beforeEach(() => localStorage.clear());
 
-describe('Enrichment requests (§22)', () => {
+describe('Enrichment requests (§8a)', () => {
   it('lists the flagged requests with every column, the account as a link, and the age', async () => {
     const lists = serve(APPROVER);
     renderApp(URL_);

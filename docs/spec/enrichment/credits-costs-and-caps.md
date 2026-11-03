@@ -1,6 +1,10 @@
 # ENR-E3 Credits, costs and caps
 
-Status: Draft · Release: R1 (caps and usage through INT), R3 (cost reporting through ANL)
+Status: Request caps shipped in R2b-2 · Release: R1 (caps and usage through INT), R3 (cost reporting
+through ANL)
+
+R2b-2 shipped plan docs/plans/2026-11-03-r2b-2-enrichment.md. Its rulings for credits and money are
+below ("R2b-2 rulings"); where they differ from the Rules, the rulings win.
 
 ## Why
 
@@ -32,6 +36,50 @@ who asked for it and why, turned into money, and stopped at the caps the owner s
 - **Estimates** use `provider_price` per tenant and operation (credits per operation); seeded with
   Apollo defaults the owner should confirm (Settings shows "Check these against your Apollo plan").
 
+## R2b-2 rulings
+
+Claude's calls, 2026-11-03 (the numbering is the plan's; the other rulings are in
+[requests-and-approval.md](requests-and-approval.md) and [results-and-failures.md](results-and-failures.md)).
+
+- **Ruling 4. Kinds, operations and credits** are code constants (`domain/prices.ts`). There is no
+  `provider_price` table and no Settings screen for it in this version; both are deferred, which
+  differs from "Estimates" in the Rules above.
+
+  | Kind | Apollo operations | Credits | Estimate |
+  |---|---|---|---|
+  | `company_firmographics` | `organizations/enrich` | 1 | 1 |
+  | `people_for_roles` | `mixed_people/api_search` (0), then `people/match` per person | 1 per person found | roles × 3 |
+  | `email_reveal` | `people/match` per named person | 1 | number of people |
+  | `signals_refresh` | `organizations/enrich` (once, for the organization id), `organizations/job_postings`, `news_articles/search` | 1 + 1 + 1 | 3 |
+  | `website_read` | `website.read` | 0 | 0 credits; Claude worst case in cents |
+
+  Vibe uses the same kinds, operations and credits in its sample data. `signals_refresh` looks the
+  company up once, so job postings and news need no lookup of their own; when the lookup finds no
+  company, the run stops there (1 credit) and finds nothing new.
+- **Ruling 5. Money on estimates.** Money is `credits × cents_per_credit`. `cents_per_credit` comes
+  from the connection's settings when set (a whole number of 0 or more); otherwise the defaults are
+  apollo 10 and vibe 10. Currency comes from the tenant. A website read's money is the `read_website`
+  task's worst case (5 cents).
+  - Copy: "Up to {n} credits, about {money}", or "Up to 1 credit, about $0.10".
+  - With 0 credits: "Free. Claude usage up to {money}" (website).
+  - On mock, append " · Sample".
+- **Check before spending.** The run calls `checkCap` with the stored estimate's credits for the
+  provider's one limit (usage-caps.md); there are no per-key limits, since keys never spend. When
+  blocked, the request stays `approved` with `waiting_reason` "Waiting for budget: {Provider} monthly
+  limit reached", committed in its own transaction, and the job waits for the limit (INT-E4-S3-AC2)
+  without using up a try.
+- **Every operation is one `gateway.call`** with `{module: 'enrichment', unit: 'credits', units: <worst
+  case for this call>, measure: <credits the provider reported>, requestSummary: {requestId,
+  accountId}}`, so the limit reserves the worst case and settles what was spent.
+- **The result's money.** `result.cost_cents` = `credits_used × cents_per_credit` (the same rate as the
+  estimate), plus Claude's cost for a website read. `integrations.usage.recorded` and ANL cost lines
+  are R3a, so ENR-E3-S1-AC2 waits for R3a.
+- **Retries re-spend.** A job retried after a provider error (or a redelivery after a crash) runs the
+  paid calls again: their credits count against the limit again, and `result.credits_used` counts
+  only the final attempt. Accepted for this version; INT's call log has every call.
+- **The vendor source is checked before any paid call.** A paused or archived provider source, or one
+  at its daily arrival limit, fails the request before anything is spent (results-and-failures.md).
+
 ## Stories
 
 ### ENR-E3-S1 Every credit is recorded once
@@ -40,7 +88,7 @@ As an owner, I want every credit spent recorded with who and why, so that cost p
   with the context fields; INT's usage for the month equals the sum of `credits_used` on ENR requests
   and search runs.
 - ENR-E3-S1-AC2 An integration test runs one enrichment and checks exactly one set of cost lines
-  appears in ANL.
+  appears in ANL. Waits for R3a, where `integrations.usage.recorded` and ANL cost lines are built.
 
 ### ENR-E3-S2 Respect caps
 As an owner, I want spending to stop at the limits I set, so that a busy week can't run up a bill.

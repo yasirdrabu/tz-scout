@@ -25,7 +25,7 @@ export type EnrichDialogProps = {
 const REASON_MAX = 500;
 
 /**
- * §4b Enrich dialog: what to find, the provider, the buying roles or people, the API's estimate. An
+ * §4c Enrich dialog: what to find, the provider, the buying roles or people, the API's estimate. An
  * approver runs it; anyone else says why it is worth the spend and asks for approval (Ruling 1).
  */
 export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: EnrichDialogProps) {

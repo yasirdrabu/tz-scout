@@ -69,7 +69,9 @@ Field rules:
   CRM webhooks may arrive without a website; those wait for a person (SRC-E3, `needs_website`).
 - **People** accept `name` (split into first and last by ACC) or `first_name` and `last_name`; one
   `buying_role` or a `buying_roles` list (keys from the tenant's list, ACC-E2); `notes` is the
-  decision note. Max 25 people.
+  decision note. Optional `email_status` (`verified`, `guessed`, `unavailable`, `bounced`) and
+  `seniority` (up to 40 characters) are stored as the person facts of the same names, with the
+  arrival's provenance (R2b-2; enrichment results carry them). Max 25 people.
 - **Signals** accept the coarse `type` from the MCP shape (`research`, `trigger`, `pain`, stored as the
   signal's kind) or a fine type from ACC-E4 (`funding`, `hiring`, ...) in `fine_type`; `occurred_at` is
   required; `confidence` 0 to 1. Max 50 signals.

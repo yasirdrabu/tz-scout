@@ -20,7 +20,7 @@ const TABS = [
   { id: 'all', label: 'All' },
 ];
 
-/** §22 Enrichment requests: what sellers and agents asked for, and for an approver Approve and Decline. */
+/** §8a Enrichment requests: what sellers and agents asked for, and for an approver Approve and Decline. */
 export function RequestsScreen() {
   const { tenant } = route.useParams();
   const queryClient = useQueryClient();

@@ -42,8 +42,26 @@ Carried from v1 and still binding: every outside service sits behind an interfac
 | Booking | `booking` | campaigns | API key | R4 |
 | SMS | `sms` | campaigns | API key | R4 |
 | Company data | `company_data` | enrichment | API key (vendor to be chosen) | R2 |
+| Company website | `website` | enrichment | None (`needsCredential: false`) | R2 (shipped in R2b-2) |
 
 Microsoft sign-in is configured per platform (env vars), not per tenant, in this version.
+
+R2b-2 (enrichment, plan docs/plans/2026-11-03-r2b-2-enrichment.md) added, as Claude's calls of
+2026-11-03:
+
+- **`needsCredential`.** A provider may be marked `needsCredential: false` (only `website` is). Such a
+  provider goes live with no saved credential: the gateway treats it as ready, and Test connection and
+  turning it back on can mark it `connected` without one. Every service in `GET /api/v1/integrations`
+  and `GET /api/v1/integrations/{key}` carries `needs_credential`, so the screen shows no credential
+  field for it.
+- **No health bookkeeping for `website`.** A keyless provider's failed call is the target's fault (one
+  company's site is down), so the gateway never moves its connection to `failing` or `connected`
+  after a call.
+- **`markConnectionFailing(ctx, provider, message)`** sets the connection `failing` (a `disabled` one
+  stays `disabled`) with the scrubbed message as `last_error`, at once, without waiting for repeated
+  failures. Enrichment calls it on an `auth` failure (a 401 from the provider).
+- **Vibe** has only a mock adapter for now (enrichment Ruling 2), so setting it live keeps the 409
+  "This service can't run live yet." Apollo has a live adapter.
 
 ## Stories
 

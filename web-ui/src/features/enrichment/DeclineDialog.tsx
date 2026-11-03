@@ -12,7 +12,7 @@ import { DECLINE_NEEDED, declinedText } from './words';
 
 const REASON_MAX = 500;
 
-/** §22 Decline dialog: the reason is required, and the requester will see it. */
+/** §8a Decline dialog: the reason is required, and the requester will see it. */
 export function DeclineDialog({ tenant, request, onClose }: { tenant: string; request: EnrichmentRequest; onClose: () => void }) {
   const toast = useToast();
   const queryClient = useQueryClient();
