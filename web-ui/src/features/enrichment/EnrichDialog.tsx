@@ -10,7 +10,7 @@ import { accountQuery, buyingRolesQuery, personName } from '../account/api';
 import { errorText } from '../settings/shared';
 import { createRequest, estimateQuery, type EnrichmentKind, type NewRequest } from './api';
 import styles from './Enrichment.module.css';
-import { EVERYONE_EMAILED, FLAGGED_TEXT, JOINED_TEXT, KINDS, PEOPLE_MAX, providersFor, REASON_NEEDED, ROLE_NEEDED, startedText, TOO_MANY_PEOPLE } from './words';
+import { CORE_ROLES, EVERYONE_EMAILED, FLAGGED_TEXT, JOINED_TEXT, KINDS, PEOPLE_MAX, providersFor, REASON_NEEDED, ROLE_NEEDED, startedText, TOO_MANY_PEOPLE } from './words';
 
 export type EnrichDialogProps = {
   tenant: string;
@@ -37,7 +37,7 @@ export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: E
 
   const [kind, setKind] = useState<EnrichmentKind>('people_for_roles');
   const [provider, setProvider] = useState(providersFor('people_for_roles')[0]!.key);
-  // null until the person changes them: the roles with no person yet, and the first 25 people without an email.
+  // null until the person changes them: the core roles with no person yet, and the first 25 people without an email.
   const [roles, setRoles] = useState<string[] | null>(null);
   const [people, setPeople] = useState<string[] | null>(null);
   const [reason, setReason] = useState('');
@@ -49,7 +49,7 @@ export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: E
   const allRoles = buying.data?.data ?? [];
   const persons = account.data?.people ?? [];
   const covered = new Set(persons.flatMap((p) => p.roles.map((r) => r.key)));
-  const pickedRoles = roles ?? allRoles.filter((r) => !covered.has(r.key)).map((r) => r.key);
+  const pickedRoles = roles ?? allRoles.filter((r) => CORE_ROLES.includes(r.key) && !covered.has(r.key)).map((r) => r.key);
   const noEmail = persons.filter((p) => !p.email);
   const pickedPeople = people ?? noEmail.slice(0, PEOPLE_MAX).map((p) => p.id);
   const tooMany = kind === 'email_reveal' && pickedPeople.length > PEOPLE_MAX;

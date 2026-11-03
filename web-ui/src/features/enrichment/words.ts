@@ -23,6 +23,8 @@ export const EVERYONE_EMAILED = 'Everyone here already has an email.';
 /** One request reveals at most this many people, as the API allows. */
 export const PEOPLE_MAX = 25;
 export const TOO_MANY_PEOPLE = `Pick up to ${PEOPLE_MAX} people.`;
+/** The roles Enrich looks for by default (§4 building state): a business owner, commercial buyer and technical buyer. */
+export const CORE_ROLES = ['business_owner', 'commercial_buyer', 'technical_buyer'];
 
 export const startedText = (name: string) => `Enrichment started for ${name}. New signals appear in about 2 minutes.`;
 export const FLAGGED_TEXT = 'Sent for approval. A leader will see it in Enrichment requests.';

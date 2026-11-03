@@ -275,7 +275,8 @@ Opened by `Enrich` on the account page (both views) and in the queue peek (§3).
 - **Provider** (select): Apollo (default) and Vibe Prospecting; for Read the website only Company
   website.
 - **Buying roles** (People for buying roles): a checkbox per role from `GET /api/v1/buying-roles`, in
-  their order; checked to start with are the roles with no person on the account yet. While they
+  their order; checked to start with are the core roles (business owner, commercial buyer, technical
+  buyer) with no person on the account yet, so a first run stays small. While they
   load: "Loading buying roles"; if they fail: "Buying roles didn't load. {error}". Sending with none
   checked: "Pick at least one buying role."
 - **People** (Reveal emails): a checkbox per person on the account without an email, the first 25

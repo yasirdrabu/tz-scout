@@ -46,6 +46,22 @@ describe('Enrich dialog', () => {
     expect(within(roles).getByRole('checkbox', { name: 'Business owner' })).not.toBeChecked();
   });
 
+  it('by default only the core roles are checked: business owner, commercial buyer and technical buyer', async () => {
+    serveAccount({ scopes: [...PAGE_LEADER, ...APPROVER], account: { ...ACCOUNT, people: [] } });
+    serveEnrichment();
+    const keys = ['business_owner', 'commercial_buyer', 'technical_buyer', 'influencer', 'champion'];
+    const label = (k: string) => k[0]!.toUpperCase() + k.slice(1).replace('_', ' ');
+    server.use(http.get('/api/v1/buying-roles', () => HttpResponse.json({ data: keys.map((key) => ({ key, label: label(key) })) })));
+    renderApp(URL);
+    const { dialog } = await openDialog();
+    const roles = within(dialog).getByRole('group', { name: 'Buying roles' });
+    expect(await within(roles).findByRole('checkbox', { name: 'Commercial buyer' })).toBeChecked();
+    expect(within(roles).getByRole('checkbox', { name: 'Business owner' })).toBeChecked();
+    expect(within(roles).getByRole('checkbox', { name: 'Technical buyer' })).toBeChecked();
+    expect(within(roles).getByRole('checkbox', { name: 'Influencer' })).not.toBeChecked();
+    expect(within(roles).getByRole('checkbox', { name: 'Champion' })).not.toBeChecked();
+  });
+
   it('with every role covered nothing is checked, and confirming asks for a role', async () => {
     const both = [{ key: 'business_owner', origin: 'stated', label: 'Business owner' }, { key: 'technical_buyer', origin: 'stated', label: 'Technical buyer' }];
     serveAccount({ scopes: [...PAGE_LEADER, ...APPROVER], account: { ...ACCOUNT, people: [{ ...ACCOUNT.people[0]!, roles: both }] } });
