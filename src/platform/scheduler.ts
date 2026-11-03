@@ -132,6 +132,24 @@ export async function upsertSchedule(adminCtx: AdminCtx, input: ScheduleInput, n
 }
 
 /**
+ * The schedule for (tenant, job), made with `upsertSchedule` only when there is none. The check takes no lock and
+ * writes nothing, so callers on a hot path (every enrichment request) neither serialize on the row nor audit each
+ * time. An existing schedule is left as it is, even when its cron differs. Returns the id.
+ */
+export async function ensureSchedule(adminCtx: AdminCtx, input: ScheduleInput, now = new Date()): Promise<string> {
+  const find = async (tx: Pick<Tx, 'select'>) =>
+    (
+      await tx
+        .select({ id: schedule.id })
+        .from(schedule)
+        .where(and(eq(schedule.tenantId, input.tenantId), eq(schedule.jobName, input.jobName)))
+    )[0]?.id;
+  const onControl = input.tenantId === PLATFORM_TENANT;
+  const found = adminCtx.tx ? await find(adminCtx.tx) : onControl ? await withControlAdmin(find) : await withWorkspaceAdmin(input.tenantId, find);
+  return found ?? upsertSchedule(adminCtx, input, now);
+}
+
+/**
  * Runs `fn` on the schedule row `id`, locked, in the database that holds it: the caller's control
  * transaction (`adminCtx.tx`) or a new one first, then each workspace database. 404 when none has it.
  */

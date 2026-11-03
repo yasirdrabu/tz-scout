@@ -15,7 +15,7 @@ import { connection } from '@/modules/integrations/db/schema';
 import { sourceFeedback } from '@/modules/intake/db/schema';
 import type { Principal } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
-import { schedule } from '@/platform/db/schema';
+import { auditLog, schedule } from '@/platform/db/schema';
 import { accountFrom, agentKey, as, enrichmentTenant, messagesFor, person, type Tenant } from './helpers';
 
 let t: Tenant;
@@ -84,6 +84,15 @@ describe('createRequest (Ruling 1)', () => {
     const sch = await adminDb.select().from(schedule).where(and(eq(schedule.tenantId, t.tenantId), eq(schedule.jobName, 'enrichment.request.expire')));
     expect(sch).toHaveLength(1);
     expect(sch[0]).toMatchObject({ cron: '0 4 * * *', timezone: 'UTC' });
+
+    // A second create finds the schedule: no second row, no new audit row.
+    const audits = () => adminDb.select().from(auditLog).where(and(eq(auditLog.subjectId, sch[0]!.id), eq(auditLog.action, 'platform.schedule.upserted')));
+    const auditsBefore = (await audits()).length;
+    const other = await accountFrom(t, agentSourceId);
+    await create(owner, other.accountId, firmo);
+    const after = await adminDb.select().from(schedule).where(and(eq(schedule.tenantId, t.tenantId), eq(schedule.jobName, 'enrichment.request.expire')));
+    expect(after.map((s) => s.id)).toEqual([sch[0]!.id]);
+    expect(await audits()).toHaveLength(auditsBefore);
   });
 
   it('a seller needs a reason, then creates it flagged with no run', async () => {
@@ -189,7 +198,7 @@ describe('approve, decline, cancel (Ruling 7)', () => {
     expect(await messagesFor(t, 'jobs.enrichment.request.run', r.id)).toHaveLength(1);
     expect((await messagesFor(t, 'enrichment.request.approved', r.id))[0]!.data).toMatchObject({ decidedBy: leader.id, requestedByLabel: 'Dana Ruiz' });
     const again = await reject(as(t, owner, (ctx) => approveRequest(ctx, owner, r.id)));
-    expect(again).toMatchObject({ status: 409, message: 'This request is already Starting.' });
+    expect(again).toMatchObject({ status: 409, message: 'This request is already approved.' });
   });
 
   it('an unknown id is a 404', async () => {
@@ -211,7 +220,7 @@ describe('approve, decline, cancel (Ruling 7)', () => {
     expect(fb.map((f) => [f.sourceId, f.kind, f.note, f.causeEventId])).toEqual([[agentSourceId, 'enrichment_declined', 'We know their size', events[0]!.id]]);
     expect(fb[0]!.arrivalId).not.toBeNull();
     expect(fb.some((f) => f.sourceId === personSourceId)).toBe(false);
-    expect((await reject(as(t, owner, (ctx) => declineRequest(ctx, owner, r.id, 'again')))).status).toBe(409);
+    expect(await reject(as(t, owner, (ctx) => declineRequest(ctx, owner, r.id, 'again')))).toMatchObject({ status: 409, message: 'This request is already declined.' });
   });
 
   it("an agent's request for an account it sent nothing for still records the feedback, with no arrival", async () => {
@@ -230,7 +239,7 @@ describe('approve, decline, cancel (Ruling 7)', () => {
     const cancelled = await as(t, seller, (ctx) => cancelRequest(ctx, seller, r.id));
     expect(cancelled).toMatchObject({ status: 'cancelled', statusText: 'Cancelled' });
     expect((await messagesFor(t, 'enrichment.request.cancelled', r.id)).map((m) => m.data)).toEqual([{ requestId: r.id, accountId, reason: 'cancelled' }]);
-    expect(await reject(as(t, seller, (ctx) => cancelRequest(ctx, seller, r.id)))).toMatchObject({ status: 409, message: 'This request is already Cancelled.' });
+    expect(await reject(as(t, seller, (ctx) => cancelRequest(ctx, seller, r.id)))).toMatchObject({ status: 409, message: 'This request is already cancelled.' });
 
     const { request: approved } = await create(owner, accountId, firmo);
     expect((await as(t, leader, (ctx) => cancelRequest(ctx, leader, approved.id))).status).toBe('cancelled');
@@ -239,30 +248,44 @@ describe('approve, decline, cancel (Ruling 7)', () => {
 
 describe('listRequests and getRequest', () => {
   it('filters by status and account, pages by cursor, and keeps to data limits', async () => {
-    const mine = await accountFrom(t, agentSourceId);
-    const theirs = await accountFrom(t, looseAgentId);
-    const a = await create(seller, mine.accountId, { ...firmo, reason: 'a' });
-    const b = await create(seller, mine.accountId, { kind: 'signals_refresh', providerKey: 'apollo', reason: 'b' });
-    const c = await create(seller, theirs.accountId, { ...firmo, reason: 'c' });
+    // A tenant of its own, so the counts don't depend on the other tests' requests.
+    const e = await enrichmentTenant();
+    const sel = await person(e.t, 'seller', 'List Seller');
+    const make = (accountId: string, input: Parameters<typeof createRequest>[3]) => as(e.t, sel, (ctx) => createRequest(ctx, sel, accountId, input));
+    const mine = await accountFrom(e.t, e.agentId);
+    const theirs = await accountFrom(e.t, e.looseAgentId);
+    const a = await make(mine.accountId, { ...firmo, reason: 'a' });
+    const b = await make(mine.accountId, { kind: 'signals_refresh', providerKey: 'apollo', reason: 'b' });
+    const c = await make(theirs.accountId, { ...firmo, reason: 'c' });
+    await as(e.t, e.owner, (ctx) => approveRequest(ctx, e.owner, b.request.id));
 
-    const byAccount = await t.run((ctx) => listRequests(ctx, { accountId: mine.accountId }));
+    const byAccount = await e.t.run((ctx) => listRequests(ctx, { accountId: mine.accountId }));
     expect(byAccount.data.map((r) => r.id)).toEqual([b.request.id, a.request.id]);
     expect(byAccount.data[0]).toMatchObject({ accountName: expect.stringMatching(/^Enrich /), kindLabel: 'Fresh signals' });
+    expect((await e.t.run((ctx) => listRequests(ctx, { status: 'flagged' }))).data.map((r) => r.id)).toEqual([c.request.id, a.request.id]);
 
-    const page1 = await t.run((ctx) => listRequests(ctx, { accountId: mine.accountId, limit: 1 }));
-    expect(page1.data.map((r) => r.id)).toEqual([b.request.id]);
-    const page2 = await t.run((ctx) => listRequests(ctx, { accountId: mine.accountId, limit: 1, cursor: page1.nextCursor! }));
-    expect(page2).toMatchObject({ data: [{ id: a.request.id }], nextCursor: null });
+    const page1 = await e.t.run((ctx) => listRequests(ctx, { limit: 1 }));
+    expect(page1.data.map((r) => r.id)).toEqual([c.request.id]);
+    const page2 = await e.t.run((ctx) => listRequests(ctx, { limit: 1, cursor: page1.nextCursor! }));
+    expect(page2.data.map((r) => r.id)).toEqual([b.request.id]);
+    const page3 = await e.t.run((ctx) => listRequests(ctx, { limit: 1, cursor: page2.nextCursor! }));
+    expect(page3).toMatchObject({ data: [{ id: a.request.id }], nextCursor: null });
 
-    const key = agentKey(t, agentSourceId);
-    const seen = await as(t, key, (ctx) => listRequests(ctx, { status: 'flagged', limit: 200 }));
-    const ids = seen.data.map((r) => r.id);
-    expect(ids).toContain(a.request.id);
-    expect(ids).not.toContain(c.request.id);
-    expect(seen.data.every((r) => r.status === 'flagged')).toBe(true);
-    expect(await as(t, key, (ctx) => getRequest(ctx, c.request.id))).toBeNull();
-    expect(await as(t, key, (ctx) => listRequests(ctx, { accountId: theirs.accountId }))).toEqual({ data: [], nextCursor: null });
-    expect((await t.run((ctx) => getRequest(ctx, c.request.id)))!.id).toBe(c.request.id);
+    const key = agentKey(e.t, e.agentId);
+    const seen = await as(e.t, key, (ctx) => listRequests(ctx, {}));
+    expect(seen).toMatchObject({ data: [{ id: b.request.id }, { id: a.request.id }], nextCursor: null });
+    // Its first page skips the request it can't see and is still full.
+    expect((await as(e.t, key, (ctx) => listRequests(ctx, { limit: 1 }))).data.map((r) => r.id)).toEqual([b.request.id]);
+    expect(await as(e.t, key, (ctx) => getRequest(ctx, c.request.id))).toBeNull();
+    expect(await as(e.t, key, (ctx) => listRequests(ctx, { accountId: theirs.accountId }))).toEqual({ data: [], nextCursor: null });
+    expect((await e.t.run((ctx) => getRequest(ctx, c.request.id)))!.id).toBe(c.request.id);
+  });
+
+  it('an unknown or malformed cursor is a 400', async () => {
+    for (const cursor of ['enr_NOPE', 'not a cursor']) {
+      const e = await reject(t.run((ctx) => listRequests(ctx, { cursor })));
+      expect(e).toMatchObject({ status: 400, message: 'That page link is out of date. Start from the first page.' });
+    }
   });
 });
 

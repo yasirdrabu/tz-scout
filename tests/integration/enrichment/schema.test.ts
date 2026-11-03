@@ -44,13 +44,14 @@ describe('enrichment schema', () => {
     expect(await b.run((ctx) => ctx.tx.select().from(request))).toHaveLength(0);
   });
 
-  it('refuses an unknown status or kind', async () => {
+  it('refuses an unknown status or kind, and a request with no account', async () => {
     const a = await freshTenant();
-    const base = { tenantId: '', kind: 'email_reveal', providerKey: 'apollo', requestedBy: 'usr_1', estimate: {}, status: 'flagged' };
+    const base = { tenantId: '', accountId: 'acc_1', kind: 'email_reveal', providerKey: 'apollo', requestedBy: 'usr_1', estimate: {}, status: 'flagged' };
     const insert = (o: Partial<typeof base>) =>
       a.run((ctx) => ctx.tx.insert(request).values({ ...base, ...o, id: newId('enr'), tenantId: ctx.tenantId }));
     await expect(insert({ status: 'paused' })).rejects.toThrow();
     await expect(insert({ kind: 'mind_reading' })).rejects.toThrow();
+    await expect(insert({ accountId: null as unknown as string })).rejects.toThrow();
   });
 });
 

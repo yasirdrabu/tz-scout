@@ -23,8 +23,8 @@ export async function expireFlagged(ctx: ModuleContext, now: Date): Promise<numb
     .for('update');
   for (const r of stale) {
     await ctx.tx.update(request).set({ status: 'cancelled', declineReason: 'expired', updatedAt: now }).where(eq(request.id, r.id));
-    const event = await publish(ctx, requestCancelled, { requestId: r.id, accountId: r.accountId!, reason: 'expired' }, { type: 'enrichment_request', id: r.id });
-    if (r.requestingSourceId && r.accountId) {
+    const event = await publish(ctx, requestCancelled, { requestId: r.id, accountId: r.accountId, reason: 'expired' }, { type: 'enrichment_request', id: r.id });
+    if (r.requestingSourceId) {
       await recordSourceFeedback(ctx, { sourceId: r.requestingSourceId, accountId: r.accountId, kind: 'enrichment_expired', note: null, causeEventId: event.id });
     }
   }

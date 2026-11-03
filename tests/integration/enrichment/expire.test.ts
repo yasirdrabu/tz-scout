@@ -1,7 +1,7 @@
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { jobs } from '@/entry/worker';
-import { createRequest, expireFlagged } from '@/modules/enrichment';
+import { approveRequest, createRequest, expireFlagged } from '@/modules/enrichment';
 import { request } from '@/modules/enrichment/db/schema';
 import { sourceFeedback } from '@/modules/intake/db/schema';
 import type { Principal } from '@/modules/tenancy';
@@ -29,6 +29,15 @@ async function requestAged(p: Principal, accountId: string, days: number, input:
   return r.id;
 }
 
+const reject = async (p: Promise<unknown>) => {
+  try {
+    await p;
+  } catch (e) {
+    return e as { status: number; message: string };
+  }
+  throw new Error('expected a rejection');
+};
+
 describe('expireFlagged (Ruling 7)', () => {
   it('cancels only requests flagged for 14 days or more, tells the requesting source and publishes cancelled', async () => {
     const key = agentKey(t, agentSourceId);
@@ -55,6 +64,25 @@ describe('expireFlagged (Ruling 7)', () => {
 
     // A second run finds nothing more.
     expect(await t.run((ctx) => expireFlagged(ctx, now))).toBe(0);
+  });
+
+  it('a request flagged exactly 14 days ago expires; one a second younger does not', async () => {
+    const now = new Date();
+    const at = (ms: number) => new Date(now.getTime() - ms);
+    const a = await accountFrom(t, agentSourceId);
+    const b = await accountFrom(t, agentSourceId);
+    const key = agentKey(t, agentSourceId);
+    const edge = await requestAged(key, a.accountId, 0);
+    const younger = await requestAged(key, b.accountId, 0);
+    await t.run((ctx) => ctx.tx.update(request).set({ createdAt: at(14 * DAY) }).where(eq(request.id, edge)));
+    await t.run((ctx) => ctx.tx.update(request).set({ createdAt: at(14 * DAY - 1000) }).where(eq(request.id, younger)));
+    expect(await t.run((ctx) => expireFlagged(ctx, now))).toBe(1);
+    const rows = new Map((await t.run((ctx) => ctx.tx.select().from(request).where(inArray(request.id, [edge, younger])))).map((r) => [r.id, r]));
+    expect(rows.get(edge)).toMatchObject({ status: 'cancelled', declineReason: 'expired' });
+    expect(rows.get(younger)!.status).toBe('flagged');
+    // A late approve reads as expired.
+    const late = await reject(as(t, owner, (ctx) => approveRequest(ctx, owner, edge)));
+    expect(late).toMatchObject({ status: 409, message: 'This request is already expired.' });
   });
 
   it('is a worker job handler', () => {

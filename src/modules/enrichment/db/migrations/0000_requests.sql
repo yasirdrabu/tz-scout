@@ -1,7 +1,7 @@
 CREATE TABLE "enrichment"."request" (
 	"id" text PRIMARY KEY NOT NULL,
 	"tenant_id" text NOT NULL,
-	"account_id" text,
+	"account_id" text NOT NULL,
 	"kind" text NOT NULL,
 	"params" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"provider_key" text NOT NULL,

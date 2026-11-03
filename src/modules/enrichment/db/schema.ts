@@ -15,7 +15,7 @@ export const request = enrichment.table(
   {
     id: text('id').primaryKey(), // enr_
     tenantId: text('tenant_id').notNull(),
-    accountId: text('account_id'),
+    accountId: text('account_id').notNull(),
     kind: text('kind').notNull(), // company_firmographics | people_for_roles | email_reveal | website_read | signals_refresh
     params: jsonb('params').notNull().default({}), // { roles?, person_ids? }
     providerKey: text('provider_key').notNull(),

@@ -29,7 +29,7 @@ export type RequestInput = { kind: EnrichmentKind; providerKey: string; roles?: 
 
 export type RequestView = {
   id: string;
-  accountId: string | null;
+  accountId: string;
   accountName: string | null;
   kind: EnrichmentKind;
   kindLabel: string;
@@ -86,7 +86,19 @@ const textOf = (r: Row) =>
 const invalid = (path: string, title: string) => new ScoutError({ slug: 'validation', status: 400, title, errors: [{ path, message: title }] });
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That enrichment request was not found.' });
 const accountNotFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
-const already = (r: Row) => new ScoutError({ slug: 'conflict', status: 409, title: `This request is already ${textOf(r)}.` });
+const STATUS_WORD: Record<RequestStatus, string> = {
+  flagged: 'waiting for approval',
+  approved: 'approved',
+  running: 'running',
+  declined: 'declined',
+  cancelled: 'cancelled',
+  completed: 'done',
+  partial: 'done',
+  failed: 'failed',
+};
+const statusWord = (r: Row) => (r.status === 'cancelled' && r.declineReason === 'expired' ? 'expired' : STATUS_WORD[r.status as RequestStatus]);
+const already = (r: Row) => new ScoutError({ slug: 'conflict', status: 409, title: `This request is already ${statusWord(r)}.` });
+const OLD_CURSOR = 'That page link is out of date. Start from the first page.';
 
 /** Ruling 1: approving and declining spend is for people, whatever a key's scopes say. */
 function requireApprover(p: Principal): void {
@@ -178,14 +190,14 @@ export async function estimateFor(
 async function views(ctx: ModuleContext, rows: Row[]): Promise<RequestView[]> {
   if (rows.length === 0) return [];
   const { currency } = await tenantSummary(ctx);
-  const names = await accountNames(ctx, [...new Set(rows.map((r) => r.accountId).filter((id): id is string => !!id))]);
+  const names = await accountNames(ctx, [...new Set(rows.map((r) => r.accountId))]);
   return rows.map((r) => {
     const est = fromStoredEstimate(r.estimate);
     const sample = r.connectionMode ? r.connectionMode !== 'live' : est.sample;
     return {
       id: r.id,
       accountId: r.accountId,
-      accountName: r.accountId ? (names.get(r.accountId) ?? null) : null,
+      accountName: names.get(r.accountId) ?? null,
       kind: r.kind as EnrichmentKind,
       kindLabel: kindLabel(r.kind as EnrichmentKind),
       providerKey: r.providerKey,
@@ -209,7 +221,7 @@ async function views(ctx: ModuleContext, rows: Row[]): Promise<RequestView[]> {
 
 const viewOf = async (ctx: ModuleContext, r: Row) => (await views(ctx, [r]))[0]!;
 
-const isVisible = async (ctx: ModuleContext, r: Row) => !r.accountId || (await filterVisibleAccountIds(ctx, [r.accountId])).length > 0;
+const isVisible = async (ctx: ModuleContext, r: Row) => (await filterVisibleAccountIds(ctx, [r.accountId])).length > 0;
 
 /** The request, or null when it doesn't exist or its account is outside the principal's data limit. */
 export async function getRequest(ctx: ModuleContext, id: string): Promise<RequestView | null> {
@@ -226,6 +238,11 @@ export async function listRequests(
   f: { status?: RequestStatus; accountId?: string; cursor?: string; limit?: number } = {},
 ): Promise<{ data: RequestView[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(f.limit ?? 25, 1), 100);
+  if (f.cursor) {
+    // An unknown id would match nothing and read as the end of the list.
+    const [known] = await ctx.tx.select({ id: request.id }).from(request).where(and(eq(request.tenantId, ctx.tenantId), eq(request.id, f.cursor)));
+    if (!known) throw invalid('cursor', OLD_CURSOR);
+  }
   if (f.accountId && (await filterVisibleAccountIds(ctx, [f.accountId])).length === 0) return { data: [], nextCursor: null };
   const kept: Row[] = [];
   let after = f.cursor ?? null;
@@ -245,10 +262,10 @@ export async function listRequests(
       )
       .orderBy(desc(request.createdAt), desc(request.id))
       .limit(limit + 1);
-    const accountIds = [...new Set(rows.map((r) => r.accountId).filter((id): id is string => !!id))];
+    const accountIds = [...new Set(rows.map((r) => r.accountId))];
     const visible = new Set(f.accountId ? accountIds : await filterVisibleAccountIds(ctx, accountIds));
     for (const r of rows) {
-      if (r.accountId && !visible.has(r.accountId)) continue;
+      if (!visible.has(r.accountId)) continue;
       kept.push(r);
       if (kept.length > limit) break;
     }
@@ -285,7 +302,7 @@ async function approveRow(ctx: ModuleContext, p: Principal, r: Row, extra: Parti
   await publish(
     ctx,
     requestApproved,
-    { requestId: r.id, accountId: r.accountId!, kind: r.kind as EnrichmentKind, providerKey: r.providerKey, decidedBy: p.id, requestedByLabel: r.requestedByLabel ?? '' },
+    { requestId: r.id, accountId: r.accountId, kind: r.kind as EnrichmentKind, providerKey: r.providerKey, decidedBy: p.id, requestedByLabel: r.requestedByLabel ?? '' },
     subject(r.id),
   );
   return updated!;
@@ -345,7 +362,7 @@ export async function createRequest(
       requestingSourceId,
       reason,
       estimate: toStoredEstimate(c.estimate, c.sample),
-      status: 'flagged',
+      status: 'flagged', // an approver's is approved below, in this transaction: one approval path, no flagged event
     })
     .returning();
   await seedEnrichmentDefaults(ctx);
@@ -389,8 +406,8 @@ export async function declineRequest(ctx: ModuleContext, principal: Principal, i
     .set({ status: 'declined', declineReason: why, decidedBy: principal.id, decidedByLabel: await requesterLabel(ctx, principal), decidedAt: new Date(), updatedAt: new Date() })
     .where(eq(request.id, r.id))
     .returning();
-  const event = await publish(ctx, requestDeclined, { requestId: r.id, accountId: r.accountId!, decidedBy: principal.id, reason: why }, subject(r.id));
-  if (r.requestingSourceId && r.accountId) {
+  const event = await publish(ctx, requestDeclined, { requestId: r.id, accountId: r.accountId, decidedBy: principal.id, reason: why }, subject(r.id));
+  if (r.requestingSourceId) {
     await recordSourceFeedback(ctx, {
       sourceId: r.requestingSourceId,
       accountId: r.accountId,
@@ -409,6 +426,6 @@ export async function cancelRequest(ctx: ModuleContext, principal: Principal, id
   if (principalRef(principal) !== r.requestedBy) requirePermission(principal, 'enrichment:approve');
   move(r, 'cancelled');
   const [updated] = await ctx.tx.update(request).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(request.id, r.id)).returning();
-  await publish(ctx, requestCancelled, { requestId: r.id, accountId: r.accountId!, reason: 'cancelled' }, subject(r.id));
+  await publish(ctx, requestCancelled, { requestId: r.id, accountId: r.accountId, reason: 'cancelled' }, subject(r.id));
   return viewOf(ctx, updated!);
 }
