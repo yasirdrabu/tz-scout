@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import { gateway, listIntegrations, type CallOpts } from '@/modules/integrations';
+import { RateLimitedError, gateway, listIntegrations, type CallOpts } from '@/modules/integrations';
 import { callLog, usageCap, usagePeriod } from '@/modules/integrations/db/schema';
 import { periodBounds, type CapPeriod, type CapUnit } from '@/modules/integrations/domain/caps';
 import { tenant } from '@/modules/tenancy/db/schema';
@@ -94,6 +94,40 @@ describe('gateway usage limits', () => {
     await call(t, { units: 1_000_000, unit: 'credits', reserveCents: 1_000_000 });
     expect((await logs(t)).map((r) => r.outcome)).toEqual(['ok']);
     expect(await usage(t)).toEqual({ used: 0, reserved: 0 });
+  });
+
+  it('a calls limit counts failed and rate-limited calls: they reached the service', async () => {
+    const t = await demoWithCap('calls', 2);
+    await expect(call(t, {}, async () => Promise.reject(new Error('broke')))).rejects.toThrow('broke');
+    await expect(call(t, {}, async () => Promise.reject(new RateLimitedError()))).rejects.toBeInstanceOf(RateLimitedError);
+    expect(await usage(t)).toEqual({ used: 2, reserved: 0 });
+    const fn = vi.fn(async () => 'never');
+    await expect(call(t, {}, fn)).rejects.toMatchObject({ slug: 'blocked_by_cap' });
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('a measured amount that is not a number keeps the call log row and falls back to the given amount', async () => {
+    const t = await demoWithCap('cost_cents', 100);
+    await call(t, { reserveCents: 10, costCents: 4, measure: () => ({ costCents: Number.NaN, units: Number.POSITIVE_INFINITY }) });
+    const rows = await logs(t);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ outcome: 'ok', costCents: 4, units: null });
+    expect(await usage(t)).toEqual({ used: 4, reserved: 0 });
+  });
+
+  it('counts usage only known after the call; such a call is not refused up front', async () => {
+    const credits = await demoWithCap('credits', 5);
+    await call(credits, { unit: 'credits', measure: () => ({ units: 6 }) });
+    expect(await usage(credits)).toEqual({ used: 6, reserved: 0 });
+    // Now over the limit: a call with no estimate still runs and counts; one with an estimate is refused.
+    await call(credits, { unit: 'credits', measure: () => ({ units: 1 }) });
+    expect(await usage(credits)).toEqual({ used: 7, reserved: 0 });
+    await expect(call(credits, { unit: 'credits', units: 1 })).rejects.toMatchObject({ slug: 'blocked_by_cap' });
+
+    const cents = await demoWithCap('cost_cents', 100);
+    await call(cents, { measure: () => ({ costCents: 30 }) });
+    await call(cents, { costCents: 5 });
+    expect(await usage(cents)).toEqual({ used: 35, reserved: 0 });
   });
 });
 

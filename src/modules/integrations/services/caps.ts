@@ -270,6 +270,30 @@ export async function settle(ctx: ModuleContext, reservation: Reservation, measu
   settled.add(reservation);
 }
 
+/**
+ * Adds usage for a call that reserved nothing because its amount was only known afterwards (its
+ * estimate was 0). Never refuses. Pass `tx` to commit with the caller's transaction.
+ */
+export async function recordUsage(ctx: ModuleContext, providerKey: string, measured: number, tx?: Tx, now = new Date()): Promise<void> {
+  const actual = wholeAmount(measured, Math.round);
+  if (actual === 0) return;
+  const timeZone = await tenantTimezone(ctx);
+  const run = async (t: Tx) => {
+    const cap = await findCap(t, ctx.tenantId, providerKey);
+    if (!cap) return;
+    const bounds = boundsOf(cap, now, timeZone);
+    await t.insert(usagePeriod).values({ tenantId: ctx.tenantId, providerKey, periodStart: bounds.start }).onConflictDoNothing();
+    const [row] = await t
+      .update(usagePeriod)
+      .set({ used: sql`${usagePeriod.used} + ${actual}` })
+      .where(periodKey(ctx.tenantId, providerKey, bounds.start))
+      .returning();
+    const level = levelOf(row!.used, row!.reserved, cap.limit, cap.overagePeriodStart === bounds.start);
+    await notify({ ...ctx, tx: t }, cap, bounds, row!, level);
+  };
+  await (tx ? run(tx) : withTenant(ctx.tenantId, run));
+}
+
 /** Ruling 9: an owner sets the limit, a whole number of 1 or more. Takes effect for the next reservation. */
 export async function setCapLimit(ctx: ModuleContext, providerKey: string, limit: number): Promise<void> {
   if (!Number.isSafeInteger(limit) || limit < 1) {
