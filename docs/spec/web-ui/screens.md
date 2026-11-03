@@ -698,7 +698,7 @@ Summary "{n} of {m} services working" with one sentence per issue. Groups and ro
 (CRM, Data and enrichment, AI and so on). Microsoft sign-in is set up for all of Scout, not per
 workspace, so it is not a row here; there is no Google Workspace row. Row: initial, name, what it is
 used for, mode chip ("Live" or "Using sample data"), status dot and text, Last call, Calls today
-("{n}"; "{n} of {cap}/day" with usage caps, R1d), `Manage` or `Connect`.
+("{n}"; "{n} of {cap}/day" only for a daily calls limit, R2b-1), `Manage` or `Connect`.
 
 Manage panel (420 px): credential label (one per credential the service needs), masked value and
 `Replace`, "Saved. Ends in {last4}."; paste input with errors ("Paste the {label} first. You can find
@@ -709,6 +709,19 @@ sample data`; needs a saved credential and a passing test); tiles Calls today, E
 average; Last 50 calls (All, Errors only): time, operation (for example `hubspot.test`), result,
 status code, ms; "Connected by {name} on {date}", `Disconnect` (toast "Disconnected {name}. Scout
 stopped calling it and switched to sample data.").
+
+Usage limits (R2b-1, usage-caps.md). A warning banner sits above the list, one line per service,
+blocked first, in the tenant's timezone ({date} reads "Nov 3" for a day, "Dec 1" for a month):
+- blocked: "{name} reached its {daily|monthly} limit. Scout stopped calling it until {date}.";
+- overage: "{name} is allowed over its limit until {date}.";
+- warn: "{name} has used {pct}% of its {daily|monthly} limit." ({pct} rounded down).
+
+The Manage panel gets a Usage limit section: "{used} of {limit} calls today. Resets {date}." ("credits";
+"this month"; for cost_cents money, "$12.40 of $200.00 this month. Resets Dec 1."), a bar (amber at
+warn, red at blocked), field "Limit per {day|month}" with `Save limit` (toast "Limit saved."; error
+"Enter a whole number of 1 or more."), and when blocked `Allow until {date}` (toast "{name} can go
+over its limit until {date}."). A service with no limit shows "No limit." A refused Test connection
+shows "{name} reached its {daily|monthly} limit." in the call list.
 
 ### 21c. API keys
 

@@ -16,8 +16,8 @@ goes through this module's gateway, so call logging, rate limits and caps live i
 | `connection` | `id` (`con_`), `tenant_id`, `provider` (see providers.md), `name`, `mode` (mock, live), `status` (not_set_up, connected, failing, disabled), `settings` (json, non-secret: portal id, region, base URL), `credential_id`, `last_tested_at`, `last_test_result`, `last_error`, `created_by` |
 | `credential` | `id`, `tenant_id`, `connection_id`, `kind` (api_key, private_app_token, oauth_tokens, client_secret), `ciphertext`, `iv`, `auth_tag`, `wrapped_data_key`, `key_version`, `hint` (last 4 chars), `expires_at`, `rotated_at` |
 | `call_log` | `id`, `tenant_id`, `connection_id`, `provider`, `operation` (e.g. `hubspot.company.upsert`), `module`, `principal_id` (user, key or system), `api_key_id`, `correlation_id`, `request_summary` (json, secrets and personal data redacted), `status_code`, `outcome` (ok, error, rate_limited, blocked_by_cap), `duration_ms`, `units` (credits, tokens, records), `cost_cents`, `error_message`, `at` |
-| `usage_cap` | `id`, `tenant_id`, `scope` (connection or api_key), `scope_id`, `unit` (credits, tokens, calls, records, cost_cents), `period` (day, month), `limit`, `warn_at` (decimal, default 0.8), `block_at` (decimal, default 1.0) |
-| `usage_counter` | `tenant_id`, `cap_id`, `period_start`, `used`, `warned_at`, `blocked_at` |
+| `usage_cap` | `tenant_id`, `provider_key`, `unit` (calls, credits, cost_cents), `period` (day, month), `limit`, `overage_period_start` (date, null), `updated_by`, `updated_at`. One per provider (R2b-1, usage-caps.md Ruling 2) |
+| `usage_period` | `tenant_id`, `provider_key`, `period_start`, `used`, `reserved`, `warned`, `blocked`. The row `reserve` locks |
 
 Call log rows are kept 180 days, then summarised into daily usage rows.
 
@@ -44,8 +44,9 @@ Call log rows are kept 180 days, then summarised into daily usage rows.
   decrypted client, logs the call, records actual units and cost, publishes threshold events.
 - `adapterFor(ctx, provider) → Adapter` returns the mock or live implementation for this tenant.
 - `connectionStatus(ctx, provider) → { mode, status, lastError }`.
-- `checkCap(ctx, { apiKeyId?, provider, unit, amount }) → { allowed, remaining, warn }` (used by
-  intake for daily arrival caps and by enrichment before spending).
+- `checkCap(ctx, providerKey, amount) → { status: 'ok'|'warn'|'blocked', used, limit|null, resetsAt|null }`
+  is the read-only check (used by enrichment estimates). `reserve` and `settle` do the atomic hold the
+  gateway uses. Per-key and arrival limits are not in INT in R2b-1 (usage-caps.md Ruling 3).
 
 ## Events
 
@@ -53,7 +54,7 @@ Call log rows are kept 180 days, then summarised into daily usage rows.
 |---|---|
 | `integrations.connection.changed` | `connectionId`, `provider`, `mode`, `status`, `changedBy` |
 | `integrations.connection.tested` | `connectionId`, `provider`, `ok`, `message`, `durationMs` |
-| `integrations.usage.threshold_reached` | `capId`, `scope`, `scopeId`, `provider?`, `unit`, `used`, `limit`, `level` (warn, block) |
+| `integrations.usage.threshold_reached` | `providerKey`, `unit`, `period`, `periodStart`, `level` (warn, blocked), `used`, `limit`, `resetsAt` (once per level per period) |
 | `integrations.usage.recorded` | `provider`, `operation`, `module`, `units`, `unit`, `costCents`, `apiKeyId?`, `sourceId?`, `correlationId` (emitted for every call with a cost; ANL builds automatic cost lines from it) |
 
 Consumes `tenancy.api_key.created` (create default caps for the key) and `tenancy.api_key.revoked`
