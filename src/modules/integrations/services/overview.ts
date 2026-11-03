@@ -1,9 +1,12 @@
-import { and, asc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { scrubError } from '@/platform/scrub-error';
 import { CREDENTIAL_LABELS, providerGroup } from '../domain/labels';
 import { callLog, connection, credential } from '../db/schema';
 import { PROVIDERS, providerName } from '../providers';
+import { periodBounds } from '../domain/caps';
+import { listCaps, type CapView } from './caps';
 import { requireProvider, type ConnectionMode, type ConnectionStatus } from './connections';
 
 /** A saved credential as the screen shows it: never the value, only its last 4 characters (null for short values). */
@@ -20,9 +23,12 @@ export type IntegrationRow = {
   lastError: string | null;
   lastTestedAt: Date | null;
   lastCallAt: Date | null;
+  /** Calls since the tenant's local midnight, not counting calls a limit refused. */
   callsToday: number;
-  /** Usage caps arrive in R1d; null until then. */
-  callsTodayCap: null;
+  /** The limit of a daily calls limit, else null. */
+  callsTodayCap: number | null;
+  /** The service's usage limit with this period's usage, null when it has none. */
+  cap: CapView | null;
   errorsToday: number;
   /** Average response time of today's calls, null when there were none. */
   avgMs: number | null;
@@ -43,6 +49,9 @@ async function rowsFor(ctx: ModuleContext, keys: string[]): Promise<IntegrationR
     .from(credential)
     .where(and(eq(credential.tenantId, ctx.tenantId), isNull(credential.replacedAt)))
     .orderBy(asc(credential.createdAt), asc(credential.id));
+  const timeZone = await tenantTimezone(ctx);
+  const day = periodBounds('day', new Date(), timeZone);
+  const caps = await listCaps(ctx);
   const today = await ctx.tx
     .select({
       provider: callLog.provider,
@@ -51,7 +60,14 @@ async function rowsFor(ctx: ModuleContext, keys: string[]): Promise<IntegrationR
       avg: sql<number>`round(avg(${callLog.durationMs}))::int`,
     })
     .from(callLog)
-    .where(and(eq(callLog.tenantId, ctx.tenantId), inArray(callLog.provider, keys), gte(callLog.at, sql`date_trunc('day', now())`)))
+    .where(
+      and(
+        eq(callLog.tenantId, ctx.tenantId),
+        inArray(callLog.provider, keys),
+        ne(callLog.outcome, 'blocked_by_cap'),
+        gte(callLog.at, sql`(${day.start}::date)::timestamp at time zone ${timeZone}`),
+      ),
+    )
     .groupBy(callLog.provider);
   const lasts = await ctx.tx
     .select({ provider: callLog.provider, at: sql<string>`max(${callLog.at})` })
@@ -64,6 +80,7 @@ async function rowsFor(ctx: ModuleContext, keys: string[]): Promise<IntegrationR
     const row = conns.find((r) => r.provider === key);
     const usage = today.find((u) => u.provider === key);
     const last = lasts.find((l) => l.provider === key);
+    const cap = caps.find((c) => c.providerKey === key) ?? null;
     return {
       key,
       name: p?.name ?? providerName(key),
@@ -75,7 +92,8 @@ async function rowsFor(ctx: ModuleContext, keys: string[]): Promise<IntegrationR
       lastTestedAt: row?.lastTestedAt ?? null,
       lastCallAt: last ? new Date(last.at) : null,
       callsToday: usage?.n ?? 0,
-      callsTodayCap: null,
+      callsTodayCap: cap?.unit === 'calls' && cap.period === 'day' ? cap.limit : null,
+      cap,
       errorsToday: usage?.errors ?? 0,
       avgMs: usage ? usage.avg : null,
       credentials: row

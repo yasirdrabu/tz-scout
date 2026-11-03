@@ -113,7 +113,14 @@ describe('GET /api/v1/integrations (integrations:manage)', () => {
     expect(Date.parse(apollo.last_call_at)).toBeGreaterThan(Date.now() - 60_000);
 
     const hubspot = body.data.find((r: { key: string }) => r.key === 'hubspot');
-    expect(hubspot).toMatchObject({ group: 'CRM', calls_today: 0, avg_ms: null, last_call_at: null });
+    expect(hubspot).toMatchObject({
+      group: 'CRM',
+      calls_today: 0,
+      calls_today_cap: 50000,
+      cap: { unit: 'calls', period: 'day', limit: 50000, used: 0, level: 'ok' },
+      avg_ms: null,
+      last_call_at: null,
+    });
     expect(hubspot.credentials).toEqual([
       { kind: 'private_app_token', label: 'Private app token', last4: '4f2a', saved_at: expect.any(String) },
     ]);

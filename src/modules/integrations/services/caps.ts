@@ -35,6 +35,8 @@ type PeriodRow = typeof usagePeriod.$inferSelect;
 type Bounds = { start: string; resetsAt: Date };
 
 export const LIMIT_INVALID = 'Enter a whole number of 1 or more.';
+/** How long a transaction here waits for a row lock before it fails, rather than hanging. */
+export const LOCK_TIMEOUT = '5s';
 
 const periodWord = (period: string) => (period === 'day' ? 'daily' : 'monthly');
 
@@ -169,6 +171,12 @@ export async function listCaps(ctx: ModuleContext, now = new Date()): Promise<Ca
   });
 }
 
+/** The unit of the provider's limit, or null when it has none. Never writes. */
+export async function capUnit(ctx: ModuleContext, providerKey: string): Promise<CapUnit | null> {
+  const cap = await readCap(ctx.tx, ctx.tenantId, providerKey);
+  return cap ? (cap.unit as CapUnit) : null;
+}
+
 /** Read-only check for estimates: the level `amount` more would reach. No limit reads as ok with `limit` null. */
 export async function checkCap(
   ctx: ModuleContext,
@@ -199,6 +207,7 @@ export async function reserve(ctx: ModuleContext, providerKey: string, requested
   const amount = wholeAmount(requested, Math.ceil);
   const timeZone = await tenantTimezone(ctx);
   const out = await withTenant(ctx.tenantId, async (tx) => {
+    await tx.execute(sql`select set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`);
     const cap = await findCap(tx, ctx.tenantId, providerKey);
     if (!cap) return null;
     const bounds = boundsOf(cap, now, timeZone);

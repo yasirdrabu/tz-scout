@@ -8,6 +8,8 @@ import { config } from '@/platform/config';
 import { registerInboundRoute } from '@/modules/tenancy';
 import { callLog, connection, credential } from './db/schema';
 import { adapterFactories, isKnownProvider, providerName, type Adapter } from './providers';
+import { capUnit, LOCK_TIMEOUT, reserve, settle, type Reservation } from './services/caps';
+import type { CapUnit } from './domain/caps';
 import { credentialAad, openValue } from './services/vault';
 
 /** Throw this from a call to log it as `rate_limited` (not counted as a failure). */
@@ -25,6 +27,8 @@ export type CallOpts = {
   units?: number;
   unit?: string;
   costCents?: number;
+  /** Most the call could cost, held against a cents limit before the call (else `costCents`). */
+  reserveCents?: number;
   apiKeyId?: string;
   /** Called with the result after a successful call; its units and cost are logged (use when they are only known afterwards). */
   measure?: (result: never) => { units?: number; costCents?: number };
@@ -56,7 +60,18 @@ export function redactSummary(value: unknown, seen: WeakSet<object> = new WeakSe
 
 const MAX_ERROR = 500;
 export const FAILING_AFTER = 3;
-const LOCK_TIMEOUT = '5s';
+
+type Measured = { units?: number; costCents?: number };
+
+/**
+ * Ruling 5: what a call counts against a limit in `unit`, as an estimate before the call or, with
+ * `measured`, after it. A calls limit counts every call; a credits limit only calls whose unit is credits.
+ */
+function capAmount(unit: CapUnit, opts: CallOpts, measured?: Measured): number {
+  if (unit === 'calls') return 1;
+  if (unit === 'credits') return opts.unit === 'credits' ? (measured?.units ?? opts.units ?? 0) : 0;
+  return measured ? (measured.costCents ?? opts.costCents ?? 0) : (opts.reserveCents ?? opts.costCents ?? 0);
+}
 
 type ConnectionRow = typeof connection.$inferSelect;
 
@@ -184,6 +199,48 @@ export async function runCall<T>(
     });
   }
   const useLive = !mockOnly && !!factories.live && !!cred && (mode === 'test' || conn.mode === 'live');
+  const logBase = {
+    tenantId: ctx.tenantId,
+    connectionId: conn.id,
+    provider,
+    operation,
+    module: opts.module ?? null,
+    principalId: ctx.actor.id,
+    apiKeyId: opts.apiKeyId ?? null,
+    correlationId: ctx.correlationId,
+    requestSummary: opts.requestSummary === undefined ? null : redactSummary(opts.requestSummary),
+  };
+
+  // Ruling 6: hold the call's share of the provider's limit before it is made. A call that spends
+  // none of the limit's unit is neither held nor refused.
+  const unit = await capUnit(ctx, provider);
+  let reservation: Reservation = { reservationId: null, level: 'ok' };
+  const estimate = unit ? capAmount(unit, opts) : 0;
+  if (estimate > 0) {
+    try {
+      reservation = await reserve(ctx, provider, estimate);
+    } catch (e) {
+      if (e instanceof ScoutError && e.slug === 'blocked_by_cap') {
+        // Ruling 8: the refusal is logged, and no outside call is made.
+        try {
+          await withTenant(ctx.tenantId, async (tx) => {
+            await tx.execute(sql`select set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`);
+            await tx.insert(callLog).values({
+              ...logBase,
+              id: newId('call'),
+              statusCode: null,
+              outcome: 'blocked_by_cap',
+              durationMs: 0,
+              errorMessage: e.message,
+            });
+          });
+        } catch (bookkeeping) {
+          log.error({ err: bookkeeping, tenantId: ctx.tenantId, provider, operation }, 'integrations: could not write call log');
+        }
+      }
+      throw e;
+    }
+  }
 
   const started = performance.now();
   let outcome: 'ok' | 'error' | 'rate_limited' = 'ok';
@@ -192,7 +249,7 @@ export async function runCall<T>(
   let thrown: unknown;
   let result!: T;
   let scrub = makeScrub(undefined);
-  let measured: { units?: number; costCents?: number } = {};
+  let measured: Measured = {};
   try {
     let adapter: Adapter;
     if (useLive && cred && factories.live) {
@@ -237,16 +294,8 @@ export async function runCall<T>(
     await withTenant(ctx.tenantId, async (tx) => {
       await tx.execute(sql`select set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`);
       await tx.insert(callLog).values({
+        ...logBase,
         id: newId('call'),
-        tenantId: ctx.tenantId,
-        connectionId: conn.id,
-        provider,
-        operation,
-        module: opts.module ?? null,
-        principalId: ctx.actor.id,
-        apiKeyId: opts.apiKeyId ?? null,
-        correlationId: ctx.correlationId,
-        requestSummary: opts.requestSummary === undefined ? null : redactSummary(opts.requestSummary),
         statusCode,
         outcome,
         durationMs,
@@ -255,6 +304,8 @@ export async function runCall<T>(
         costCents: outcome === 'ok' ? (measured.costCents ?? opts.costCents ?? null) : null,
         errorMessage,
       });
+      // Review Focus 3: a failed call releases its reservation and adds nothing to usage.
+      if (unit) await settle(ctx, reservation, outcome === 'ok' ? capAmount(unit, opts, measured) : 0, tx);
       if (outcome === 'rate_limited') return;
       // Only calls that reached the real service say anything about the connection's health:
       // a sample-data success must not mark a never-tested credential as connected.

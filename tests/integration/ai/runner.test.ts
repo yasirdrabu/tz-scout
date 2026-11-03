@@ -20,8 +20,9 @@ import { anthropicMock, registerAnthropicAdapter } from '@/modules/ai-tasks/adap
 import { aiRun } from '@/modules/ai-tasks/db/schema';
 import { costCents } from '@/modules/ai-tasks/pricing';
 import { canonicalJson } from '@/modules/ai-tasks/runner';
-import { registerAdapter, saveCredential, setDisabled, setMode, testConnection } from '@/modules/integrations';
-import { connection } from '@/modules/integrations/db/schema';
+import { registerAdapter, saveCredential, setCapLimit, setDisabled, setMode, testConnection } from '@/modules/integrations';
+import { callLog, connection, usagePeriod } from '@/modules/integrations/db/schema';
+import { periodBounds } from '@/modules/integrations/domain/caps';
 import { adminDb } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
 import { accountBriefTask } from '@/modules/playbooks/tasks/account-brief';
@@ -225,6 +226,18 @@ describe('runTask', () => {
     expect(r.mode).toBe('rules');
     expect(complete).not.toHaveBeenCalled();
     expect((await runsOf(t.tenantId)).map((x) => x.status).sort()).toEqual(['ok', 'refused_by_cap']);
+  });
+
+  it('falls back to rules when Claude reached its monthly limit (blocked_by_cap)', async () => {
+    const t = await freshTenant();
+    await t.run((ctx) => setCapLimit(ctx, 'anthropic', 100));
+    await adminDb
+      .insert(usagePeriod)
+      .values({ tenantId: t.tenantId, providerKey: 'anthropic', periodStart: periodBounds('month', new Date(), 'UTC').start, used: 100 });
+    const r = await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject }));
+    expect(r).toMatchObject({ mode: 'rules', output: { echoed: 'hi' } });
+    const calls = await adminDb.select().from(callLog).where(eq(callLog.tenantId, t.tenantId));
+    expect(calls.map((c) => c.outcome)).toEqual(['blocked_by_cap']);
   });
 
   it('rejects invalid input, and lists, gets and totals runs', async () => {

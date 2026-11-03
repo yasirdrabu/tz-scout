@@ -280,6 +280,8 @@ export async function runTask<I, O>(
       module: 'ai-tasks',
       unit: 'tokens',
       requestSummary: { task: task.name, promptVersion: task.promptVersion, model },
+      // Held against Claude's monthly cost limit before the call; mock calls hold it too, so the limit works locally.
+      reserveCents: worstCaseCents(model, Math.ceil((task.system.length + user.length) / 4), task.maxTokens),
       // Both attempts' tokens are counted. Cost is only logged for live calls.
       measure: (a: Attempt) => ({
         units: a.usage.inputTokens + a.usage.outputTokens + a.usage.cacheReadTokens,
