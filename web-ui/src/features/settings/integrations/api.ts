@@ -79,7 +79,7 @@ export const setCapLimit = (tenant: string, key: string, limit: number) =>
 
 export const allowOverage = (tenant: string, key: string) => apiFetch<unknown>(`${path(key)}/cap:allow-overage`, { tenant, method: 'POST' });
 
-export const disconnect= (tenant: string, key: string) => apiFetch<Integration>(`${path(key)}:disconnect`, { tenant, method: 'POST' });
+export const disconnect = (tenant: string, key: string) => apiFetch<Integration>(`${path(key)}:disconnect`, { tenant, method: 'POST' });
 
 /**
  * What a service's credential is called. The row lists only saved credentials, not the kinds a

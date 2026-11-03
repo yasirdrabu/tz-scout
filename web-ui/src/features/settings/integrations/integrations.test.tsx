@@ -302,6 +302,22 @@ describe('usage limits', () => {
     ]);
   });
 
+  it('rounds the percent down without float error', async () => {
+    serve([{ ...HUBSPOT, cap: cap({ used: 29, limit: 100, level: 'warn' }) }]);
+    renderApp('/t/taazaa/settings/integrations');
+    expect(await screen.findByText('HubSpot has used 29% of its daily limit.')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['America/New_York', 'Dec 1'],
+    ['America/Los_Angeles', 'Nov 30'],
+  ])('writes the reset date in the tenant timezone (%s)', async (timezone, date) => {
+    serve([{ ...HUBSPOT, cap: cap({ used: 50000, level: 'blocked', period: 'month', resets_at: '2026-12-01T05:00:00Z' }) }]);
+    serveMe({ taazaa: { scopes: ['integrations:manage'], tenant: { id: 'taazaa', slug: 'taazaa', name: 'taazaa', timezone } } });
+    renderApp('/t/taazaa/settings/integrations');
+    expect(await screen.findByText(`HubSpot reached its monthly limit. Scout stopped calling it until ${date}.`)).toBeInTheDocument();
+  });
+
   it('shows no limit lines when everything is ok', async () => {
     serve([{ ...HUBSPOT, cap: cap({ used: 10 }) }]);
     renderApp('/t/taazaa/settings/integrations');
