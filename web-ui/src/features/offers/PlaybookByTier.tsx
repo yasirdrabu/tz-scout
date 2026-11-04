@@ -115,7 +115,7 @@ export function InitialMessage({ tenant, offerId }: { tenant: string; offerId: s
           <div className={styles.tierLine}>
             <TierChip tier={t.tier} label={TIER_WORD[t.tier]} />
             <span className={styles.grow} />
-            <Button size="sm" variant="ghost" onClick={() => void copy(t.first_email!.subject, t.first_email!.body)}>
+            <Button size="sm" variant="ghost" aria-label={`Copy ${TIER_WORD[t.tier]} initial message`} onClick={() => void copy(t.first_email!.subject, t.first_email!.body)}>
               Copy
             </Button>
           </div>

@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
@@ -24,6 +24,31 @@ describe('Seller guide on the account page', () => {
     renderApp('/t/taazaa/accounts/acc_mdc');
     expect(await screen.findByText('No seller guide for Modernization Blueprint yet.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Write one' })).toBeNull();
+  });
+
+  it('keeps one h2 heading and omits the audience sentence', async () => {
+    serveAccount({ review: ASSIGNED });
+    serveOffer({ talking_points: ['Lead with the mandate'] });
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    await screen.findByText('Lead with the mandate');
+    expect(screen.getByRole('heading', { level: 2, name: 'Seller guide' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 3, name: 'Seller guide' })).toBeNull();
+    expect(screen.getByText('What to say, what to expect, what to avoid.')).toBeInTheDocument();
+  });
+
+  it('renders nothing when the offer is gone (404), and the error text for other failures', async () => {
+    serveAccount({ review: ASSIGNED });
+    server.use(http.get('/api/v1/offers/off_mb', () => HttpResponse.json({ title: 'Not found', status: 404 }, { status: 404 })));
+    const { unmount } = renderApp('/t/taazaa/accounts/acc_mdc');
+    await screen.findByRole('region', { name: 'HubSpot activity' });
+    await waitFor(() => expect(screen.queryByText(/Loading the seller guide/)).toBeNull());
+    expect(screen.queryByRole('heading', { name: 'Seller guide' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    unmount();
+
+    server.use(http.get('/api/v1/offers/off_mb', () => HttpResponse.json({ title: 'Boom', status: 500 }, { status: 500 })));
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    expect(await screen.findByText(/The seller guide didn't load/)).toBeInTheDocument();
   });
 
   it('is hidden without a lead offer', async () => {

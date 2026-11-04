@@ -14,7 +14,7 @@ describe('Playbooks list (§20)', () => {
     expect(screen.getByText('The steps an AE follows after accepting an account. Each offer picks a playbook for each tier.')).toBeInTheDocument();
     const how = screen.getByRole('list', { name: 'How playbooks work' });
     for (const t of ['Offer and tier pick it', 'Starts on acceptance', 'Scout prepares each step', 'Stops on a result']) expect(within(how).getByText(t)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New playbook' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'New playbook' })).toBeInTheDocument();
   });
 
   it('lists each playbook with its steps, channel mix, offers, running count and empty rates', async () => {
@@ -47,7 +47,7 @@ describe('Playbooks list (§20)', () => {
     servePlaybooks({ playbooks: [] });
     renderApp('/t/taazaa/playbooks');
     expect(await screen.findByRole('heading', { name: 'No playbooks yet' })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'New playbook' })).toHaveLength(2);
+    expect(screen.getAllByRole('link', { name: 'New playbook' })).toHaveLength(2);
   });
 
   it('shows the API words and Try again when the list fails', async () => {
@@ -68,7 +68,7 @@ describe('Playbooks list (§20)', () => {
     servePlaybooks({ scopes: SELLER });
     renderApp('/t/taazaa/playbooks');
     await screen.findByRole('link', { name: 'Public sector RFP' });
-    expect(screen.queryByRole('button', { name: 'New playbook' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'New playbook' })).toBeNull();
   });
 });
 
@@ -108,11 +108,12 @@ describe('Playbook detail (§20)', () => {
     expect(card).toHaveTextContent('Act now');
   });
 
-  it('says it is not assigned when it runs on nothing', async () => {
+  it('tells a draft to become active before it can be assigned', async () => {
     servePlaybooks();
     renderApp('/t/taazaa/playbooks/plb_draft');
     const card = await screen.findByRole('region', { name: 'Runs on' });
-    expect(card).toHaveTextContent('Not assigned to any offer yet, so no accounts will start it. Assign it to an offer and tier.');
+    expect(card).toHaveTextContent('Make it active to assign it to an offer and tier.');
+    expect(card).not.toHaveTextContent('Not assigned to any offer yet');
   });
 
   it('shows the rules', async () => {
@@ -190,7 +191,7 @@ describe('Playbook detail (§20)', () => {
   it('gives a manager Edit playbook, linking to the edit form', async () => {
     servePlaybooks();
     renderApp('/t/taazaa/playbooks/plb_rfp');
-    const link = (await screen.findByRole('button', { name: 'Edit playbook' })).closest('a')!;
+    const link = (await screen.findByRole('link', { name: 'Edit playbook' }));
     expect(link.getAttribute('href')).toContain('edit=playbook');
   });
 
@@ -198,7 +199,8 @@ describe('Playbook detail (§20)', () => {
     servePlaybooks({ scopes: SELLER });
     renderApp('/t/taazaa/playbooks/plb_rfp');
     await screen.findByRole('heading', { name: 'Public sector RFP', level: 1 });
-    for (const name of ['Duplicate', 'Retire', 'Delete', 'Edit playbook']) expect(screen.queryByRole('button', { name })).toBeNull();
+    for (const name of ['Duplicate', 'Retire', 'Delete']) expect(screen.queryByRole('button', { name })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Edit playbook' })).toBeNull();
   });
 
   it('writes Unknown offer when the offer is not in the list', async () => {

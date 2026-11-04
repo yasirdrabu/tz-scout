@@ -147,10 +147,11 @@ function bodyOf(v: Values, base: Values | null): OfferBody {
     company_size_min: int(v.sizeMin),
     company_size_max: int(v.sizeMax),
     proof_points: lines(v.proofPoints),
-    talking_points: lines(v.talkingPoints),
-    // Sent only when the text changed (or on create), so a save never rewrites objections nobody touched.
+    // Talking points, objections and avoid are sent only when their text changed (or on create), so a save never
+    // rewrites a list nobody touched (an item with a line break would be split).
+    ...(!base || v.talkingPoints !== base.talkingPoints ? { talking_points: lines(v.talkingPoints) } : {}),
     ...(!base || v.objections !== base.objections ? { objections: objectionsOf(v.objections).filter((x): x is Objection => x !== null) } : {}),
-    avoid: lines(v.avoid),
+    ...(!base || v.avoid !== base.avoid ? { avoid: lines(v.avoid) } : {}),
   };
 }
 

@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { seedAccountDefaults } from '@/modules/accounts';
+import { buyingRole } from '@/modules/accounts/db/schema';
 import { createOffer, createPractice, seedOffers, TAAZAA_OFFERS } from '@/modules/offers';
 import {
   archiveTemplate,
@@ -82,6 +83,19 @@ describe('target buying roles', () => {
     });
     const ok = await t.run((ctx) => createTemplate(ctx, { name: 'Good roles', steps: [{ ...email, targetBuyingRoles: ['business_owner'] }] }));
     await rejects(t.run((ctx) => updateTemplate(ctx, ok.id, { steps: bad })), 400, 'Unknown buying role: wizard');
+  });
+});
+
+describe('archived target buying roles', () => {
+  it('keeps a role the current version already uses; a new unknown key still fails', async () => {
+    await t.run((ctx) => seedAccountDefaults(ctx));
+    const made = await t.run((ctx) => createTemplate(ctx, { name: 'Kept role', steps: [{ ...email, targetBuyingRoles: ['business_owner'] }] }));
+    await t.run((ctx) => ctx.tx.update(buyingRole).set({ archived: true }).where(and(eq(buyingRole.tenantId, ctx.tenantId), eq(buyingRole.key, 'business_owner'))));
+    const kept = await t.run((ctx) => updateTemplate(ctx, made.id, { name: 'Kept role 2', steps: [{ ...email, targetBuyingRoles: ['business_owner'] }, call] }));
+    expect(kept.steps[0]!.targetBuyingRoles).toEqual(['business_owner']);
+    await rejects(t.run((ctx) => updateTemplate(ctx, made.id, { steps: [{ ...email, targetBuyingRoles: ['business_owner', 'wizard'] }] })), 400, 'Unknown buying role: wizard');
+    const other = await t.run((ctx) => createTemplate(ctx, { name: 'Other' }));
+    await rejects(t.run((ctx) => updateTemplate(ctx, other.id, { steps: [{ ...email, targetBuyingRoles: ['business_owner'] }] })), 400, 'Unknown buying role: business_owner');
   });
 });
 

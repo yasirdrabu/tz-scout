@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { ApiError } from '../../api/errors';
 import page from '../../routes/Page.module.css';
 import { useFormat } from '../../lib/useFormat';
-import { Button } from '../../ui/Button';
+import { Button, buttonClass } from '../../ui/Button';
 import { Card } from '../../ui/Card';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { Pill } from '../../ui/Pill';
@@ -159,10 +159,8 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
                 </Button>
               )
             )}
-            <Link to="/t/$tenant/playbooks/$id" params={{ tenant, id: p.id }} search={{ edit: 'playbook' }}>
-              <Button size="sm" variant="secondary">
-                Edit playbook
-              </Button>
+            <Link to="/t/$tenant/playbooks/$id" params={{ tenant, id: p.id }} search={{ edit: 'playbook' }} className={buttonClass('secondary', 'sm')}>
+              Edit playbook
             </Link>
           </div>
         )}
@@ -205,10 +203,8 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
         title="Runs on"
         actions={
           canManage && p.status === 'active' ? (
-            <Link to="/t/$tenant/playbooks/$id" params={{ tenant, id: p.id }} search={{ assign: 'offer' }}>
-              <Button size="sm" variant="secondary">
-                Assign
-              </Button>
+            <Link to="/t/$tenant/playbooks/$id" params={{ tenant, id: p.id }} search={{ assign: 'offer' }} className={buttonClass('secondary', 'sm')}>
+              Assign
             </Link>
           ) : undefined
         }
@@ -239,7 +235,11 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
             })}
           </ul>
         ) : (
-          <p className={styles.note}>Not assigned to any offer yet, so no accounts will start it. Assign it to an offer and tier.</p>
+          <p className={styles.note}>
+            {p.status === 'draft'
+              ? 'Make it active to assign it to an offer and tier.'
+              : 'Not assigned to any offer yet, so no accounts will start it. Assign it to an offer and tier.'}
+          </p>
         )}
       </Card>
 

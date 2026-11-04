@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse } from 'msw';
 import { renderApp } from '../../test/renderApp';
-import { draftPlaybook, rfp, SELLER, servePlaybooks } from './testing';
+import { draftPlaybook, rfp, RFP_STEPS, SELLER, servePlaybooks } from './testing';
 
 const bodies = (seen: ReturnType<typeof servePlaybooks>, method: string, end: string) =>
   seen.filter((r) => r.method === method && r.url.pathname.endsWith(end)).map((r) => r.body as Record<string, unknown>);
@@ -130,6 +130,38 @@ describe('Playbook form (§20)', () => {
   });
 });
 
+describe('Playbook form: day and archived roles', () => {
+  it('blocks save on an empty or out-of-range day', async () => {
+    const seen = servePlaybooks();
+    const user = userEvent.setup();
+    renderApp('/t/taazaa/playbooks/plb_rfp?edit=playbook');
+    const d = await screen.findByRole('dialog', { name: 'Edit Public sector RFP' });
+    await waitFor(() => expect(within(d).getByLabelText('Name')).toHaveValue('Public sector RFP'));
+    await user.clear(within(step(2)).getByLabelText('Day'));
+    await user.clear(within(step(3)).getByLabelText('Day'));
+    await user.type(within(step(3)).getByLabelText('Day'), '400');
+    await user.click(within(d).getByRole('button', { name: 'Save changes' }));
+    expect(await within(step(2)).findByText('Use a day from 0 to 365.')).toBeInTheDocument();
+    expect(within(step(3)).getByText('Use a day from 0 to 365.')).toBeInTheDocument();
+    expect(within(step(1)).queryByText('Use a day from 0 to 365.')).toBeNull();
+    expect(bodies(seen, 'PATCH', '/playbooks/plb_rfp')).toHaveLength(0);
+  });
+
+  it('shows an archived role as a checked box that can be unticked', async () => {
+    const seen = servePlaybooks({ steps: { plb_rfp: RFP_STEPS.map((s, i) => (i === 0 ? { ...s, target_buying_roles: ['old_role'] } : s)) } });
+    const user = userEvent.setup();
+    renderApp('/t/taazaa/playbooks/plb_rfp?edit=playbook');
+    const d = await screen.findByRole('dialog', { name: 'Edit Public sector RFP' });
+    const box = await within(step(1)).findByRole('checkbox', { name: 'old_role (archived)' });
+    expect(box).toBeChecked();
+    await user.click(box);
+    await user.click(within(d).getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Changes to Public sector RFP saved.');
+    const [body] = bodies(seen, 'PATCH', '/playbooks/plb_rfp') as { steps: { target_buying_roles: string[] }[] }[];
+    expect(body!.steps[0]!.target_buying_roles).toEqual([]);
+  });
+});
+
 describe('Assign playbook (§20)', () => {
   it('lists active offers as "offer · practice" and the tier notes', async () => {
     servePlaybooks({ playbooks: [rfp({ runs_on: [{ offer_id: 'off_mb', tier: 'act_now' }] }), draftPlaybook({ status: 'active', id: 'plb_other', name: 'Other', runs_on: [{ offer_id: 'off_mb', tier: 'watch' }] })] });
@@ -168,19 +200,19 @@ describe('Assign playbook (§20)', () => {
     servePlaybooks();
     const { unmount } = renderApp('/t/taazaa/playbooks/plb_draft');
     await screen.findByRole('heading', { name: 'Warm intro', level: 1 });
-    expect(screen.queryByRole('button', { name: 'Assign' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Assign' })).toBeNull();
     unmount();
     servePlaybooks({ scopes: SELLER });
     renderApp('/t/taazaa/playbooks/plb_rfp');
     await screen.findByRole('heading', { name: 'Public sector RFP', level: 1 });
-    expect(screen.queryByRole('button', { name: 'Assign' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Assign' })).toBeNull();
   });
 
   it('Assign opens the dialog from the Runs on card', async () => {
     servePlaybooks();
     const user = userEvent.setup();
     renderApp('/t/taazaa/playbooks/plb_rfp');
-    await user.click(await screen.findByRole('button', { name: 'Assign' }));
+    await user.click(await screen.findByRole('link', { name: 'Assign' }));
     expect(await screen.findByRole('dialog', { name: 'Assign Public sector RFP' })).toBeInTheDocument();
   });
 
@@ -202,7 +234,8 @@ describe('Retired playbook', () => {
     servePlaybooks({ playbooks: [draftPlaybook({ status: 'archived' })] });
     renderApp('/t/taazaa/playbooks/plb_draft');
     await screen.findByRole('heading', { name: 'Warm intro', level: 1 });
-    for (const name of ['Delete', 'Retire', 'Assign']) expect(screen.queryByRole('button', { name })).toBeNull();
+    for (const name of ['Delete', 'Retire']) expect(screen.queryByRole('button', { name })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Assign' })).toBeNull();
   });
 });
 

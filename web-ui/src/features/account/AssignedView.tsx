@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ApiError } from '../../api/errors';
 import { hasScope } from '../../api/me';
 import { formatMoney } from '../../lib/format';
 import { cx } from '../../lib/cx';
@@ -193,12 +194,14 @@ function SellerGuideCard({ tenant, offerId }: { tenant: string; offerId: string 
         <p className={styles.note}>Loading the seller guide</p>
       </Card>
     );
-  if (offer.isError)
+  if (offer.isError) {
+    if (offer.error instanceof ApiError && offer.error.status === 404) return null;
     return (
       <Card title="Seller guide">
         <p className={styles.error} role="alert">{`The seller guide didn't load. ${errorText(offer.error)}`}</p>
       </Card>
     );
+  }
   const o = offer.data;
   if (!o.talking_points.length && !o.objections.length && !o.proof_points.length && !o.avoid.length)
     return (
@@ -207,8 +210,8 @@ function SellerGuideCard({ tenant, offerId }: { tenant: string; offerId: string 
       </Card>
     );
   return (
-    <Card>
-      <SellerGuide offer={o} />
+    <Card title="Seller guide">
+      <SellerGuide offer={o} audience={null} showTitle={false} />
     </Card>
   );
 }

@@ -141,6 +141,15 @@ describe('/api/v1/offers/{id}/playbooks', () => {
     expect((await w.as(operator, putOfferPlaybook, 'offers/off_missing/playbooks/watch', 'PUT', { playbook_id: null })).status).toBe(404);
   });
 
+  it('PATCH status archived clears the tier like :archive', async () => {
+    const pb = await (await w.as(leader, createRoute, 'playbooks', 'POST', { name: 'Patch archive', status: 'active', steps })).json();
+    await w.as(operator, putOfferPlaybook, `offers/${offerId}/playbooks/watch`, 'PUT', { playbook_id: pb.id });
+    const patched = await w.as(leader, patchRoute, `playbooks/${pb.id}`, 'PATCH', { status: 'archived' });
+    expect(patched.status).toBe(200);
+    const read = await (await w.as(seller, offerPlaybooksRoute, `offers/${offerId}/playbooks`)).json();
+    expect(read.data.find((d: { tier: string }) => d.tier === 'watch').playbook).toBeNull();
+  });
+
   it('refuses a tier change on a retired offer (409)', async () => {
     const pb = await (await w.as(leader, createRoute, 'playbooks', 'POST', { name: 'Retired map', status: 'active', steps })).json();
     const old = await w.run(async (ctx) => {

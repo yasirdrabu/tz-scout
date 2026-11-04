@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { EmptyState } from '../../ui/EmptyState';
-import { Button } from '../../ui/Button';
+import { buttonClass } from '../../ui/Button';
 import { Pill } from '../../ui/Pill';
 import table from '../../ui/Table.module.css';
 import { offersQuery } from '../offers/api';
@@ -23,8 +23,8 @@ export function PlaybookList({ tenant, canManage }: { tenant: string; canManage:
         title="No playbooks yet"
         actions={
           canManage ? (
-            <Link to="/t/$tenant/playbooks" params={{ tenant }} search={{ edit: 'new' }}>
-              <Button>New playbook</Button>
+            <Link to="/t/$tenant/playbooks" params={{ tenant }} search={{ edit: 'new' }} className={buttonClass()}>
+              New playbook
             </Link>
           ) : undefined
         }

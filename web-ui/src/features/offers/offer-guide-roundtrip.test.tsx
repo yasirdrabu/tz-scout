@@ -6,8 +6,9 @@ import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
 import { draftPlaybook, rfp } from '../playbooks/testing';
 import type { OfferPlaybook } from './api';
-import { BLUEPRINT, emptyTiers, offer, serveOffers } from './testing';
+import { BLUEPRINT, MANAGER, emptyTiers, offer, serveOffers } from './testing';
 
+const PICKER = [...MANAGER, 'playbooks:read'];
 const patches = (seen: ReturnType<typeof serveOffers>) => seen.filter((r) => r.method === 'PATCH').map((r) => r.body as Record<string, unknown>);
 
 describe('Offer form: objections round-trip', () => {
@@ -24,7 +25,20 @@ describe('Offer form: objections round-trip', () => {
     await user.click(within(d).getByRole('button', { name: 'Save changes' }));
     await screen.findByText('Changes to Modernization Blueprint v2 saved.');
     expect(patches(seen)[0]).not.toHaveProperty('objections');
-    expect(patches(seen)[0]).toHaveProperty('talking_points');
+    expect(patches(seen)[0]).not.toHaveProperty('talking_points');
+    expect(patches(seen)[0]).not.toHaveProperty('avoid');
+  });
+
+  it('sends talking points and avoid only when their text changed', async () => {
+    const seen = serveOffers({ offers: [offer({ ...BLUEPRINT, talking_points: ['One\nstill one'], avoid: ['Nope'] })] });
+    const user = userEvent.setup();
+    renderApp('/t/taazaa/offers/prc_ai/off_mb?edit=offer');
+    const d = await screen.findByRole('dialog', { name: 'Edit offer' });
+    await user.type(await within(d).findByLabelText('Talking points'), '{Enter}Two');
+    await user.click(within(d).getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Changes to Modernization Blueprint saved.');
+    expect(patches(seen)[0]!.talking_points).toEqual(['One', 'still one', 'Two']);
+    expect(patches(seen)[0]).not.toHaveProperty('avoid');
   });
 
   it('sends them when edited', async () => {
@@ -66,7 +80,7 @@ describe('Offer page: tier selects states', () => {
   });
 
   it('a mapped playbook that is not active still shows in its tier select', async () => {
-    serveOffers({ playbooks: [rfp(), draftPlaybook()], tiers: draftMapped() });
+    serveOffers({ scopes: PICKER, playbooks: [rfp(), draftPlaybook()], tiers: draftMapped() });
     renderApp('/t/taazaa/offers/prc_ai/off_mb');
     const watch = await screen.findByRole('combobox', { name: 'Watch playbook' });
     expect(watch).toHaveValue('plb_draft');
@@ -83,7 +97,7 @@ describe('Offer page: tier selects states', () => {
   });
 
   it('shows a loading line while the playbooks load', async () => {
-    serveOffers({ playbooks: [rfp()] });
+    serveOffers({ scopes: PICKER, playbooks: [rfp()] });
     server.use(http.get('/api/v1/playbooks', () => delay('infinite')));
     renderApp('/t/taazaa/offers/prc_ai/off_mb');
     expect((await screen.findAllByText('Loading playbooks')).length).toBe(3);
@@ -91,7 +105,7 @@ describe('Offer page: tier selects states', () => {
   });
 
   it('shows the error text when the playbooks fail to load, not a silent read-only list', async () => {
-    serveOffers({ playbooks: [rfp()] });
+    serveOffers({ scopes: PICKER, playbooks: [rfp()] });
     server.use(http.get('/api/v1/playbooks', () => problem(500, 'The playbooks are down.')));
     renderApp('/t/taazaa/offers/prc_ai/off_mb');
     await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0));

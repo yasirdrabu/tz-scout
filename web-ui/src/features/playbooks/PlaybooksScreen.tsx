@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { hasScope, meQuery } from '../../api/me';
 import page from '../../routes/Page.module.css';
-import { Button } from '../../ui/Button';
+import { buttonClass } from '../../ui/Button';
 import type { PlaybooksSearch } from '../../routes/workspace';
 import { PlaybookForm } from './PlaybookForm';
 import { PlaybookList } from './PlaybookList';
@@ -35,8 +35,8 @@ export function PlaybooksScreen() {
           <p className={page.sub}>The steps an AE follows after accepting an account. Each offer picks a playbook for each tier.</p>
         </div>
         {canManage && (
-          <Link to="/t/$tenant/playbooks" params={{ tenant }} search={{ edit: 'new' }}>
-            <Button>New playbook</Button>
+          <Link to="/t/$tenant/playbooks" params={{ tenant }} search={{ edit: 'new' }} className={buttonClass()}>
+            New playbook
           </Link>
         )}
       </div>

@@ -6,6 +6,7 @@ import { draftPlaybook, rfp } from '../playbooks/testing';
 import { BLUEPRINT, MANAGER, READER, emptyTiers, offer, serveOffers } from './testing';
 import type { OfferPlaybook } from './api';
 
+const PICKER = [...MANAGER, 'playbooks:read'];
 const LEADER = ['offers:read', 'playbooks:read', 'playbooks:manage'];
 const WARM = rfp({ id: 'plb_warm', name: 'Warm intro', steps: 1, days: 0, runs_on: [] });
 const PLAYBOOKS = [rfp(), WARM, draftPlaybook()];
@@ -38,7 +39,7 @@ describe('Offer page: playbook by tier (§19)', () => {
   });
 
   it('changing a select PUTs that tier and shows the toast; choosing none sends null', async () => {
-    const seen = serveOffers({ playbooks: PLAYBOOKS, tiers: withRfp() });
+    const seen = serveOffers({ scopes: PICKER, playbooks: PLAYBOOKS, tiers: withRfp() });
     const user = userEvent.setup();
     renderApp('/t/taazaa/offers/prc_ai/off_mb');
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Good fit playbook' }), 'plb_warm');
@@ -75,8 +76,17 @@ describe('Offer page: playbook by tier (§19)', () => {
     expect(seen.some((r) => r.url.pathname.endsWith('/playbooks') && r.url.pathname === '/api/v1/playbooks')).toBe(false);
   });
 
+  it('offers:manage without playbooks:read sees text only, with no alert', async () => {
+    serveOffers({ scopes: MANAGER, playbooks: PLAYBOOKS, tiers: withRfp() });
+    renderApp('/t/taazaa/offers/prc_ai/off_mb');
+    const region = await screen.findByRole('region', { name: 'Playbook by tier' });
+    expect(await within(region).findByText('Public sector RFP')).toBeInTheDocument();
+    expect(within(region).queryByRole('combobox')).toBeNull();
+    expect(within(region).queryByRole('alert')).toBeNull();
+  });
+
   it('shows the API message when a change fails', async () => {
-    serveOffers({ playbooks: PLAYBOOKS, tiers: withRfp(), answer: { 'PUT watch': () => HttpResponse.json({ type: 'x', title: 'No', status: 409, detail: 'That playbook is retired.' }, { status: 409, headers: { 'content-type': 'application/problem+json' } }) } });
+    serveOffers({ scopes: PICKER, playbooks: PLAYBOOKS, tiers: withRfp(), answer: { 'PUT watch': () => HttpResponse.json({ type: 'x', title: 'No', status: 409, detail: 'That playbook is retired.' }, { status: 409, headers: { 'content-type': 'application/problem+json' } }) } });
     const user = userEvent.setup();
     renderApp('/t/taazaa/offers/prc_ai/off_mb');
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Watch playbook' }), 'plb_warm');
@@ -94,13 +104,13 @@ describe('Offer page: initial message (§19)', () => {
     const block = within(region).getByRole('group', { name: 'Act now initial message' });
     expect(within(block).getByText('Hi {person.first_name}')).toBeInTheDocument();
     expect(within(region).getAllByRole('group')).toHaveLength(1);
-    await user.click(within(block).getByRole('button', { name: 'Copy' }));
+    await user.click(within(block).getByRole('button', { name: 'Copy Act now initial message' }));
     expect(await screen.findByText('Initial message copied.')).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toBe('Subject: Hi {person.first_name}\n\nLine one.\n\nLine two for {account.name}.');
   });
 
   it('is hidden when no tier has a first email', async () => {
-    serveOffers({ playbooks: PLAYBOOKS });
+    serveOffers({ scopes: PICKER, playbooks: PLAYBOOKS });
     renderApp('/t/taazaa/offers/prc_ai/off_mb');
     await screen.findByRole('region', { name: 'Playbook by tier' });
     await screen.findByRole('combobox', { name: 'Act now playbook' });
@@ -178,8 +188,8 @@ describe('Offer form: seller guide group (§19)', () => {
         { objection: 'Not now', answer: 'Costs rise | later' },
       ],
       proof_points: ['Plan approved in 7 weeks'],
-      avoid: ['Discounts'],
     });
+    expect(bodies(seen)[0]).not.toHaveProperty('avoid');
   });
 
   it('an objection line without "|" shows a field error and sends nothing', async () => {

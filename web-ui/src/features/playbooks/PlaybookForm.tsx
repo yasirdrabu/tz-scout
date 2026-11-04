@@ -26,6 +26,7 @@ import {
 import styles from './Playbooks.module.css';
 
 const NAME_NEEDED = 'Give the playbook a name.';
+const DAY_INVALID = 'Use a day from 0 to 365.';
 const STEPS_NEEDED = 'Add at least one step.';
 
 type StepValues = {
@@ -154,7 +155,8 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const toast = useToast();
-  const roles = useQuery(buyingRolesQuery(tenant)).data?.data ?? [];
+  const rolesLoaded = useQuery(buyingRolesQuery(tenant)).data?.data;
+  const roles = rolesLoaded ?? [];
   const [v, setV] = useState<Values>(() => valuesOf(initial));
   /** Messages by the API's field path ("name", "steps.2.title"). */
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -207,6 +209,10 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
     const found: Record<string, string> = {};
     if (!v.name.trim()) found.name = NAME_NEEDED;
     if (!v.steps.length) found.steps = STEPS_NEEDED;
+    v.steps.forEach((s, i) => {
+      const day = Number(s.day);
+      if (!s.day.trim() || !Number.isInteger(day) || day < 0 || day > 365) found[`steps.${i}.day`] = DAY_INVALID;
+    });
     if (Object.keys(found).length) {
       setErrors(found);
       return;
@@ -327,10 +333,10 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
                   </Field>
                 </>
               )}
-              {roles.length > 0 && (
+              {(roles.length > 0 || s.target_buying_roles.length > 0) && (
                 <fieldset className={styles.radios}>
                   <legend className={styles.legendTitle}>Buying roles</legend>
-                  {roles.map((r) => (
+                  {[...roles.map((r) => ({ key: r.key, label: r.label })), ...(rolesLoaded ? s.target_buying_roles.filter((k) => !roles.some((r) => r.key === k)) : []).map((k) => ({ key: k, label: `${k} (archived)` }))].map((r) => (
                     <label key={r.key} className={styles.radio}>
                       <input
                         type="checkbox"
