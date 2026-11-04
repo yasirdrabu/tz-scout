@@ -92,6 +92,7 @@ describe('people for buying roles (ENR-E3-S1-AC1)', () => {
       expect(p.emailStatus).toBe('verified');
       expect(p.email).toMatch(/@/);
       expect(p.roles.map((r) => r.key)).toContain('technical_buyer');
+      expect(p.roles.find((r) => r.key === 'technical_buyer')!.origin).toBe('guessed_from_title');
     }
     // The Apollo source: the facts carry the vendor in their chain.
     const facts = await t.run((ctx) => getFacts(ctx, accountId));
@@ -206,7 +207,8 @@ describe('people for buying roles (ENR-E3-S1-AC1)', () => {
 
   it('a person found for two roles is revealed once and keeps both roles', async () => {
     const mock = apolloMock();
-    const same = [{ name: 'Dana', first_name: 'Dana', title: 'CEO', provider_ref: 'stub-same' }];
+    // Found people also get title guesses on top of the searched role, so the title must guess nothing here.
+    const same = [{ name: 'Dana', first_name: 'Dana', title: 'Founder', provider_ref: 'stub-same' }];
     registerAdapter('apollo', { mock: () => ({ ...mock, peopleSearch: async () => ({ value: same, creditsUsed: 0 }) }) });
     const { accountId } = await accountFrom(t, agentSourceId);
     const peopleBefore = (await t.run((ctx) => listPeople(ctx, accountId))).length;

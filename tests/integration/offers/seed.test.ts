@@ -42,4 +42,13 @@ describe('Taazaa catalogue seed', () => {
     )) as unknown as { n: number }[];
     expect(rows[0]!.n).toBe(TAAZAA_OFFERS.reduce((sum, o) => sum + o.cases.length, 0));
   });
+
+  it('gives every offer the core buying roles as required and procurement as optional', async () => {
+    const offers = await t.run((ctx) => listOffers(ctx));
+    expect(offers.length).toBeGreaterThan(0);
+    for (const o of offers) {
+      expect(o.targetBuyingRoles, o.slug).toEqual(['business_owner', 'technical_buyer', 'commercial_buyer']);
+      expect(o.optionalBuyingRoles, o.slug).toEqual(['procurement']);
+    }
+  });
 });

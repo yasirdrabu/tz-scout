@@ -20,7 +20,10 @@ export type Person = {
   email?: string | null;
   is_primary: boolean;
   decision_note: string | null;
-  roles: { key: string; origin: string; label: string }[];
+  /** Who wrote the note and when; null when a source wrote it. */
+  decision_note_by?: { id: string; name: string | null } | null;
+  decision_note_at?: string | null;
+  roles: { key: string; origin: string; label: string; set_by_name?: string | null; set_at?: string | null }[];
 };
 
 export type AccountSignal = {
@@ -52,6 +55,39 @@ export const accountQuery = (tenant: string, id: string) =>
     queryKey: ['account', tenant, id, 'detail'],
     queryFn: () => apiFetch<AccountDetail>(path(id), { tenant }),
   });
+
+export type CommitteeRole = {
+  key: string;
+  label: string;
+  required: boolean;
+  status: 'covered' | 'guessed' | 'gap';
+  people: { id: string; name: string; title: string | null; origin: string }[];
+};
+
+/** Which buying roles the lead offer needs and who covers them (the API's words). */
+export type Committee = {
+  offer: { id: string; name: string } | null;
+  roles: CommitteeRole[];
+  summary: { covered: number; required: number; text: string };
+  gaps: string[];
+  core_roles: boolean;
+};
+
+/** Under `['account', tenant, id]`, so a finished enrichment request refreshes it with the rest. */
+export const committeeQuery = (tenant: string, id: string) =>
+  queryOptions({
+    queryKey: ['account', tenant, id, 'committee'],
+    queryFn: () => apiFetch<Committee>(path(id, '/committee'), { tenant }),
+  });
+
+function joinWith(items: string[], word: string) {
+  return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${word} ${items.at(-1)}`;
+}
+const article = (label: string) => `${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label.toLowerCase()}`;
+/** "a business owner, a commercial buyer and a technical buyer". */
+export const listWithAnd = (labels: string[]) => joinWith(labels.map(article), 'and');
+/** "commercial buyer or technical buyer" (no article). */
+export const listWithOr = (labels: string[]) => joinWith(labels.map((l) => l.toLowerCase()), 'or');
 
 export type Tile = { key: string; label: string; value: number | null; max: number | null; note: string };
 
@@ -238,5 +274,11 @@ export type NewPerson = { name: string; title?: string; email?: string; buying_r
 
 export const addPerson = (tenant: string, id: string, person: NewPerson) =>
   apiFetch<{ person_id: string }>(path(id, '/people'), { tenant, method: 'POST', body: person });
+
+export type PersonPatch = { role_keys?: string[]; confirm_role_keys?: string[]; decision_note?: string };
+
+/** An empty `decision_note` clears it: the API takes a string, not null. */
+export const editPerson = (tenant: string, personId: string, body: PersonPatch) =>
+  apiFetch<Person>(`/people/${encodeURIComponent(personId)}`, { tenant, method: 'PATCH', body });
 
 export const personName = (p: Pick<Person, 'first_name' | 'last_name'>) => [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Someone';

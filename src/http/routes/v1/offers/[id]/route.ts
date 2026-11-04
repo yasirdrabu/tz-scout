@@ -16,6 +16,7 @@ import { can } from '@/modules/tenancy';
 import { parseBody } from '../../_lib/body';
 import { idAndAction, notFound } from '../../_lib/path';
 import { byAction, noContent, v1Route } from '../../_lib/v1-route';
+import { checkBuyingRoles } from '../roles';
 import { patchOfferBody } from '../schemas';
 
 // People without `offers:manage` can read approved offers only; a draft is a 404 to them.
@@ -37,7 +38,11 @@ export const GET = v1Route({ permission: 'offers:read' }, async (req, principal,
 export const PATCH = v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) => {
   const { id, action } = idAndAction(req, 'offers');
   if (action) throw notFound();
-  const { offer, warning } = await updateOffer(ctx, id, await parseBody<OfferPatch>(req, patchOfferBody));
+  const patch = await parseBody<OfferPatch>(req, patchOfferBody);
+  if (patch.targetBuyingRoles !== undefined || patch.optionalBuyingRoles !== undefined) {
+    await checkBuyingRoles(ctx, patch, await getOffer(ctx, id));
+  }
+  const { offer, warning } = await updateOffer(ctx, id, patch);
   const view = await withLabel(ctx, offer);
   return warning ? { ...view, warning } : view;
 });

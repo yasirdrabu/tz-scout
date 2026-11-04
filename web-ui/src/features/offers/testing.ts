@@ -7,6 +7,13 @@ import type { Offer, OfferDetail, OfferStat, Practice } from './api';
 // Fixtures in the API's shapes (snake_case) for the Offers tests. Price lines, status words, counts and
 // win rates are ones the browser could not derive (C8).
 
+export const BUYING_ROLES = [
+  { key: 'business_owner', label: 'Business owner' },
+  { key: 'technical_buyer', label: 'Technical buyer' },
+  { key: 'commercial_buyer', label: 'Commercial buyer' },
+  { key: 'procurement', label: 'Procurement' },
+];
+
 export const MANAGER = ['offers:read', 'offers:manage', 'members:read', 'accounts:read'];
 export const READER = ['offers:read', 'accounts:read'];
 
@@ -36,6 +43,7 @@ export const offer = (o: Partial<Offer> & Pick<Offer, 'id' | 'name' | 'practice_
   sales_cycle_days: 60,
   target_titles: ['CTO'],
   target_buying_roles: [],
+  optional_buying_roles: [],
   industries: ['logistics'],
   company_size_min: null,
   company_size_max: null,
@@ -109,6 +117,7 @@ export function serveOffers(opts: Opts = {}) {
   };
   const override = (key: string) => opts.answer?.[key]?.();
   server.use(
+    http.get('/api/v1/buying-roles', () => HttpResponse.json({ data: BUYING_ROLES })),
     http.get('/api/v1/practices', () => HttpResponse.json({ data: practices, next_cursor: null })),
     http.get('/api/v1/practices/:id', ({ params }) => {
       const p = practices.find((x) => x.id === params.id);

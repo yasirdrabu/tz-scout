@@ -38,6 +38,7 @@ export type Offer = {
   sales_cycle_days: number | null;
   target_titles: string[];
   target_buying_roles: string[];
+  optional_buying_roles: string[];
   industries: string[];
   company_size_min: number | null;
   company_size_max: number | null;
@@ -67,6 +68,8 @@ export type OfferBody = Partial<
     | 'typical_deal_cents'
     | 'sales_cycle_days'
     | 'target_titles'
+    | 'target_buying_roles'
+    | 'optional_buying_roles'
     | 'industries'
     | 'company_size_min'
     | 'company_size_max'

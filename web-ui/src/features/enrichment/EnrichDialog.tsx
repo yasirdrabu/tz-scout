@@ -17,6 +17,8 @@ export type EnrichDialogProps = {
   me: Me;
   accountId: string;
   name: string;
+  /** Roles to tick first (a Find button), in place of the default. */
+  initialRoles?: string[];
   onClose: () => void;
   /** After a request was created or joined. */
   onDone?: () => void;
@@ -28,7 +30,7 @@ const REASON_MAX = 500;
  * §4c Enrich dialog: what to find, the provider, the buying roles or people, the API's estimate. An
  * approver runs it; anyone else says why it is worth the spend and asks for approval (Ruling 1).
  */
-export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: EnrichDialogProps) {
+export function EnrichDialog({ tenant, me, accountId, name, initialRoles, onClose, onDone }: EnrichDialogProps) {
   const toast = useToast();
   const queryClient = useQueryClient();
   const account = useQuery(accountQuery(tenant, accountId));
@@ -49,7 +51,8 @@ export function EnrichDialog({ tenant, me, accountId, name, onClose, onDone }: E
   const allRoles = buying.data?.data ?? [];
   const persons = account.data?.people ?? [];
   const covered = new Set(persons.flatMap((p) => p.roles.map((r) => r.key)));
-  const pickedRoles = roles ?? allRoles.filter((r) => CORE_ROLES.includes(r.key) && !covered.has(r.key)).map((r) => r.key);
+  const pickedRoles =
+    roles ?? (initialRoles ? allRoles.filter((r) => initialRoles.includes(r.key)) : allRoles.filter((r) => CORE_ROLES.includes(r.key) && !covered.has(r.key))).map((r) => r.key);
   const noEmail = persons.filter((p) => !p.email);
   const pickedPeople = people ?? noEmail.slice(0, PEOPLE_MAX).map((p) => p.id);
   const tooMany = kind === 'email_reveal' && pickedPeople.length > PEOPLE_MAX;

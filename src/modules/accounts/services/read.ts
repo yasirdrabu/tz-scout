@@ -1,4 +1,5 @@
-import { and, arrayOverlaps, asc, desc, eq, exists, gt, gte, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, arrayOverlaps, asc, desc, eq, exists, gt, gte, inArray, isNotNull, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { userNames } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import type { AccountView, CrmStatus, FactKind, FactView, PersonView, RoleOrigin, SignalKind, SignalView, SourceChain } from '../contracts/types';
@@ -87,6 +88,23 @@ async function peopleOf(ctx: ModuleContext, accountIds: string[]): Promise<Perso
         .where(and(eq(personRole.tenantId, ctx.tenantId), inArray(personRole.personId, rows.map((p) => p.id))))
         .orderBy(asc(personRole.roleKey))
     : [];
+  const notes = rows.length
+    ? await ctx.tx
+        .select({ personId: fact.personId, pinnedBy: fact.pinnedBy, pinnedAt: fact.pinnedAt })
+        .from(fact)
+        .where(
+          and(
+            eq(fact.tenantId, ctx.tenantId),
+            eq(fact.key, 'decision_note'),
+            eq(fact.status, 'current'),
+            isNotNull(fact.pinnedBy),
+            inArray(fact.personId, rows.map((p) => p.id)),
+          ),
+        )
+    : [];
+  const ids = [...notes.map((n) => n.pinnedBy), ...roles.map((r) => r.setBy)].filter((x): x is string => !!x);
+  const who = ids.length ? await userNames(ctx, ids) : new Map<string, string>();
+  const noteOf = (personId: string) => notes.find((n) => n.personId === personId);
   const labels = roles.length ? new Map((await allBuyingRoles(ctx)).map((r) => [r.key, r.label])) : new Map<string, string>();
   const view = (p: PersonRow): PersonView => ({
     id: p.id,
@@ -101,8 +119,18 @@ async function peopleOf(ctx: ModuleContext, accountIds: string[]): Promise<Perso
     mobilePhone: p.mobilePhone,
     linkedinUrl: p.linkedinUrl,
     isPrimary: p.isPrimary,
-    decisionNote: p.decisionNote,
-    roles: roles.filter((r) => r.personId === p.id).map((r) => ({ key: r.roleKey, origin: r.origin as RoleOrigin, label: labels.get(r.roleKey) ?? r.roleKey })),
+    decisionNote: p.decisionNote || null,
+    decisionNoteBy: p.decisionNote && noteOf(p.id)?.pinnedBy ? { id: noteOf(p.id)!.pinnedBy!, name: who.get(noteOf(p.id)!.pinnedBy!) ?? null } : null,
+    decisionNoteAt: p.decisionNote && noteOf(p.id)?.pinnedBy ? noteOf(p.id)!.pinnedAt : null,
+    roles: roles
+      .filter((r) => r.personId === p.id)
+      .map((r) => ({
+        key: r.roleKey,
+        origin: r.origin as RoleOrigin,
+        label: labels.get(r.roleKey) ?? r.roleKey,
+        setByName: r.setBy ? (who.get(r.setBy) ?? null) : null,
+        setAt: r.setBy ? r.setAt : null,
+      })),
   });
   return rows.map(view);
 }

@@ -5,6 +5,7 @@ import { ScoutError } from '@/platform/errors';
 import { parseBody } from '../_lib/body';
 import { pageOfList } from '../_lib/pagination';
 import { created, v1Route } from '../_lib/v1-route';
+import { checkBuyingRoles } from './roles';
 import { createOfferBody } from './schemas';
 
 const statusParam = z.enum(['draft', 'approved', 'archived']);
@@ -26,6 +27,8 @@ export const GET = v1Route({ permission: 'offers:read' }, async (req, principal,
   return pageOfList(req, await withLabels(ctx, await listOffers(ctx, { practiceId: q.get('practice_id') ?? undefined, status })));
 });
 
-export const POST = v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) =>
-  created(await withLabel(ctx, await createOffer(ctx, await parseBody<OfferInput>(req, createOfferBody)))),
-);
+export const POST = v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) => {
+  const input = await parseBody<OfferInput>(req, createOfferBody);
+  await checkBuyingRoles(ctx, input);
+  return created(await withLabel(ctx, await createOffer(ctx, input)));
+});

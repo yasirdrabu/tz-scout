@@ -1,8 +1,9 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { newId } from '@/platform/ids';
 import type { ArrivalPerson, SourceChain } from '../contracts/types';
-import { fact, person, personRole } from '../db/schema';
+import { buyingRole, fact, person, personRole } from '../db/schema';
+import { guessRolesFromTitle } from '../domain/roles';
 import { ScoutError } from '@/platform/errors';
 import { PERSON_COLUMNS, recordFacts, reproject, reprojectPerson, type FactInput } from './facts';
 
@@ -76,10 +77,21 @@ function personFacts(input: ArrivalPerson, observedAt?: Date): FactInput[] {
     .map(([key, value]) => ({ key, value, observedAt }));
 }
 
+async function hasRoles(ctx: ModuleContext, personId: string): Promise<boolean> {
+  const rows = await ctx.tx
+    .select({ k: personRole.roleKey })
+    .from(personRole)
+    .where(and(eq(personRole.tenantId, ctx.tenantId), eq(personRole.personId, personId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
 /**
  * Finds the person at the account (email, then LinkedIn, then same first and last name, then a
  * research-sheet email whose local part fits a name) or adds them. Records the values as facts and
- * the roles as `stated`. The caller holds the account lock.
+ * the roles as `stated` (upgrading a guess of the same role). When the arrival states no roles and
+ * the person has none, roles guessed from `guessedRoleKeys` and the title are stored as
+ * `guessed_from_title`. The caller holds the account lock.
  */
 export async function matchOrAddPerson(
   ctx: ModuleContext,
@@ -105,13 +117,36 @@ export async function matchOrAddPerson(
   const conflictIds = recordedKeys.length ? await reproject(ctx, accountId, recordedKeys, { detectFor: factIds }) : [];
 
   const wanted = [...new Set([...(input.roleKeys ?? []), ...(opts.extraRoleKeys ?? [])])];
+  // A stated role is new, or upgrades the same role guessed from a title.
   const added = wanted.length
     ? await ctx.tx
         .insert(personRole)
         .values(wanted.map((roleKey) => ({ tenantId: ctx.tenantId, personId, roleKey, origin: 'stated' })))
-        .onConflictDoNothing()
+        .onConflictDoUpdate({
+          target: [personRole.personId, personRole.roleKey],
+          set: { origin: 'stated', setBy: null, setAt: sql`now()` },
+          setWhere: eq(personRole.origin, 'guessed_from_title'),
+        })
         .returning({ roleKey: personRole.roleKey })
     : [];
+  // Guesses only fill a person with no roles, and only when this arrival states none.
+  if (!wanted.length && (!match || !(await hasRoles(ctx, personId)))) {
+    const guesses = [...new Set([...(input.guessedRoleKeys ?? []), ...guessRolesFromTitle(input.title ?? match?.title)])];
+    const active = guesses.length
+      ? await ctx.tx
+          .select({ key: buyingRole.key })
+          .from(buyingRole)
+          .where(and(eq(buyingRole.tenantId, ctx.tenantId), eq(buyingRole.archived, false), inArray(buyingRole.key, guesses)))
+      : [];
+    if (active.length)
+      added.push(
+        ...(await ctx.tx
+          .insert(personRole)
+          .values(active.map((r) => ({ tenantId: ctx.tenantId, personId, roleKey: r.key, origin: 'guessed_from_title' })))
+          .onConflictDoNothing()
+          .returning({ roleKey: personRole.roleKey })),
+      );
+  }
   const roles = await ctx.tx
     .select({ roleKey: personRole.roleKey })
     .from(personRole)

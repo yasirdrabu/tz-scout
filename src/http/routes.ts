@@ -24,6 +24,7 @@ import * as v1AccountsIdInsights from './routes/v1/accounts/[id]/insights/route'
 import * as v1AccountsIdLeadOffer from './routes/v1/accounts/[id]/lead-offer/route';
 import * as v1AccountsIdMatches from './routes/v1/accounts/[id]/matches/route';
 import * as v1AccountsIdNotes from './routes/v1/accounts/[id]/notes/route';
+import * as v1AccountsIdCommittee from './routes/v1/accounts/[id]/committee/route';
 import * as v1AccountsIdPeople from './routes/v1/accounts/[id]/people/route';
 import * as v1AccountsIdPractices from './routes/v1/accounts/[id]/practices/route';
 import * as v1AccountsIdReviewStatus from './routes/v1/accounts/[id]/review-status/route';
@@ -171,6 +172,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/accounts/:id/lead-offer`, module: v1AccountsIdLeadOffer },
   { path: `${V1}/accounts/:id/matches`, module: v1AccountsIdMatches },
   { path: `${V1}/accounts/:id/notes`, module: v1AccountsIdNotes },
+  { path: `${V1}/accounts/:id/committee`, module: v1AccountsIdCommittee },
   { path: `${V1}/accounts/:id/people`, module: v1AccountsIdPeople },
   { path: `${V1}/accounts/:id/practices`, module: v1AccountsIdPractices },
   { path: `${V1}/accounts/:id/review-status`, module: v1AccountsIdReviewStatus },

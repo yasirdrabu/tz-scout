@@ -43,7 +43,7 @@ export const toScoringAccount = (v: ScoringView): ScoringAccount => ({
   technologies: v.technologies,
   headcountGrowth6m: v.headcountGrowth6m,
   excluded: v.excludedReasonKey && !v.excludedOverride ? { label: v.excludedLabel ?? v.excludedReasonKey } : null,
-  people: v.people.map((p) => ({ title: p.title, roleKeys: p.roles.map((r) => r.key) })),
+  people: v.people.map((p) => ({ title: p.title, roleKeys: p.roles.filter((r) => r.origin !== 'guessed_from_title').map((r) => r.key) })),
 });
 
 export const toScoringSignals = (v: ScoringView): ScoringSignal[] =>

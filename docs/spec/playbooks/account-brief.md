@@ -36,7 +36,10 @@ risks.
   rules brief. From R2 the
   `brief_sections` task drafts every section of the practice's template from the account's facts,
   signals, people, best offer, case studies and score explanation, and `committee_gaps` names missing
-  buying roles with titles to look for. Every AI-written claim cites the fact and signal ids it used
+  buying roles with titles to look for. R2b-3: `GET /api/v1/accounts/{id}/brief` also returns `committee`
+  (the ACC-E2 structure from `getCommittee`, for the account's lead offer). Only the route adds it; the
+  `getBrief` service and the brief prompt are unchanged, so the future `get_account_brief` agent tool must
+  call `getCommittee`. Every AI-written claim cites the fact and signal ids it used
   (`citations`); a section with an uncited number is rejected by validation and redrafted once. Without Claude, sections are assembled from
   rules and labelled "Assembled from rules" (carried from v1). Briefs never quote research intent,
   lawsuits or breaches in buyer-facing text (carried rule).

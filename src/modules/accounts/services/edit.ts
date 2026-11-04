@@ -1,4 +1,4 @@
-import { and, eq, isNull, notInArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, notInArray } from 'drizzle-orm';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -74,11 +74,12 @@ export async function editAccount(ctx: ModuleContext, accountId: string, patch: 
 export type PersonPatch = Pick<
   ArrivalPerson,
   'firstName' | 'lastName' | 'title' | 'seniority' | 'email' | 'emailStatus' | 'phone' | 'mobilePhone' | 'linkedinUrl' | 'decisionNote' | 'roleKeys'
->;
+> & { confirmRoleKeys?: string[] };
 
 /**
  * Pins each given person field as a fact from the editor. `roleKeys` is the full set of roles the person should have;
- * roles added here are `set_by_person`. Re-picks the primary contact.
+ * roles added here are `set_by_person`. `confirmRoleKeys` turns roles the person holds after the patch (for example guessed ones)
+ * into `set_by_person`. Re-picks the primary contact.
  */
 export async function editPerson(ctx: ModuleContext, personId: string, patch: PersonPatch): Promise<void> {
   const { userId, chain } = editor(ctx);
@@ -88,6 +89,17 @@ export async function editPerson(ctx: ModuleContext, personId: string, patch: Pe
   if (!row || (await filterVisibleAccountIds(ctx, [row.accountId])).length === 0) throw notFound('person');
   const accountId = row.accountId;
   await lockAccount(ctx, accountId);
+
+  const confirm = [...new Set(patch.confirmRoleKeys ?? [])];
+  if (confirm.length) {
+    const held = patch.roleKeys
+      ? patch.roleKeys
+      : (await ctx.tx.select({ roleKey: personRole.roleKey }).from(personRole).where(and(eq(personRole.tenantId, ctx.tenantId), eq(personRole.personId, personId)))).map((r) => r.roleKey);
+    if (confirm.some((k) => !held.includes(k))) {
+      const message = 'Only a role the person holds can be confirmed.';
+      throw new ScoutError({ slug: 'validation', status: 400, title: 'Check the request.', errors: [{ path: 'confirm_role_keys', message }] });
+    }
+  }
 
   const facts = factsFromPatch(patch, PERSON_KEY_BY_FIELD);
   const changedKeys = facts.map((f) => f.key);
@@ -113,8 +125,23 @@ export async function editPerson(ctx: ModuleContext, personId: string, patch: Pe
           .returning({ roleKey: personRole.roleKey })
       : [];
     rolesChanged = removed.length > 0 || added.length > 0;
-    if (rolesChanged) changedKeys.push('roles');
   }
+  if (confirm.length) {
+    const confirmed = await ctx.tx
+      .update(personRole)
+      .set({ origin: 'set_by_person', setBy: userId, setAt: new Date() })
+      .where(
+        and(
+          eq(personRole.tenantId, ctx.tenantId),
+          eq(personRole.personId, personId),
+          inArray(personRole.roleKey, confirm),
+          ne(personRole.origin, 'set_by_person'),
+        ),
+      )
+      .returning({ roleKey: personRole.roleKey });
+    if (confirmed.length > 0) rolesChanged = true;
+  }
+  if (rolesChanged) changedKeys.push('roles');
 
   await repickPrimary(ctx, accountId);
   if (changedKeys.length === 0) return;

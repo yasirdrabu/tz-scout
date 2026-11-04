@@ -13,6 +13,9 @@ export type BuiltInput = { input: BriefInput; accountId: string; offerId: string
 /** Facts the overview leans on come first, so the cap never drops them. */
 const CORE_FACT_KEYS = ['name', 'domain', 'industry', 'employees', 'hq_city', 'hq_state', 'hq_country', 'description', 'revenue_cents'];
 
+/** Roles a person holds beyond a title guess: a guess is not a confirmed role. */
+const confirmed = <T extends { origin: string }>(roles: T[]) => roles.filter((r) => r.origin !== 'guessed_from_title');
+
 export const closestSource = (c: SignalView['sourceChain']) => c.agentSourceId ?? c.vendorSourceId ?? c.personSourceId;
 const text = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
 const notFoundOr = async <T>(p: Promise<T>): Promise<T | null> => {
@@ -104,8 +107,8 @@ export async function buildBriefInput(ctx: ModuleContext, accountId: string): Pr
       id: p.id,
       name: [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unnamed contact',
       title: p.title,
-      roleKeys: p.roles.map((r) => r.key),
-      roleLabels: p.roles.map((r) => r.label),
+      roleKeys: confirmed(p.roles).map((r) => r.key),
+      roleLabels: confirmed(p.roles).map((r) => r.label),
       isPrimary: p.isPrimary,
     })),
     score: {

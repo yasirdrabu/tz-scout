@@ -65,7 +65,8 @@ export const offer = offers.table(
     expansionValueCents: cents('expansion_value_cents'),
     salesCycleDays: integer('sales_cycle_days'),
     targetTitles: textArray('target_titles'),
-    targetBuyingRoles: textArray('target_buying_roles'),
+    targetBuyingRoles: textArray('target_buying_roles'), // the required roles
+    optionalBuyingRoles: textArray('optional_buying_roles'),
     companySizeMin: integer('company_size_min'),
     companySizeMax: integer('company_size_max'),
     revenueMinCents: cents('revenue_min_cents'),

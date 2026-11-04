@@ -12,19 +12,19 @@ import { patchFacts, patchPersonBody } from '../../accounts/schemas';
 export const PATCH = v1Route({ permission: 'people:write' }, async (req, principal, ctx) => {
   const { id, action } = idAndAction(req, 'people');
   if (action) throw notFound();
-  const patch = await parseBody<{ roleKeys?: string[] }>(req, patchPersonBody);
+  const patch = await parseBody<{ roleKeys?: string[]; confirmRoleKeys?: string[] }>(req, patchPersonBody);
   const current = await getPerson(ctx, id);
   if (!current) throw notFound();
   if (principal.kind === 'user') {
     await editPerson(ctx, id, patch);
     return personFor((await getPerson(ctx, id))!, can(principal, 'people:read'));
   }
-  if (patch.roleKeys) {
+  if (patch.roleKeys || patch.confirmRoleKeys) {
     throw new ScoutError({
       slug: 'validation',
       status: 400,
       title: 'Check the request.',
-      errors: [{ path: 'role_keys', message: 'Only a person can change roles.' }],
+      errors: [{ path: patch.roleKeys ? 'role_keys' : 'confirm_role_keys', message: 'Only a person can change roles.' }],
     });
   }
   const r = await submitArrival(

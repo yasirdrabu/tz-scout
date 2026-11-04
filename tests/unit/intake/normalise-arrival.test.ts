@@ -59,6 +59,11 @@ describe('normaliseArrival', () => {
     expect(n.people).toEqual([{ firstName: 'Pat', lastName: 'Lee', email: 'pat@acme.com', emailStatus: 'verified', seniority: 'vp' }]);
   });
 
+  it('maps guessed_buying_roles to guessedRoleKeys, apart from the stated roles', () => {
+    const n = normaliseArrival(parse({ account: { name: 'A' }, people: [{ name: 'Pat Lee', guessed_buying_roles: [' champion ', 'champion', ''] }] }), null);
+    expect(n.people).toEqual([{ firstName: 'Pat', lastName: 'Lee', guessedRoleKeys: ['champion'] }]);
+  });
+
   it('refuses an email status Accounts does not know, and a seniority over 40 characters', () => {
     expect(ArrivalV1Schema({ strict: false }).safeParse({ people: [{ name: 'A', email_status: 'maybe' }] }).success).toBe(false);
     expect(ArrivalV1Schema({ strict: false }).safeParse({ people: [{ name: 'A', seniority: 'x'.repeat(41) }] }).success).toBe(false);

@@ -22,8 +22,11 @@ export type PersonView = {
   linkedinUrl: string | null;
   isPrimary: boolean;
   decisionNote: string | null;
+  /** Who set the current decision note and when; null when a source wrote it. */
+  decisionNoteBy: { id: string; name: string | null } | null;
+  decisionNoteAt: Date | null;
   /** `label` is the tenant's name for the role (the key when the role is gone). */
-  roles: { key: string; origin: RoleOrigin; label: string }[];
+  roles: { key: string; origin: RoleOrigin; label: string; setByName: string | null; setAt: Date | null }[];
 };
 
 export type AccountView = {
@@ -137,6 +140,8 @@ export type ArrivalPerson = {
   mobilePhone?: string;
   linkedinUrl?: string;
   roleKeys?: string[];
+  /** Roles a source suggests without stating them (enrichment's searched role); stored as `guessed_from_title`. */
+  guessedRoleKeys?: string[];
   decisionNote?: string;
   /** Outside ids for this person, for example `{ system: 'hubspot', id: '123' }`. */
   externalIds?: { system: string; id: string }[];

@@ -38,7 +38,7 @@ const personFields = {
   phone: text,
   mobile_phone: text,
   linkedin_url: text,
-  decision_note: text,
+  decision_note: text.max(1000, 'Keep the note under 1,000 characters.'),
 };
 
 const someField = (o: object) => Object.keys(o).length > 0;
@@ -46,7 +46,7 @@ const EMPTY = 'Send at least one field to change.';
 
 export const patchAccountBody = z.strictObject(accountFields).partial().refine(someField, EMPTY);
 export const patchPersonBody = z
-  .strictObject({ ...personFields, role_keys: list })
+  .strictObject({ ...personFields, role_keys: list, confirm_role_keys: list })
   .partial()
   .refine(someField, EMPTY);
 

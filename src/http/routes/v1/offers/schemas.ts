@@ -24,6 +24,7 @@ const editable = {
   sales_cycle_days: int.nonnegative().nullable(),
   target_titles: list,
   target_buying_roles: list,
+  optional_buying_roles: list,
   company_size_min: int.nonnegative().nullable(),
   company_size_max: int.nonnegative().nullable(),
   revenue_min_cents: cents,
