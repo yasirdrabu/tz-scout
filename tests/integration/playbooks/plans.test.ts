@@ -448,6 +448,21 @@ describe('roles and people on steps', () => {
     expect(later.people.map((p) => p.name).sort()).toEqual(['Chip Ng', 'Dana Lee']);
   });
 
+  it('missing_roles leaves out a role that has been archived', async () => {
+    const { accountId } = await account({ name: 'Gone Role Co' });
+    const [plan] = await plansOf(accountId);
+    await asSeller((ctx) => addStep(ctx, plan!.id, { day: 4, channel: 'call', ownerRole: 'seller', title: 'Find the blocker', targetBuyingRoles: ['blocker'] }));
+    const find = async () => (await asLeader((ctx) => getPlan(ctx, accountId)))!.steps.find((x) => x.title === 'Find the blocker')!;
+    expect((await find()).missingRoles).toEqual(['blocker']);
+    const archive = (archived: boolean) => t.run((ctx) => ctx.tx.update(buyingRole).set({ archived }).where(and(eq(buyingRole.tenantId, ctx.tenantId), eq(buyingRole.key, 'blocker'))));
+    await archive(true);
+    try {
+      expect(await find()).toMatchObject({ targetBuyingRoles: ['blocker'], missingRoles: [] });
+    } finally {
+      await archive(false);
+    }
+  });
+
   it('a person whose role was only guessed from a title does not count', async () => {
     const { accountId } = await account({ name: 'Guess Co' });
     const [plan] = await plansOf(accountId);
@@ -562,7 +577,12 @@ describe('customising a plan', () => {
     expect(await rejects(asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { title: ' ' })))).toEqual({ status: 400, title: 'Give the step a title.' });
     expect(await rejects(asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { targetBuyingRoles: ['wizard'] })))).toEqual({ status: 400, title: 'Unknown buying role: wizard' });
     expect(await rejects(asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { day: 999 })))).toMatchObject({ status: 400 });
-// An added step stays added when edited; only template steps become edited.    const extra = (await asSeller((ctx) => addStep(ctx, plan!.id, { day: 2, channel: 'task', ownerRole: 'seller', title: 'Mine' }))).steps.find((x) => x.title === 'Mine')!;    const renamed = await asSeller((ctx) => updateStep(ctx, plan!.id, extra.id, { title: 'Mine, renamed' }));    expect(renamed.steps.find((x) => x.id === extra.id)).toMatchObject({ title: 'Mine, renamed', origin: 'added' });    expect(renamed.history.some((h) => h.kind === 'step_edited' && h.stepId === extra.id)).toBe(true);
+
+    // An added step stays added when edited; only template steps become edited.
+    const extra = (await asSeller((ctx) => addStep(ctx, plan!.id, { day: 2, channel: 'task', ownerRole: 'seller', title: 'Mine' }))).steps.find((x) => x.title === 'Mine')!;
+    const renamed = await asSeller((ctx) => updateStep(ctx, plan!.id, extra.id, { title: 'Mine, renamed' }));
+    expect(renamed.steps.find((x) => x.id === extra.id)).toMatchObject({ title: 'Mine, renamed', origin: 'added' });
+    expect(renamed.history.some((h) => h.kind === 'step_edited' && h.stepId === extra.id)).toBe(true);
   });
 
   it('status, note and owner changes alone do not customise the plan or the step', async () => {

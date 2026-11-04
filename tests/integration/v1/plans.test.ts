@@ -216,6 +216,13 @@ describe('GET /api/v1/accounts/{id}/review current assignment playbook', () => {
     expect(res.status).toBe(200);
     expect((await res.json()).current_assignment).toMatchObject({ seller_user_id: seller, playbook_name: 'HTTP flow', no_playbook: false, template_id: null });
   });
+
+  it('without playbooks:read the playbook fields are null', async () => {
+    const viewer = await w.person('viewer');
+    const res = await w.as(viewer, reviewRoute, `accounts/${accountId}/review`);
+    expect(res.status).toBe(200);
+    expect((await res.json()).current_assignment).toMatchObject({ seller_user_id: seller, template_id: null, no_playbook: null, playbook_name: null });
+  });
 });
 
 describe('POST /api/v1/plans/{id}:action', () => {

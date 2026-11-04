@@ -158,6 +158,8 @@ async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
   const people: (PlanPerson & { name: string })[] = steps.some((s) => s.targetBuyingRoles.length > 0)
     ? (await listPeople(ctx, plan.accountId)).map((p) => ({ id: p.id, firstName: p.firstName, name: personName(p), roles: p.roles.map((r) => ({ key: r.key, origin: r.origin })) }))
     : [];
+  // An archived buying role is not something to go and find.
+  const active = new Set(steps.some((s) => s.targetBuyingRoles.length > 0) ? (await listBuyingRoles(ctx)).map((r) => r.key) : []);
   return {
     id: plan.id,
     accountId: plan.accountId,
@@ -177,7 +179,7 @@ async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
     steps: steps.map(({ tenantId: _t, planId: _p, ...s }) => ({
       ...s,
       people: linkedPeople(people, s.targetBuyingRoles).map((p) => ({ id: p.id, name: p.name })),
-      missingRoles: missingRoles(people, s.targetBuyingRoles),
+      missingRoles: missingRoles(people, s.targetBuyingRoles).filter((k) => active.has(k)),
       ownerName: s.ownerUserId ? (names.get(s.ownerUserId) ?? null) : null,
       ...(OPEN_STEP.includes(s.status) ? dueFlags(s.dueDate, today) : { overdue: false, dueToday: false }),
     })),
