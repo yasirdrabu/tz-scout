@@ -36,6 +36,13 @@
       "when": 1793799265512,
       "tag": "0004_plan_offer_optional",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793804144543,
+      "tag": "0005_plan_accepted_at",
+      "breakpoints": true
     }
   ]
 }

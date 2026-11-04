@@ -183,6 +183,8 @@ export const accountPlan = playbooks.table(
     /** The accept day in the tenant timezone. */
     startDate: date('start_date', { mode: 'string' }).notNull(),
     statusReason: text('status_reason'),
+    /** When the accepted event that started, resumed or last took over the plan happened; an older accept never takes it back. Plans that existed before this column read their migration time. */
+    acceptedAt: at('accepted_at').notNull().defaultNow(),
     createdAt: at('created_at').notNull().defaultNow(),
     updatedAt: at('updated_at').notNull().defaultNow(),
   },

@@ -15,7 +15,7 @@ import { MAPPED_TIERS, playbookFor } from './offer-playbooks';
 import { publishChanged, recordChange, snapshot } from './plans';
 
 type Accepted = z.output<typeof assignmentAccepted.data>;
-type NotStarted = 'no_playbook_chosen' | 'no_offer_playbook' | 'template_unavailable';
+type NotStarted = 'no_playbook_chosen' | 'no_offer_playbook' | 'template_unavailable' | 'superseded';
 
 const OPEN = ['active', 'paused'];
 
@@ -36,11 +36,11 @@ async function lockedTemplate(ctx: ModuleContext, id: string) {
  * longer open. Either way the plan points at the new assignment, open seller steps go to the new seller and open
  * leader steps to the new assigner. Due dates stay: a resumed plan shows its late steps as overdue.
  */
-async function takeOver(ctx: ModuleContext, plan: typeof accountPlan.$inferSelect, d: Accepted): Promise<void> {
+async function takeOver(ctx: ModuleContext, plan: typeof accountPlan.$inferSelect, d: Accepted, acceptedAt: Date): Promise<void> {
   const resuming = plan.status === 'paused';
   const [row] = await ctx.tx
     .update(accountPlan)
-    .set({ status: 'active', statusReason: null, sellerUserId: d.sellerUserId, assignmentId: d.assignmentId, updatedAt: new Date() })
+    .set({ status: 'active', statusReason: null, sellerUserId: d.sellerUserId, assignmentId: d.assignmentId, acceptedAt, updatedAt: new Date() })
     .where(eq(accountPlan.id, plan.id))
     .returning();
   const open = and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, plan.id), inArray(planStep.status, ['todo', 'in_progress']));
@@ -67,7 +67,8 @@ export async function startPlan(ctx: ModuleContext, e: { data: Accepted; occurre
     .from(accountPlan)
     .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, d.accountId), inArray(accountPlan.status, OPEN)))
     .for('update');
-  if (open) return takeOver(ctx, open, d);
+  // A retried older accept can arrive after a later one: only a later accept takes an open plan over.
+  if (open) return new Date(e.occurredAt) > open.acceptedAt ? takeOver(ctx, open, d, new Date(e.occurredAt)) : notStarted(ctx, d, 'superseded');
 
   if (d.noPlaybook) return notStarted(ctx, d, 'no_playbook_chosen');
   const [summary] = await getSummaries(ctx, [d.accountId]);
@@ -124,6 +125,7 @@ export async function startPlan(ctx: ModuleContext, e: { data: Accepted; occurre
     sellerUserId: d.sellerUserId,
     stopWhen: draft.stopWhen,
     startDate: draft.startDate,
+    acceptedAt: new Date(e.occurredAt),
   });
   const rows = draft.steps.map((s) => ({ ...s, id: newId('stp'), tenantId: ctx.tenantId, planId }));
   if (rows.length > 0) await ctx.tx.insert(planStep).values(rows);

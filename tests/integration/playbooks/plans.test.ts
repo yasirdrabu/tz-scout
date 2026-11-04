@@ -308,6 +308,20 @@ describe('start date, merges and late events', () => {
     expect((await stepsOf(plan!.id)).map((s) => s.dueDate)).toEqual(['2026-11-06', '2026-11-09', '2026-11-11', '2026-11-13']);
   });
 
+  it('a later accept wins: a retried older accept after a take-over starts nothing and publishes superseded', async () => {
+    const accountId = await arrivedAccount(t, { name: 'Superseded Co' });
+    await t.run((ctx) => startPlan(ctx, accepted(accountId)));
+    const [plan] = await plansOf(accountId);
+    const next = accepted(accountId, { sellerUserId: seller2 });
+    await t.run((ctx) => startPlan(ctx, { ...next, occurredAt: '2026-11-08T09:00:00.000Z' }));
+    expect((await plansOf(accountId))[0]).toMatchObject({ id: plan!.id, sellerUserId: seller2, assignmentId: next.data.assignmentId, acceptedAt: new Date('2026-11-08T09:00:00.000Z') });
+
+    const older = accepted(accountId, { sellerUserId: seller });
+    await t.run((ctx) => startPlan(ctx, { ...older, occurredAt: '2026-11-07T12:00:00.000Z' }));
+    expect(await plansOf(accountId)).toEqual([expect.objectContaining({ id: plan!.id, sellerUserId: seller2, assignmentId: next.data.assignmentId, status: 'active' })]);
+    expect((await events('playbooks.plan.not_started', accountId))[0]!.data).toMatchObject({ assignmentId: older.data.assignmentId, reason: 'superseded' });
+  });
+
   it('a late accepted event for a merged-away account starts the plan on the survivor', async () => {
     const survivor = await arrivedAccount(t, { name: 'Late Survivor' });
     const gone = await arrivedAccount(t, { name: 'Late Gone' });

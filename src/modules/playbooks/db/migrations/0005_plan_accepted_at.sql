@@ -1,0 +1,1 @@
+ALTER TABLE "playbooks"."account_plan" ADD COLUMN "accepted_at" timestamp with time zone DEFAULT now() NOT NULL;

@@ -50,7 +50,9 @@ Out of R2c (user, 2026-11-04): outreach sequences, call prep, proposals and outc
   - An `active` plan of another assignment is taken over the same way (status stays `active`, the plan
     points at the new assignment, history kind `taken_over`, `plan.changed` with `owners`). This is the
     accept arriving before the old assignment withdrawal; the late withdrawal then finds no plan
-    and does nothing.
+    and does nothing. The plan keeps `accepted_at`, the time of the accept that started, resumed or took it over;
+    an accept that is not later than it (an older event retried late) starts nothing and publishes
+    `not_started` with reason `superseded`.
   - A redelivered `accepted` event makes no second plan (one plan per assignment).
   - If an account was merged, the plan starts or resumes on the survivor. When both accounts have an
     open plan at merge, the survivor's stays and the other is `abandoned` (reason `merged`).
@@ -133,7 +135,7 @@ Published (shapes in `architecture/event-catalog.md`):
 | `playbooks.plan.created` | `planId`, `accountId`, `offerId` and `tier` (null as above), `templateId`, `templateVersion`, `assignmentId`, `sellerUserId`, `stopWhen`, `steps[{id, order, day, channel, title, ownerUserId, dueDate, crmTask, subject, body}]` |
 | `playbooks.plan.changed` | `planId`, `accountId`, `status`, `changed` (any of `status`, `steps`, `owners`, `account`), `reason?`, `previousAccountId?` (a merge repoint) and `steps[{id, status, ownerUserId, dueDate, title, crmTask}]`, the steps the change touched (a step edit: that step; owner moves on a resume or take-over: the moved steps; a stop: the skipped steps; empty for a status-only change) |
 | `playbooks.step.completed` | `planId`, `stepId`, `accountId`, `channel`, `doneBy`, `doneAt` |
-| `playbooks.plan.not_started` | `accountId`, `assignmentId`, `reason`: `no_playbook_chosen`, `no_offer_playbook` or `template_unavailable` (draft, archived or deleted template); lets the screens explain an empty plan |
+| `playbooks.plan.not_started` | `accountId`, `assignmentId`, `reason`: `no_playbook_chosen`, `no_offer_playbook`, `superseded` or `template_unavailable` (draft, archived or deleted template); lets the screens explain an empty plan |
 
 `plan.changed` is published for step edits (`steps`, plus `owners` when the owner moved), the four
 plan actions (`status`), a withdrawal pause (`status`, reason `withdrawn`), a resume on accept

@@ -95,6 +95,6 @@ export const planNotStarted = defineEvent(
   z.object({
     accountId: z.string(),
     assignmentId: z.string(),
-    reason: z.enum(['no_playbook_chosen', 'no_offer_playbook', 'template_unavailable']),
+    reason: z.enum(['no_playbook_chosen', 'no_offer_playbook', 'template_unavailable', 'superseded']),
   }),
 );
