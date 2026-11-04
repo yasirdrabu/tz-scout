@@ -149,6 +149,9 @@ export type AssignmentFilters = {
   limit?: number;
 };
 
+/** A next step as the lists show it. */
+export type NextStepFields = { title: string; dueDate: string; overdue: boolean; dueToday: boolean };
+
 export type AssignmentRow = {
   id: string;
   accountId: string;
@@ -167,12 +170,15 @@ export type AssignmentRow = {
   /** The offer the account leads with (the one picked, else Scout's best), for "{offer}" in My accounts. */
   offerId: string | null;
   offerName: string | null;
-  /** Playbooks are R2: null until then. */
-  playbookName: null;
+  /** Filled by the assignments route from playbooks; null here. */
+  playbookName: string | null;
+  /** The playbook the assigner picked, and whether they chose to send none (a pending row's playbook is worked out from these). */
+  templateId: string | null;
+  noPlaybook: boolean;
   stage: string | null;
   stageLabel: string | null;
-  /** Playbook steps are R2. */
-  nextStep: null;
+  /** Filled by the route from playbooks; null here. */
+  nextStep: NextStepFields | null;
   /** The latest CRM activity on the account, when the caller can see it. */
   lastActivity: { kind: string; at: Date } | null;
   /** The CRM handoff state, so a row can show it while the send has not finished. */
@@ -226,6 +232,8 @@ async function assignmentRows(ctx: ModuleContext, rows: (typeof assignment.$infe
     offerId,
     offerName: lookups.offer(offerId)?.name ?? null,
     playbookName: null,
+    templateId: a.templateId,
+    noPlaybook: a.noPlaybook,
     stage,
     stageLabel: stage ? (stageNames.get(stage) ?? stage) : null,
     nextStep: null,

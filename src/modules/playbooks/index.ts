@@ -61,7 +61,7 @@ export {
   type TemplateStatus,
   type TemplateSummary,
 } from './services/templates';
-export { MAPPED_TIERS, NOT_AVAILABLE, offerPlaybooks, playbookFor, setOfferPlaybook, type MappedTier, type OfferPlaybookView } from './services/offer-playbooks';
+export { MAPPED_TIERS, NOT_AVAILABLE, offerPlaybooks, pendingPlaybookNames, playbookFor, setOfferPlaybook, type MappedTier, type OfferPlaybookView, type PendingChoice } from './services/offer-playbooks';
 export {
   FINISH_STEPS,
   MAX_NOTE,
@@ -71,11 +71,14 @@ export {
   abandonPlan,
   completePlan,
   getPlan,
+  myStepCounts,
+  nextSteps,
   pausePlan,
   resumePlan,
   stopPlan,
   updateStep,
   type HistoryView,
+  type NextStep,
   type PlanView,
   type StepPatch,
   type StepStatus,

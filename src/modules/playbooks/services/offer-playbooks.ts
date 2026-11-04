@@ -1,4 +1,5 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
+import { getSummaries } from '@/modules/accounts';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -85,4 +86,42 @@ export async function playbookFor(ctx: ModuleContext, offerId: string, tier: str
     .innerJoin(playbookTemplate, eq(playbookTemplate.id, offerPlaybook.templateId))
     .where(and(eq(offerPlaybook.tenantId, ctx.tenantId), eq(offerPlaybook.offerId, offerId), eq(offerPlaybook.tier, tier)));
   return row ?? null;
+}
+
+export type PendingChoice = { key: string; accountId: string; offerId: string | null; templateId: string | null; noPlaybook: boolean };
+
+/**
+ * The playbook name that would start for each not-yet-accepted assignment: the assigner's pick, else the lead offer's
+ * playbook for the account's tier; null when they chose none or nothing is mapped (see `startPlan`). Batched: a fixed
+ * number of queries for any number of rows.
+ */
+export async function pendingPlaybookNames(ctx: ModuleContext, items: PendingChoice[]): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  const open = items.filter((i) => !i.noPlaybook);
+  for (const i of items) if (i.noPlaybook) out.set(i.key, null);
+  if (open.length === 0) return out;
+  const needTier = open.filter((i) => !i.templateId && i.offerId);
+  const tiers = new Map((await getSummaries(ctx, [...new Set(needTier.map((i) => i.accountId))])).map((s) => [s.accountId, s.tier]));
+  const offerIds = [...new Set(needTier.map((i) => i.offerId!))];
+  const mapped = offerIds.length
+    ? await ctx.tx
+        .select({ offerId: offerPlaybook.offerId, tier: offerPlaybook.tier, templateId: offerPlaybook.templateId })
+        .from(offerPlaybook)
+        .where(and(eq(offerPlaybook.tenantId, ctx.tenantId), inArray(offerPlaybook.offerId, offerIds)))
+    : [];
+  const byPair = new Map(mapped.map((m) => [`${m.offerId}|${m.tier}`, m.templateId]));
+  const chosen = new Map<string, string | null>();
+  for (const i of open) {
+    const tier = tiers.get(i.accountId);
+    chosen.set(i.key, i.templateId ?? (i.offerId && tier ? (byPair.get(`${i.offerId}|${tier}`) ?? null) : null));
+  }
+  const templateIds = [...new Set([...chosen.values()].filter((t): t is string => !!t))];
+  const names = new Map(
+    (templateIds.length
+      ? await ctx.tx.select({ id: playbookTemplate.id, name: playbookTemplate.name }).from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), inArray(playbookTemplate.id, templateIds)))
+      : []
+    ).map((t) => [t.id, t.name]),
+  );
+  for (const [key, t] of chosen) out.set(key, t ? (names.get(t) ?? null) : null);
+  return out;
 }

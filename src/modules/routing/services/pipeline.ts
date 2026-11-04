@@ -7,6 +7,7 @@ import { members, tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { accountReview, stageChange } from '../db/schema';
+import type { NextStepFields } from './read';
 import { toCsv } from '../domain/csv';
 import type { PipelineStage } from '../domain/pipeline';
 import { stageRank } from '../domain/pipeline';
@@ -43,8 +44,9 @@ export type AccountListRow = SearchRow & {
   source: { sourceId: string; name: string; kind: string; via: string | null } | null;
   lastActivity: AccountCrmFacts['lastActivity'];
   value: { amountCents: number | null; currency: string | null; kind: 'won' | 'open_deal' | 'estimated'; dealName: string | null } | null;
-  /** Playbook steps are R2. */
-  nextStep: null;
+  /** Filled by the route from playbooks; null here. */
+  playbookName: string | null;
+  nextStep: NextStepFields | null;
 };
 
 /** The "Other" tab: exits, plus accounts sent back to their source (they keep an earlier stage). */
@@ -125,6 +127,7 @@ export async function listAccounts(ctx: ModuleContext, f: AccountListFilters = {
         source: source ? { sourceId: source.sourceId, name: source.name, kind: source.kind, via: source.via } : null,
         lastActivity: facts?.lastActivity ?? null,
         value: facts?.value ?? estimate(potentials.get(r.accountId)?.cents),
+        playbookName: null,
         nextStep: null,
       };
     }),

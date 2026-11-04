@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds, resolveAccountId } from '@/modules/accounts';
 import { memberDirectory, tenantTimezone, userNames } from '@/modules/tenancy';
 import { audit } from '@/platform/audit';
@@ -8,7 +8,7 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { planChanged, stepCompleted } from '../contracts/events';
 import { accountPlan, planChange, planStep, playbookTemplate } from '../db/schema';
-import { dueFlags } from '../domain/next-step';
+import { dueFlags, pickNextStep } from '../domain/next-step';
 import { localDate } from '../domain/plan';
 
 export const PLAN_ENDED = 'This plan has ended.';
@@ -261,4 +261,53 @@ export async function stopPlan(ctx: ModuleContext, planId: string, reason: strin
     .where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, planId), inArray(planStep.status, OPEN_STEP)))
     .returning({ id: planStep.id });
   await move(ctx, plan, 'stopped', reason, 'stopped', { reason, skipped: open.map((s) => s.id) }, open.length > 0 ? ['status', 'steps'] : ['status'], reason);
+}
+
+export type NextStep = { planId: string; playbookName: string; title: string; dueDate: string; overdue: boolean; dueToday: boolean; ownerUserId: string | null };
+
+/**
+ * The next step of each account's open plan, for the lists (Ruling 15): the earliest `todo` or `in_progress` step by
+ * due date, then order. One query for any number of ids. Only `active` plans count, so a paused plan shows no next
+ * step, and neither does a plan with nothing left open. Accounts without one are absent from the map. The caller
+ * passes ids its list already filtered for visibility.
+ */
+export async function nextSteps(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, NextStep>> {
+  const out = new Map<string, NextStep>();
+  if (accountIds.length === 0) return out;
+  const rows = await ctx.tx
+    .select({ accountId: accountPlan.accountId, planId: accountPlan.id, playbookName: playbookTemplate.name, step: planStep })
+    .from(accountPlan)
+    .innerJoin(planStep, and(eq(planStep.tenantId, accountPlan.tenantId), eq(planStep.planId, accountPlan.id)))
+    .innerJoin(playbookTemplate, eq(playbookTemplate.id, accountPlan.templateId))
+    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.status, 'active'), inArray(accountPlan.accountId, accountIds), inArray(planStep.status, OPEN_STEP)));
+  const today = localDate(Date.now(), await tenantTimezone(ctx));
+  const byAccount = new Map<string, typeof rows>();
+  for (const r of rows) byAccount.set(r.accountId, [...(byAccount.get(r.accountId) ?? []), r]);
+  for (const [accountId, list] of byAccount) {
+    const pick = pickNextStep(list.map((r) => ({ ...r, status: r.step.status, dueDate: r.step.dueDate, order: r.step.order })));
+    if (!pick) continue;
+    out.set(accountId, {
+      planId: pick.planId,
+      playbookName: pick.playbookName,
+      title: pick.step.title,
+      dueDate: pick.step.dueDate,
+      ...dueFlags(pick.step.dueDate, today),
+      ownerUserId: pick.step.ownerUserId,
+    });
+  }
+  return out;
+}
+
+/** How many open steps the caller owns that are due today or overdue, in active plans (tenant timezone). One query. */
+export async function myStepCounts(ctx: ModuleContext): Promise<{ dueToday: number; overdue: number }> {
+  const today = localDate(Date.now(), await tenantTimezone(ctx));
+  const [row] = await ctx.tx
+    .select({
+      dueToday: sql<number>`count(*) filter (where ${planStep.dueDate} = ${today})::int`,
+      overdue: sql<number>`count(*) filter (where ${planStep.dueDate} < ${today})::int`,
+    })
+    .from(planStep)
+    .innerJoin(accountPlan, and(eq(accountPlan.tenantId, planStep.tenantId), eq(accountPlan.id, planStep.planId)))
+    .where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.ownerUserId, ctx.actor.id), inArray(planStep.status, OPEN_STEP), eq(accountPlan.status, 'active')));
+  return { dueToday: row?.dueToday ?? 0, overdue: row?.overdue ?? 0 };
 }
