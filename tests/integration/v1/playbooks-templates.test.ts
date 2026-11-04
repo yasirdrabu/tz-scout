@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as offerPlaybooksRoute } from '@/http/routes/v1/offers/[id]/playbooks/route';
 import { PUT as putOfferPlaybook } from '@/http/routes/v1/offers/[id]/playbooks/[tier]/route';
+import { POST as offerActionRoute } from '@/http/routes/v1/offers/[id]/route';
 import { DELETE as deleteRoute, GET as getRoute, PATCH as patchRoute, POST as actionRoute } from '@/http/routes/v1/playbooks/[id]/route';
 import { GET as listRoute, POST as createRoute } from '@/http/routes/v1/playbooks/route';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
@@ -138,5 +139,18 @@ describe('/api/v1/offers/{id}/playbooks', () => {
 
     expect((await w.as(operator, offerPlaybooksRoute, 'offers/off_missing/playbooks')).status).toBe(404);
     expect((await w.as(operator, putOfferPlaybook, 'offers/off_missing/playbooks/watch', 'PUT', { playbook_id: null })).status).toBe(404);
+  });
+
+  it('refuses a tier change on a retired offer (409)', async () => {
+    const pb = await (await w.as(leader, createRoute, 'playbooks', 'POST', { name: 'Retired map', status: 'active', steps })).json();
+    const old = await w.run(async (ctx) => {
+      const practice = await createPractice(ctx, { name: 'Old' });
+      const o = await createOffer(ctx, { name: 'Old offer', practiceId: practice.id, ...completeOffer });
+      return approveOffer(ctx, o.id);
+    });
+    expect((await w.as(operator, offerActionRoute, `offers/${old.id}:archive`, 'POST')).status).toBe(200);
+    const res = await w.as(operator, putOfferPlaybook, `offers/${old.id}/playbooks/act_now`, 'PUT', { playbook_id: pb.id });
+    expect(res.status).toBe(409);
+    expect((await res.json()).title).toBe('This offer is retired.');
   });
 });

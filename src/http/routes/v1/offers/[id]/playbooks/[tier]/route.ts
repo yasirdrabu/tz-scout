@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { getOffer } from '@/modules/offers';
 import { setOfferPlaybook } from '@/modules/playbooks';
 import { can, requirePermission } from '@/modules/tenancy';
+import { ScoutError } from '@/platform/errors';
 import { parseBody } from '../../../../_lib/body';
 import { idAndAction, notFound } from '../../../../_lib/path';
 import { v1Route } from '../../../../_lib/v1-route';
@@ -17,6 +18,7 @@ export const PUT = v1Route({}, async (req, principal, ctx) => {
   const parts = new URL(req.url).pathname.split('/').filter(Boolean);
   const tier = decodeURIComponent(parts[parts.indexOf('playbooks') + 1] ?? '');
   const { playbookId } = await parseBody<{ playbookId: string | null }>(req, body);
-  await getOffer(ctx, id);
+  const offer = await getOffer(ctx, id);
+  if (offer.status === 'archived') throw new ScoutError({ slug: 'offer-archived', status: 409, title: 'This offer is retired.' });
   return { data: await setOfferPlaybook(ctx, id, tier, playbookId) };
 });

@@ -1,10 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Button } from '../../ui/Button';
+import { LoadingLine } from '../../ui/LoadingLine';
 import { useToast } from '../../ui/Toast';
 import { TIER_WORD, playbooksQuery, span } from '../playbooks/api';
 import { TierChip } from '../review/parts';
-import { LoadFailed, LoadingRows, copyText, useRun } from '../settings/shared';
+import { LoadFailed, LoadingRows, copyText, errorText, useRun } from '../settings/shared';
 import { offerPlaybooksQuery, setOfferPlaybook, type OfferPlaybook } from './api';
 import styles from './Offers.module.css';
 
@@ -32,8 +33,10 @@ export function PlaybookByTier({ tenant, offerId, canPick, canOpen }: Props) {
 
   if (tiers.isPending) return <LoadingRows rows={3}>Loading the playbooks</LoadingRows>;
   if (tiers.isError) return <LoadFailed title="The playbooks didn't load" error={tiers.error} onRetry={() => void tiers.refetch()} />;
-  // A viewer cannot list playbooks: they get the current names read-only.
+  // A viewer cannot list playbooks: they get the current names read-only. A person who can pick waits for the list.
   const options = canPick ? playbooks.data?.filter((p) => p.status === 'active') : undefined;
+  const loading = canPick && playbooks.isPending;
+  const failed = canPick && playbooks.isError;
 
   async function pick(row: OfferPlaybook, id: string) {
     const chosen = options?.find((p) => p.id === id);
@@ -56,7 +59,13 @@ export function PlaybookByTier({ tenant, offerId, canPick, canOpen }: Props) {
                 <span className={styles.tierChip}>
                   <TierChip tier={row.tier} label={word} />
                 </span>
-                {options ? (
+                {loading ? (
+                  <LoadingLine>Loading playbooks</LoadingLine>
+                ) : failed ? (
+                  <p role="alert" className={styles.formError}>
+                    {errorText(playbooks.error)}
+                  </p>
+                ) : options ? (
                   <select className="input" aria-label={`${word} playbook`} value={current?.id ?? ''} disabled={act.busy} onChange={(e) => void pick(row, e.target.value)}>
                     <option value="">No playbook</option>
                     {current && !options.some((p) => p.id === current.id) && <option value={current.id}>{current.name}</option>}

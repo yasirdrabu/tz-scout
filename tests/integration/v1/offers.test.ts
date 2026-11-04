@@ -350,6 +350,10 @@ describe('R1 offer and practice routes (Rulings 12 to 14)', () => {
     expect((await bad({ objections: [{ objection: 'a'.repeat(501), answer: 'b' }] })).status).toBe(400);
     expect((await bad({ objections: [{ objection: 'a', answer: '' }] })).status).toBe(400);
     expect((await bad({ objections: [{ objection: 'a', answer: 'b', extra: 1 }] })).status).toBe(400);
+    const piped = await bad({ objections: [{ objection: 'a | b', answer: 'c | d' }] });
+    expect(piped.status).toBe(400);
+    expect((await piped.json()).errors.map((e: { message: string }) => e.message)).toContain('Take the | out of the objection.');
+    expect((await bad({ objections: [{ objection: 'Too dear', answer: 'Fixed fee | cheap' }] })).status).toBe(200);
   });
 
   it('a content edit keeps an active offer active; a buyer edit sends it back with the warning', async () => {

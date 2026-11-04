@@ -157,7 +157,7 @@ export function OfferView({ tenant, offerId, canManage, canPick, canOpenPlaybook
         );
       })}
 
-      <PlaybookByTier tenant={tenant} offerId={o.id} canPick={canPick} canOpen={canOpenPlaybooks} />
+      <PlaybookByTier tenant={tenant} offerId={o.id} canPick={canPick && !retired} canOpen={canOpenPlaybooks} />
       <InitialMessage tenant={tenant} offerId={o.id} />
       <SellerGuide offer={o} {...(canManage && !retired ? { onWrite: () => onEdit('talking_points') } : {})} />
 

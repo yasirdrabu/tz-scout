@@ -9,7 +9,12 @@ const guideList = z
 const objections = z
   .array(
     z.strictObject({
-      objection: z.string().trim().min(1, 'Write the objection.').max(500, 'Keep this under 500 characters.'),
+      objection: z
+        .string()
+        .trim()
+        .min(1, 'Write the objection.')
+        .max(500, 'Keep this under 500 characters.')
+        .refine((s) => !s.includes('|'), 'Take the | out of the objection.'),
       answer: z.string().trim().min(1, 'Write the answer.').max(500, 'Keep this under 500 characters.'),
     }),
   )

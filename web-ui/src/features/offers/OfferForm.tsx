@@ -56,6 +56,8 @@ const num = (n: number | null) => (n === null ? '' : String(n));
 /** Minor units as a plain amount, cents kept ("25000.5"). */
 const dollars = (cents: number | null) => (cents === null ? '' : String(cents / 100));
 
+const flat = (s: string) => s.replace(/\s*[\r\n]+\s*/g, ' ');
+
 function valuesOf(o: Offer | undefined, practiceId: string, copy: boolean): Values {
   return {
     name: o ? (copy ? `${o.name} (copy)` : o.name) : '',
@@ -80,7 +82,8 @@ function valuesOf(o: Offer | undefined, practiceId: string, copy: boolean): Valu
     sizeMax: num(o?.company_size_max ?? null),
     proofPoints: (o?.proof_points ?? []).join('\n'),
     talkingPoints: (o?.talking_points ?? []).join('\n'),
-    objections: (o?.objections ?? []).map((x) => `${x.objection} | ${x.answer}`).join('\n'),
+    // A line break inside an objection or answer shows as a space, so one entry stays one line.
+    objections: (o?.objections ?? []).map((x) => `${flat(x.objection)} | ${flat(x.answer)}`).join('\n'),
     avoid: (o?.avoid ?? []).join('\n'),
   };
 }
@@ -112,6 +115,7 @@ function objectionsOf(s: string): (Objection | null)[] {
 }
 
 const OBJECTION_FORMAT = 'Write each line as: objection | answer';
+const OBJECTION_PIPE = 'Take the | out of the objection.';
 
 const priceChanged = (v: Values, base: Values) => v.priceModel !== base.priceModel || v.amount !== base.amount || v.amountMax !== base.amountMax;
 
@@ -144,7 +148,8 @@ function bodyOf(v: Values, base: Values | null): OfferBody {
     company_size_max: int(v.sizeMax),
     proof_points: lines(v.proofPoints),
     talking_points: lines(v.talkingPoints),
-    objections: objectionsOf(v.objections).filter((x): x is Objection => x !== null),
+    // Sent only when the text changed (or on create), so a save never rewrites objections nobody touched.
+    ...(!base || v.objections !== base.objections ? { objections: objectionsOf(v.objections).filter((x): x is Objection => x !== null) } : {}),
     avoid: lines(v.avoid),
   };
 }
@@ -268,8 +273,10 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
       setErrors({ name: TITLE_NEEDED });
       return;
     }
-    if (objectionsOf(v.objections).includes(null)) {
-      setErrors({ objections: OBJECTION_FORMAT });
+    // An objection may not contain "|": a saved one that does would be split at the wrong place if it stays as it is.
+    const piped = v.objections !== base?.objections && (initial?.objections ?? []).some((x) => x.objection.includes('|') && lines(v.objections).includes(`${flat(x.objection)} | ${flat(x.answer)}`));
+    if (piped || objectionsOf(v.objections).includes(null)) {
+      setErrors({ objections: piped ? OBJECTION_PIPE : OBJECTION_FORMAT });
       formRef.current?.querySelector<HTMLElement>('[data-field="objections"]')?.focus();
       return;
     }
