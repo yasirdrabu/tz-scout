@@ -18,6 +18,8 @@ export type Practice = {
   offer_count: number;
 };
 
+export type Objection = { objection: string; answer: string };
+
 export type Offer = {
   id: string;
   practice_id: string;
@@ -43,6 +45,9 @@ export type Offer = {
   company_size_min: number | null;
   company_size_max: number | null;
   proof_points: string[];
+  talking_points: string[];
+  objections: Objection[];
+  avoid: string[];
   updated_at: string;
 };
 
@@ -74,6 +79,9 @@ export type OfferBody = Partial<
     | 'company_size_min'
     | 'company_size_max'
     | 'proof_points'
+    | 'talking_points'
+    | 'objections'
+    | 'avoid'
   >
 >;
 

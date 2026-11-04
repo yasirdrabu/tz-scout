@@ -388,3 +388,81 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Playbook by tier, initial message, seller guide */
+.tierRows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tierRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tierLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.tierChip {
+  min-width: 84px;
+}
+
+.tierLine select {
+  min-width: 220px;
+}
+
+.tierName {
+  font-weight: 500;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.messageSubject {
+  font-weight: 600;
+}
+
+.messageBody {
+  max-width: 72ch;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.guideBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.guideTitle {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.objections {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quote {
+  font-style: italic;
+}

@@ -53,7 +53,7 @@ describe('Offers and practices (§19)', () => {
     expect(await screen.findByText('No lead yet · 1 offer')).toBeInTheDocument();
   });
 
-  it('the offer view: breadcrumb, Updated line, price, the API stats and the sections, without the R2 parts', async () => {
+  it('the offer view: breadcrumb, Updated line, price, the API stats, the sections and the seller guide', async () => {
     serveOffers();
     renderApp('/t/taazaa/offers/prc_ai/off_mb');
     expect(await screen.findByRole('heading', { name: 'Modernization Blueprint', level: 2 })).toBeInTheDocument();
@@ -71,8 +71,7 @@ describe('Offers and practices (§19)', () => {
     expect(within(screen.getByRole('region', { name: 'Summary' })).getByText('A funded plan in six weeks.')).toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: 'Ideal customer' })).getByText('Agencies with a mandate.')).toBeInTheDocument();
     for (const name of ['Key offer', 'Why us', 'Why now']) expect(within(screen.getByRole('region', { name })).getByRole('button', { name: 'Add it' })).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'Proof points' })).getByText('Plan approved in 7 weeks')).toBeInTheDocument();
-    for (const r2 of ['Playbook by tier', 'Initial message', 'Seller guide', 'Talking points']) expect(screen.queryByText(r2)).toBeNull();
+    expect(within(screen.getByRole('region', { name: 'Seller guide' })).getByText('Plan approved in 7 weeks')).toBeInTheDocument();
   });
 
   it('Retire when the offer has history: confirm, then the toast', async () => {

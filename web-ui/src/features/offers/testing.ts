@@ -2,7 +2,8 @@ import { http, HttpResponse } from 'msw';
 import { exactly, problem } from '../../test/http';
 import { serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
-import type { Offer, OfferDetail, OfferStat, Practice } from './api';
+import type { Playbook } from '../playbooks/api';
+import type { Offer, OfferDetail, OfferPlaybook, OfferStat, Practice } from './api';
 
 // Fixtures in the API's shapes (snake_case) for the Offers tests. Price lines, status words, counts and
 // win rates are ones the browser could not derive (C8).
@@ -48,6 +49,9 @@ export const offer = (o: Partial<Offer> & Pick<Offer, 'id' | 'name' | 'practice_
   company_size_min: null,
   company_size_max: null,
   proof_points: [],
+  talking_points: [],
+  objections: [],
+  avoid: [],
   updated_at: '2026-10-20T12:00:00Z',
   ...o,
 });
@@ -91,7 +95,13 @@ type Opts = {
   detail?: Record<string, Partial<OfferDetail>>;
   /** Answers for one action, by path suffix such as `off_mb:approve` or `DELETE off_mb`. */
   answer?: Record<string, () => Response>;
+  /** Playbooks the list returns (`GET /playbooks`), and what each tier of an offer runs, by offer id. */
+  playbooks?: Playbook[];
+  tiers?: Record<string, OfferPlaybook[]>;
 };
+
+export const TIERS: OfferPlaybook['tier'][] = ['act_now', 'good_fit', 'watch'];
+export const emptyTiers = (): OfferPlaybook[] => TIERS.map((tier) => ({ tier, playbook: null, first_email: null }));
 
 /** The Offers screen answered from fixtures; writes change the fixtures. Returns the request log. */
 export function serveOffers(opts: Opts = {}) {
@@ -116,6 +126,7 @@ export function serveOffers(opts: Opts = {}) {
     return offers.find((o) => o.id === id)!;
   };
   const override = (key: string) => opts.answer?.[key]?.();
+  const tiers: Record<string, OfferPlaybook[]> = { ...opts.tiers };
   server.use(
     http.get('/api/v1/buying-roles', () => HttpResponse.json({ data: BUYING_ROLES })),
     http.get('/api/v1/practices', () => HttpResponse.json({ data: practices, next_cursor: null })),
@@ -131,6 +142,19 @@ export function serveOffers(opts: Opts = {}) {
     http.get('/api/v1/offers/:id', ({ params }) => {
       const o = read(String(params.id));
       return o ? HttpResponse.json(o) : problem(404, 'That offer was not found.');
+    }),
+    http.get('/api/v1/playbooks', () => HttpResponse.json({ data: opts.playbooks ?? [], next_cursor: null })),
+    http.get('/api/v1/offers/:id/playbooks', ({ params }) => HttpResponse.json({ data: tiers[String(params.id)] ?? emptyTiers() })),
+    http.put('/api/v1/offers/:id/playbooks/:tier', async ({ request, params }) => {
+      await log(request);
+      const out = override(`PUT ${String(params.tier)}`);
+      if (out) return out;
+      const body = (await request.clone().json()) as { playbook_id: string | null };
+      const chosen = (opts.playbooks ?? []).find((p) => p.id === body.playbook_id);
+      tiers[String(params.id)] = (tiers[String(params.id)] ?? emptyTiers()).map((t) =>
+        t.tier === params.tier ? { ...t, playbook: chosen ? { id: chosen.id, name: chosen.name, status: chosen.status, steps: chosen.steps, days: chosen.days } : null } : t,
+      );
+      return HttpResponse.json({ data: tiers[String(params.id)] });
     }),
     http.get('/api/v1/members/directory', () => HttpResponse.json({ data: MEMBERS })),
     http.post('/api/v1/offers', async ({ request }) => {

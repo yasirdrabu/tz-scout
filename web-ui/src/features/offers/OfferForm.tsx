@@ -8,7 +8,7 @@ import { Field } from '../../ui/Field';
 import { useToast } from '../../ui/Toast';
 import { buyingRolesQuery } from '../account/api';
 import { errorText, LoadingRows } from '../settings/shared';
-import { approveOffer, createOffer, offerQuery, patchOffer, unapproveOffer, type Offer, type OfferBody, type OfferStatus, type Practice, type PriceModel } from './api';
+import { approveOffer, createOffer, offerQuery, patchOffer, unapproveOffer, type Objection, type Offer, type OfferBody, type OfferStatus, type Practice, type PriceModel } from './api';
 import { ChipsInput } from './ChipsInput';
 import { SECTIONS } from './OfferView';
 import styles from './Offers.module.css';
@@ -46,6 +46,10 @@ type Values = {
   sizeMin: string;
   sizeMax: string;
   proofPoints: string;
+  talkingPoints: string;
+  /** One "objection | answer" per line. */
+  objections: string;
+  avoid: string;
 };
 
 const num = (n: number | null) => (n === null ? '' : String(n));
@@ -75,6 +79,9 @@ function valuesOf(o: Offer | undefined, practiceId: string, copy: boolean): Valu
     sizeMin: num(o?.company_size_min ?? null),
     sizeMax: num(o?.company_size_max ?? null),
     proofPoints: (o?.proof_points ?? []).join('\n'),
+    talkingPoints: (o?.talking_points ?? []).join('\n'),
+    objections: (o?.objections ?? []).map((x) => `${x.objection} | ${x.answer}`).join('\n'),
+    avoid: (o?.avoid ?? []).join('\n'),
   };
 }
 
@@ -87,6 +94,24 @@ const cents = (s: string): number | null => {
   return s.trim() === '' || !Number.isFinite(n) ? null : Math.round(n * 100);
 };
 const textOrNull = (s: string) => (s.trim() ? s.trim() : null);
+
+const lines = (s: string) =>
+  s
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+/** "objection | answer" lines, split at the first "|". A line with no "|", or an empty side, is `null`. */
+function objectionsOf(s: string): (Objection | null)[] {
+  return lines(s).map((l) => {
+    const i = l.indexOf('|');
+    const objection = i < 0 ? '' : l.slice(0, i).trim();
+    const answer = i < 0 ? '' : l.slice(i + 1).trim();
+    return objection && answer ? { objection, answer } : null;
+  });
+}
+
+const OBJECTION_FORMAT = 'Write each line as: objection | answer';
 
 const priceChanged = (v: Values, base: Values) => v.priceModel !== base.priceModel || v.amount !== base.amount || v.amountMax !== base.amountMax;
 
@@ -117,10 +142,10 @@ function bodyOf(v: Values, base: Values | null): OfferBody {
     industries: v.industries,
     company_size_min: int(v.sizeMin),
     company_size_max: int(v.sizeMax),
-    proof_points: v.proofPoints
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean),
+    proof_points: lines(v.proofPoints),
+    talking_points: lines(v.talkingPoints),
+    objections: objectionsOf(v.objections).filter((x): x is Objection => x !== null),
+    avoid: lines(v.avoid),
   };
 }
 
@@ -143,6 +168,10 @@ const FIELD_OF: Record<string, keyof Values> = {
   company_size_max: 'sizeMax',
   target_buying_roles: 'requiredRoles',
   optional_buying_roles: 'optionalRoles',
+  proof_points: 'proofPoints',
+  talking_points: 'talkingPoints',
+  objections: 'objections',
+  avoid: 'avoid',
 };
 
 type Props = {
@@ -224,7 +253,8 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
   function fieldErrors(err: ApiError): boolean {
     const found: Partial<Record<keyof Values, string>> = {};
     for (const e of err.errors) {
-      const k = FIELD_OF[e.path];
+      // A list's errors come as "objections.2.answer": they show at the list's field.
+      const k = FIELD_OF[e.path] ?? FIELD_OF[e.path.split('.')[0]!];
       if (k && !found[k]) found[k] = e.message;
     }
     setErrors(found);
@@ -236,6 +266,11 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
     setNotice(null);
     if (!v.name.trim()) {
       setErrors({ name: TITLE_NEEDED });
+      return;
+    }
+    if (objectionsOf(v.objections).includes(null)) {
+      setErrors({ objections: OBJECTION_FORMAT });
+      formRef.current?.querySelector<HTMLElement>('[data-field="objections"]')?.focus();
       return;
     }
     setErrors({});
@@ -296,6 +331,11 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
   const area = (k: 'promise' | 'description' | 'key_offer' | 'why_us' | 'why_now', label: string) => (
     <Field key={k} label={label} error={errors[k] ?? null}>
       {(c) => <textarea {...c} className="input" rows={3} value={v[k]} data-field={k} onChange={(e) => set(k, e.target.value)} />}
+    </Field>
+  );
+  const guide = (k: 'talkingPoints' | 'objections' | 'proofPoints' | 'avoid', label: string, hint: string, rows: number, dataField: string) => (
+    <Field label={label} hint={hint} error={errors[k] ?? null}>
+      {(c) => <textarea {...c} className="input" rows={rows} value={v[k]} data-field={dataField} onChange={(e) => set(k, e.target.value)} />}
     </Field>
   );
   const roleGroup = (k: 'requiredRoles' | 'optionalRoles', label: string, other: 'requiredRoles' | 'optionalRoles') => (
@@ -401,9 +441,14 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
             {number('sizeMax', 'Company size max')}
           </div>
         </fieldset>
-        <Field label="Proof points" hint="One per line.">
-          {(c) => <textarea {...c} className="input" rows={4} value={v.proofPoints} onChange={(e) => set('proofPoints', e.target.value)} />}
-        </Field>
+        <fieldset className={styles.group}>
+          <legend className={styles.legendTitle}>Seller guide</legend>
+          <p className={styles.note}>What to say, what to expect, what to avoid. Shown to the AE on every account matched to this offer.</p>
+          {guide('talkingPoints', 'Talking points', 'One per line, in the order a seller would use them.', 5, 'talking_points')}
+          {guide('objections', 'Objections', 'One per line, written as: objection | answer', 4, 'objections')}
+          {guide('proofPoints', 'Proof points', 'Case studies and numbers sellers can cite. One per line.', 4, 'proof_points')}
+          {guide('avoid', 'Avoid', 'Things not to say or promise. One per line.', 3, 'avoid')}
+        </fieldset>
       </fieldset>
       <div className={styles.formFooter}>
         <Button variant="secondary" onClick={onClose}>
