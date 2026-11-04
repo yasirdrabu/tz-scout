@@ -526,7 +526,7 @@ describe('customising a plan', () => {
     expect(v.steps.find((s) => s.title === 'Ok')!.ownerUserId).toBeNull();
   });
 
-  it('edits a step: origin edited, day recomputes due date and order, history and plan.changed; explicit due date wins; no change does nothing', async () => {
+  it('edits a step: template origin becomes edited, added stays added, day recomputes due date and order, history and plan.changed; explicit due date wins; no change does nothing', async () => {
     const { accountId } = await account({ name: 'Edit Co' });
     const [plan] = await plansOf(accountId);
     await setStart(plan!.id, '2030-01-04');
@@ -562,6 +562,7 @@ describe('customising a plan', () => {
     expect(await rejects(asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { title: ' ' })))).toEqual({ status: 400, title: 'Give the step a title.' });
     expect(await rejects(asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { targetBuyingRoles: ['wizard'] })))).toEqual({ status: 400, title: 'Unknown buying role: wizard' });
     expect(await rejects(asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { day: 999 })))).toMatchObject({ status: 400 });
+// An added step stays added when edited; only template steps become edited.    const extra = (await asSeller((ctx) => addStep(ctx, plan!.id, { day: 2, channel: 'task', ownerRole: 'seller', title: 'Mine' }))).steps.find((x) => x.title === 'Mine')!;    const renamed = await asSeller((ctx) => updateStep(ctx, plan!.id, extra.id, { title: 'Mine, renamed' }));    expect(renamed.steps.find((x) => x.id === extra.id)).toMatchObject({ title: 'Mine, renamed', origin: 'added' });    expect(renamed.history.some((h) => h.kind === 'step_edited' && h.stepId === extra.id)).toBe(true);
   });
 
   it('status, note and owner changes alone do not customise the plan or the step', async () => {

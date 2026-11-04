@@ -181,7 +181,7 @@ describe('customising a plan over HTTP', () => {
     const res = await w.as(seller, stepRoute, path, 'PATCH', { title: 'Renamed', day: 2, target_buying_roles: ['champion', 'business_owner'], detail: null, crm_task: true });
     expect(res.status).toBe(200);
     const step = (await res.json()).steps.find((s: { id: string }) => s.id === extraStepId);
-    expect(step).toMatchObject({ title: 'Renamed', day: 2, origin: 'edited', detail: null, crm_task: true, target_buying_roles: ['champion', 'business_owner'] });
+    expect(step).toMatchObject({ title: 'Renamed', day: 2, origin: 'added', detail: null, crm_task: true, target_buying_roles: ['champion', 'business_owner'] });
     expect(step.due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect((await w.as(seller, stepRoute, path, 'PATCH', { day: 366 })).status).toBe(400);
     expect((await w.as(seller, stepRoute, path, 'PATCH', { title: '' })).status).toBe(400);

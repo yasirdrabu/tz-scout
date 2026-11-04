@@ -358,7 +358,7 @@ export async function updateStep(ctx: ModuleContext, planId: string, stepId: str
   }
   const customised = Object.keys(edited).length > 0;
   if (customised) {
-    set.origin = 'edited';
+    if (step.origin === 'template') set.origin = 'edited';
     changes.push(['step_edited', { changed: edited }]);
   }
 
