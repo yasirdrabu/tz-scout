@@ -10,13 +10,13 @@ import { useToast } from '../../ui/Toast';
 import type { AccountReview } from '../review/api';
 import { Flag } from '../review/parts';
 import { errorText } from '../settings/shared';
-import { briefQuery, confirmWarmIntro, conflictsQuery, factsQuery, resolveConflict, scoreQuery, type AccountDetail, type Conflict, type ConflictFact, type Fact, type WarmIntro } from './api';
+import { briefQuery, committeeQuery, confirmWarmIntro, conflictsQuery, factsQuery, listWithOr, resolveConflict, scoreQuery, type AccountDetail, type Conflict, type ConflictFact, type Fact, type WarmIntro } from './api';
 import { BriefCard, notDrafted, Recommendation } from './BriefCard';
 import styles from './Account.module.css';
 import { BuyingCommittee, InHubSpot, Notes, WhereFrom } from './RightRail';
 import { ScoreStrip } from './ScoreStrip';
 
-export type ViewProps = { tenant: string; me: Me; account: AccountDetail; review: AccountReview };
+export type ViewProps = { tenant: string; me: Me; account: AccountDetail; review: AccountReview; onFind: (roles: string[]) => void };
 
 /** The dashed card before Scout's first draft (§4 States, Building). */
 function Building({ tenant, id }: { tenant: string; id: string }) {
@@ -77,7 +77,8 @@ function WarmIntroLine({ tenant, id, intro }: { tenant: string; id: string; intr
 const anchorOf = (c: Conflict) => `conflict-${c.id}`;
 
 /** §4a 2. Before you approve: unresolved conflicts (or "Facts agree" after) and the warm intro; no card without either. */
-function BeforeYouApprove({ tenant, id }: { tenant: string; id: string }) {
+function BeforeYouApprove({ tenant, me, id, onFind }: { tenant: string; me: Me; id: string; onFind: (roles: string[]) => void }) {
+  const committee = useQuery(committeeQuery(tenant, id));
   const value = useFactValue();
   const score = useQuery(scoreQuery(tenant, id));
   const facts = useQuery(factsQuery(tenant, id));
@@ -86,7 +87,8 @@ function BeforeYouApprove({ tenant, id }: { tenant: string; id: string }) {
   const settled = open.length === 0 ? list.find((c) => c.status === 'resolved') : undefined;
   // An edit's kept fact is not one of the conflict's facts; the key's current fact is.
   const settledFact = settled && (settled.facts.find((x) => x.id === settled.kept_fact_id) ?? facts.data?.data.find((x) => x.key === settled.key && x.person_id === null));
-  if (!intro && open.length === 0 && !settledFact) return null;
+  const gaps = committee.data?.roles.filter((r) => r.required && r.status === 'gap') ?? [];
+  if (!intro && open.length === 0 && !settledFact && gaps.length === 0) return null;
 
   function jump() {
     const row = document.getElementById(anchorOf(open[0]!));
@@ -105,6 +107,16 @@ function BeforeYouApprove({ tenant, id }: { tenant: string; id: string }) {
         </p>
       )}
       {settled && settledFact && <p className={styles.dotRow}>{`Facts agree. ${settled.label} set to ${value(settledFact.value, settled.key)}.`}</p>}
+      {gaps.length > 0 && (
+        <p className={cx(styles.dotRow, styles.dotWarn)}>
+          <span>{`Buying committee has no ${listWithOr(gaps.map((g) => g.label))}.`}</span>
+          {hasScope(me, 'enrichment:request') && (
+            <button type="button" className={styles.textButton} onClick={() => onFind(gaps.map((g) => g.key))}>
+              Find with Enrich
+            </button>
+          )}
+        </p>
+      )}
       {intro && <WarmIntroLine tenant={tenant} id={id} intro={intro} />}
     </Card>
   );
@@ -322,20 +334,20 @@ export function AccountFacts({ tenant, id, readOnly = false }: { tenant: string;
 }
 
 /** §4a: the decision first, then scores, signals, facts and the brief; the rail on the right. */
-export function ReviewView({ tenant, me, account, review }: ViewProps) {
+export function ReviewView({ tenant, me, account, review, onFind }: ViewProps) {
   return (
     <div className={styles.layout}>
       <div className={styles.main}>
         <Building tenant={tenant} id={account.id} />
         <Recommendation tenant={tenant} id={account.id} />
-        <BeforeYouApprove tenant={tenant} id={account.id} />
+        <BeforeYouApprove tenant={tenant} me={me} id={account.id} onFind={onFind} />
         <ScoreStrip tenant={tenant} id={account.id} />
         <WhyNow account={account} />
         <AccountFacts tenant={tenant} id={account.id} />
         <BriefCard tenant={tenant} me={me} id={account.id} />
       </div>
       <aside className={styles.rail} aria-label="Account details">
-        <BuyingCommittee tenant={tenant} me={me} account={account} />
+        <BuyingCommittee tenant={tenant} me={me} account={account} onFind={onFind} />
         <Notes tenant={tenant} id={account.id} />
         <WhereFrom review={review} />
         <InHubSpot tenant={tenant} me={me} id={account.id} />

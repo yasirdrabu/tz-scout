@@ -5,7 +5,7 @@ import { server } from '../../test/server';
 import type { AccountReview } from '../review/api';
 import { LEADER, REASONS, SELLERS, STATUSES } from '../review/testing';
 import type { StagesView } from '../settings/stages/api';
-import type { AccountDetail, AccountScore, Brief, BriefSection, Conflict, CrmCheck, Fact, Handoffs } from './api';
+import type { AccountDetail, AccountScore, Brief, BriefSection, Committee, Conflict, CrmCheck, Fact, Handoffs } from './api';
 
 // Fixtures in the API's shapes (snake_case), for the account page's tests.
 
@@ -35,6 +35,29 @@ export const ACCOUNT: AccountDetail = {
     { id: 'sig_0', type: 'research', kind: 'research', title: 'Undated research', detail: null, url: null, occurred_at: null, source_name: null },
     { id: 'sig_2', type: 'funding', kind: 'trigger', title: 'FY2027 budget adds $3.2M for DTPW tech modernization', detail: null, url: 'https://www.govspend.com/budget', occurred_at: '2026-09-18T12:00:00Z', source_name: null },
   ],
+};
+
+const ROLE = (key: string, label: string, required: boolean) => ({ key, label, required });
+
+/** The lead offer's committee for ACCOUNT: Jarice covers business owner; commercial and technical buyers are gaps, procurement is optional. */
+export const COMMITTEE: Committee = {
+  offer: { id: 'off_mb', name: 'Modernization Blueprint' },
+  roles: [
+    { ...ROLE('business_owner', 'Business owner', true), status: 'covered', people: [{ id: 'per_jr', name: 'Jarice Rodriguez', title: 'Deputy Director, Transit Operations', origin: 'stated' }] },
+    { ...ROLE('commercial_buyer', 'Commercial buyer', true), status: 'gap', people: [] },
+    { ...ROLE('technical_buyer', 'Technical buyer', true), status: 'gap', people: [] },
+    { ...ROLE('procurement', 'Procurement', false), status: 'gap', people: [] },
+  ],
+  summary: { covered: 1, required: 3, text: '1 of 3 roles covered' },
+  gaps: ['commercial_buyer', 'technical_buyer'],
+};
+
+/** The same offer for an account with no people (Coastline): every role is a gap. */
+export const COMMITTEE_EMPTY: Committee = {
+  ...COMMITTEE,
+  roles: COMMITTEE.roles.map((r) => ({ ...r, status: 'gap' as const, people: [] })),
+  summary: { covered: 0, required: 3, text: '0 of 3 roles covered' },
+  gaps: ['business_owner', 'commercial_buyer', 'technical_buyer'],
 };
 
 export const REVIEW: AccountReview = {
@@ -193,6 +216,7 @@ export function serveCoastline() {
     http.get('/api/v1/accounts/acc_ccu', () => HttpResponse.json({ ...ACCOUNT, id: 'acc_ccu', name: 'Coastline Credit Union', people: [], signals: [] })),
     http.get('/api/v1/accounts/acc_ccu/review', () => HttpResponse.json({ ...REVIEW, account_id: 'acc_ccu' })),
     http.get(/\/api\/v1\/accounts\/acc_ccu\/(score|brief|facts|conflicts|crm-check|notes)$/, () => problem(404, 'That account was not found.')),
+    http.get('/api/v1/accounts/acc_ccu/committee', () => HttpResponse.json(COMMITTEE_EMPTY)),
   );
 }
 
@@ -225,6 +249,7 @@ export type Served = {
   handoffs?: Handoffs;
   stages?: StagesView;
   conflicts?: Conflict[];
+  committee?: Committee;
 };
 
 /** Everything the account page reads, answered; returns the request bodies seen per path. */
@@ -248,6 +273,7 @@ export function serveAccount(opts: Served = {}) {
         : HttpResponse.json(opts.score ?? SCORE),
     ),
     http.get('/api/v1/accounts/acc_mdc/facts', () => HttpResponse.json({ data: opts.facts ?? FACTS, next_cursor: null })),
+    http.get('/api/v1/accounts/acc_mdc/committee', () => HttpResponse.json(opts.committee ?? COMMITTEE)),
     http.get('/api/v1/accounts/acc_mdc/brief', () => HttpResponse.json(opts.brief ?? BRIEF)),
     http.get('/api/v1/accounts/acc_mdc/notes', () => HttpResponse.json({ data: [], total: 0 })),
     http.get('/api/v1/accounts/acc_mdc/crm-check', () => HttpResponse.json(opts.crm ?? CRM_NEW)),

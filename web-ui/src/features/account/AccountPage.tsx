@@ -95,7 +95,7 @@ function Account({ tenant, id, me }: { tenant: string; id: string; me: Me }) {
   const [sendBack, setSendBack] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [enriching, setEnriching] = useState(false);
+  const [enriching, setEnriching] = useState<{ initialRoles?: string[] } | null>(null);
 
   // C14: a refetch that shows someone else's assignment, send back or decline swaps the actions for who did it.
   // Adjusted while rendering when a new review arrives, so nothing waits for an effect.
@@ -217,13 +217,17 @@ function Account({ tenant, id, me }: { tenant: string; id: string; me: Me }) {
         onSendBack={() => setSendBack(true)}
         onAssign={() => setAssigning(true)}
         onRetry={() => void retry()}
-        onEnrich={() => setEnriching(true)}
+        onEnrich={() => setEnriching({})}
         onMoved={() => void changed()}
       />
       {hasScope(me, 'enrichment:request') && <AccountEnrichment tenant={tenant} id={id} />}
       {handoffs.data?.conflict && <ConflictNotice />}
       <StageTracker tenant={tenant} review={r} reviewer={hasScope(me, 'review:act')} />
-      {r.current_assignment ? <AssignedView tenant={tenant} me={me} account={a} review={r} /> : <ReviewView tenant={tenant} me={me} account={a} review={r} />}
+      {r.current_assignment ? (
+        <AssignedView tenant={tenant} me={me} account={a} review={r} onFind={(roles) => setEnriching({ initialRoles: roles })} />
+      ) : (
+        <ReviewView tenant={tenant} me={me} account={a} review={r} onFind={(roles) => setEnriching({ initialRoles: roles })} />
+      )}
 
       {sendBack && (
         <SendBackDialog
@@ -240,7 +244,7 @@ function Account({ tenant, id, me }: { tenant: string; id: string; me: Me }) {
           }}
         />
       )}
-      {enriching && <EnrichDialog tenant={tenant} me={me} accountId={a.id} name={a.name} onClose={() => setEnriching(false)} />}
+      {enriching && <EnrichDialog tenant={tenant} me={me} accountId={a.id} name={a.name} initialRoles={enriching.initialRoles} onClose={() => setEnriching(null)} />}
       {assigning && (
         <AssignDialog
           tenant={tenant}

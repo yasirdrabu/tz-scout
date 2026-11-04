@@ -53,6 +53,38 @@ export const accountQuery = (tenant: string, id: string) =>
     queryFn: () => apiFetch<AccountDetail>(path(id), { tenant }),
   });
 
+export type CommitteeRole = {
+  key: string;
+  label: string;
+  required: boolean;
+  status: 'covered' | 'guessed' | 'gap';
+  people: { id: string; name: string; title: string | null; origin: string }[];
+};
+
+/** Which buying roles the lead offer needs and who covers them (the API's words). */
+export type Committee = {
+  offer: { id: string; name: string } | null;
+  roles: CommitteeRole[];
+  summary: { covered: number; required: number; text: string };
+  gaps: string[];
+};
+
+/** Under `['account', tenant, id]`, so a finished enrichment request refreshes it with the rest. */
+export const committeeQuery = (tenant: string, id: string) =>
+  queryOptions({
+    queryKey: ['account', tenant, id, 'committee'],
+    queryFn: () => apiFetch<Committee>(path(id, '/committee'), { tenant }),
+  });
+
+function joinWith(items: string[], word: string) {
+  return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${word} ${items.at(-1)}`;
+}
+const article = (label: string) => `${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label.toLowerCase()}`;
+/** "a business owner, a commercial buyer and a technical buyer". */
+export const listWithAnd = (labels: string[]) => joinWith(labels.map(article), 'and');
+/** "commercial buyer or technical buyer" (no article). */
+export const listWithOr = (labels: string[]) => joinWith(labels.map((l) => l.toLowerCase()), 'or');
+
 export type Tile = { key: string; label: string; value: number | null; max: number | null; note: string };
 
 export type WarmIntro = {

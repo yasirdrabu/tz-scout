@@ -183,7 +183,7 @@ function AssignmentCard({ review }: { review: ViewProps['review'] }) {
 
 /** §4b: outcomes, HubSpot activity and the review record; the assignment and committee on the right. */
 export function AssignedView(props: ViewProps) {
-  const { tenant, me, account, review } = props;
+  const { tenant, me, account, review, onFind } = props;
   const handoffs = useQuery(handoffsQuery(tenant, account.id));
   return (
     <div className={styles.layout}>
@@ -194,7 +194,7 @@ export function AssignedView(props: ViewProps) {
       </div>
       <aside className={styles.rail} aria-label="Account details">
         <AssignmentCard review={review} />
-        <BuyingCommittee tenant={tenant} me={me} account={account} />
+        <BuyingCommittee tenant={tenant} me={me} account={account} onFind={onFind} />
       </aside>
     </div>
   );

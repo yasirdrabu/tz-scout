@@ -6,7 +6,7 @@ import { renderApp, serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
 import { serveQueue } from '../review/testing';
 import { crmSentence } from './RightRail';
-import { ACCOUNT, ASSIGNED, EMPTY_BRIEF, FACTS, PAGE_LEADER, REVIEW, SELLER, serveAccount, serveCoastline } from './testing';
+import { ACCOUNT, ASSIGNED, COMMITTEE, COMMITTEE_EMPTY, EMPTY_BRIEF, FACTS, PAGE_LEADER, REVIEW, SELLER, serveAccount, serveCoastline } from './testing';
 
 const URL_BASE = 'http://app';
 const params = (href: string) => new URL(href, URL_BASE).searchParams;
@@ -170,20 +170,20 @@ describe('Review view sections', () => {
   });
 
   it('has no Before you approve card without a warm intro, and says when the account is not scored', async () => {
-    serveAccount({ score: null });
+    serveAccount({ score: null, committee: { ...COMMITTEE, roles: COMMITTEE.roles.map((r) => ({ ...r, status: 'covered' as const })), gaps: [] } });
     renderApp('/t/taazaa/accounts/acc_mdc');
     expect(await screen.findByText("Scout hasn't scored this account yet. Scores show here once it has.")).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Before you approve' })).toBeNull();
   });
 
   it('shows the Building card and the section empties before the first draft', async () => {
-    serveAccount({ brief: EMPTY_BRIEF, account: { ...ACCOUNT, people: [], signals: [] }, facts: [] });
+    serveAccount({ brief: EMPTY_BRIEF, account: { ...ACCOUNT, people: [], signals: [] }, facts: [], committee: COMMITTEE_EMPTY });
     renderApp('/t/taazaa/accounts/acc_mdc');
     expect(await screen.findByText('Scout is still building this brief')).toBeInTheDocument();
     expect(screen.getByText(/Scores, dated signals and the brief appear here as enrichment finishes\./)).toBeInTheDocument();
     expect(screen.getByText('No dated signals yet. Signals show here with their date and a link to where Scout found them.')).toBeInTheDocument();
     expect(screen.getByText('Overview, approach, value angle and risks get drafted once Scout has at least two signals.')).toBeInTheDocument();
-    expect(screen.getByText('No people yet. Add someone you know, or Enrich will look for a business owner, commercial buyer and technical buyer.')).toBeInTheDocument();
+    expect(screen.getByText('No people yet. Add someone you know, or Enrich will look for a business owner, a commercial buyer and a technical buyer.')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: "Scout's recommendation" })).toBeNull();
   });
 

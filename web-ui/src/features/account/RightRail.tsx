@@ -12,13 +12,18 @@ import { useToast } from '../../ui/Toast';
 import { addNote, notesQuery, type AccountReview } from '../review/api';
 import { NOTE_MAX } from '../review/ReasonPicker';
 import { errorText, useRun } from '../settings/shared';
-import { accountQuery, addPerson, buyingRolesQuery, checkCrm, crmCheckQuery, personName, type AccountDetail, type CrmCheck } from './api';
+import { accountQuery, addPerson, buyingRolesQuery, checkCrm, committeeQuery, crmCheckQuery, listWithAnd, personName, type AccountDetail, type CrmCheck } from './api';
 import styles from './Account.module.css';
 
 /** §4a 8. Buying committee: people with their role labels and notes; `Add a person` with `people:write`. */
-export function BuyingCommittee({ tenant, me, account, canAdd = true }: { tenant: string; me: Me; account: AccountDetail; canAdd?: boolean }) {
+export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: { tenant: string; me: Me; account: AccountDetail; canAdd?: boolean; onFind: (roles: string[]) => void }) {
   const [adding, setAdding] = useState(false);
   const add = canAdd && hasScope(me, 'people:write');
+  const find = hasScope(me, 'enrichment:request');
+  // Loading or failed: the rail is today's, with no coverage.
+  const committee = useQuery(committeeQuery(tenant, account.id)).data;
+  const required = committee?.roles.filter((r) => r.required) ?? [];
+  const gapRows = committee?.roles.filter((r) => r.status === 'gap') ?? [];
   return (
     <Card
       title="Buying committee"
@@ -30,8 +35,20 @@ export function BuyingCommittee({ tenant, me, account, canAdd = true }: { tenant
         ) : undefined
       }
     >
+      {committee && <p className={styles.muted}>{`${committee.offer?.name ?? 'Core roles'}: ${committee.summary.text}`}</p>}
       {account.people.length === 0 ? (
-        <p className={styles.note}>No people yet. Add someone you know, or Enrich will look for a business owner, commercial buyer and technical buyer.</p>
+        <>
+          <p className={styles.note}>
+            {committee
+              ? `No people yet. Add someone you know, or Enrich will look for ${listWithAnd(required.map((r) => r.label))}.`
+              : 'No people yet. Add someone you know, or Enrich will look for a business owner, commercial buyer and technical buyer.'}
+          </p>
+          {committee && find && required.length > 0 && (
+            <Button size="sm" variant="secondary" onClick={() => onFind(required.map((r) => r.key))}>
+              Find with Enrich
+            </Button>
+          )}
+        </>
       ) : (
         <ul className={styles.rows}>
           {account.people.map((p) => (
@@ -43,6 +60,20 @@ export function BuyingCommittee({ tenant, me, account, canAdd = true }: { tenant
                 {p.roles.length > 0 && <span>{p.roles.map((r) => r.label).join(', ')}</span>}
                 {p.decision_note && <span className={styles.muted}>{p.decision_note}</span>}
               </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {account.people.length > 0 && gapRows.length > 0 && (
+        <ul className={styles.rows}>
+          {gapRows.map((r) => (
+            <li key={r.key} className={styles.dotRow}>
+              <span>{`No ${r.label.toLowerCase()} yet${r.required ? '' : ' · Optional'}`}</span>
+              {find && (
+                <button type="button" className={styles.textButton} onClick={() => onFind([r.key])} aria-label={`Find ${r.label.toLowerCase()}`}>
+                  Find
+                </button>
+              )}
             </li>
           ))}
         </ul>
