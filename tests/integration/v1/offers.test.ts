@@ -1,3 +1,4 @@
+import { and, eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as listPracticesRoute, POST as createPracticeRoute } from '@/http/routes/v1/practices/route';
 import { GET as getPracticeRoute, PATCH as patchPractice, POST as practiceAction } from '@/http/routes/v1/practices/[id]/route';
@@ -9,6 +10,7 @@ import { POST as caseAction } from '@/http/routes/v1/case-studies/[id]/route';
 import { approveOffer, createCaseStudy, createOffer, createPractice } from '@/modules/offers';
 import { SYSTEM_GRANTOR, createApiKey, setPrincipalCacheTtl } from '@/modules/tenancy';
 import { offerMatch } from '@/modules/scoring/db/schema';
+import { buyingRole } from '@/modules/accounts/db/schema';
 import { adminDb } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { completeOffer, freshTenant } from '../offers/helpers';
@@ -307,6 +309,25 @@ describe('R1 offer and practice routes (Rulings 12 to 14)', () => {
     const swapped = await patch({ target_buying_roles: ['procurement'], optional_buying_roles: ['technical_buyer'] });
     expect(swapped.status).toBe(200);
     expect(await swapped.json()).toMatchObject({ target_buying_roles: ['procurement'], optional_buying_roles: ['technical_buyer'] });
+  });
+
+  it('keeps a stored role editable after the role is archived; a new unknown key is still refused', async () => {
+    const made = await w.as(w.owner, createOfferRoute, 'offers', 'POST', { name: 'Archived role', practice_id: practice, promise: 'x', target_buying_roles: ['technical_buyer'], optional_buying_roles: ['procurement'] });
+    const o = await made.json();
+    await adminDb.update(buyingRole).set({ archived: true }).where(and(eq(buyingRole.tenantId, w.tenantId), eq(buyingRole.key, 'procurement')));
+    const patch = (body: Record<string, unknown>) => w.as(w.owner, patchOffer, `offers/${o.id}`, 'PATCH', body);
+    const same = await patch({ name: 'Renamed', target_buying_roles: ['technical_buyer'], optional_buying_roles: ['procurement'] });
+    expect(same.status).toBe(200);
+    expect(await same.json()).toMatchObject({ name: 'Renamed', optional_buying_roles: ['procurement'] });
+    expect((await patch({ optional_buying_roles: ['procurement', 'wizard'] })).status).toBe(400);
+  });
+
+  it('refuses a patch of only the optional roles that includes a stored required role', async () => {
+    const made = await w.as(w.owner, createOfferRoute, 'offers', 'POST', { name: 'Reverse overlap', practice_id: practice, promise: 'x', target_buying_roles: ['technical_buyer'] });
+    const o = await made.json();
+    const res = await w.as(w.owner, patchOffer, `offers/${o.id}`, 'PATCH', { optional_buying_roles: ['technical_buyer'] });
+    expect(res.status).toBe(400);
+    expect((await res.json()).errors.map((e: { message: string }) => e.message)).toContain("A role can't be both required and optional: Technical buyer");
   });
 
   it('a content edit keeps an active offer active; a buyer edit sends it back with the warning', async () => {

@@ -9,7 +9,8 @@ const bad = (path: string, message: string) =>
 
 /**
  * Checks required and optional buying roles against the workspace's roles, and that no role is in both.
- * `stored` is the offer's current lists (patch), so the overlap check sees the merged result.
+ * `stored` is the offer's current lists (patch): the overlap check sees the merged result, and a key the
+ * offer already holds stays valid even if the role has since been archived.
  */
 export async function checkBuyingRoles(ctx: ModuleContext, input: Roles, stored: Roles = {}): Promise<void> {
   if (input.targetBuyingRoles === undefined && input.optionalBuyingRoles === undefined) return;
@@ -18,7 +19,8 @@ export async function checkBuyingRoles(ctx: ModuleContext, input: Roles, stored:
     ['target_buying_roles', input.targetBuyingRoles],
     ['optional_buying_roles', input.optionalBuyingRoles],
   ] as const) {
-    const unknown = list?.find((k) => !labels.has(k));
+    const held = [...(stored.targetBuyingRoles ?? []), ...(stored.optionalBuyingRoles ?? [])];
+    const unknown = list?.find((k) => !labels.has(k) && !held.includes(k));
     if (unknown !== undefined) throw bad(path, `Unknown buying role: ${unknown}`);
   }
   const required = input.targetBuyingRoles ?? stored.targetBuyingRoles ?? [];
