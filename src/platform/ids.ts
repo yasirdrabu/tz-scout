@@ -60,7 +60,12 @@ export type IdPrefix =
   | 'wir'
   | 'wic'
   | 'rsr'
-  | 'enr';
+  | 'enr'
+  | 'plb'
+  | 'pls'
+  | 'pln'
+  | 'stp'
+  | 'pch';
 
 const ulid = monotonicFactory();
 
