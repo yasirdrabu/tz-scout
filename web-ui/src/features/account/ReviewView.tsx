@@ -12,6 +12,7 @@ import { Flag } from '../review/parts';
 import { errorText } from '../settings/shared';
 import { briefQuery, committeeQuery, confirmWarmIntro, conflictsQuery, factsQuery, listWithOr, resolveConflict, scoreQuery, type AccountDetail, type Conflict, type ConflictFact, type Fact, type WarmIntro } from './api';
 import { BriefCard, notDrafted, Recommendation } from './BriefCard';
+import { PlaybookPreview } from './PlaybookPreview';
 import styles from './Account.module.css';
 import { BuyingCommittee, InHubSpot, Notes, WhereFrom } from './RightRail';
 import { ScoreStrip } from './ScoreStrip';
@@ -345,6 +346,7 @@ export function ReviewView({ tenant, me, account, review, onFind }: ViewProps) {
         <WhyNow account={account} />
         <AccountFacts tenant={tenant} id={account.id} />
         <BriefCard tenant={tenant} me={me} id={account.id} />
+        <PlaybookPreview tenant={tenant} accountId={account.id} me={me} />
       </div>
       <aside className={styles.rail} aria-label="Account details">
         <BuyingCommittee tenant={tenant} me={me} account={account} onFind={onFind} />

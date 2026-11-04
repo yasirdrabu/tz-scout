@@ -342,6 +342,7 @@ export function serveAccount(opts: Served = {}) {
     ),
     http.get('/api/v1/accounts/acc_mdc/facts', () => HttpResponse.json({ data: opts.facts ?? FACTS, next_cursor: null })),
     http.get('/api/v1/accounts/acc_mdc/committee', () => HttpResponse.json(opts.committee ?? COMMITTEE)),
+    http.get('/api/v1/accounts/acc_mdc/playbook-suggestion', () => HttpResponse.json({ playbook: null, reason: 'none', offer: null, tier: null })),
     http.get('/api/v1/accounts/acc_mdc/brief', () => HttpResponse.json(opts.brief ?? BRIEF)),
     http.get('/api/v1/accounts/acc_mdc/notes', () => HttpResponse.json({ data: [], total: 0 })),
     http.get('/api/v1/accounts/acc_mdc/crm-check', () => HttpResponse.json(opts.crm ?? CRM_NEW)),
