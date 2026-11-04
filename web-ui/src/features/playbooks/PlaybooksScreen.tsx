@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useParams } from '@tanstack/react-router';
+import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { hasScope, meQuery } from '../../api/me';
 import page from '../../routes/Page.module.css';
 import { Button } from '../../ui/Button';
+import type { PlaybooksSearch } from '../../routes/workspace';
+import { PlaybookForm } from './PlaybookForm';
 import { PlaybookList } from './PlaybookList';
 import { PlaybookView } from './PlaybookView';
 import styles from './Playbooks.module.css';
@@ -23,6 +25,8 @@ function useCanManage(tenant: string) {
 export function PlaybooksScreen() {
   const tenant = useParams({ strict: false }).tenant!;
   const canManage = useCanManage(tenant);
+  const search = useSearch({ strict: false }) as PlaybooksSearch;
+  const navigate = useNavigate();
   return (
     <div className={page.page}>
       <div className={styles.head}>
@@ -45,6 +49,7 @@ export function PlaybooksScreen() {
         ))}
       </ol>
       <PlaybookList tenant={tenant} canManage={canManage} />
+      {canManage && <PlaybookForm tenant={tenant} open={search.edit === 'new'} mode="new" id={undefined} onClose={() => void navigate({ to: '.', search: {}, replace: true })} />}
     </div>
   );
 }

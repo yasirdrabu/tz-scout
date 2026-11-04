@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
 import { ApiError } from '../../api/errors';
 import page from '../../routes/Page.module.css';
@@ -9,7 +9,7 @@ import { Card } from '../../ui/Card';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { Pill } from '../../ui/Pill';
 import { useToast } from '../../ui/Toast';
-import { offersQuery, practicesQuery } from '../offers/api';
+import { offersQuery, practicesQuery, setOfferPlaybook } from '../offers/api';
 import { errorText, LoadFailed, LoadingRows, useRun } from '../settings/shared';
 import {
   archivePlaybook,
@@ -25,9 +25,13 @@ import {
   TIER_TONE,
   TIER_WORD,
   type PlaybookDetail,
+  type Tier,
 } from './api';
-import { NotYet } from './PlaybookList';
+import { AssignPlaybookDialog } from './AssignPlaybookDialog';
+import { PlaybookForm } from './PlaybookForm';
+import { NotYet } from './NotYet';
 import styles from './Playbooks.module.css';
+import type { PlaybooksSearch } from '../../routes/workspace';
 
 type Props = { tenant: string; id: string; canManage: boolean };
 
@@ -44,15 +48,18 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
   /** The API's words when a delete is refused, so the dialog can offer Retire. */
   const [blocked, setBlocked] = useState<string | null>(null);
   const act = useRun();
+  const search = useSearch({ strict: false }) as PlaybooksSearch;
+  const [deleting, setDeleting] = useState(false);
 
   if (playbook.isPending) return <LoadingRows>Loading the playbook</LoadingRows>;
   if (playbook.isError) return <LoadFailed title="This playbook didn't load" error={playbook.error} onRetry={() => void playbook.refetch()} />;
   const p: PlaybookDetail = playbook.data;
-  const canDelete = p.running === 0 && p.runs_on.length === 0;
   const retired = p.status === 'archived';
+  const canDelete = p.running === 0 && p.runs_on.length === 0 && !retired;
   const tiers = p.runs_on.length;
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['playbooks', tenant] });
 
+  const closeForm = () => void navigate({ to: '.', search: {}, replace: true });
   const close = (open: boolean) => {
     if (open) return;
     setConfirm(null);
@@ -75,6 +82,7 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
   }
 
   async function remove() {
+    setDeleting(true);
     try {
       await deletePlaybook(tenant, p.id);
     } catch (e) {
@@ -84,6 +92,8 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
         close(false);
       }
       return;
+    } finally {
+      setDeleting(false);
     }
     toast.show(`${p.name} deleted.`);
     close(false);
@@ -103,6 +113,12 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
     </li>
   );
   const offerOf = (offerId: string) => offers.data?.find((o) => o.id === offerId);
+  const unassign = (offerId: string, tier: Tier, offerName: string) =>
+    act
+      .run(() => setOfferPlaybook(tenant, offerId, tier, null), `${p.name} removed from ${offerName} · ${TIER_WORD[tier]}.`)
+      .then(async (ok) => {
+        if (ok) await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ['offers', tenant] })]);
+      });
 
   return (
     <section aria-labelledby="playbook-name" className={styles.view}>
@@ -185,7 +201,18 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
         </ol>
       </section>
 
-      <Card title="Runs on">
+      <Card
+        title="Runs on"
+        actions={
+          canManage && p.status === 'active' ? (
+            <Link to="/t/$tenant/playbooks/$id" params={{ tenant, id: p.id }} search={{ assign: 'offer' }}>
+              <Button size="sm" variant="secondary">
+                Assign
+              </Button>
+            </Link>
+          ) : undefined
+        }
+      >
         {p.runs_on.length ? (
           <ul className={styles.rows}>
             {p.runs_on.map((r) => {
@@ -193,9 +220,20 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
               const practice = practices.data?.find((x) => x.id === offer?.practice_id);
               return (
                 <li key={`${r.offer_id}:${r.tier}`}>
-                  <strong>{offer?.name ?? 'Unknown offer'}</strong>
+                  <strong>{offers.isPending ? null : (offer?.name ?? 'Unknown offer')}</strong>
                   {practice && <span className={styles.meta}>{practice.name}</span>}
                   <Pill tone={TIER_TONE[r.tier]}>{TIER_WORD[r.tier]}</Pill>
+                  {canManage && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={act.busy}
+                      aria-label={`Remove from ${offer?.name ?? 'offer'} ${TIER_WORD[r.tier]}`}
+                      onClick={() => void unassign(r.offer_id, r.tier, offer?.name ?? 'the offer')}
+                    >
+                      Remove
+                    </Button>
+                  )}
                 </li>
               );
             })}
@@ -233,8 +271,15 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
         title={`Delete ${p.name}?`}
         description="It never ran on an account and no offer uses it. You can't undo this."
         confirmLabel="Delete playbook"
+        busy={deleting}
         onConfirm={() => void remove()}
       />
+      {canManage && (
+        <>
+          <PlaybookForm tenant={tenant} open={search.edit === 'playbook'} mode="edit" id={p.id} onClose={closeForm} />
+          <AssignPlaybookDialog tenant={tenant} open={search.assign === 'offer' && p.status === 'active'} onOpenChange={(o) => !o && closeForm()} playbook={p} />
+        </>
+      )}
     </section>
   );
 }

@@ -2,8 +2,8 @@ import { http, HttpResponse } from 'msw';
 import { exactly, problem } from '../../test/http';
 import { serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
-import { ASSESS, AI, BLUEPRINT, DATA, SPRINT } from '../offers/testing';
-import type { Playbook, PlaybookDetail, PlaybookStep } from './api';
+import { ASSESS, AI, BLUEPRINT, BUYING_ROLES, DATA, SPRINT } from '../offers/testing';
+import type { Playbook, PlaybookDetail, PlaybookStep, Tier } from './api';
 
 // Fixtures in the API's shapes (snake_case) for the Playbooks tests.
 
@@ -63,9 +63,11 @@ const detailOf = (p: Playbook, steps: PlaybookStep[]): PlaybookDetail => ({ ...p
 export function servePlaybooks(opts: Opts = {}) {
   const seen: Seen[] = [];
   let playbooks = [...(opts.playbooks ?? [rfp(), draftPlaybook()])];
-  const steps = (id: string) => opts.steps?.[id] ?? (id === 'plb_rfp' ? RFP_STEPS : [step({ id: 'stp_x', order: 1, day: 0, channel: 'task', title: 'Do the thing' })]);
+  const written: Record<string, PlaybookStep[]> = {};
+  const steps = (id: string) => written[id] ?? opts.steps?.[id] ?? (id === 'plb_rfp' ? RFP_STEPS : [step({ id: 'stp_x', order: 1, day: 0, channel: 'task', title: 'Do the thing' })]);
   const log = async (request: Request) => {
-    seen.push({ method: request.method, url: new URL(request.url), body: undefined });
+    const body = request.method === 'GET' || request.method === 'DELETE' ? undefined : await request.clone().json().catch(() => undefined);
+    seen.push({ method: request.method, url: new URL(request.url), body });
   };
   serveMe({ taazaa: { scopes: opts.scopes ?? MANAGER, tenant: { id: 't1', slug: 'taazaa', name: 'Taazaa', currency: 'USD', timezone: 'America/New_York' } } });
   const answer = (key: string) => opts.answer?.[key]?.();
@@ -73,6 +75,7 @@ export function servePlaybooks(opts: Opts = {}) {
   const idOf = (request: Request) => new URL(request.url).pathname.split('/').pop()!.split(':')[0]!;
   server.use(
     http.get('/api/v1/offers', () => HttpResponse.json({ data: [BLUEPRINT, SPRINT, ASSESS], next_cursor: null })),
+    http.get('/api/v1/buying-roles', () => HttpResponse.json({ data: BUYING_ROLES })),
     http.get('/api/v1/practices', () => HttpResponse.json({ data: [AI, DATA], next_cursor: null })),
     http.get('/api/v1/playbooks', async ({ request }) => {
       await log(request);
@@ -81,6 +84,45 @@ export function servePlaybooks(opts: Opts = {}) {
     http.get('/api/v1/playbooks/:id', ({ params }) => {
       const p = found(params.id);
       return p ? HttpResponse.json(detailOf(p, steps(p.id))) : problem(404, 'That playbook was not found.');
+    }),
+    http.post(exactly('/api/v1/playbooks'), async ({ request }) => {
+      await log(request);
+      const out = answer('POST');
+      if (out) return out;
+      const body = (await request.clone().json()) as Record<string, unknown>;
+      const made = rfp({ id: 'plb_new', name: String(body.name), status: 'draft', runs_on: [], running: 0 });
+      playbooks = [...playbooks, made];
+      return HttpResponse.json(detailOf(made, steps('plb_new')), { status: 201 });
+    }),
+    http.patch('/api/v1/playbooks/:id', async ({ request, params }) => {
+      await log(request);
+      const out = answer(`PATCH ${String(params.id)}`);
+      if (out) return out;
+      const body = (await request.clone().json()) as Partial<Playbook> & { steps?: Partial<PlaybookStep>[] };
+      const { steps: sent, ...fields } = body;
+      if (sent) written[String(params.id)] = sent.map((x, i) => step({ id: `stp_n${i}`, order: i + 1, day: 0, title: '', ...x }));
+      playbooks = playbooks.map((p) => (p.id === params.id ? { ...p, ...fields } : p));
+      return HttpResponse.json(detailOf(found(params.id)!, steps(String(params.id))));
+    }),
+    http.get('/api/v1/offers/:id/playbooks', ({ params }) =>
+      HttpResponse.json({
+        data: (['act_now', 'good_fit', 'watch'] as const).map((tier) => {
+          const p = playbooks.find((x) => x.runs_on.some((r) => r.offer_id === params.id && r.tier === tier));
+          return { tier, playbook: p ? { id: p.id, name: p.name, status: p.status, steps: p.steps, days: p.days } : null, first_email: null };
+        }),
+      }),
+    ),
+    http.put('/api/v1/offers/:id/playbooks/:tier', async ({ request, params }) => {
+      await log(request);
+      const out = answer(`PUT ${String(params.tier)}`);
+      if (out) return out;
+      const body = (await request.clone().json()) as { playbook_id: string | null };
+      const same = (r: { offer_id: string; tier: string }) => r.offer_id === params.id && r.tier === params.tier;
+      playbooks = playbooks.map((p) => ({
+        ...p,
+        runs_on: [...p.runs_on.filter((r) => !same(r)), ...(p.id === body.playbook_id ? [{ offer_id: String(params.id), tier: params.tier as Tier }] : [])],
+      }));
+      return HttpResponse.json({ data: [] });
     }),
     http.post(exactly('/api/v1/playbooks/plb_rfp:duplicate'), async ({ request }) => {
       await log(request);

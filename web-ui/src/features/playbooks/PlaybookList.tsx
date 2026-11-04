@@ -6,17 +6,9 @@ import { Pill } from '../../ui/Pill';
 import table from '../../ui/Table.module.css';
 import { offersQuery } from '../offers/api';
 import { LoadFailed, LoadingRows } from '../settings/shared';
+import { NotYet } from './NotYet';
 import { mix, playbooksQuery, span, STATUS_WORD, statusTone, TIER_WORD } from './api';
 import styles from './Playbooks.module.css';
-
-/** A number Scout cannot give yet (rates arrive with the results release): a dash that reads as "not yet". */
-export function NotYet() {
-  return (
-    <span className={table.muted}>
-      —<span className="sr-only"> Not available yet</span>
-    </span>
-  );
-}
 
 /** §20 list: every playbook, any status, with what it runs on. Rates are R3. */
 export function PlaybookList({ tenant, canManage }: { tenant: string; canManage: boolean }) {
@@ -85,7 +77,7 @@ export function PlaybookList({ tenant, canManage }: { tenant: string; canManage:
                     <ul className={styles.runsOn}>
                       {p.runs_on.map((r) => (
                         <li key={`${r.offer_id}:${r.tier}`}>
-                          {offerName(r.offer_id)} · {TIER_WORD[r.tier]}
+                          {offers.isPending ? '' : `${offerName(r.offer_id)} · `}{TIER_WORD[r.tier]}
                         </li>
                       ))}
                     </ul>
