@@ -99,6 +99,7 @@ function normalisePeople(a: ArrivalV1): ArrivalPerson[] {
   return a.people.map((p) => {
     const split = !str(p.first_name) && !str(p.last_name) && str(p.name) ? splitName(p.name!) : null;
     const roleKeys = [...new Set([p.buying_role, ...(p.buying_roles ?? [])].map((r) => str(r)).filter((r): r is string => !!r))];
+    const guessedRoleKeys = [...new Set((p.guessed_buying_roles ?? []).map((r) => str(r)).filter((r): r is string => !!r))];
     return defined({
       firstName: str(p.first_name) ?? split?.firstName,
       lastName: str(p.last_name) ?? split?.lastName ?? undefined,
@@ -109,6 +110,7 @@ function normalisePeople(a: ArrivalV1): ArrivalPerson[] {
       phone: str(p.phone),
       linkedinUrl: str(p.linkedin_url),
       roleKeys: roleKeys.length ? roleKeys : undefined,
+      guessedRoleKeys: guessedRoleKeys.length ? guessedRoleKeys : undefined,
       decisionNote: str(p.notes),
     });
   });

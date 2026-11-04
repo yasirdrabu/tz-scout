@@ -53,6 +53,7 @@ export {
 } from './services/read';
 export { conflictExplainHandler, exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';
 export { conflictExplainJob } from './contracts/jobs';
+export { guessRolesFromTitle } from './domain/roles';
 export { mergeAccounts } from './services/merge';
 export { countAccounts, countAccountsBy, oldestCreatedAt, search, type FacetKey, type SearchQuery, type SearchRow, type SearchSort } from './services/search';
 export { listExclusionLists, listExclusionRules, setExclusionList, setExclusionRule, type ExclusionRuleView } from './services/settings';

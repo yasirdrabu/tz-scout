@@ -55,6 +55,7 @@ const person = z
     title: text,
     buying_role: text,
     buying_roles: z.array(z.string()).nullish(),
+    guessed_buying_roles: z.array(z.string()).nullish(),
     email: text,
     phone: text,
     linkedin_url: text,

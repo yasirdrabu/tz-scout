@@ -146,13 +146,13 @@ async function operate(ctx: ModuleContext, r: Row, domain: string, f: Found): Pr
           const ref = p.provider_ref ?? `${p.name}|${p.title}`;
           const known = byRef.get(ref);
           if (known) {
-            known.buying_roles = [...new Set([...(known.buying_roles ?? []), role])];
+            known.guessed_buying_roles = [...new Set([...(known.guessed_buying_roles ?? []), role])];
             continue;
           }
           // One arrival takes at most 25 people: past that, nothing more is revealed (review I2).
           if (f.people.length >= MAX_PEOPLE) continue;
           const revealed = await call('people/match', 1, (a) => a.revealEmail({ person: p, domain }));
-          const person: Person = { ...revealed, buying_role: role, buying_roles: [role] };
+          const person: Person = { ...revealed, guessed_buying_roles: [role] };
           byRef.set(ref, person);
           f.people.push(person);
         }

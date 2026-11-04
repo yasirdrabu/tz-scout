@@ -137,6 +137,8 @@ export type ArrivalPerson = {
   mobilePhone?: string;
   linkedinUrl?: string;
   roleKeys?: string[];
+  /** Roles a source suggests without stating them (enrichment's searched role); stored as `guessed_from_title`. */
+  guessedRoleKeys?: string[];
   decisionNote?: string;
   /** Outside ids for this person, for example `{ system: 'hubspot', id: '123' }`. */
   externalIds?: { system: string; id: string }[];
