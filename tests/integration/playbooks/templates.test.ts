@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { seedAccountDefaults } from '@/modules/accounts';
 import { createOffer, createPractice, seedOffers, TAAZAA_OFFERS } from '@/modules/offers';
 import {
   archiveTemplate,
@@ -70,6 +71,20 @@ describe('versioning (Ruling 6)', () => {
   });
 });
 
+describe('target buying roles', () => {
+  it('refuses an unknown role at its step, on create and on update', async () => {
+    await t.run((ctx) => seedAccountDefaults(ctx));
+    const bad: StepInput[] = [email, { ...call, targetBuyingRoles: ['business_owner', 'wizard'] }];
+    await expect(t.run((ctx) => createTemplate(ctx, { name: 'Bad roles', steps: bad }))).rejects.toMatchObject({
+      status: 400,
+      message: 'Unknown buying role: wizard',
+      errors: [{ path: 'steps.1.target_buying_roles' }],
+    });
+    const ok = await t.run((ctx) => createTemplate(ctx, { name: 'Good roles', steps: [{ ...email, targetBuyingRoles: ['business_owner'] }] }));
+    await rejects(t.run((ctx) => updateTemplate(ctx, ok.id, { steps: bad })), 400, 'Unknown buying role: wizard');
+  });
+});
+
 describe('list, duplicate, archive, delete', () => {
   it('lists steps, days, channels, runs_on and running', async () => {
     const made = await t.run((ctx) => createTemplate(ctx, { name: 'Listed', status: 'active', steps: [email, call, { ...call, day: 9 }] }));
@@ -130,6 +145,7 @@ describe('offer playbooks (Ruling 14)', () => {
 describe('seeds (Ruling 17)', () => {
   it('gives a seeded catalogue its templates and maps act_now and good_fit, once', async () => {
     const s = await freshTenant();
+    await s.run((ctx) => seedAccountDefaults(ctx));
     await s.run((ctx) => seedOffers(ctx));
     await s.run((ctx) => seedPlaybooksDefaults(ctx));
     await s.run((ctx) => seedPlaybooksDefaults(ctx));
@@ -157,6 +173,10 @@ describe('seeds (Ruling 17)', () => {
     });
     const mapped = await s.run((ctx) => playbookFor(ctx, blueprint, 'act_now'));
     expect(mapped!.templateId).toBe(templates.find((x) => x.name === 'Public sector RFP')!.id);
+    // A cleared mapping stays cleared when the seed runs again.
+    await s.run((ctx) => setOfferPlaybook(ctx, blueprint, 'good_fit', null));
+    await s.run((ctx) => seedPlaybooksDefaults(ctx));
+    expect(await s.run((ctx) => playbookFor(ctx, blueprint, 'good_fit'))).toBeNull();
     const rows = await s.run((ctx) => ctx.tx.select({ id: playbookTemplate.id }).from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId))));
     expect(rows).toHaveLength(2);
   });

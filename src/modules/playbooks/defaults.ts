@@ -3,7 +3,7 @@ import { listOffers, listPractices } from '@/modules/offers';
 import type { ModuleContext } from '@/platform/context';
 import { upsertSchedule } from '@/platform/scheduler';
 import { briefSweepJob } from './contracts/jobs';
-import { offerPlaybook, playbookTemplate } from './db/schema';
+import { playbookTemplate } from './db/schema';
 import { setOfferPlaybook } from './services/offer-playbooks';
 import { createTemplate, type StepInput } from './services/templates';
 
@@ -53,18 +53,19 @@ const STANDARD_STEPS: StepInput[] = [
 /**
  * One active template per seeded practice (Ruling 17): "Public sector RFP" for AI Operating Platforms and
  * "Standard outbound" for the rest, then each offer's act_now and good_fit mapped to its practice's template.
- * Matches by template name and by offer and tier, so a rerun adds what is missing and leaves anything edited
- * alone. A workspace with no practices (a new one, before its offers are seeded) gets nothing.
+ * Matches templates by name; offers are mapped only when their template was made in this run, so a rerun leaves
+ * edits and cleared mappings alone. A workspace with no practices (a new one, before its offers are seeded) gets nothing.
  */
 async function seedTemplates(ctx: ModuleContext): Promise<void> {
   const practices = await listPractices(ctx);
   if (practices.length === 0) return;
-  const idOf = async (name: string, steps: StepInput[], description: string, whenToUse: string): Promise<string> => {
+  const idOf = async (name: string, steps: StepInput[], description: string, whenToUse: string): Promise<{ id: string; fresh: boolean }> => {
     const [have] = await ctx.tx
       .select({ id: playbookTemplate.id })
       .from(playbookTemplate)
       .where(and(eq(playbookTemplate.tenantId, ctx.tenantId), eq(playbookTemplate.name, name)));
-    return have?.id ?? (await createTemplate(ctx, { name, description, whenToUse, status: 'active', steps })).id;
+    if (have) return { id: have.id, fresh: false };
+    return { id: (await createTemplate(ctx, { name, description, whenToUse, status: 'active', steps })).id, fresh: true };
   };
   const rfp = practices.some((p) => p.slug === RFP_PRACTICE)
     ? await idOf(RFP_NAME, RFP_STEPS, 'Get found by a public sector buyer before the RFP is out.', 'Offers sold to counties and other public sector buyers.')
@@ -73,16 +74,11 @@ async function seedTemplates(ctx: ModuleContext): Promise<void> {
     ? await idOf(STANDARD_NAME, STANDARD_STEPS, 'Four touches over two weeks: email, LinkedIn, a follow-up and a call.', 'The default for a new account when nothing more specific fits.')
     : null;
   const slugOf = new Map(practices.map((p) => [p.id, p.slug]));
+  // Only a template made in this run is mapped, so a rerun never brings back a mapping someone cleared.
   for (const o of await listOffers(ctx, { status: ['draft', 'approved'] })) {
-    const templateId = slugOf.get(o.practiceId) === RFP_PRACTICE ? rfp : standard;
-    if (!templateId) continue;
-    for (const tier of ['act_now', 'good_fit']) {
-      const [have] = await ctx.tx
-        .select({ tier: offerPlaybook.tier })
-        .from(offerPlaybook)
-        .where(and(eq(offerPlaybook.tenantId, ctx.tenantId), eq(offerPlaybook.offerId, o.id), eq(offerPlaybook.tier, tier)));
-      if (!have) await setOfferPlaybook(ctx, o.id, tier, templateId);
-    }
+    const template = slugOf.get(o.practiceId) === RFP_PRACTICE ? rfp : standard;
+    if (!template?.fresh) continue;
+    for (const tier of ['act_now', 'good_fit']) await setOfferPlaybook(ctx, o.id, tier, template.id);
   }
 }
 

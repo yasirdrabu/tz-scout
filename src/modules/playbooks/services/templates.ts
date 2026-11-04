@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { listBuyingRoles } from '@/modules/accounts';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -118,6 +119,16 @@ const sameSteps = (a: StepView[], b: Normal[]) =>
     );
   });
 
+/** Every target buying role must be one of the workspace's active roles: 400 "Unknown buying role: {key}" at the step. */
+async function checkRoles(ctx: ModuleContext, steps: Normal[]): Promise<void> {
+  if (!steps.some((s) => s.targetBuyingRoles.length > 0)) return;
+  const known = new Set((await listBuyingRoles(ctx)).map((r) => r.key));
+  for (const [i, s] of steps.entries()) {
+    const bad = s.targetBuyingRoles.find((k) => !known.has(k));
+    if (bad !== undefined) throw invalid('steps.' + i + '.target_buying_roles', 'Unknown buying role: ' + bad);
+  }
+}
+
 async function insertSteps(ctx: ModuleContext, templateId: string, version: number, steps: Normal[]): Promise<void> {
   if (steps.length === 0) return;
   await ctx.tx.insert(templateStep).values(steps.map((s) => ({ ...s, id: newId('pls'), tenantId: ctx.tenantId, templateId, templateVersion: version })));
@@ -129,6 +140,7 @@ export async function createTemplate(ctx: ModuleContext, input: TemplateInput): 
   const name = input.name.trim();
   if (!name) throw invalid('name', NEEDS_NAME);
   const steps = normalise(input.steps ?? []);
+  await checkRoles(ctx, steps);
   const status = input.status ?? 'draft';
   if (status === 'active' && steps.length === 0) throw invalid('status', NEEDS_STEP);
   const [row] = await ctx.tx
@@ -170,6 +182,7 @@ export async function updateTemplate(ctx: ModuleContext, id: string, patch: Temp
 
   const current = await stepsOf(ctx, id, before.version);
   const next = patch.steps === undefined ? null : normalise(patch.steps);
+  if (next) await checkRoles(ctx, next);
   const changedSteps = next !== null && !sameSteps(current, next);
   if ((patch.status ?? before.status) === 'active' && (changedSteps ? next! : current).length === 0) throw invalid('status', NEEDS_STEP);
 

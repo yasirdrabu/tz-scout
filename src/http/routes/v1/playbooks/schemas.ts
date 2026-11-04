@@ -6,12 +6,12 @@ const step = z.strictObject({
   day: z.number('Use a day from 0 to 365.').int('Use a day from 0 to 365.').min(0, 'Use a day from 0 to 365.').max(365, 'Use a day from 0 to 365.'),
   channel: z.enum(STEP_CHANNELS, 'Pick email, linkedin, call, meeting or task.'),
   owner_role: z.enum(OWNER_ROLES, 'Pick seller, leader or operator.'),
-  title: z.string('Give every step a title.'),
-  detail: z.string().nullable().optional(),
+  title: z.string('Give every step a title.').max(200, 'Keep this under 200 characters.'),
+  detail: z.string().max(4000, 'Keep this under 4,000 characters.').nullable().optional(),
   target_buying_roles: z.array(z.string()).optional(),
   crm_task: z.boolean().optional(),
-  subject: z.string().nullable().optional(),
-  body: z.string().nullable().optional(),
+  subject: z.string().max(200, 'Keep this under 200 characters.').nullable().optional(),
+  body: z.string().max(10000, 'Keep this under 10,000 characters.').nullable().optional(),
 });
 
 const editable = {

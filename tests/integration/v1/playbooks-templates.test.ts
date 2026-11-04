@@ -57,6 +57,9 @@ describe('/api/v1/playbooks', () => {
     expect((await noName.json()).title).toBe('Give the playbook a name.');
     const badDay = await w.as(leader, createRoute, 'playbooks', 'POST', { name: 'x', steps: [{ ...steps[1], day: 400 }] });
     expect(badDay.status).toBe(400);
+    const long = await w.as(leader, createRoute, 'playbooks', 'POST', { name: 'x', steps: [{ ...steps[1], title: 'a'.repeat(201) }] });
+    expect(long.status).toBe(400);
+    expect((await long.json()).errors[0].message).toBe('Keep this under 200 characters.');
     const unknown = await w.as(leader, createRoute, 'playbooks', 'POST', { name: 'x', auto_send: true });
     expect(unknown.status).toBe(400);
   });
@@ -107,6 +110,10 @@ describe('/api/v1/offers/{id}/playbooks', () => {
     const pb = await (await w.as(leader, createRoute, 'playbooks', 'POST', { name: 'Offer map', status: 'active', steps })).json();
 
     expect((await w.as(seller, putOfferPlaybook, `offers/${offerId}/playbooks/act_now`, 'PUT', { playbook_id: pb.id })).status).toBe(403);
+    // A leader holds playbooks:manage but not offers:manage, and may map playbooks.
+    const byLeader = await w.as(leader, putOfferPlaybook, `offers/${offerId}/playbooks/good_fit`, 'PUT', { playbook_id: pb.id });
+    expect(byLeader.status).toBe(200);
+    await w.as(leader, putOfferPlaybook, `offers/${offerId}/playbooks/good_fit`, 'PUT', { playbook_id: null });
     const set = await w.as(operator, putOfferPlaybook, `offers/${offerId}/playbooks/act_now`, 'PUT', { playbook_id: pb.id });
     expect(set.status).toBe(200);
 

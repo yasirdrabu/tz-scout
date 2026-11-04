@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { getOffer } from '@/modules/offers';
 import { setOfferPlaybook } from '@/modules/playbooks';
+import { can, requirePermission } from '@/modules/tenancy';
 import { parseBody } from '../../../../_lib/body';
 import { idAndAction, notFound } from '../../../../_lib/path';
 import { v1Route } from '../../../../_lib/v1-route';
@@ -8,7 +9,9 @@ import { v1Route } from '../../../../_lib/v1-route';
 const body = z.strictObject({ playbook_id: z.string().nullable() });
 
 // PUT /api/v1/offers/{id}/playbooks/{tier} with {playbook_id | null} sets or clears the mapping; returns all three tiers.
-export const PUT = v1Route({ permission: 'offers:manage' }, async (req, _principal, ctx) => {
+export const PUT = v1Route({}, async (req, principal, ctx) => {
+  // Either permission will do, so a leader (who has playbooks:manage but not offers:manage) can map playbooks.
+  if (!can(principal, 'offers:manage')) requirePermission(principal, 'playbooks:manage');
   const { id, action } = idAndAction(req, 'offers');
   if (action) throw notFound();
   const parts = new URL(req.url).pathname.split('/').filter(Boolean);

@@ -135,7 +135,7 @@ export const templateStep = playbooks.table(
     body: text('body'),
   },
   (t) => [
-    index('template_step_order_idx').on(t.templateId, t.templateVersion, t.order),
+    uniqueIndex('template_step_order_uq').on(t.templateId, t.templateVersion, t.order),
     check('template_step_day_valid', sql`${t.day} between 0 and 365`),
     check('template_step_channel_valid', sql`${t.channel} in ('email', 'linkedin', 'call', 'meeting', 'task')`),
     check('template_step_owner_role_valid', sql`${t.ownerRole} in ('seller', 'leader', 'operator')`),
