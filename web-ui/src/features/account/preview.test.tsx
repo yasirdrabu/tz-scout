@@ -18,14 +18,14 @@ describe('Playbook preview', () => {
     suggest(SUGGESTED);
     renderApp('/t/taazaa/accounts/acc_mdc');
     const c = await card();
-    expect(await within(c).findByText('Public sector RFP · 3 steps over 14 days · starts when accepted')).toBeInTheDocument();
+    expect(await within(c).findByText('Public sector RFP · 3 steps over 15 days · starts when accepted')).toBeInTheDocument();
     const rows = within(c).getAllByRole('listitem');
     expect(rows).toHaveLength(3);
-    expect(rows[0]).toHaveTextContent('Day 0');
+    expect(rows[0]).toHaveTextContent('Day 1');
     expect(rows[0]).toHaveTextContent('Send the opening email');
     expect(rows[0]).toHaveTextContent('Seller');
     expect(rows[0]).toHaveTextContent('Not started');
-    expect(rows[2]).toHaveTextContent('Day 14');
+    expect(rows[2]).toHaveTextContent('Day 15');
     expect(rows[2]).toHaveTextContent('Leader');
   });
 

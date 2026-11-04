@@ -76,7 +76,11 @@ function StepDetail({ tenant, me, plan, step, canWrite, onPlan, onFind }: Props)
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const label = (key: string) => (roles.data?.data.find((r) => r.key === key)?.label ?? key.replace(/_/g, ' ')).toLowerCase();
+  /** Lowercase the label's first letter for mid-sentence use, unless it opens with an acronym (CIO). */
+  const label = (key: string) => {
+    const text = roles.data?.data.find((r) => r.key === key)?.label ?? key.replace(/_/g, ' ');
+    return /^[A-Z]{2,}/.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1);
+  };
   const find = hasScope(me, 'enrichment:request');
   const members = directory.data ?? [];
   const ownerKnown = !step.owner_user_id || members.some((m) => m.user_id === step.owner_user_id);

@@ -19,7 +19,7 @@ describe('Playbook form (§20)', () => {
     for (const l of ['Name', 'Status', 'When to use it', 'Description', 'Stop when']) expect(within(d).getByLabelText(l)).toBeInTheDocument();
     expect(within(d).getByRole('option', { name: 'Retired' })).toBeInTheDocument();
     for (const o of ['They reply or book a meeting', 'They book a meeting', 'Run every step']) expect(within(d).getByRole('option', { name: o })).toBeInTheDocument();
-    expect(within(d).getByText('Day counts from when the AE accepts the account.')).toBeInTheDocument();
+    expect(within(d).getByText('Day counts from when the AE accepts the account. Day 1 is the accept day.')).toBeInTheDocument();
     await user.click(within(d).getByRole('button', { name: 'Create playbook' }));
     expect(await within(d).findByText('Give the playbook a name.')).toBeInTheDocument();
     expect(within(d).getByText('Add at least one step.')).toBeInTheDocument();
@@ -64,7 +64,9 @@ describe('Playbook form (§20)', () => {
     await user.type(within(step(1)).getByLabelText('Subject'), 'Hello');
     await user.click(await within(step(1)).findByRole('checkbox', { name: 'Procurement' }));
     await user.click(within(d).getByRole('button', { name: 'Add step' }));
-    await user.type(within(step(2)).getByLabelText('Day'), '4');
+    expect(within(step(2)).getByLabelText('Day')).toHaveValue(1);
+    await user.clear(within(step(2)).getByLabelText('Day'));
+    await user.type(within(step(2)).getByLabelText('Day'), '5');
     await user.selectOptions(within(step(2)).getByLabelText('Channel'), 'task');
     await user.type(within(step(2)).getByLabelText('Title'), 'Do it');
     await user.click(within(d).getByRole('button', { name: 'Create playbook' }));
@@ -141,9 +143,9 @@ describe('Playbook form: day and archived roles', () => {
     await user.clear(within(step(3)).getByLabelText('Day'));
     await user.type(within(step(3)).getByLabelText('Day'), '400');
     await user.click(within(d).getByRole('button', { name: 'Save changes' }));
-    expect(await within(step(2)).findByText('Use a day from 0 to 365.')).toBeInTheDocument();
-    expect(within(step(3)).getByText('Use a day from 0 to 365.')).toBeInTheDocument();
-    expect(within(step(1)).queryByText('Use a day from 0 to 365.')).toBeNull();
+    expect(await within(step(2)).findByText('Use a day from 1 to 366.')).toBeInTheDocument();
+    expect(within(step(3)).getByText('Use a day from 1 to 366.')).toBeInTheDocument();
+    expect(within(step(1)).queryByText('Use a day from 1 to 366.')).toBeNull();
     expect(bodies(seen, 'PATCH', '/playbooks/plb_rfp')).toHaveLength(0);
   });
 

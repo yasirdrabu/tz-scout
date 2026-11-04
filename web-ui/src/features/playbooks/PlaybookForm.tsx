@@ -26,7 +26,7 @@ import {
 import styles from './Playbooks.module.css';
 
 const NAME_NEEDED = 'Give the playbook a name.';
-const DAY_INVALID = 'Use a day from 0 to 365.';
+const DAY_INVALID = 'Use a day from 1 to 366.';
 const STEPS_NEEDED = 'Add at least one step.';
 
 type StepValues = {
@@ -75,7 +75,7 @@ function valuesOf(p: PlaybookDetail | undefined): Values {
     stop_when: p?.stop_when ?? 'reply_or_meeting',
     steps: (p?.steps ?? []).map((s) => ({
       key: nextKey++,
-      day: String(s.day),
+      day: String(s.day + 1),
       channel: s.channel,
       owner_role: s.owner_role,
       title: s.title,
@@ -100,7 +100,7 @@ function bodyOf(v: Values): PlaybookBody {
     stop_when: v.stop_when,
     steps: v.steps.map((s, i) => ({
       order: i + 1,
-      day: Math.round(Number(s.day)) || 0,
+      day: Math.round(Number(s.day)) - 1,
       channel: s.channel,
       owner_role: s.owner_role,
       title: s.title.trim(),
@@ -181,7 +181,7 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
     clearError(...Object.keys(patch).map((k) => `steps.${i}.${k}`));
   };
   const addStep = () => {
-    const added = blankStep(v.steps.at(-1)?.day ?? '0');
+    const added = blankStep(v.steps.at(-1)?.day ?? '1');
     refocus.current = `[data-step-key="${added.key}"] [data-focus="title"]`;
     set('steps', [...v.steps, added]);
     setErrors((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'steps')));
@@ -211,7 +211,7 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
     if (!v.steps.length) found.steps = STEPS_NEEDED;
     v.steps.forEach((s, i) => {
       const day = Number(s.day);
-      if (!s.day.trim() || !Number.isInteger(day) || day < 0 || day > 365) found[`steps.${i}.day`] = DAY_INVALID;
+      if (!s.day.trim() || !Number.isInteger(day) || day < 1 || day > 366) found[`steps.${i}.day`] = DAY_INVALID;
     });
     if (Object.keys(found).length) {
       setErrors(found);
@@ -284,7 +284,7 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
 
       <div className={styles.group}>
         <h3 className={styles.legendTitle}>Steps</h3>
-        <p className={styles.note}>Day counts from when the AE accepts the account.</p>
+        <p className={styles.note}>Day counts from when the AE accepts the account. Day 1 is the accept day.</p>
         {v.steps.map((s, i) => {
           const err = (f: string) => errors[`steps.${i}.${f}`] ?? null;
           return (
@@ -292,7 +292,7 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
               <legend className={styles.legendTitle}>Step {i + 1}</legend>
               <div className={styles.row}>
                 <Field label="Day" error={err('day')}>
-                  {(c) => <input {...c} className="input" type="number" min={0} max={365} step={1} inputMode="numeric" value={s.day} onChange={(e) => setStep(i, { day: e.target.value })} />}
+                  {(c) => <input {...c} className="input" type="number" min={1} max={366} step={1} inputMode="numeric" value={s.day} onChange={(e) => setStep(i, { day: e.target.value })} />}
                 </Field>
                 <Field label="Channel" error={err('channel')}>
                   {(c) => (

@@ -185,7 +185,7 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
         <ol className={styles.steps}>
           {p.steps.map((s) => (
             <li key={s.id} className={styles.step}>
-              <span className={styles.day}>Day {s.day}</span>
+              <span className={styles.day}>Day {s.day + 1}</span>
               <div>
                 <div className={styles.stepTitle}>{s.title}</div>
                 <p className={styles.meta}>{s.detail || 'No detail yet.'}</p>

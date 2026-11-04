@@ -41,12 +41,12 @@ conflicts amber, gaps red only when the offer requires that role).
 R2c-3a (shipped): in the assigned view the Playbook card is the first card of the main column.
 Header "{name} · Day {d} of {n}" with "{x} of {y} done" and a bar; a card menu (Pause or Resume,
 Complete, Abandon with a required reason) and an `Edit plan` button, both with `playbooks:write` and
-only on open plans; rows with a checkbox, "Day n", the step title (click for the in-place detail: draft
-with Copy, linked people, "No {role} on file" with `Find`, and note, owner, due date and status
+only on open plans; rows with a checkbox, "Day n" (1-based: Day 1 is the start day; the API and database stay 0-based), the step title (click for the in-place detail: draft
+with Copy, people (plain names, not links), "No {role} on file" with `Find`, and note, owner, due date and status
 editing), owner and status pill; a collapsed "History ({n})"; a closed plan shows its status line
 ("Completed {date}", "Stopped: {reason}", "Abandoned: {reason}") and read-only rows. `Edit plan` opens
 a drawer to add, edit and remove steps (a done step's Remove is disabled: "Skip it instead."). Before
-acceptance the card reads "{playbook} starts when {AE first name} accepts." or "No playbook. ..."; in
+acceptance the card reads "{playbook} starts when {AE first name} accepts." ("resumes" when the account already has a paused or active plan) or "No playbook. ..."; in
 the review view a Playbook preview follows the Brief. Details in `account-plans.md`.
 
 Buttons whose permission the viewer lacks are hidden. A seller sees only accounts in their data scope.

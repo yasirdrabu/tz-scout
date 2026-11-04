@@ -79,7 +79,7 @@ describe('Edit plan', () => {
     const { drawer } = await openDrawer();
     const titles = drawer.getAllByRole('listitem').map((li) => within(li).getAllByRole('button')[0]!.getAttribute('aria-label'));
     expect(titles).toEqual(['Edit Intro email', 'Edit Connect on LinkedIn', 'Edit Follow-up email', 'Edit Call the sponsor', 'Edit Send the case study']);
-    expect(drawer.getByText('Day 3 · Email · Ash Patel · To do')).toBeInTheDocument();
+    expect(drawer.getByText('Day 4 · Email · Ash Patel · To do')).toBeInTheDocument();
     expect(drawer.getByRole('button', { name: 'Remove Intro email' })).toBeDisabled();
     expect(drawer.getAllByText('Skip it instead.')).toHaveLength(1);
     expect(drawer.getByRole('button', { name: 'Remove Call the sponsor' })).toBeEnabled();
@@ -101,7 +101,7 @@ describe('Edit plan', () => {
     await userEvent.click(form.getByRole('button', { name: 'Add step' }));
     expect(await screen.findByText('Step added.')).toBeInTheDocument();
     expect(seen.post).toEqual([
-      { day: 4, channel: 'email', owner_role: 'leader', title: 'Extra touch', detail: null, subject: 'Hello', body: null, target_buying_roles: ['technical_buyer'], crm_task: true },
+      { day: 3, channel: 'email', owner_role: 'leader', title: 'Extra touch', detail: null, subject: 'Hello', body: null, target_buying_roles: ['technical_buyer'], crm_task: true },
     ]);
     expect(await card.findByText('Extra touch')).toBeInTheDocument();
     await waitFor(() => expect(drawer.getByText('Extra touch').closest('li')).toHaveFocus());
@@ -115,7 +115,7 @@ describe('Edit plan', () => {
     const { card, drawer } = await openDrawer();
     await userEvent.click(drawer.getByRole('button', { name: 'Edit Call the sponsor' }));
     const form = within(drawer.getByRole('form', { name: 'Edit Call the sponsor' }));
-    expect(form.getByLabelText('Day')).toHaveValue(5);
+    expect(form.getByLabelText('Day')).toHaveValue(6);
     expect(form.queryByLabelText('Subject')).not.toBeInTheDocument();
     await userEvent.type(form.getByLabelText('Title'), ' now');
     await userEvent.click(form.getByRole('button', { name: 'Save step' }));
@@ -189,7 +189,7 @@ describe('Edit plan', () => {
     await userEvent.clear(form.getByLabelText('Day'));
     await userEvent.type(form.getByLabelText('Day'), '400');
     await userEvent.click(form.getByRole('button', { name: 'Add step' }));
-    expect(await form.findByText('Use a day from 0 to 365.')).toBeInTheDocument();
+    expect(await form.findByText('Use a day from 1 to 366.')).toBeInTheDocument();
   });
 
   it('maps an edit title error from the API onto the title', async () => {

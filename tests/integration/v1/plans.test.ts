@@ -20,6 +20,7 @@ let seller: string;
 let outsider: string;
 let accountId: string;
 let planId: string;
+let offerId: string;
 let stepIds: string[];
 let extraStepId: string;
 
@@ -35,7 +36,7 @@ beforeAll(async () => {
   // A seller who sees only one source, which is not this account's.
   outsider = await w.person('seller', { dataLimit: { kind: 'sources', ids: ['src_elsewhere'] } });
   const practice = await w.run((ctx) => createPractice(ctx, { name: 'Main' }));
-  const offerId = (await w.run(async (ctx) => approveOffer(ctx, (await createOffer(ctx, { name: 'Pilot', practiceId: practice.id, ...completeOffer })).id))).id;
+  offerId = (await w.run(async (ctx) => approveOffer(ctx, (await createOffer(ctx, { name: 'Pilot', practiceId: practice.id, ...completeOffer })).id))).id;
   const template = await w.run((ctx) => createTemplate(ctx, { name: 'HTTP flow', status: 'active', steps }));
   await w.run((ctx) => setOfferPlaybook(ctx, offerId, 'act_now', template.id));
 
@@ -214,14 +215,47 @@ describe('GET /api/v1/accounts/{id}/review current assignment playbook', () => {
   it('names the playbook the assignment chose or its tier maps to, with playbooks:read', async () => {
     const res = await w.as(leader, reviewRoute, `accounts/${accountId}/review`);
     expect(res.status).toBe(200);
-    expect((await res.json()).current_assignment).toMatchObject({ seller_user_id: seller, playbook_name: 'HTTP flow', no_playbook: false, template_id: null });
+    expect((await res.json()).current_assignment).toMatchObject({ seller_user_id: seller, playbook_name: 'HTTP flow', no_playbook: false, template_id: null, plan_resumes: true });
   });
 
   it('without playbooks:read the playbook fields are null', async () => {
     const viewer = await w.person('viewer');
     const res = await w.as(viewer, reviewRoute, `accounts/${accountId}/review`);
     expect(res.status).toBe(200);
-    expect((await res.json()).current_assignment).toMatchObject({ seller_user_id: seller, template_id: null, no_playbook: null, playbook_name: null });
+    expect((await res.json()).current_assignment).toMatchObject({ seller_user_id: seller, template_id: null, no_playbook: null, playbook_name: null, plan_resumes: null });
+  });
+});
+
+describe('GET /api/v1/accounts/{id}/review with an open plan', () => {
+  it('names the open plan playbook and says it resumes, paused or active; false when there is no open plan', async () => {
+    // The tier now maps to another playbook; the account's plan keeps the one it started with.
+    const other = await w.run((ctx) => createTemplate(ctx, { name: 'Other flow', status: 'active', steps }));
+    await w.run((ctx) => setOfferPlaybook(ctx, offerId, 'good_fit', other.id));
+    const own = await w.account('Resume Co');
+    await setSummary(w.tenant, own, { tier: 'good_fit', bestOfferId: offerId });
+    const made = await asPerson(w.tenant, (ctx) => assign(ctx, own, { sellerUserId: seller }), { userId: leader });
+
+    const before = await (await w.as(leader, reviewRoute, `accounts/${own}/review`)).json();
+    expect(before.current_assignment).toMatchObject({ playbook_name: 'Other flow', plan_resumes: false });
+
+    await asPerson(w.tenant, (ctx) => accept(ctx, made.id), { userId: seller, dataLimit: { kind: 'own_accounts' } });
+    await w.deliver();
+    const planOf = await (await w.as(leader, getPlanRoute, `accounts/${own}/plan`)).json();
+    expect(planOf.playbook.name).toBe('Other flow');
+    // Repoint the tier, then pause: the plan's own playbook is still the one named.
+    const next = await w.run((ctx) => createTemplate(ctx, { name: 'Later flow', status: 'active', steps }));
+    await w.run((ctx) => setOfferPlaybook(ctx, offerId, 'good_fit', next.id));
+    expect((await w.as(leader, actionRoute, `plans/${planOf.id}:pause`, 'POST')).status).toBe(200);
+    const paused = await (await w.as(leader, reviewRoute, `accounts/${own}/review`)).json();
+    expect(paused.current_assignment).toMatchObject({ playbook_name: 'Other flow', plan_resumes: true });
+
+    const viewer = await w.person('viewer');
+    expect((await (await w.as(viewer, reviewRoute, `accounts/${own}/review`)).json()).current_assignment).toMatchObject({ playbook_name: null, plan_resumes: null });
+
+    // A closed plan no longer resumes.
+    await w.as(leader, actionRoute, `plans/${planOf.id}:abandon`, 'POST', { reason: 'Test' });
+    const closed = await (await w.as(leader, reviewRoute, `accounts/${own}/review`)).json();
+    expect(closed.current_assignment.plan_resumes).toBe(false);
   });
 });
 

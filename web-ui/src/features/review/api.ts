@@ -232,6 +232,8 @@ export type CurrentAssignment = {
   playbook_name?: string | null;
   template_id?: string | null;
   no_playbook?: boolean | null;
+  /** True when the account has an open (paused or active) plan: it resumes on accept instead of a new one starting. */
+  plan_resumes?: boolean | null;
 };
 
 export type AccountReview = {

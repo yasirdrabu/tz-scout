@@ -155,7 +155,7 @@ done and todo; unticking a done step returns it to todo and both changes are in 
 
 **Pending state.** Between assignment and acceptance there is no plan. `GET /accounts/{id}/review`'s
 `current_assignment` carries `playbook_name`, `template_id` and `no_playbook` (null without
-`playbooks:read`), and the account page shows "{playbook} starts when {AE first name} accepts." or
+`playbooks:read`), and the account page shows "{playbook} starts when {AE first name} accepts." (when the account has a paused or active plan, `playbook_name` is that plan's playbook, `plan_resumes` is true and the text says "resumes when"; `plan_resumes` is null without `playbooks:read`) or
 "No playbook. {AE first name} works it with no set steps."
 
 **Preview.** Before assignment the review view shows a Playbook card from

@@ -40,7 +40,7 @@ const DONE: Record<PlanActionName, string> = { pause: 'Plan paused.', resume: 'P
 export function PendingPlan({ assignment }: { assignment: CurrentAssignment }) {
   const ae = assignment.seller_name?.split(' ')[0] ?? 'The AE';
   const text = assignment.playbook_name
-    ? `${assignment.playbook_name} starts when ${ae} accepts.`
+    ? `${assignment.playbook_name} ${assignment.plan_resumes ? 'resumes' : 'starts'} when ${ae} accepts.`
     : assignment.no_playbook
       ? `No playbook. ${ae} works it with no set steps.`
       : null;
@@ -127,18 +127,28 @@ function closedLine(plan: Plan, date: (when: string) => string): string | null {
   }
   if (plan.status === 'stopped') return plan.status_reason ? `Stopped: ${plan.status_reason}` : 'Stopped';
   if (plan.status === 'abandoned') return plan.status_reason ? `Abandoned: ${plan.status_reason}` : 'Abandoned';
+  if (plan.status === 'paused') return 'Paused';
   return null;
 }
 
+/** After an accept the plan starts asynchronously; its 404 is retried this often, for this long. */
+const START_POLL_MS = 2_000;
+const START_POLL_FOR_MS = 30_000;
+
 /** §4b 2: the account's plan; with `playbooks:write` the checkboxes, step edits and the actions menu. No plan, no card. */
-export function PlanCard({ tenant, me, accountId, onFind }: { tenant: string; me: Me; accountId: string; onFind: (roles: string[]) => void }) {
+export function PlanCard({ tenant, me, accountId, accepted = false, onFind }: { tenant: string; me: Me; accountId: string; accepted?: boolean; onFind: (roles: string[]) => void }) {
   const f = useFormat();
   const queryClient = useQueryClient();
   const { run, busy } = useRun();
   const toast = useToast();
   const [abandoning, setAbandoning] = useState(false);
   const [editing, setEditing] = useState(false);
-  const plan = useQuery({ ...planQuery(tenant, accountId), enabled: hasScope(me, 'playbooks:read') });
+  const [mounted] = useState(() => Date.now());
+  const plan = useQuery({
+    ...planQuery(tenant, accountId),
+    enabled: hasScope(me, 'playbooks:read'),
+    refetchInterval: (q) => (accepted && q.state.error instanceof ApiError && q.state.error.status === 404 && Date.now() - mounted < START_POLL_FOR_MS ? START_POLL_MS : false),
+  });
 
   if (!hasScope(me, 'playbooks:read')) return null;
   if (plan.isPending) {
@@ -158,7 +168,10 @@ export function PlanCard({ tenant, me, accountId, onFind }: { tenant: string; me
   }
 
   const p = plan.data;
-  const setPlan = (next: Plan) => queryClient.setQueryData(planQuery(tenant, accountId).queryKey, next);
+  const setPlan = (next: Plan) => {
+    queryClient.setQueryData(planQuery(tenant, accountId).queryKey, next);
+    void queryClient.invalidateQueries({ queryKey: ['me-counts', tenant] });
+  };
   const open = p.status === 'active' || p.status === 'paused';
   const canWrite = open && hasScope(me, 'playbooks:write');
   const steps = [...p.steps].sort((a, b) => a.order - b.order);

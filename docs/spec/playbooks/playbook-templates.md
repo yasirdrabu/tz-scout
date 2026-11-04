@@ -46,7 +46,7 @@ wins: each offer picks a playbook per tier, steps are by day, and a playbook has
   it. Otherwise 409 "This playbook has run on accounts. Retire it instead." Delete removes the
   template's steps first.
 - **Steps.**
-  - `order` (renumbered 1 to n), `day` (integer 0 to 365; day 0 is the start day), `channel`,
+  - `order` (renumbered 1 to n), `day` (integer 0 to 365; day 0 is the start day; screens show it 1-based, "Day 1" to "Day 366", and "{n} steps over {d} days" counts the last day + 1), `channel`,
     `owner_role` (`seller`, `leader` or `operator`), `title` (required, up to 200 characters),
     `detail` (markdown guidance, up to 4,000), `target_buying_roles` (buying-role keys; each must be
     an active role of the workspace, otherwise 400 "Unknown buying role: {key}"), `crm_task` (bool,

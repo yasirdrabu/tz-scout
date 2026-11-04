@@ -41,7 +41,7 @@ Code map: `docs/plans/2026-11-04-r2c-3-plans-crm.map.md`. Section 1 has the copy
 
    The checkbox toggles done and todo with a PATCH. An unchecked done step goes back to todo.
 4. **Step detail** opens in place when the step title is clicked.
-   - **Content:** the rendered detail, the email subject and body with `Copy` (toast "Draft copied."), people (linked names), the note, owner, due date and status.
+   - **Content:** the rendered detail, the email subject and body with `Copy` (toast "Draft copied."), people (plain names), the note, owner, due date and status.
    - **Editing:** note, owner (members select), due date and status (todo, in progress, done, skipped) save with the existing PATCH, and show the toast "Step updated.".
    - **Missing role:** a step whose target role has no stated or confirmed person shows "No {role label} on file" and `Find`. Find opens the Enrich dialog with that role (`initialRoles`, built in R2b-3), and only with `enrichment:request`.
 5. **Plan actions**, in a card menu with `playbooks:write`:
@@ -90,7 +90,7 @@ Code map: `docs/plans/2026-11-04-r2c-3-plans-crm.map.md`. Section 1 has the copy
 2. **Removing a done step** is refused. Editing a step on a closed plan is refused. Task 1.
 3. **A person found by Enrich after acceptance** shows under the step and clears its "No {role} on file". Task 1 (API) and Task 2 (UI).
 4. **A seller unticking a step they ticked by mistake** returns it to todo. History records both changes. Task 2.
-5. **A viewer** sees the plan read-only, with no checkbox, menu or Edit plan. Task 2.
+5. **Someone with `playbooks:read` but not `playbooks:write`** sees the plan read-only, with no checkbox, menu or Edit plan. Task 2.
 
 ---
 
@@ -135,7 +135,7 @@ Code map: `docs/plans/2026-11-04-r2c-3-plans-crm.map.md`. Section 1 has the copy
   - the newer-version note;
   - History;
   - the not-yet-accepted text;
-  - a viewer seeing it read-only;
+  - someone with `playbooks:read` but not `playbooks:write` seeing it read-only;
   - 404 (no plan) showing nothing.
 - [ ] **Step 2: Implement.** The plan card is the first card in the assigned view's main column (map section 6). **Step 3: Run** `cd web-ui && npx vitest run src/features/account`, typecheck and lint, then `npm test`. **Step 4: Commit** `feat(web-ui): the plan on the account page`.
 

@@ -10,7 +10,7 @@ import styles from '../playbooks/Playbooks.module.css';
 import { errorText } from '../settings/shared';
 import { addStep, buyingRolesQuery, patchStep, removeStep, type NewStep, type Plan, type PlanStep, type StepPatch, type StepStatus } from './api';
 
-const DAY_INVALID = 'Use a day from 0 to 365.';
+const DAY_INVALID = 'Use a day from 1 to 366.';
 const TITLE_NEEDED = 'Give the step a title.';
 const STATUS_WORD: Record<StepStatus, string> = { todo: 'To do', in_progress: 'In progress', done: 'Done', skipped: 'Skipped' };
 
@@ -26,10 +26,10 @@ type Values = {
   crm_task: boolean;
 };
 
-const BLANK: Values = { day: '0', channel: 'email', owner_role: 'seller', title: '', detail: '', subject: '', body: '', target_buying_roles: [], crm_task: true };
+const BLANK: Values = { day: '1', channel: 'email', owner_role: 'seller', title: '', detail: '', subject: '', body: '', target_buying_roles: [], crm_task: true };
 
 const valuesOf = (s: PlanStep): Values => ({
-  day: String(s.day),
+  day: String(s.day + 1),
   channel: s.channel,
   owner_role: s.owner_role,
   title: s.title,
@@ -47,7 +47,7 @@ function check(v: Values): Record<string, string> {
   const found: Record<string, string> = {};
   const day = Number(v.day);
   if (!v.title.trim()) found.title = TITLE_NEEDED;
-  if (!v.day.trim() || !Number.isInteger(day) || day < 0 || day > 365) found.day = DAY_INVALID;
+  if (!v.day.trim() || !Number.isInteger(day) || day < 1 || day > 366) found.day = DAY_INVALID;
   return found;
 }
 
@@ -56,7 +56,7 @@ function changes(step: PlanStep, v: Values): StepPatch {
   const patch: StepPatch = {};
   if (v.title.trim() !== step.title) patch.title = v.title.trim();
   if (textOrNull(v.detail) !== step.detail) patch.detail = textOrNull(v.detail);
-  if (Number(v.day) !== step.day) patch.day = Number(v.day);
+  if (Number(v.day) - 1 !== step.day) patch.day = Number(v.day) - 1;
   if (v.channel !== step.channel) patch.channel = v.channel;
   if (v.channel === 'email') {
     if (textOrNull(v.subject) !== step.subject) patch.subject = textOrNull(v.subject);
@@ -79,7 +79,7 @@ function StepFields({ tenant, v, onChange, errors, showOwner }: { tenant: string
     <>
       <div className={styles.row}>
         <Field label="Day" error={errors.day ?? null}>
-          {(c) => <input {...c} className="input" type="number" min={0} max={365} step={1} inputMode="numeric" value={v.day} onChange={(e) => onChange({ day: e.target.value })} />}
+          {(c) => <input {...c} className="input" type="number" min={1} max={366} step={1} inputMode="numeric" value={v.day} onChange={(e) => onChange({ day: e.target.value })} />}
         </Field>
         <Field label="Channel" error={errors.channel ?? null}>
           {(c) => (
@@ -179,10 +179,10 @@ function useStepForm<T>(initial: Values, send: (v: Values) => Promise<T>, done: 
 function AddStep({ tenant, plan, onPlan, onAdded }: { tenant: string; plan: Plan; onPlan: (p: Plan) => void; onAdded: (p: Plan, before: Set<string>) => void }) {
   const toast = useToast();
   const form = useStepForm(
-    BLANK,
+    { ...BLANK, day: String(Math.min(plan.day + 1, 366)) },
     (v) => {
       const body: NewStep = {
-        day: Number(v.day),
+        day: Number(v.day) - 1,
         channel: v.channel,
         owner_role: v.owner_role,
         title: v.title.trim(),
@@ -281,7 +281,7 @@ export function EditPlanDrawer({ tenant, plan, open, onClose, onPlan }: Props) {
               <li key={s.id} data-step-id={s.id} tabIndex={-1} className={styles.stepBox}>
                 <div>
                   <strong>{s.title}</strong>
-                  <p className={styles.note}>{[`Day ${s.day}`, CHANNEL_WORD[s.channel], s.owner_name ?? OWNER_WORD[s.owner_role], STATUS_WORD[s.status]].join(' · ')}</p>
+                  <p className={styles.note}>{[`Day ${s.day + 1}`, CHANNEL_WORD[s.channel], s.owner_name ?? OWNER_WORD[s.owner_role], STATUS_WORD[s.status]].join(' · ')}</p>
                 </div>
                 {editing === s.id ? (
                   <EditStep

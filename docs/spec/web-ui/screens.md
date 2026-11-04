@@ -222,7 +222,7 @@ step.
    textarea with `Save` and `Cancel`, hint "Saving marks this section as edited by you."; toast
    "{Title} saved".
 7. **Playbook** preview (R2c-3a, shipped; after the Brief): "{name} · {n} steps over {d} days · starts when
-   accepted", rows "Day {n}", step, owner role word, "Not started". Source is the account's playbook
+   accepted", rows "Day {n}" (1-based), step, owner role word, "Not started"; hidden when the account already has a paused or active plan. Source is the account's playbook
    suggestion (`assign:act`); no card without the permission or without a suggestion.
 8. **Right rail.**
    - Buying committee (R2b-3): under the title "{offer name}: {n} of {m} roles covered" ("Core roles: ..."
@@ -253,20 +253,20 @@ step.
    deal name and value).
 2. **Playbook** (R2c-3a, shipped; first card of the main column): "{name} · Day {d} of {n}" (`d` is
    `plan.day + 1` capped at `n`, `n` is `plan.days + 1`), "{x} of {y} done" (done and skipped steps over all
-   steps) with a bar; rows checkbox, "Day n", step, owner, status pill ("Done", "Skipped", "In progress",
+   steps) with a bar; rows checkbox, "Day n" (1-based, Day 1 is the start day; the API stays 0-based), step, owner, status pill ("Done", "Skipped", "In progress",
    "Due Nov 18" amber row for a todo step overdue or due today, "Not started"). The checkbox toggles done and
    todo. Clicking the title opens the **step detail** in place: the draft (subject, body, `Copy`, toast
-   "Draft copied."), linked people, "No {role} on file" with `Find` (Enrich dialog, `enrichment:request`),
+   "Draft copied."), people (plain names, not links), "No {role} on file" with `Find` (Enrich dialog, `enrichment:request`),
    and note, owner, due date and status (toast "Step updated."). The card menu (`playbooks:write`, open plans):
    Pause or Resume, Complete (the API's 409 text when steps are open), Abandon (dialog "Why are you
    abandoning it?", reason required); toasts "Plan paused.", "Plan resumed.", "Plan completed.", "Plan
    abandoned.". A closed plan shows "Completed {date}", "Stopped: {reason}" or "Abandoned: {reason}", no
-   menu and read-only rows. A newer template: "A newer version of {playbook} exists. This plan keeps the steps
+   menu and read-only rows. A paused plan shows "Paused" the same way, and its menu offers Resume. A newer template: "A newer version of {playbook} exists. This plan keeps the steps
    it started with." A collapsed "History ({n})" lists "{who} {what} · {when}". `Edit plan` (`playbooks:write`,
    open plans) opens a drawer: steps with Edit and Remove (a done step's Remove is disabled, hint "Skip it
    instead."), and an Add step form (Day, Channel, Done by, Title, Detail, Subject and Body for email, Buying
    roles, HubSpot task); each save is immediate with toasts "Step added.", "Step saved.", "Step removed.".
-   Before the seller accepts, the card reads "{playbook} starts when {AE first name} accepts." or "No
+   Before the seller accepts, the card reads "{playbook} starts when {AE first name} accepts." ("resumes when" if the account already has a paused or active plan, from `plan_resumes`) or "No
    playbook. {AE first name} works it with no set steps." CRM tasks and the stop rule are R2c-3b.
 3. **HubSpot activity** ("Synced {when}"): dated entries of replies, emails, meetings, opens, and
    Scout's own actions ("Scout set Ash Patel as company owner, logged the brief and started the
@@ -772,7 +772,7 @@ detail, "{channel} · {who}", tag "Draft ready for AE" on email steps, "HubSpot 
 when; drafts are always for the AE to review and send).
 
 Form: Name ("Give the playbook a name."), Status, When to use it, Stop when (They reply or book a
-meeting, They book a meeting, Run every step), Steps (Day 0 to 365, Channel: Email, LinkedIn, Call,
+meeting, They book a meeting, Run every step), Steps (Day 1 to 366, with the note "Day counts from when the AE accepts the account. Day 1 is the accept day.", Channel: Email, LinkedIn, Call,
 Meeting or Task; Done by: Seller, Leader or Operator; title, detail, buying roles, subject and body
 on email steps, reorder, remove; "Add at least one step."), `Add step`, `Cancel`, `Save changes` or `Create playbook`.
 
