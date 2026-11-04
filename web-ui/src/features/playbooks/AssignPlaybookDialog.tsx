@@ -100,11 +100,9 @@ function Tiers({ tenant, offerId, offerLabel, playbook, onDone }: { tenant: stri
     try {
       for (const t of added) await setOfferPlaybook(tenant, offerId, t, playbook.id);
       for (const t of removed) await setOfferPlaybook(tenant, offerId, t, null);
-      toast.show(
-        added.length
-          ? `${playbook.name} now runs on ${offerLabel} · ${words(added)}.`
-          : `${playbook.name} no longer runs on ${offerLabel} · ${words(removed)}.`,
-      );
+      const head = added.length ? `${playbook.name} now runs on ${offerLabel} · ${words(added)}.` : '';
+      const tail = removed.length ? (added.length ? `Removed from ${words(removed)}.` : `${playbook.name} no longer runs on ${offerLabel} · ${words(removed)}.`) : '';
+      toast.show([head, tail].filter(Boolean).join(' '));
       onDone();
     } catch (e) {
       toast.show(errorText(e));

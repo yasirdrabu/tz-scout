@@ -154,7 +154,7 @@ describe('Assign playbook (§20)', () => {
     await user.click(within(d).getByRole('checkbox', { name: /Watch/ }));
     await user.click(within(d).getByRole('checkbox', { name: /Act now/ }));
     await user.click(within(d).getByRole('button', { name: 'Assign' }));
-    expect(await screen.findByText('Public sector RFP now runs on Modernization Blueprint · AI Transformation · Good fit, Watch.')).toBeInTheDocument();
+    expect(await screen.findByText('Public sector RFP now runs on Modernization Blueprint · AI Transformation · Good fit, Watch. Removed from Act now.')).toBeInTheDocument();
     const puts = seen.filter((r) => r.method === 'PUT');
     expect(puts.map((r) => [r.url.pathname.split('/').pop(), r.body])).toEqual([
       ['good_fit', { playbook_id: 'plb_rfp' }],
@@ -203,5 +203,60 @@ describe('Retired playbook', () => {
     renderApp('/t/taazaa/playbooks/plb_draft');
     await screen.findByRole('heading', { name: 'Warm intro', level: 1 });
     for (const name of ['Delete', 'Retire', 'Assign']) expect(screen.queryByRole('button', { name })).toBeNull();
+  });
+});
+
+describe('Playbook form focus and errors', () => {
+  it('moves focus on Add step, Remove and Move', async () => {
+    servePlaybooks();
+    const user = userEvent.setup();
+    renderApp('/t/taazaa/playbooks?edit=new');
+    const d = await screen.findByRole('dialog', { name: 'New playbook' });
+    await user.click(within(d).getByRole('button', { name: 'Add step' }));
+    expect(within(step(1)).getByLabelText('Title')).toHaveFocus();
+    await user.click(within(d).getByRole('button', { name: 'Add step' }));
+    await user.click(within(d).getByRole('button', { name: 'Add step' }));
+    expect(within(step(3)).getByLabelText('Title')).toHaveFocus();
+    await user.click(within(step(2)).getByRole('button', { name: 'Move step 2 up' }));
+    expect(screen.getByRole('button', { name: 'Move step 1 down' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Move step 1 down' }));
+    expect(screen.getByRole('button', { name: 'Move step 2 down' })).toHaveFocus();
+    await user.click(within(step(2)).getByRole('button', { name: 'Move step 2 down' }));
+    expect(screen.getByRole('button', { name: 'Move step 3 up' })).toHaveFocus();
+    await user.click(within(step(1)).getByRole('button', { name: 'Remove step 1' }));
+    expect(screen.getByRole('button', { name: 'Remove step 1' })).toHaveFocus();
+    await user.click(within(step(2)).getByRole('button', { name: 'Remove step 2' }));
+    expect(screen.getByRole('button', { name: 'Remove step 1' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Remove step 1' }));
+    expect(within(d).getByRole('button', { name: 'Add step' })).toHaveFocus();
+  });
+
+  it('shows the notice for an error on a field the form does not draw, and clears a field error on edit', async () => {
+    servePlaybooks({
+      answer: {
+        'PATCH plb_rfp': () =>
+          HttpResponse.json(
+            {
+              type: 'https://scout.taazaa.ai/problems/validation',
+              title: 'Check the form',
+              status: 400,
+              errors: [
+                { path: 'steps.1.order', message: 'Order is off.' },
+                { path: 'name', message: 'That name is taken.' },
+              ],
+            },
+            { status: 400, headers: { 'content-type': 'application/problem+json' } },
+          ),
+      },
+    });
+    const user = userEvent.setup();
+    renderApp('/t/taazaa/playbooks/plb_rfp?edit=playbook');
+    const d = await screen.findByRole('dialog', { name: 'Edit Public sector RFP' });
+    await waitFor(() => expect(within(d).getByLabelText('Name')).toHaveValue('Public sector RFP'));
+    await user.click(within(d).getByRole('button', { name: 'Save changes' }));
+    expect(await within(d).findByRole('alert')).toHaveTextContent('Check the form');
+    expect(within(d).getByText('That name is taken.')).toBeInTheDocument();
+    await user.type(within(d).getByLabelText('Name'), 'x');
+    expect(within(d).queryByText('That name is taken.')).toBeNull();
   });
 });

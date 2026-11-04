@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ApiError } from '../../api/errors';
 import { Button } from '../../ui/Button';
 import { Drawer } from '../../ui/Drawer';
@@ -112,6 +112,16 @@ function bodyOf(v: Values): PlaybookBody {
   };
 }
 
+/** Whether the form draws a message for this API path, so an error nobody can see still reaches the notice. */
+function shown(path: string, steps: StepValues[]): boolean {
+  if (/^(name|status|when_to_use|description|stop_when|steps)$/.test(path)) return true;
+  const m = /^steps\.(\d+)\.(\w+)$/.exec(path);
+  const step = m ? steps[Number(m[1])] : undefined;
+  if (!m || !step) return false;
+  const f = m[2]!;
+  return ['day', 'channel', 'owner_role', 'title', 'detail', 'target_buying_roles'].includes(f) || (step.channel === 'email' && (f === 'subject' || f === 'body'));
+}
+
 const withoutStepErrors = (e: Record<string, string>) => Object.fromEntries(Object.entries(e).filter(([k]) => !k.startsWith('steps')));
 
 type Props = {
@@ -151,17 +161,40 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const set = <K extends keyof Values>(k: K, value: Values[K]) => setV((prev) => ({ ...prev, [k]: value }));
-  const setStep = (i: number, patch: Partial<StepValues>) => set('steps', v.steps.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  const formRef = useRef<HTMLFormElement>(null);
+  /** Where focus goes once the steps have re-rendered. */
+  const refocus = useRef<string | null>(null);
+  useEffect(() => {
+    const target = refocus.current;
+    refocus.current = null;
+    if (target) formRef.current?.querySelector<HTMLElement>(target)?.focus();
+  }, [v.steps]);
+  const clearError = (...keys: string[]) => setErrors((e) => (keys.some((k) => k in e) ? Object.fromEntries(Object.entries(e).filter(([k]) => !keys.includes(k))) : e));
+  const set = <K extends keyof Values>(k: K, value: Values[K]) => {
+    setV((prev) => ({ ...prev, [k]: value }));
+    clearError(k);
+  };
+  const setStep = (i: number, patch: Partial<StepValues>) => {
+    set('steps', v.steps.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+    clearError(...Object.keys(patch).map((k) => `steps.${i}.${k}`));
+  };
   const addStep = () => {
-    set('steps', [...v.steps, blankStep(v.steps.at(-1)?.day ?? '0')]);
+    const added = blankStep(v.steps.at(-1)?.day ?? '0');
+    refocus.current = `[data-step-key="${added.key}"] [data-focus="title"]`;
+    set('steps', [...v.steps, added]);
     setErrors((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== 'steps')));
   };
   const removeStep = (i: number) => {
+    const near = v.steps[i + 1] ?? v.steps[i - 1];
+    refocus.current = near ? `[data-step-key="${near.key}"] [data-focus="remove"]` : '[data-focus="add"]';
     set('steps', v.steps.filter((_, j) => j !== i));
     setErrors(withoutStepErrors);
   };
   const moveStep = (i: number, by: -1 | 1) => {
+    const at = i + by;
+    const atEdge = by === -1 ? at === 0 : at === v.steps.length - 1;
+    const keep = atEdge ? (by === -1 ? 'down' : 'up') : by === -1 ? 'up' : 'down';
+    refocus.current = `[data-step-key="${v.steps[i]!.key}"] [data-focus="${keep}"]`;
     const next = [...v.steps];
     [next[i], next[i + by]] = [next[i + by]!, next[i]!];
     set('steps', next);
@@ -188,11 +221,15 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
       else onClose();
     } catch (err) {
       const mapped: Record<string, string> = {};
+      let hidden = false;
       if (err instanceof ApiError) {
-        for (const x of err.errors) if (/^(name|status|when_to_use|description|stop_when|steps)(\.|$)/.test(x.path) && !(x.path in mapped)) mapped[x.path] = x.message;
+        for (const x of err.errors) {
+          if (shown(x.path, v.steps)) mapped[x.path] ??= x.message;
+          else hidden = true;
+        }
       }
-      if (Object.keys(mapped).length) setErrors(mapped);
-      else setNotice(errorText(err));
+      setErrors(mapped);
+      if (hidden || !Object.keys(mapped).length) setNotice(errorText(err));
     } finally {
       setBusy(false);
     }
@@ -205,7 +242,7 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
   );
 
   return (
-    <form className={styles.form} onSubmit={(e) => void submit(e)} noValidate>
+    <form ref={formRef} className={styles.form} onSubmit={(e) => void submit(e)} noValidate>
       {notice && (
         <p role="alert" className={styles.formError}>
           {notice}
@@ -245,7 +282,7 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
         {v.steps.map((s, i) => {
           const err = (f: string) => errors[`steps.${i}.${f}`] ?? null;
           return (
-            <fieldset key={s.key} className={styles.stepBox}>
+            <fieldset key={s.key} className={styles.stepBox} data-step-key={s.key}>
               <legend className={styles.legendTitle}>Step {i + 1}</legend>
               <div className={styles.row}>
                 <Field label="Day" error={err('day')}>
@@ -275,7 +312,7 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
                 </Field>
               </div>
               <Field label="Title" error={err('title')}>
-                {(c) => <input {...c} className="input" value={s.title} onChange={(e) => setStep(i, { title: e.target.value })} />}
+                {(c) => <input {...c} data-focus="title" className="input" value={s.title} onChange={(e) => setStep(i, { title: e.target.value })} />}
               </Field>
               <Field label="Detail" error={err('detail')}>
                 {(c) => <textarea {...c} className="input" rows={2} value={s.detail} onChange={(e) => setStep(i, { detail: e.target.value })} />}
@@ -311,13 +348,13 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
                 <span>CRM task</span>
               </label>
               <div className={styles.actions}>
-                <Button size="sm" variant="ghost" onClick={() => moveStep(i, -1)} disabled={i === 0} aria-label={`Move step ${i + 1} up`}>
+                <Button size="sm" variant="ghost" data-focus="up" onClick={() => moveStep(i, -1)} disabled={i === 0} aria-label={`Move step ${i + 1} up`}>
                   Move up
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => moveStep(i, 1)} disabled={i === v.steps.length - 1} aria-label={`Move step ${i + 1} down`}>
+                <Button size="sm" variant="ghost" data-focus="down" onClick={() => moveStep(i, 1)} disabled={i === v.steps.length - 1} aria-label={`Move step ${i + 1} down`}>
                   Move down
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => removeStep(i)} aria-label={`Remove step ${i + 1}`}>
+                <Button size="sm" variant="ghost" data-focus="remove" onClick={() => removeStep(i)} aria-label={`Remove step ${i + 1}`}>
                   Remove
                 </Button>
               </div>
@@ -330,7 +367,7 @@ function Fields({ tenant, mode, initial, onClose }: { tenant: string; mode: 'new
           </p>
         )}
         <div>
-          <Button variant="secondary" onClick={addStep}>
+          <Button variant="secondary" data-focus="add" onClick={addStep}>
             Add step
           </Button>
         </div>
