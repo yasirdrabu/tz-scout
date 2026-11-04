@@ -1,0 +1,2 @@
+ALTER TABLE "playbooks"."account_plan" ADD COLUMN "customised" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "playbooks"."plan_step" ADD COLUMN "target_buying_roles" text[] DEFAULT '{}'::text[] NOT NULL;

@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as getPlanRoute } from '@/http/routes/v1/accounts/[id]/plan/route';
 import { POST as actionRoute } from '@/http/routes/v1/plans/[id]/route';
-import { PATCH as stepRoute } from '@/http/routes/v1/plans/[id]/steps/[stepId]/route';
+import { POST as addRoute } from '@/http/routes/v1/plans/[id]/steps/route';
+import { DELETE as removeRoute, PATCH as stepRoute } from '@/http/routes/v1/plans/[id]/steps/[stepId]/route';
+import { GET as reviewRoute } from '@/http/routes/v1/accounts/[id]/review/route';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
 import { createTemplate, setOfferPlaybook } from '@/modules/playbooks';
 import { accept, assign } from '@/modules/routing';
@@ -19,6 +21,7 @@ let outsider: string;
 let accountId: string;
 let planId: string;
 let stepIds: string[];
+let extraStepId: string;
 
 const steps = [
   { day: 0, channel: 'email' as const, ownerRole: 'seller' as const, title: 'Intro', subject: 'Hi {person.first_name}', body: 'Hello from {seller.first_name}' },
@@ -112,6 +115,106 @@ describe('PATCH /api/v1/plans/{id}/steps/{stepId}', () => {
     expect((await w.as(operator, stepRoute, `plans/${planId}/steps/${stepIds[1]}`, 'PATCH', { note: 'x' })).status).toBe(200);
     const viewer = await w.person('viewer');
     expect((await w.as(viewer, stepRoute, `plans/${planId}/steps/${stepIds[1]}`, 'PATCH', { note: 'y' })).status).toBe(403);
+  });
+});
+
+describe('customising a plan over HTTP', () => {
+  it('GET plan carries customised, and people, missing_roles and target_buying_roles on steps', async () => {
+    const body = await (await w.as(leader, getPlanRoute, `accounts/${accountId}/plan`)).json();
+    expect(body.customised).toBe(false);
+    expect(body.steps[0]).toMatchObject({ target_buying_roles: [], people: [], missing_roles: [] });
+  });
+
+  it('POST /plans/{id}/steps adds a step (201, the whole plan); the body is checked', async () => {
+    const path = `plans/${planId}/steps`;
+    const res = await w.as(seller, addRoute, path, 'POST', {
+      day: 1,
+      channel: 'email',
+      owner_role: 'seller',
+      title: 'Extra touch',
+      detail: 'Detail',
+      subject: 'Hello',
+      body: 'Body',
+      target_buying_roles: ['champion'],
+      crm_task: false,
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.customised).toBe(true);
+    const added = body.steps.find((s: { title: string }) => s.title === 'Extra touch');
+    expect(added).toMatchObject({
+      origin: 'added',
+      template_step_id: null,
+      day: 1,
+      channel: 'email',
+      owner_role: 'seller',
+      owner_user_id: seller,
+      owner_name: 'Sam Seller',
+      subject: 'Hello',
+      crm_task: false,
+      target_buying_roles: ['champion'],
+      people: [],
+      missing_roles: ['champion'],
+      status: 'todo',
+    });
+    expect(body.steps.map((s: { order: number }) => s.order)).toEqual([1, 2, 3]);
+    extraStepId = added.id;
+    expect(body.history[0]).toMatchObject({ kind: 'step_added', step_id: added.id });
+
+    const bad = async (payload: unknown) => w.as(seller, addRoute, path, 'POST', payload);
+    const ok = { day: 1, channel: 'call', owner_role: 'seller', title: 'T' };
+    expect((await bad({ ...ok, surprise: 1 })).status).toBe(400);
+    expect((await bad({ ...ok, title: '' })).status).toBe(400);
+    expect((await bad({ ...ok, day: -1 })).status).toBe(400);
+    expect((await bad({ ...ok, channel: 'fax' })).status).toBe(400);
+    expect((await bad({ ...ok, owner_role: 'ceo' })).status).toBe(400);
+    expect((await bad({ day: 1 })).status).toBe(400);
+    const role = await bad({ ...ok, target_buying_roles: ['wizard'] });
+    expect(role.status).toBe(400);
+    expect((await role.json()).errors[0]).toMatchObject({ path: 'target_buying_roles', message: 'Unknown buying role: wizard' });
+    expect((await w.as(seller, addRoute, 'plans/pln_missing/steps', 'POST', ok)).status).toBe(404);
+    expect((await w.as(outsider, addRoute, path, 'POST', ok)).status).toBe(404);
+  });
+
+  it('PATCH takes the content fields; a new day recomputes the due date', async () => {
+    const path = `plans/${planId}/steps/${extraStepId}`;
+    const res = await w.as(seller, stepRoute, path, 'PATCH', { title: 'Renamed', day: 2, target_buying_roles: ['champion', 'business_owner'], detail: null, crm_task: true });
+    expect(res.status).toBe(200);
+    const step = (await res.json()).steps.find((s: { id: string }) => s.id === extraStepId);
+    expect(step).toMatchObject({ title: 'Renamed', day: 2, origin: 'edited', detail: null, crm_task: true, target_buying_roles: ['champion', 'business_owner'] });
+    expect(step.due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect((await w.as(seller, stepRoute, path, 'PATCH', { day: 366 })).status).toBe(400);
+    expect((await w.as(seller, stepRoute, path, 'PATCH', { title: '' })).status).toBe(400);
+    expect((await w.as(seller, stepRoute, path, 'PATCH', { channel: 'fax' })).status).toBe(400);
+  });
+
+  it('DELETE removes a step; a done step is a 409; a viewer and an agent key are refused', async () => {
+    const done = await w.as(seller, removeRoute, `plans/${planId}/steps/${stepIds[0]}`, 'DELETE');
+    expect(done.status).toBe(409);
+    expect((await done.json()).title).toBe("A done step can't be removed. Skip it instead.");
+
+    const viewer = await w.person('viewer');
+    expect((await w.as(viewer, removeRoute, `plans/${planId}/steps/${extraStepId}`, 'DELETE')).status).toBe(403);
+    expect((await w.as(viewer, addRoute, `plans/${planId}/steps`, 'POST', { day: 1, channel: 'call', owner_role: 'seller', title: 'T' })).status).toBe(403);
+    const key = await keyFor(w.tenant, ['playbooks:read', 'playbooks:write'], { dataLimit: { kind: 'all' } });
+    expect((await call(removeRoute, key, `plans/${planId}/steps/${extraStepId}`, { method: 'DELETE' })).status).toBe(403);
+    expect((await call(addRoute, key, `plans/${planId}/steps`, { body: { day: 1, channel: 'call', owner_role: 'seller', title: 'T' } })).status).toBe(403);
+
+    const res = await w.as(seller, removeRoute, `plans/${planId}/steps/${extraStepId}`, 'DELETE');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.steps.map((s: { id: string }) => s.id)).toEqual(stepIds);
+    expect(body.customised).toBe(true);
+    expect(body.history.map((h: { kind: string }) => h.kind)).toEqual(expect.arrayContaining(['step_added', 'step_edited', 'step_removed']));
+    expect((await w.as(seller, removeRoute, `plans/${planId}/steps/${extraStepId}`, 'DELETE')).status).toBe(404);
+  });
+});
+
+describe('GET /api/v1/accounts/{id}/review current assignment playbook', () => {
+  it('names the playbook the assignment chose or its tier maps to, with playbooks:read', async () => {
+    const res = await w.as(leader, reviewRoute, `accounts/${accountId}/review`);
+    expect(res.status).toBe(200);
+    expect((await res.json()).current_assignment).toMatchObject({ seller_user_id: seller, playbook_name: 'HTTP flow', no_playbook: false, template_id: null });
   });
 });
 

@@ -50,7 +50,7 @@ export const planCreated = defineEvent(
 /**
  * Any change to a plan after it started: status, steps, owners or its account (a merge repoint, with `previousAccountId`).
  * `steps` lists the steps the change touched (a step edit: that step; owner moves: the moved steps; a stop: the skipped
- * steps); it is empty for a status-only change.
+ * steps; a step taken out is `{id, removed: true}`); it is empty for a status-only change.
  */
 export const planChanged = defineEvent(
   'playbooks.plan.changed',
@@ -65,11 +65,20 @@ export const planChanged = defineEvent(
     steps: z.array(
       z.object({
         id: z.string(),
-        status: z.enum(['todo', 'in_progress', 'done', 'skipped']),
-        ownerUserId: z.string().nullable(),
-        dueDate: z.string(),
-        title: z.string(),
-        crmTask: z.boolean(),
+        /** True for a step taken out of the plan; only `id` is then sent. */
+        removed: z.boolean().optional(),
+        // Everything below is absent on a removed step, and older rows lack `order` to `body`.
+        status: z.enum(['todo', 'in_progress', 'done', 'skipped']).optional(),
+        ownerUserId: z.string().nullable().optional(),
+        dueDate: z.string().optional(),
+        title: z.string().optional(),
+        crmTask: z.boolean().optional(),
+        order: z.number().int().optional(),
+        day: z.number().int().optional(),
+        channel: z.enum(['email', 'linkedin', 'call', 'meeting', 'task']).optional(),
+        detail: z.string().nullable().optional(),
+        subject: z.string().nullable().optional(),
+        body: z.string().nullable().optional(),
       }),
     ),
   }),

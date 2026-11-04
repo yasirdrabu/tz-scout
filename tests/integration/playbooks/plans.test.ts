@@ -1,16 +1,19 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { editPerson, mergeAccounts, upsertFromArrival } from '@/modules/accounts';
+import { buyingRole } from '@/modules/accounts/db/schema';
 import { accountMerged } from '@/modules/accounts/contracts/events';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
 import {
   abandonPlan,
+  addStep,
   archiveTemplate,
   completePlan,
   createTemplate,
   deleteTemplate,
   getPlan,
   pausePlan,
+  removeStep,
   resumePlan,
   setOfferPlaybook,
   startPlan,
@@ -219,6 +222,12 @@ describe('a plan starts on accept', () => {
     expect(changed).toMatchObject({ status: 'active', changed: ['owners'] });
     expect(changed.steps.map((x: { id: string }) => x.id).sort()).toEqual([after[1]!.id, after[3]!.id].sort());
     expect(changed.steps.find((x: { id: string }) => x.id === after[3]!.id)).toEqual({
+      order: 4,
+      day: 7,
+      channel: 'email',
+      detail: null,
+      subject: 'Following up',
+      body: 'Hi again',
       id: after[3]!.id,
       status: 'todo',
       ownerUserId: seller2,
@@ -375,7 +384,7 @@ describe('running a plan', () => {
     expect(moved.steps[0]).toMatchObject({ ownerUserId: seller2, dueDate: '2030-01-15' });
     const edited = (await events('playbooks.plan.changed', accountId)).pop()!.data;
     expect(edited).toMatchObject({ changed: ['steps', 'owners'] });
-    expect(edited.steps).toEqual([{ id: s.id, status: 'todo', ownerUserId: seller2, dueDate: '2030-01-15', title: 'Intro', crmTask: true }]);
+    expect(edited.steps).toEqual([{ id: s.id, order: 1, day: 0, channel: 'email', title: 'Intro', detail: null, subject: 'Hello Dana at Owner Co', body: expect.any(String), status: 'todo', ownerUserId: seller2, dueDate: '2030-01-15', crmTask: true }]);
     expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { dueDate: 'soon' })))).toMatchObject({ status: 400 });
     expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { dueDate: '2026-02-31' })))).toMatchObject({ status: 400 });
     expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { dueDate: '2028-02-29' })))).toBeNull();
@@ -407,5 +416,203 @@ describe('running a plan', () => {
     expect(stopped.steps.map((x: { id: string; status: string }) => [x.id, x.status])).toEqual((await stepsOf(plan!.id)).slice(1).map((r) => [r.id, 'skipped']));
     await t.run((ctx) => stopPlan(ctx, plan!.id, 'again'));
     expect((await plansOf(accountId))[0]!.statusReason).toBe('replied');
+  });
+});
+
+describe('roles and people on steps', () => {
+  it('copies target roles from the template and links people live, including one added after acceptance', async () => {
+    const { accountId } = await account({ name: 'Roles Co' });
+    const [plan] = await plansOf(accountId);
+    const rows = await stepsOf(plan!.id);
+    expect(rows[0]!.targetBuyingRoles).toEqual(['business_owner']);
+    expect(rows[1]!.targetBuyingRoles).toEqual([]);
+
+    const first = await asLeader((ctx) => getPlan(ctx, accountId));
+    expect(first!.steps[0]).toMatchObject({ people: [{ id: expect.any(String), name: 'Dana Lee' }], missingRoles: [] });
+    expect(first!.steps[1]).toMatchObject({ people: [], missingRoles: [] });
+    expect(first!.customised).toBe(false);
+
+    // A step for a role nobody holds yet.
+    const added = await asSeller((ctx) => addStep(ctx, plan!.id, { day: 4, channel: 'call', ownerRole: 'seller', title: 'Call the champion', targetBuyingRoles: ['champion', 'business_owner'] }));
+    const step = added.steps.find((s) => s.title === 'Call the champion')!;
+    expect(step.missingRoles).toEqual(['champion']);
+    expect(step.people.map((p) => p.name)).toEqual(['Dana Lee']);
+
+    // Enrich (or a person) finds the champion after the plan started.
+    const d = domain();
+    const out = await t.run((ctx) => upsertFromArrival(ctx, arrival({ account: { name: 'Roles Co', domain: d }, people: [{ firstName: 'Chip', lastName: 'Ng', email: `chip@${d}`, title: 'Ops' }] }), accountId));
+    const chip = out.personIds.at(-1)!;
+    await asPerson(t, (ctx) => editPerson(ctx, chip, { roleKeys: ['champion'] }));
+    const later = (await asLeader((ctx) => getPlan(ctx, accountId)))!.steps.find((s) => s.id === step.id)!;
+    expect(later.missingRoles).toEqual([]);
+    expect(later.people.map((p) => p.name).sort()).toEqual(['Chip Ng', 'Dana Lee']);
+  });
+
+  it('a person whose role was only guessed from a title does not count', async () => {
+    const { accountId } = await account({ name: 'Guess Co' });
+    const [plan] = await plansOf(accountId);
+    const d = domain();
+    await t.run((ctx) => upsertFromArrival(ctx, arrival({ account: { name: 'Guess Co', domain: d }, people: [{ firstName: 'Guy', lastName: 'Ess', email: `guy@${d}`, title: 'Chief Technology Officer' }] }), accountId));
+    const view = await asSeller((ctx) => addStep(ctx, plan!.id, { day: 4, channel: 'call', ownerRole: 'seller', title: 'Call', targetBuyingRoles: ['technical_buyer'] }));
+    expect(view.steps.find((s) => s.title === 'Call')).toMatchObject({ people: [], missingRoles: ['technical_buyer'] });
+  });
+});
+
+describe('customising a plan', () => {
+  const setStart = (planId: string, startDate: string) => t.run((ctx) => ctx.tx.update(accountPlan).set({ startDate }).where(eq(accountPlan.id, planId)));
+  const ended = { status: 409, title: 'This plan has ended.' };
+
+  it('adds a step: working-day due date, owner from role, order, history, customised and plan.changed', async () => {
+    const { accountId } = await account({ name: 'Add Co' });
+    const [plan] = await plansOf(accountId);
+    await setStart(plan!.id, '2030-01-04'); // a Friday; steps are on days 0, 3, 5, 7
+
+    const v = await asSeller((ctx) =>
+      addStep(ctx, plan!.id, { day: 4, channel: 'email', ownerRole: 'seller', title: 'Extra email', detail: ' More ', subject: ' Hi ', body: 'Body', targetBuyingRoles: ['business_owner'] }),
+    );
+    expect(v.customised).toBe(true);
+    expect(v.steps.map((s) => [s.order, s.day, s.title])).toEqual([[1, 0, 'Intro'], [2, 3, 'Leader call'], [3, 4, 'Extra email'], [4, 5, 'Research'], [5, 7, 'Follow up']]);
+    const added = v.steps[2]!;
+    expect(added).toMatchObject({ origin: 'added', templateStepId: null, status: 'todo', ownerRole: 'seller', ownerUserId: seller, detail: 'More', subject: 'Hi', crmTask: true, dueDate: '2030-01-08' });
+    expect(added.people).toHaveLength(1);
+
+    // Day 1 and day 2 from a Friday land on a weekend: the next working day is Monday.
+    const wk = await asSeller((ctx) => addStep(ctx, plan!.id, { day: 1, channel: 'task', ownerRole: 'operator', title: 'Weekend task', crmTask: false }));
+    expect(wk.steps.find((s) => s.title === 'Weekend task')).toMatchObject({ dueDate: '2030-01-07', ownerUserId: null, crmTask: false, order: 2 });
+    const wk2 = await asSeller((ctx) => addStep(ctx, plan!.id, { day: 2, channel: 'task', ownerRole: 'leader', title: 'Sunday task' }));
+    expect(wk2.steps.find((s) => s.title === 'Sunday task')).toMatchObject({ dueDate: '2030-01-07', ownerUserId: leader });
+    // Day 5 from a Friday is a Wednesday; a step on the same day as another goes after it.
+    const d5 = await asSeller((ctx) => addStep(ctx, plan!.id, { day: 5, channel: 'task', ownerRole: 'seller', title: 'Day five', ownerUserId: seller2 }));
+    expect(d5.steps.find((s) => s.title === 'Day five')).toMatchObject({ dueDate: '2030-01-09', ownerUserId: seller2 });
+    const titles = d5.steps.map((s) => s.title);
+    expect(titles.indexOf('Day five')).toBe(titles.indexOf('Research') + 1);
+
+    expect(d5.history.filter((h) => h.kind === 'step_added')).toHaveLength(4);
+    expect(d5.history.find((h) => h.kind === 'step_added' && h.stepId === added.id)!.detail).toMatchObject({ title: 'Extra email', day: 4, channel: 'email', ownerRole: 'seller', dueDate: '2030-01-08' });
+
+    const first = (await events('playbooks.plan.changed', accountId)).find((e) => e.data.steps.some((s: { id: string }) => s.id === added.id))!.data;
+    expect(first).toMatchObject({ changed: ['steps', 'owners'], status: 'active' });
+    // The new step and the steps it pushed down.
+    expect(first.steps.map((s: { title: string }) => s.title)).toEqual(['Extra email', 'Research', 'Follow up']);
+    expect(first.steps[0]).toEqual({
+      id: added.id,
+      order: 3,
+      day: 4,
+      channel: 'email',
+      title: 'Extra email',
+      detail: 'More',
+      subject: 'Hi',
+      body: 'Body',
+      status: 'todo',
+      ownerUserId: seller,
+      dueDate: '2030-01-08',
+      crmTask: true,
+    });
+    expect(first.steps[1]).toMatchObject({ order: 4, title: 'Research' });
+  });
+
+  it('checks the input; a leader step with no leader known on the plan has no owner', async () => {
+    const { accountId } = await account({ name: 'Add Bad Co' });
+    const [plan] = await plansOf(accountId);
+    const ok = { day: 2, channel: 'call' as const, ownerRole: 'seller' as const, title: 'Ok' };
+    expect(await rejects(asSeller((ctx) => addStep(ctx, plan!.id, { ...ok, title: '  ' })))).toEqual({ status: 400, title: 'Give the step a title.' });
+    expect(await rejects(asSeller((ctx) => addStep(ctx, plan!.id, { ...ok, day: 400 })))).toMatchObject({ status: 400 });
+    expect(await rejects(asSeller((ctx) => addStep(ctx, plan!.id, { ...ok, ownerUserId: 'usr_nobody' })))).toMatchObject({ status: 400 });
+    expect(await rejects(asSeller((ctx) => addStep(ctx, plan!.id, { ...ok, targetBuyingRoles: ['wizard'] })))).toEqual({ status: 400, title: 'Unknown buying role: wizard' });
+    expect(await rejects(asSeller((ctx) => addStep(ctx, 'pln_missing', ok)))).toMatchObject({ status: 404 });
+    expect((await stepsOf(plan!.id)).length).toBe(4);
+    await t.run((ctx) => ctx.tx.update(planStep).set({ ownerUserId: null }).where(eq(planStep.planId, plan!.id)));
+    const v = await asSeller((ctx) => addStep(ctx, plan!.id, { ...ok, ownerRole: 'leader' }));
+    expect(v.steps.find((s) => s.title === 'Ok')!.ownerUserId).toBeNull();
+  });
+
+  it('edits a step: origin edited, day recomputes due date and order, history and plan.changed; explicit due date wins; no change does nothing', async () => {
+    const { accountId } = await account({ name: 'Edit Co' });
+    const [plan] = await plansOf(accountId);
+    await setStart(plan!.id, '2030-01-04');
+    const follow = (await stepsOf(plan!.id))[3]!; // day 7, order 4
+    const noop = await asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { title: follow.title, day: follow.day }));
+    expect(noop.customised).toBe(false);
+    expect(noop.history.map((h) => h.kind)).toEqual(['created']);
+
+    const v = await asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { title: ' Early follow up ', day: 1, targetBuyingRoles: ['champion'], crmTask: false }));
+    expect(v.customised).toBe(true);
+    const s = v.steps.find((x) => x.id === follow.id)!;
+    expect(s).toMatchObject({ title: 'Early follow up', day: 1, origin: 'edited', dueDate: '2030-01-07', order: 2, crmTask: false, targetBuyingRoles: ['champion'], missingRoles: ['champion'] });
+    expect(v.steps.map((x) => x.title)).toEqual(['Intro', 'Early follow up', 'Leader call', 'Research']);
+    const h = v.history.find((x) => x.kind === 'step_edited')!;
+    expect(h.stepId).toBe(follow.id);
+    expect(h.detail).toMatchObject({
+      changed: { title: { from: 'Follow up', to: 'Early follow up' }, day: { from: 7, to: 1 }, due_date: { to: '2030-01-07' }, crm_task: { from: true, to: false }, target_buying_roles: { from: [], to: ['champion'] } },
+    });
+    const ev = (await events('playbooks.plan.changed', accountId)).pop()!.data;
+    expect(ev.changed).toEqual(['steps']);
+    expect(ev.steps.map((x: { title: string; order: number }) => [x.order, x.title])).toEqual([[2, 'Early follow up'], [3, 'Leader call'], [4, 'Research']]);
+    expect(ev.steps[0]).toMatchObject({ id: follow.id, day: 1, channel: 'email', dueDate: '2030-01-07', status: 'todo', crmTask: false });
+
+    // An explicit due date beats the recompute.
+    const both = await asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { day: 6, dueDate: '2030-02-01' }));
+    expect(both.steps.find((x) => x.id === follow.id)).toMatchObject({ day: 6, dueDate: '2030-02-01' });
+    expect(both.history.filter((x) => x.kind === 'due_date')).toHaveLength(1);
+
+    // Leaving email drops the subject and body.
+    const call = await asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { channel: 'call' }));
+    expect(call.steps.find((x) => x.id === follow.id)).toMatchObject({ channel: 'call', subject: null, body: null });
+
+    expect(await rejects(asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { title: ' ' })))).toEqual({ status: 400, title: 'Give the step a title.' });
+    expect(await rejects(asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { targetBuyingRoles: ['wizard'] })))).toEqual({ status: 400, title: 'Unknown buying role: wizard' });
+    expect(await rejects(asSeller((ctx) => updateStep(ctx, plan!.id, follow.id, { day: 999 })))).toMatchObject({ status: 400 });
+  });
+
+  it('status, note and owner changes alone do not customise the plan or the step', async () => {
+    const { accountId } = await account({ name: 'Plain Co' });
+    const [plan] = await plansOf(accountId);
+    const s = (await stepsOf(plan!.id))[0]!;
+    const v = await asSeller((ctx) => updateStep(ctx, plan!.id, s.id, { status: 'in_progress', note: 'On it' }));
+    expect(v.customised).toBe(false);
+    expect(v.steps[0]!.origin).toBe('template');
+  });
+
+  it('keeps a role the step already holds after it is archived, and refuses a newly archived one', async () => {
+    const { accountId } = await account({ name: 'Archived Co' });
+    const [plan] = await plansOf(accountId);
+    const s = (await stepsOf(plan!.id))[0]!; // targets business_owner
+    const archive = (archived: boolean) => t.run((ctx) => ctx.tx.update(buyingRole).set({ archived }).where(and(eq(buyingRole.tenantId, ctx.tenantId), eq(buyingRole.key, 'business_owner'))));
+    await archive(true);
+    try {
+      const keep = await asSeller((ctx) => updateStep(ctx, plan!.id, s.id, { targetBuyingRoles: ['business_owner'], title: 'Kept' }));
+      expect(keep.steps[0]!.targetBuyingRoles).toEqual(['business_owner']);
+      expect(await rejects(asSeller((ctx) => addStep(ctx, plan!.id, { day: 2, channel: 'call', ownerRole: 'seller', title: 'New', targetBuyingRoles: ['business_owner'] })))).toEqual({
+        status: 400,
+        title: 'Unknown buying role: business_owner',
+      });
+    } finally {
+      await archive(false);
+    }
+  });
+
+  it('removes a step: history, customised, plan.changed {id, removed}; refuses a done step and a closed plan', async () => {
+    const { accountId } = await account({ name: 'Remove Co' });
+    const [plan] = await plansOf(accountId);
+    const rows = await stepsOf(plan!.id);
+    await asSeller((ctx) => updateStep(ctx, plan!.id, rows[0]!.id, { status: 'done' }));
+    expect(await rejects(asSeller((ctx) => removeStep(ctx, plan!.id, rows[0]!.id)))).toEqual({ status: 409, title: "A done step can't be removed. Skip it instead." });
+    expect(await rejects(asSeller((ctx) => removeStep(ctx, plan!.id, 'stp_missing')))).toMatchObject({ status: 404 });
+
+    const v = await asSeller((ctx) => removeStep(ctx, plan!.id, rows[2]!.id));
+    expect(v.customised).toBe(true);
+    expect(v.steps.map((s) => s.title)).toEqual(['Intro', 'Leader call', 'Follow up']);
+    expect(v.history.find((x) => x.kind === 'step_removed')).toMatchObject({ stepId: rows[2]!.id, detail: { title: 'Research', day: 5, channel: 'task', status: 'todo' } });
+    expect((await events('playbooks.plan.changed', accountId)).pop()!.data).toMatchObject({ changed: ['steps'], steps: [{ id: rows[2]!.id, removed: true }] });
+
+    // A skipped step can be removed, and a paused plan can still be changed.
+    await asLeader((ctx) => pausePlan(ctx, plan!.id));
+    await asSeller((ctx) => updateStep(ctx, plan!.id, rows[1]!.id, { status: 'skipped' }));
+    expect((await asSeller((ctx) => removeStep(ctx, plan!.id, rows[1]!.id))).steps.map((s) => s.title)).toEqual(['Intro', 'Follow up']);
+
+    await asLeader((ctx) => abandonPlan(ctx, plan!.id, 'Nope'));
+    expect(await rejects(asSeller((ctx) => removeStep(ctx, plan!.id, rows[3]!.id)))).toEqual(ended);
+    expect(await rejects(asSeller((ctx) => addStep(ctx, plan!.id, { day: 2, channel: 'call', ownerRole: 'seller', title: 'Late' })))).toEqual(ended);
+    expect(await rejects(asSeller((ctx) => updateStep(ctx, plan!.id, rows[3]!.id, { title: 'Late' })))).toEqual(ended);
   });
 });
