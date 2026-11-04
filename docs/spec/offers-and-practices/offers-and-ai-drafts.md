@@ -14,6 +14,15 @@ and what proof stands behind it. Nothing should be matched against an offer an o
 - Editing the **buyer definition** of an approved offer (industries, size, revenue, regions, titles,
   buying roles, exclusions) sends it back to draft (carried from v1). Editing other fields (promise,
   price, proof points) keeps it approved and publishes `offers.offer.changed`.
+- **Seller guide (R2c-2).** `talking_points` (text[]), `objections` (`[{objection, answer}]`) and `avoid`
+  (text[]) are on create, patch and get, next to `proof_points`. All default empty. Limits: at most 20
+  items in each list; a talking point or avoid item is up to 300 characters; an objection and an answer are
+  up to 500 each. An objection may not contain "|" (400 "Take the | out of the objection."), because the
+  form writes one per line as `objection | answer`; an answer may. They do not affect matching, so editing
+  them keeps an approved offer approved. The web form sends `objections` only when the text changed.
+- **Retired offers.** A retired (archived) offer's playbook tiers are read-only: `PUT
+  /api/v1/offers/{id}/playbooks/{tier}` is 409 "This offer is retired." Archiving a playbook clears its
+  tiers (see `docs/spec/playbooks/playbook-templates.md`).
 - `target_buying_roles` lists the **required** buying-committee roles (for example business owner,
   commercial buyer, technical buyer); `optional_buying_roles` lists roles that help but are not needed
   (shipped R2b-3). Accounts uses both for committee coverage; Playbooks uses it to show committee gaps;

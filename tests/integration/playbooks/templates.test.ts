@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { seedAccountDefaults } from '@/modules/accounts';
+import { buyingRole } from '@/modules/accounts/db/schema';
 import { createOffer, createPractice, seedOffers, TAAZAA_OFFERS } from '@/modules/offers';
 import {
   archiveTemplate,
@@ -85,6 +86,19 @@ describe('target buying roles', () => {
   });
 });
 
+describe('archived target buying roles', () => {
+  it('keeps a role the current version already uses; a new unknown key still fails', async () => {
+    await t.run((ctx) => seedAccountDefaults(ctx));
+    const made = await t.run((ctx) => createTemplate(ctx, { name: 'Kept role', steps: [{ ...email, targetBuyingRoles: ['business_owner'] }] }));
+    await t.run((ctx) => ctx.tx.update(buyingRole).set({ archived: true }).where(and(eq(buyingRole.tenantId, ctx.tenantId), eq(buyingRole.key, 'business_owner'))));
+    const kept = await t.run((ctx) => updateTemplate(ctx, made.id, { name: 'Kept role 2', steps: [{ ...email, targetBuyingRoles: ['business_owner'] }, call] }));
+    expect(kept.steps[0]!.targetBuyingRoles).toEqual(['business_owner']);
+    await rejects(t.run((ctx) => updateTemplate(ctx, made.id, { steps: [{ ...email, targetBuyingRoles: ['business_owner', 'wizard'] }] })), 400, 'Unknown buying role: wizard');
+    const other = await t.run((ctx) => createTemplate(ctx, { name: 'Other' }));
+    await rejects(t.run((ctx) => updateTemplate(ctx, other.id, { steps: [{ ...email, targetBuyingRoles: ['business_owner'] }] })), 400, 'Unknown buying role: business_owner');
+  });
+});
+
 describe('list, duplicate, archive, delete', () => {
   it('lists steps, days, channels, runs_on and running', async () => {
     const made = await t.run((ctx) => createTemplate(ctx, { name: 'Listed', status: 'active', steps: [email, call, { ...call, day: 9 }] }));
@@ -102,6 +116,20 @@ describe('list, duplicate, archive, delete', () => {
     expect(copy).toMatchObject({ name: 'Original (copy)', status: 'draft', version: 1, stepCount: 2 });
     expect(copy.id).not.toBe(made.id);
     expect((await t.run((ctx) => archiveTemplate(ctx, made.id))).status).toBe('archived');
+  });
+
+  it('archiving removes the offer mapping so the tier shows null; running plans stay', async () => {
+    const made = await t.run((ctx) => createTemplate(ctx, { name: 'To archive', status: 'active', steps: [email] }));
+    await t.run((ctx) => setOfferPlaybook(ctx, offerId, 'good_fit', made.id));
+    const planId = newId('pln');
+    await t.run((ctx) =>
+      ctx.tx.insert(accountPlan).values({ id: planId, tenantId: ctx.tenantId, accountId: newId('acc'), offerId, tier: 'good_fit', templateId: made.id, templateVersion: 1, assignmentId: newId('asg'), stopWhen: 'never', startDate: '2026-11-04' }),
+    );
+    expect((await t.run((ctx) => offerPlaybooks(ctx, offerId))).find((v) => v.tier === 'good_fit')!.playbook).toMatchObject({ id: made.id });
+    await t.run((ctx) => archiveTemplate(ctx, made.id));
+    expect((await t.run((ctx) => offerPlaybooks(ctx, offerId))).find((v) => v.tier === 'good_fit')).toEqual({ tier: 'good_fit', playbook: null, firstEmail: null });
+    const [plan] = await t.run((ctx) => ctx.tx.select().from(accountPlan).where(eq(accountPlan.id, planId)));
+    expect(plan).toMatchObject({ status: 'active', templateId: made.id });
   });
 
   it('deletes an unused template and refuses one a plan or an offer uses (409)', async () => {

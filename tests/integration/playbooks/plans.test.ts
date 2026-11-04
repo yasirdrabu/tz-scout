@@ -170,8 +170,9 @@ describe('a plan starts on accept', () => {
     const mapped = (await t.run((ctx) => createTemplate(ctx, { name: 'Mapped then archived', status: 'active', steps: [steps[0]!] }))).id;
     await t.run((ctx) => setOfferPlaybook(ctx, offerId, 'good_fit', mapped));
     await t.run((ctx) => archiveTemplate(ctx, mapped));
+    // Archiving clears the tier mapping, so the offer path now reports no playbook.
     const viaOffer = await account({ tier: 'good_fit', name: 'Mapped Co' });
-    expect((await events('playbooks.plan.not_started', viaOffer.accountId))[0]!.data.reason).toBe('template_unavailable');
+    expect((await events('playbooks.plan.not_started', viaOffer.accountId))[0]!.data.reason).toBe('no_offer_playbook');
     await t.run((ctx) => setOfferPlaybook(ctx, offerId, 'good_fit', null));
   });
 

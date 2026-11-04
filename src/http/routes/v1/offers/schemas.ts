@@ -3,6 +3,22 @@ import { PRICE_MODELS } from '@/modules/offers';
 
 const text = z.string();
 const list = z.array(z.string());
+const guideList = z
+  .array(z.string().trim().min(1, 'Leave out blank lines.').max(300, 'Keep each line under 300 characters.'))
+  .max(20, 'Use 20 lines or fewer.');
+const objections = z
+  .array(
+    z.strictObject({
+      objection: z
+        .string()
+        .trim()
+        .min(1, 'Write the objection.')
+        .max(500, 'Keep this under 500 characters.')
+        .refine((s) => !s.includes('|'), 'Take the | out of the objection.'),
+      answer: z.string().trim().min(1, 'Write the answer.').max(500, 'Keep this under 500 characters.'),
+    }),
+  )
+  .max(20, 'Use 20 lines or fewer.');
 const int = z.number().int();
 const cents = int.nonnegative().nullable();
 const rate = z.number().nonnegative().nullable();
@@ -34,6 +50,9 @@ const editable = {
   excluded_domains: list,
   excluded_categories: list,
   proof_points: list,
+  talking_points: guideList,
+  objections,
+  avoid: guideList,
   price_model: z.enum(PRICE_MODELS, 'Pick fixed, starting_at, per_month or custom.').nullable(),
   length_weeks: int.min(1, 'Use 1 to 260 weeks.').max(260, 'Use 1 to 260 weeks.').nullable(),
   key_offer: section,

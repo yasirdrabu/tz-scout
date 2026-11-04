@@ -107,9 +107,11 @@ describe('PATCH /api/v1/plans/{id}/steps/{stepId}', () => {
     expect((await w.as(seller, stepRoute, `plans/${planId}/steps/stp_missing`, 'PATCH', { note: 'x' })).status).toBe(404);
   });
 
-  it('an operator, who holds no playbooks:write, cannot write (403)', async () => {
+  it('an operator holds playbooks:write and can update a step; a viewer cannot (403)', async () => {
     const operator = await w.person('operator');
-    expect((await w.as(operator, stepRoute, `plans/${planId}/steps/${stepIds[1]}`, 'PATCH', { note: 'x' })).status).toBe(403);
+    expect((await w.as(operator, stepRoute, `plans/${planId}/steps/${stepIds[1]}`, 'PATCH', { note: 'x' })).status).toBe(200);
+    const viewer = await w.person('viewer');
+    expect((await w.as(viewer, stepRoute, `plans/${planId}/steps/${stepIds[1]}`, 'PATCH', { note: 'y' })).status).toBe(403);
   });
 });
 

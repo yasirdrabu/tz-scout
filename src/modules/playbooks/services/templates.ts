@@ -119,10 +119,14 @@ const sameSteps = (a: StepView[], b: Normal[]) =>
     );
   });
 
-/** Every target buying role must be one of the workspace's active roles: 400 "Unknown buying role: {key}" at the step. */
-async function checkRoles(ctx: ModuleContext, steps: Normal[]): Promise<void> {
+/**
+ * Every target buying role must be one of the workspace's active roles: 400 "Unknown buying role: {key}" at the step.
+ * A key the template's current version already uses stays valid after its role is archived (`kept`).
+ */
+async function checkRoles(ctx: ModuleContext, steps: Normal[], kept: StepView[] = []): Promise<void> {
   if (!steps.some((s) => s.targetBuyingRoles.length > 0)) return;
   const known = new Set((await listBuyingRoles(ctx)).map((r) => r.key));
+  for (const s of kept) for (const k of s.targetBuyingRoles) known.add(k);
   for (const [i, s] of steps.entries()) {
     const bad = s.targetBuyingRoles.find((k) => !known.has(k));
     if (bad !== undefined) throw invalid('steps.' + i + '.target_buying_roles', 'Unknown buying role: ' + bad);
@@ -182,7 +186,7 @@ export async function updateTemplate(ctx: ModuleContext, id: string, patch: Temp
 
   const current = await stepsOf(ctx, id, before.version);
   const next = patch.steps === undefined ? null : normalise(patch.steps);
-  if (next) await checkRoles(ctx, next);
+  if (next) await checkRoles(ctx, next, current);
   const changedSteps = next !== null && !sameSteps(current, next);
   if ((patch.status ?? before.status) === 'active' && (changedSteps ? next! : current).length === 0) throw invalid('status', NEEDS_STEP);
 
@@ -197,6 +201,7 @@ export async function updateTemplate(ctx: ModuleContext, id: string, patch: Temp
     await insertSteps(ctx, id, version, next!);
   }
   const changed = Object.keys(set);
+  if (set.status === 'archived' && before.status !== 'archived') await clearOfferMaps(ctx, id);
   if (changed.length > 0 || changedSteps) {
     await ctx.tx
       .update(playbookTemplate)
@@ -275,6 +280,11 @@ export async function duplicateTemplate(ctx: ModuleContext, id: string): Promise
   return copy;
 }
 
+/** An archived template cannot fill a tier; running plans keep their copy. */
+async function clearOfferMaps(ctx: ModuleContext, id: string): Promise<void> {
+  await ctx.tx.delete(offerPlaybook).where(and(eq(offerPlaybook.tenantId, ctx.tenantId), eq(offerPlaybook.templateId, id)));
+}
+
 /** The template stops being chosen; running plans are untouched. */
 export async function archiveTemplate(ctx: ModuleContext, id: string): Promise<TemplateDetail> {
   const before = await load(ctx, id, true);
@@ -283,6 +293,7 @@ export async function archiveTemplate(ctx: ModuleContext, id: string): Promise<T
       .update(playbookTemplate)
       .set({ status: 'archived', updatedBy: ctx.actor.id, updatedAt: new Date() })
       .where(eq(playbookTemplate.id, id));
+    await clearOfferMaps(ctx, id);
     await audit(ctx, { action: 'playbooks.template.archived', subject: subjectOf(id), before: { status: before.status }, after: { status: 'archived' } });
   }
   return getTemplate(ctx, id);

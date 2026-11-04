@@ -29,7 +29,7 @@ they are the same strings.
 | `assign:act` | Assign accounts to sellers |
 | `assignments:respond` | Accept or decline own assignments |
 | `playbooks:read` | See account plans and briefs |
-| `playbooks:write` | Edit account plans, steps, outcomes, learnings |
+| `playbooks:write` | Edit account plans, steps, outcomes, learnings. Operators hold it by default: everyone who works an account can edit its plan (user, 2026-11-04) |
 | `playbooks:manage` | Edit playbook templates |
 | `offers:read` | See practices and offers |
 | `offers:manage` | Create, edit, approve offers, practices, case studies |
@@ -62,7 +62,7 @@ they are the same strings.
 | review:act | yes | yes | grantable | yes (web-ui W6) | no |
 | assign:act | yes | yes | no | no | no |
 | assignments:respond | yes | yes | yes | no | no |
-| playbooks read/write | yes | yes | yes | read | no |
+| playbooks read/write | yes | yes | yes | yes | no |
 | playbooks:manage | yes | yes | no | yes | no |
 | offers:read | yes | yes | yes | yes | yes |
 | offers:manage | yes | no | no | yes | no |
@@ -86,7 +86,9 @@ The Viewer role (web-ui Decision 17) sees the pipeline and the scorecard and cha
 
 - A workspace's role sets live in `tenancy.role_permission` (one row per tenant and role, the role's
   permission list). A role with no row uses the default above, so a new workspace needs no seed and a
-  later change to the defaults reaches every workspace that never edited that role.
+  later change to the defaults reaches every workspace that never edited that role. A workspace with a
+  customised Operator role keeps its saved list, so it does not gain `playbooks:write` until the role is
+  restored to the defaults or edited (R2c-2).
 - `GET /api/v1/roles` (`members:read`) returns per role its current `permissions`, its
   `default_permissions`, `customised` and `locked` (true for Owner), and the permission list with labels
   and groups. `PUT /api/v1/roles/{role}` (`members:manage`, people only) replaces one role's list.

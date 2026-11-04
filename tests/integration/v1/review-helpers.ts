@@ -11,7 +11,7 @@ import { arrival } from '@/modules/intake/db/schema';
 import { newId } from '@/platform/ids';
 import { call, keyFor, personAndAgent, SEND } from './intake-helpers';
 
-export type Role = 'leader' | 'seller' | 'operator';
+export type Role = 'leader' | 'seller' | 'operator' | 'viewer';
 type Handler = (r: Request) => Promise<Response>;
 
 async function signIn(userId: string): Promise<string> {

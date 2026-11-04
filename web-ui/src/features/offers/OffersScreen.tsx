@@ -26,6 +26,8 @@ export function OffersScreen() {
   const practices = useQuery(practicesQuery(tenant));
   const offers = useQuery(offersQuery(tenant));
   const canManage = !!me && hasScope(me, 'offers:manage');
+  const canPick = canManage || (!!me && hasScope(me, 'playbooks:manage'));
+  const canOpenPlaybooks = !!me && hasScope(me, 'playbooks:read');
 
   const list = practices.data ?? [];
   const practiceId = params.practiceId ?? list[0]?.id;
@@ -63,7 +65,7 @@ export function OffersScreen() {
           />
           <div className={styles.content}>
             {offerId && practiceId ? (
-              <OfferView tenant={tenant} offerId={offerId} canManage={canManage} onEdit={(field) => edit({ edit: 'offer', ...(field ? { field } : {}) })} onDuplicate={() => edit({ edit: 'new-offer', copy: offerId })} />
+              <OfferView tenant={tenant} offerId={offerId} canManage={canManage} canPick={canPick} canOpenPlaybooks={canOpenPlaybooks} onEdit={(field) => edit({ edit: 'offer', ...(field ? { field } : {}) })} onDuplicate={() => edit({ edit: 'new-offer', copy: offerId })} />
             ) : practiceId ? (
               <PracticeView
                 tenant={tenant}

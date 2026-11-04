@@ -76,6 +76,9 @@ export const offer = offers.table(
     excludedDomains: textArray('excluded_domains'),
     excludedCategories: textArray('excluded_categories'),
     proofPoints: textArray('proof_points'),
+    talkingPoints: textArray('talking_points'), // seller guide: what to say, in order
+    objections: jsonb('objections').notNull().default(sql`'[]'::jsonb`).$type<{ objection: string; answer: string }[]>(),
+    avoid: textArray('avoid'), // seller guide: what not to say or promise
     priceModel: text('price_model'), // fixed | starting_at | per_month | custom
     lengthWeeks: integer('length_weeks'),
     keyOffer: text('key_offer'),

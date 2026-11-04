@@ -314,7 +314,7 @@ export type BulkResult = { account_id: string; ok: true } | { account_id: string
 
 export type BulkAction =
   | ({ action: 'status' } & StatusChange)
-  | { action: 'assign'; seller_user_id: string; notes?: string; ownership_decision?: 'assign' | 'keep'; ownership_decisions?: Record<string, 'assign' | 'keep'> };
+  | { action: 'assign'; seller_user_id: string; notes?: string; playbook_id?: string | null; ownership_decision?: 'assign' | 'keep'; ownership_decisions?: Record<string, 'assign' | 'keep'> };
 
 export const bulk = (tenant: string, accountIds: string[], action: BulkAction) =>
   apiFetch<{ results: BulkResult[] }>('/review-queue/bulk', { tenant, method: 'POST', body: { account_ids: accountIds, ...action } });
@@ -361,8 +361,23 @@ export type BulkPreviewRow = ({ account_id: string; ok: true } & Preview) | { ac
 export const previewBulkAssign = (tenant: string, accountIds: string[], sellerUserId: string) =>
   apiFetch<{ data: BulkPreviewRow[] }>('/review-queue/assign-preview', { tenant, method: 'POST', body: { account_ids: accountIds, seller_user_id: sellerUserId } });
 
-export const assign = (tenant: string, id: string, body: { seller_user_id: string; notes?: string; ownership_decision?: 'assign' | 'keep' }) =>
+export const assign = (tenant: string, id: string, body: { seller_user_id: string; notes?: string; playbook_id?: string | null; ownership_decision?: 'assign' | 'keep' }) =>
   apiFetch<{ id: string }>(`/accounts/${encodeURIComponent(id)}:assign`, { tenant, method: 'POST', body });
 
 /** Sends the account to the CRM again after a failed handoff (`crm:push`). */
 export const retryPush = (tenant: string, id: string) => apiFetch<{ handoff_id: string }>(`/accounts/${encodeURIComponent(id)}:push`, { tenant, method: 'POST' });
+
+/** What Scout would start for the account: its offer and tier's playbook, or none. */
+export type PlaybookSuggestion = {
+  playbook: { id: string; name: string; steps: number; days: number } | null;
+  reason: 'offer_tier' | 'none';
+  offer: { id: string; name: string } | null;
+  tier: string | null;
+};
+
+export const playbookSuggestionQuery = (tenant: string, id: string) =>
+  queryOptions({
+    queryKey: ['playbook-suggestion', tenant, id],
+    queryFn: () => apiFetch<PlaybookSuggestion>(`/accounts/${encodeURIComponent(id)}/playbook-suggestion`, { tenant }),
+    gcTime: 0,
+  });

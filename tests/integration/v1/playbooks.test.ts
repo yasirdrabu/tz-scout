@@ -13,7 +13,7 @@ let w: Workspace;
 let other: Workspace;
 let leader: string;
 let seller: string;
-let operator: string;
+let viewer: string;
 let account: string;
 let otherAccount: string;
 
@@ -22,7 +22,7 @@ beforeAll(async () => {
   other = await workspace('Other Brief Co');
   leader = await w.person('leader', { name: 'Dana Ruiz' });
   seller = await w.person('seller', { name: 'Sam Seller', dataLimit: { kind: 'own_accounts' } });
-  operator = await w.person('operator', { name: 'Olu Operator' });
+  viewer = await w.person('viewer', { name: 'Vera Viewer' });
   account = await w.sent({ name: 'Brief Route Co', industry: 'Logistics' });
   otherAccount = await other.sent({ name: 'Elsewhere Co' });
 });
@@ -108,8 +108,8 @@ describe('PUT /accounts/{id}/brief/sections/{key}', () => {
     expect((await put('overview', { body: 'x'.repeat(17 * 1024) })).status).toBe(413);
   });
 
-  it('needs playbooks:write: an operator is a 403', async () => {
-    expect((await w.as(operator, putSection, `accounts/${account}/brief/sections/overview`, 'PUT', { body: 'Hi' })).status).toBe(403);
+  it('needs playbooks:write: a viewer is a 403', async () => {
+    expect((await w.as(viewer, putSection, `accounts/${account}/brief/sections/overview`, 'PUT', { body: 'Hi' })).status).toBe(403);
   });
 
   it('is a 404 for another tenant and a seller outside the data limit', async () => {
@@ -154,8 +154,8 @@ describe('POST /accounts/{id}:draft-brief', () => {
     expect((await post({ other: 1 })).status).toBe(400);
   });
 
-  it('needs playbooks:write: an operator is a 403', async () => {
-    expect((await w.as(operator, accountAction, `accounts/${account}:draft-brief`, 'POST')).status).toBe(403);
+  it('needs playbooks:write: a viewer is a 403', async () => {
+    expect((await w.as(viewer, accountAction, `accounts/${account}:draft-brief`, 'POST')).status).toBe(403);
   });
 
   it('is a 404 for another tenant and a seller outside the data limit', async () => {

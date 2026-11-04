@@ -1,4 +1,4 @@
-import { formatCompact, formatDate, formatDateTime, formatDay, formatDuration, formatMoney, formatMonthDay, formatNumber, formatPercent, formatRelative, formatTime } from './format';
+import { daysSince, formatCompact,formatDate, formatDateTime, formatDay, formatDuration, formatMoney, formatMonthDay, formatNumber, formatPercent, formatRelative, formatTime } from './format';
 
 describe('formatMoney', () => {
   it('formats integer cents in the tenant currency', () => {
@@ -107,5 +107,18 @@ describe('formatCompact', () => {
     [2_100_000, '2.1M'],
   ])('%d is %s', (n, text) => {
     expect(formatCompact(n)).toBe(text);
+  });
+});
+
+describe('daysSince', () => {
+  it('counts days in the tenant timezone, not the browser timezone', () => {
+    // 00:30 on Nov 4 in Los Angeles is 08:30Z.
+    const now = new Date('2026-11-04T08:30:00Z');
+    expect(daysSince('2026-11-04', 'America/Los_Angeles', now)).toBe(0);
+    expect(daysSince('2026-11-03', 'America/Los_Angeles', now)).toBe(1);
+    // 23:30 on Nov 3 in Los Angeles is 07:30Z on Nov 4: still the 3rd there, the 4th in UTC.
+    const before = new Date('2026-11-04T07:30:00Z');
+    expect(daysSince('2026-11-03', 'America/Los_Angeles', before)).toBe(0);
+    expect(daysSince('2026-11-03', 'UTC', before)).toBe(1);
   });
 });

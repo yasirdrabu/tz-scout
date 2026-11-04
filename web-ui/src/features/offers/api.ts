@@ -18,6 +18,8 @@ export type Practice = {
   offer_count: number;
 };
 
+export type Objection = { objection: string; answer: string };
+
 export type Offer = {
   id: string;
   practice_id: string;
@@ -43,6 +45,9 @@ export type Offer = {
   company_size_min: number | null;
   company_size_max: number | null;
   proof_points: string[];
+  talking_points: string[];
+  objections: Objection[];
+  avoid: string[];
   updated_at: string;
 };
 
@@ -74,6 +79,9 @@ export type OfferBody = Partial<
     | 'company_size_min'
     | 'company_size_max'
     | 'proof_points'
+    | 'talking_points'
+    | 'objections'
+    | 'avoid'
   >
 >;
 
@@ -130,3 +138,20 @@ export const archivePractice = (tenant: string, id: string) => apiFetch<Practice
 
 /** The status dot's tone for an offer status. */
 export const statusTone = (s: OfferStatus) => (s === 'approved' ? 'good' : s === 'draft' ? 'near' : 'neutral');
+
+export type OfferPlaybook = {
+  tier: 'act_now' | 'good_fit' | 'watch';
+  playbook: { id: string; name: string; status: string; steps: number; days: number } | null;
+  first_email: { subject: string; body: string } | null;
+};
+
+/** The playbook each tier of an offer runs. */
+export const offerPlaybooksQuery = (tenant: string, id: string) =>
+  queryOptions({
+    queryKey: ['offers', tenant, 'playbooks', id],
+    queryFn: () => apiFetch<{ data: OfferPlaybook[] }>(`${path(id)}/playbooks`, { tenant }).then((r) => r.data),
+  });
+
+/** Pick a playbook for one tier, or `null` for none. */
+export const setOfferPlaybook = (tenant: string, id: string, tier: OfferPlaybook['tier'], playbookId: string | null) =>
+  apiFetch<{ data: OfferPlaybook[] }>(`${path(id)}/playbooks/${tier}`, { tenant, method: 'PUT', body: { playbook_id: playbookId } });

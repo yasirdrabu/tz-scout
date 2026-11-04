@@ -150,10 +150,22 @@ export const offerRoute = createRoute({
   component: OffersScreen,
 });
 
+/** Playbooks (§20): the open form in `edit` (`new` or `playbook`), so a link or a reload keeps the place (C10). */
+export type PlaybooksSearch = { edit?: string; assign?: string };
+const playbooksSearch = (search: Record<string, unknown>): PlaybooksSearch => pickStrings(search, ['edit', 'assign']);
+
 export const playbooksRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'playbooks',
-  component: () => <Placeholder screen={SCREENS.playbooks} />,
+  validateSearch: playbooksSearch,
+  component: lazyRouteComponent(() => import('../features/playbooks/PlaybooksScreen'), 'PlaybooksScreen'),
+});
+
+export const playbookRoute = createRoute({
+  getParentRoute: () => tenantRoute,
+  path: 'playbooks/$id',
+  validateSearch: playbooksSearch,
+  component: lazyRouteComponent(() => import('../features/playbooks/PlaybooksScreen'), 'PlaybookScreen'),
 });
 
 export const funnelRoute = createRoute({

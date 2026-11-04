@@ -330,6 +330,32 @@ describe('R1 offer and practice routes (Rulings 12 to 14)', () => {
     expect((await res.json()).errors.map((e: { message: string }) => e.message)).toContain("A role can't be both required and optional: Technical buyer");
   });
 
+  it('the seller guide round-trips, keeps an approved offer approved, and refuses over-limit lists', async () => {
+    const guide = { talking_points: ['  Open with the pilot  ', 'Ask about the budget'], objections: [{ objection: 'Too dear', answer: 'Fixed fee.' }], avoid: ['Do not promise dates'] };
+    const o = await create('Guide offer', guide);
+    expect(o).toMatchObject({ ...guide, talking_points: ['Open with the pilot', 'Ask about the budget'] });
+    expect(await create('No guide')).toMatchObject({ talking_points: [], objections: [], avoid: [] });
+    expect((await w.as(operator, offerAction, `offers/${o.id}:approve`, 'POST')).status).toBe(200);
+    const edited = await (await w.as(w.owner, patchOffer, `offers/${o.id}`, 'PATCH', { talking_points: ['New'], objections: [], avoid: ['Nothing'] })).json();
+    expect(edited).toMatchObject({ status: 'approved', talking_points: ['New'], objections: [], avoid: ['Nothing'] });
+    expect(edited.warning).toBeUndefined();
+    const read = await (await w.as(w.owner, getOfferRoute, `offers/${o.id}`)).json();
+    expect(read).toMatchObject({ status: 'approved', talking_points: ['New'], avoid: ['Nothing'] });
+
+    const bad = (body: unknown) => w.as(w.owner, patchOffer, `offers/${o.id}`, 'PATCH', body);
+    expect((await bad({ talking_points: Array(21).fill('x') })).status).toBe(400);
+    expect((await bad({ talking_points: ['x'.repeat(301)] })).status).toBe(400);
+    expect((await bad({ avoid: ['  '] })).status).toBe(400);
+    expect((await bad({ objections: Array(21).fill({ objection: 'a', answer: 'b' }) })).status).toBe(400);
+    expect((await bad({ objections: [{ objection: 'a'.repeat(501), answer: 'b' }] })).status).toBe(400);
+    expect((await bad({ objections: [{ objection: 'a', answer: '' }] })).status).toBe(400);
+    expect((await bad({ objections: [{ objection: 'a', answer: 'b', extra: 1 }] })).status).toBe(400);
+    const piped = await bad({ objections: [{ objection: 'a | b', answer: 'c | d' }] });
+    expect(piped.status).toBe(400);
+    expect((await piped.json()).errors.map((e: { message: string }) => e.message)).toContain('Take the | out of the objection.');
+    expect((await bad({ objections: [{ objection: 'Too dear', answer: 'Fixed fee | cheap' }] })).status).toBe(200);
+  });
+
   it('a content edit keeps an active offer active; a buyer edit sends it back with the warning', async () => {
     const o = await create('Edit me');
     expect((await w.as(operator, offerAction, `offers/${o.id}:approve`, 'POST')).status).toBe(200);

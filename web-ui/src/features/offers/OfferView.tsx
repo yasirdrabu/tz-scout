@@ -6,6 +6,8 @@ import { Button } from '../../ui/Button';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { Pill } from '../../ui/Pill';
 import { LoadFailed, LoadingRows, useRun } from '../settings/shared';
+import { InitialMessage, PlaybookByTier } from './PlaybookByTier';
+import { SellerGuide } from './SellerGuide';
 import { deleteOffer, offerQuery, offerStatsQuery, practiceQuery, retireOffer, statusTone, type OfferDetail } from './api';
 import styles from './Offers.module.css';
 
@@ -18,12 +20,16 @@ export const SECTIONS = [
   { field: 'why_now', label: 'Why now' },
 ] as const;
 
-export type SectionField = (typeof SECTIONS)[number]['field'];
+export type SectionField = (typeof SECTIONS)[number]['field'] | 'talking_points';
 
 type Props = {
   tenant: string;
   offerId: string;
   canManage: boolean;
+  /** offers:manage or playbooks:manage: the tier selects. */
+  canPick: boolean;
+  /** playbooks:read: the Open links. */
+  canOpenPlaybooks: boolean;
   /** Opens the form, at a section when one is given. */
   onEdit: (field?: SectionField) => void;
   onDuplicate: () => void;
@@ -31,10 +37,9 @@ type Props = {
 
 /**
  * §19 Offer view: breadcrumb, title, status and "Updated", the actions, the price line, the current stats,
- * the sections and the proof points. Playbook by tier, the initial message and the seller guide are R2 and
- * not rendered.
+ * the sections, the playbook by tier, the initial message and the seller guide.
  */
-export function OfferView({ tenant, offerId, canManage, onEdit, onDuplicate }: Props) {
+export function OfferView({ tenant, offerId, canManage, canPick, canOpenPlaybooks, onEdit, onDuplicate }: Props) {
   const f = useFormat();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -152,18 +157,9 @@ export function OfferView({ tenant, offerId, canManage, onEdit, onDuplicate }: P
         );
       })}
 
-      <section className={styles.section} aria-label="Proof points">
-        <h3 className={styles.sectionTitle}>Proof points</h3>
-        {o.proof_points.length ? (
-          <ul className={styles.bullets}>
-            {o.proof_points.map((p) => (
-              <li key={p}>{p}</li>
-            ))}
-          </ul>
-        ) : (
-          <p className={styles.note}>Not written yet.</p>
-        )}
-      </section>
+      <PlaybookByTier tenant={tenant} offerId={o.id} canPick={canPick && canOpenPlaybooks && !retired} canOpen={canOpenPlaybooks} />
+      <InitialMessage tenant={tenant} offerId={o.id} />
+      <SellerGuide offer={o} {...(canManage && !retired ? { onWrite: () => onEdit('talking_points') } : {})} />
 
       <ConfirmDialog
         open={confirming}

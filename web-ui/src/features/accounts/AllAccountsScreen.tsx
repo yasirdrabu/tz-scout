@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router';
 import { useId, useState } from 'react';
+import { hasScope, meQuery } from '../../api/me';
 import { formatMoney } from '../../lib/format';
 import { useFormat } from '../../lib/useFormat';
 import { useSearchText } from '../../lib/useSearchText';
@@ -14,6 +15,7 @@ import { Tabs } from '../../ui/Tabs';
 import { useToast } from '../../ui/Toast';
 import { kindAndPlace } from '../review/parts';
 import { errorText, LoadFailed, LoadingRows } from '../settings/shared';
+import { DueWords } from './NextStep';
 import { accountFacetsQuery, accountsQuery, activityText, exportAccounts, type AccountRow, type AccountsFilters } from './api';
 import styles from './Accounts.module.css';
 
@@ -46,6 +48,8 @@ export function AllAccountsScreen() {
 
   const list = useInfiniteQuery(accountsQuery(tenant, filters));
   const facets = useQuery(accountFacetsQuery(tenant, filters));
+  const me = useQuery(meQuery(tenant));
+  const showSteps = !!me.data && hasScope(me.data, 'playbooks:read');
   const rows = list.data?.pages.flatMap((p) => p.data) ?? [];
   const total = list.data?.pages[0]?.total;
   const fx = facets.data;
@@ -132,7 +136,7 @@ export function AllAccountsScreen() {
         )
       ) : (
         <div className={table.wrap}>
-          <Table tenant={tenant} rows={rows} />
+          <Table tenant={tenant} rows={rows} showSteps={showSteps} />
           <div className={table.foot}>
             <span>{`Showing ${rows.length} of ${f.number(total ?? rows.length)}`}</span>
             {list.hasNextPage && (
@@ -148,7 +152,7 @@ export function AllAccountsScreen() {
   );
 }
 
-function Table({ tenant, rows }: { tenant: string; rows: AccountRow[] }) {
+function Table({ tenant, rows, showSteps }: { tenant: string; rows: AccountRow[]; showSteps: boolean }) {
   const f = useFormat();
   const navigate = useNavigate();
   return (
@@ -163,6 +167,7 @@ function Table({ tenant, rows }: { tenant: string; rows: AccountRow[] }) {
             Priority
           </th>
           <th scope="col">Source</th>
+          {showSteps && <th scope="col">Next step</th>}
           <th scope="col">Last activity</th>
           <th scope="col" className={table.num}>
             Value
@@ -198,6 +203,20 @@ function Table({ tenant, rows }: { tenant: string; rows: AccountRow[] }) {
               {r.source?.name ?? <span className={table.muted}>None</span>}
               {r.source?.via && <div className={styles.sub}>{r.source.via}</div>}
             </td>
+            {showSteps && (
+              <td>
+                {r.next_step ? (
+                  <>
+                    {r.next_step.title}
+                    <div className={styles.sub}>
+                      <DueWords step={r.next_step} />
+                    </div>
+                  </>
+                ) : (
+                  <span className={table.muted}>None</span>
+                )}
+              </td>
+            )}
             <td>
               {r.last_activity ? (
                 <>

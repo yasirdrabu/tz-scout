@@ -20,6 +20,9 @@ export const ACTIVITY: Record<string, string> = {
 };
 export const activityText = (a: Activity) => ACTIVITY[a.kind] ?? a.kind;
 
+/** The next open step of the account's running playbook. `due_date` is a plain "YYYY-MM-DD". */
+export type NextStep = { title: string; due_date: string; overdue: boolean; due_today: boolean };
+
 export type Assignment = {
   id: string;
   account_id: string;
@@ -36,6 +39,7 @@ export type Assignment = {
   offer_id: string | null;
   offer_name: string | null;
   playbook_name: string | null;
+  next_step: NextStep | null;
   stage: string | null;
   stage_label: string | null;
   last_activity: Activity | null;
@@ -77,6 +81,7 @@ export type AccountRow = {
   practice_name: string | null;
   lead_offer: LeadOffer | null;
   source: SourceRef | null;
+  next_step?: NextStep | null;
   last_activity: Activity | null;
   value: { amount_cents: number | null; currency: string | null; kind: 'won' | 'open_deal' | 'estimated'; deal_name: string | null } | null;
 };
