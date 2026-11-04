@@ -16,6 +16,7 @@ import { activityQuery, briefQuery, handoffsQuery, scoreQuery, type Handoffs } f
 import { BriefCard } from './BriefCard';
 import styles from './Account.module.css';
 import { AccountFacts, WhyNow, type ViewProps } from './ReviewView';
+import { PendingPlan, PlanCard } from './PlanCard';
 import { BuyingCommittee } from './RightRail';
 import { ScoreStrip, ScoreTile } from './ScoreStrip';
 
@@ -223,6 +224,7 @@ export function AssignedView(props: ViewProps) {
   return (
     <div className={styles.layout}>
       <div className={styles.main}>
+        {review.current_assignment?.status === 'pending' ? <PendingPlan assignment={review.current_assignment} /> : <PlanCard tenant={tenant} me={me} accountId={account.id} onFind={onFind} />}
         <Outcomes handoffs={handoffs.data} />
         <Activity tenant={tenant} id={account.id} />
         <ReviewRecord {...props} />

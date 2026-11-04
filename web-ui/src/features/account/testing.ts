@@ -6,7 +6,7 @@ import type { AccountReview } from '../review/api';
 import { BLUEPRINT } from '../offers/testing';
 import { LEADER, REASONS, SELLERS, STATUSES } from '../review/testing';
 import type { StagesView } from '../settings/stages/api';
-import type { AccountDetail, AccountScore, Brief, BriefSection, Committee, Conflict, CrmCheck, Fact, Handoffs } from './api';
+import type { Plan, AccountDetail, AccountScore, Brief, BriefSection, Committee, Conflict, CrmCheck, Fact, Handoffs } from './api';
 
 // Fixtures in the API's shapes (snake_case), for the account page's tests.
 
@@ -240,6 +240,68 @@ export const STAGES: StagesView = {
   triggers: [],
 };
 
+const PSTEP = {
+  owner_role: 'seller' as const,
+  owner_user_id: 'usr_ash',
+  owner_name: 'Ash Patel',
+  detail: null,
+  subject: null,
+  body: null,
+  note: null,
+  done_at: null,
+  done_by: null,
+  origin: 'template' as const,
+  crm_task: false,
+  target_buying_roles: [],
+  people: [],
+  missing_roles: [],
+  overdue: false,
+  due_today: false,
+};
+
+/** Ash's plan, day 4 of 11: two steps done or skipped of five, one overdue email with no technical buyer on file. */
+export const PLAN: Plan = {
+  id: 'pln_1',
+  account_id: 'acc_mdc',
+  status: 'active',
+  status_reason: null,
+  playbook: { id: 'pbk_1', name: 'Public sector RFP', version: 2 },
+  newer_version: false,
+  customised: false,
+  start_date: '2026-11-02',
+  day: 3,
+  days: 10,
+  steps: [
+    { ...PSTEP, id: 'stp_1', order: 1, day: 0, channel: 'email', title: 'Intro email', status: 'done', due_date: '2026-11-02', done_at: '2026-11-02T15:00:00Z', done_by: 'usr_ash' },
+    { ...PSTEP, id: 'stp_2', order: 2, day: 1, channel: 'linkedin', title: 'Connect on LinkedIn', status: 'in_progress', due_date: '2026-11-03' },
+    {
+      ...PSTEP,
+      id: 'stp_3',
+      order: 3,
+      day: 3,
+      channel: 'email',
+      title: 'Follow-up email',
+      detail: 'Mention the December RFP.',
+      subject: 'Following up on the RFP',
+      body: 'Hi {person.first_name},\n\nA short note on the RFP.',
+      status: 'todo',
+      due_date: '2026-11-04',
+      target_buying_roles: ['business_owner', 'technical_buyer'],
+      people: [{ id: 'per_jr', name: 'Jarice Rodriguez' }],
+      missing_roles: ['technical_buyer'],
+      due_today: true,
+    },
+    { ...PSTEP, id: 'stp_4', order: 4, day: 5, channel: 'call', title: 'Call the sponsor', owner_role: 'leader', owner_user_id: null, owner_name: null, status: 'todo', due_date: '2026-11-09' },
+    { ...PSTEP, id: 'stp_5', order: 5, day: 10, channel: 'task', title: 'Send the case study', status: 'skipped', due_date: '2026-11-16' },
+  ],
+  history: [
+    { id: 'his_1', kind: 'created', step_id: null, detail: null, by: null, by_name: null, at: '2026-11-02T10:00:00Z' },
+    { id: 'his_2', kind: 'step_status', step_id: 'stp_1', detail: { from: 'todo', to: 'done' }, by: 'usr_ash', by_name: 'Ash Patel', at: '2026-11-02T15:00:00Z' },
+  ],
+};
+
+const PEOPLE_NAMES: Record<string, string> = { usr_ash: 'Ash Patel', usr_zach: 'Zach Wiant' };
+
 export type Served = {
   scopes?: string[];
   account?: AccountDetail;
@@ -252,6 +314,8 @@ export type Served = {
   stages?: StagesView;
   conflicts?: Conflict[];
   committee?: Committee;
+  /** The account's plan; none answers 404. */
+  plan?: Plan | null;
 };
 
 /** Everything the account page reads, answered; returns the request bodies seen per path. */
@@ -264,6 +328,7 @@ export function serveAccount(opts: Served = {}) {
   };
   // Resolving keeps the chosen fact as Zach, so the refetch reads "Kept by Zach Wiant".
   let conflicts = opts.conflicts ?? [];
+  let plan = opts.plan ?? null;
   serveMe({ taazaa: { scopes: opts.scopes ?? PAGE_LEADER, user: { id: 'usr_zach', name: 'Zach Wiant', email: 'zach@taazaa.com' } } });
   server.use(
     http.get('/api/v1/stages', () => HttpResponse.json(opts.stages ?? STAGES)),
@@ -287,6 +352,37 @@ export function serveAccount(opts: Served = {}) {
     http.get('/api/v1/settings/review/reasons', () => HttpResponse.json({ data: REASONS })),
     http.get('/api/v1/assignable-sellers', () => HttpResponse.json(SELLERS)),
     http.post(exactly('/api/v1/accounts/acc_mdc:assign-preview'), () => HttpResponse.json({ preflight: { result: 'new', message: 'New in the CRM' }, approves_to: null, replaces: null })),
+    http.get('/api/v1/accounts/acc_mdc/plan', () => (plan ? HttpResponse.json(plan) : problem(404, 'That account has no plan.'))),
+    http.get('/api/v1/members/directory', () =>
+      HttpResponse.json({ data: Object.entries(PEOPLE_NAMES).map(([user_id, name]) => ({ user_id, name })) }),
+    ),
+    http.patch('/api/v1/plans/:planId/steps/:stepId', async ({ request, params }) => {
+      await note(request);
+      const body = sent[new URL(request.url).pathname]!.at(-1) as { status?: Plan['steps'][number]['status']; note?: string | null; owner_user_id?: string | null; due_date?: string };
+      plan = {
+        ...plan!,
+        steps: plan!.steps.map((s) =>
+          s.id !== params.stepId
+            ? s
+            : {
+                ...s,
+                ...(body.status ? { status: body.status, done_at: body.status === 'done' ? '2026-11-04T12:00:00Z' : null } : {}),
+                ...('note' in body ? { note: body.note ?? null } : {}),
+                ...('owner_user_id' in body ? { owner_user_id: body.owner_user_id ?? null, owner_name: body.owner_user_id ? (PEOPLE_NAMES[body.owner_user_id] ?? null) : null } : {}),
+                ...(body.due_date ? { due_date: body.due_date } : {}),
+              },
+        ),
+      };
+      return HttpResponse.json(plan);
+    }),
+    http.post(/\/api\/v1\/plans\/[^/]+:(pause|resume|complete|abandon)$/, async ({ request }) => {
+      await note(request);
+      const action = new URL(request.url).pathname.split(':').pop()!;
+      const body = sent[new URL(request.url).pathname]!.at(-1) as { reason?: string } | null;
+      const status = { pause: 'paused', resume: 'active', complete: 'completed', abandon: 'abandoned' }[action] as Plan['status'];
+      plan = { ...plan!, status, status_reason: body?.reason ?? null };
+      return HttpResponse.json(plan);
+    }),
     http.get('/api/v1/accounts/acc_mdc/conflicts', () => HttpResponse.json({ data: conflicts, next_cursor: null })),
     http.post(/\/api\/v1\/conflicts\/[^/]+:resolve$/, async ({ request }) => {
       const { pathname } = new URL(request.url);

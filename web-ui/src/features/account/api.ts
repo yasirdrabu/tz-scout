@@ -1,5 +1,6 @@
 import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 import { apiFetch } from '../../api/client';
+import type { OwnerRole, StepChannel } from '../playbooks/api';
 
 // The account page (screens.md §4): the account, its score, facts, brief, HubSpot check, handoffs
 // and activity (src/http/routes/v1/accounts/[id]/..., buying-roles). Every word, number and label is
@@ -282,3 +283,71 @@ export const editPerson = (tenant: string, personId: string, body: PersonPatch) 
   apiFetch<Person>(`/people/${encodeURIComponent(personId)}`, { tenant, method: 'PATCH', body });
 
 export const personName = (p: Pick<Person, 'first_name' | 'last_name'>) => [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Someone';
+
+export type PlanStatus = 'active' | 'paused' | 'completed' | 'stopped' | 'abandoned';
+export type StepStatus = 'todo' | 'in_progress' | 'done' | 'skipped';
+
+export type PlanStep = {
+  id: string;
+  order: number;
+  day: number;
+  channel: StepChannel;
+  owner_role: OwnerRole;
+  owner_user_id: string | null;
+  owner_name: string | null;
+  title: string;
+  detail: string | null;
+  subject: string | null;
+  body: string | null;
+  status: StepStatus;
+  note: string | null;
+  due_date: string | null;
+  done_at: string | null;
+  done_by: string | null;
+  origin: 'template' | 'added' | 'edited';
+  crm_task: boolean;
+  target_buying_roles: string[];
+  /** The account's people who hold a target role (stated or set by a person), read live. */
+  people: { id: string; name: string }[];
+  /** Target roles nobody holds. */
+  missing_roles: string[];
+  overdue: boolean;
+  due_today: boolean;
+};
+
+export type PlanHistory = { id: string; kind: string; step_id: string | null; detail: unknown; by: string | null; by_name: string | null; at: string };
+
+export type Plan = {
+  id: string;
+  account_id: string;
+  status: PlanStatus;
+  status_reason: string | null;
+  playbook: { id: string; name: string; version: number };
+  newer_version: boolean;
+  customised: boolean;
+  start_date: string;
+  /** Days since the plan started, and the last step's day. */
+  day: number;
+  days: number;
+  steps: PlanStep[];
+  history: PlanHistory[];
+};
+
+/** Under `['account', tenant, id]`, so what refreshes the account refreshes the plan. A 404 means no plan. */
+export const planQuery = (tenant: string, id: string) =>
+  queryOptions({
+    queryKey: ['account', tenant, id, 'plan'],
+    queryFn: () => apiFetch<Plan>(path(id, '/plan'), { tenant }),
+  });
+
+export type StepPatch = { status?: StepStatus; note?: string | null; owner_user_id?: string | null; due_date?: string };
+
+/** Returns the whole plan. */
+export const patchStep = (tenant: string, planId: string, stepId: string, body: StepPatch) =>
+  apiFetch<Plan>(`/plans/${encodeURIComponent(planId)}/steps/${encodeURIComponent(stepId)}`, { tenant, method: 'PATCH', body });
+
+export type PlanActionName = 'pause' | 'resume' | 'complete' | 'abandon';
+
+/** Returns the whole plan; `reason` is for abandon. */
+export const planAction = (tenant: string, planId: string, action: PlanActionName, reason?: string) =>
+  apiFetch<Plan>(`/plans/${encodeURIComponent(planId)}:${action}`, { tenant, method: 'POST', body: reason ? { reason } : {} });
