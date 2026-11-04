@@ -95,12 +95,16 @@ import * as v1MeWorkspace from './routes/v1/me/workspace/route';
 import * as v1MembersId from './routes/v1/members/[id]/route';
 import * as v1MembersDirectory from './routes/v1/members/directory/route';
 import * as v1Members from './routes/v1/members/route';
+import * as v1OffersIdPlaybooksTier from './routes/v1/offers/[id]/playbooks/[tier]/route';
+import * as v1OffersIdPlaybooks from './routes/v1/offers/[id]/playbooks/route';
 import * as v1OffersIdCaseStudies from './routes/v1/offers/[id]/case-studies/route';
 import * as v1OffersId from './routes/v1/offers/[id]/route';
 import * as v1OffersIdSignalRules from './routes/v1/offers/[id]/signal-rules/route';
 import * as v1Offers from './routes/v1/offers/route';
 import * as v1OffersStats from './routes/v1/offers/stats/route';
 import * as v1PeopleId from './routes/v1/people/[id]/route';
+import * as v1PlaybooksId from './routes/v1/playbooks/[id]/route';
+import * as v1Playbooks from './routes/v1/playbooks/route';
 import * as v1PracticesId from './routes/v1/practices/[id]/route';
 import * as v1Practices from './routes/v1/practices/route';
 import * as v1Rescore from './routes/v1/rescore/route';
@@ -245,10 +249,14 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/members`, module: v1Members },
   { path: `${V1}/offers/stats`, module: v1OffersStats },
   { path: `${V1}/offers/:id/case-studies`, module: v1OffersIdCaseStudies },
+  { path: `${V1}/offers/:id/playbooks`, module: v1OffersIdPlaybooks },
+  { path: `${V1}/offers/:id/playbooks/:tier`, module: v1OffersIdPlaybooksTier },
   { path: `${V1}/offers/:id`, module: v1OffersId },
   { path: `${V1}/offers/:id/signal-rules`, module: v1OffersIdSignalRules },
   { path: `${V1}/offers`, module: v1Offers },
   { path: `${V1}/people/:id`, module: v1PeopleId },
+  { path: `${V1}/playbooks/:id`, module: v1PlaybooksId },
+  { path: `${V1}/playbooks`, module: v1Playbooks },
   { path: `${V1}/practices/:id`, module: v1PracticesId },
   { path: `${V1}/practices`, module: v1Practices },
   { path: `${V1}/rescore`, module: v1Rescore },

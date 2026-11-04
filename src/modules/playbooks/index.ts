@@ -34,3 +34,28 @@ export { handoffPackage, playbooksHandoffPackage } from './services/package';
 export { bestOfferNames } from './services/best-offer';
 export { buildPackage, type PackageBrief, type PackageInput, type PackageSignal } from './domain/package';
 export { followUps } from './domain/follow-ups';
+export {
+  HAS_RUN,
+  NEEDS_NAME,
+  NEEDS_STEP,
+  OWNER_ROLES,
+  STEP_CHANNELS,
+  STOP_RULES,
+  TEMPLATE_STATUSES,
+  archiveTemplate,
+  createTemplate,
+  deleteTemplate,
+  duplicateTemplate,
+  getTemplate,
+  listTemplates,
+  updateTemplate,
+  type StepInput,
+  type StepView,
+  type Template,
+  type TemplateDetail,
+  type TemplateInput,
+  type TemplatePatch,
+  type TemplateStatus,
+  type TemplateSummary,
+} from './services/templates';
+export { MAPPED_TIERS, NOT_AVAILABLE, offerPlaybooks, playbookFor, setOfferPlaybook, type MappedTier, type OfferPlaybookView } from './services/offer-playbooks';
