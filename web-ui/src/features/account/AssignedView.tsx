@@ -1,11 +1,14 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { hasScope } from '../../api/me';
 import { formatMoney } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { useFormat } from '../../lib/useFormat';
 import { Avatar } from '../../ui/Avatar';
 import { Button } from '../../ui/Button';
 import { Card } from '../../ui/Card';
+import { offerQuery } from '../offers/api';
+import { SellerGuide } from '../offers/SellerGuide';
 import { HandoffChip } from '../review/parts';
 import { errorText } from '../settings/shared';
 import { activityQuery, briefQuery, handoffsQuery, scoreQuery, type Handoffs } from './api';
@@ -181,6 +184,35 @@ function AssignmentCard({ review }: { review: ViewProps['review'] }) {
   );
 }
 
+/** The lead offer's seller guide, read only. */
+function SellerGuideCard({ tenant, offerId }: { tenant: string; offerId: string }) {
+  const offer = useQuery(offerQuery(tenant, offerId));
+  if (offer.isPending)
+    return (
+      <Card title="Seller guide">
+        <p className={styles.note}>Loading the seller guide</p>
+      </Card>
+    );
+  if (offer.isError)
+    return (
+      <Card title="Seller guide">
+        <p className={styles.error} role="alert">{`The seller guide didn't load. ${errorText(offer.error)}`}</p>
+      </Card>
+    );
+  const o = offer.data;
+  if (!o.talking_points.length && !o.objections.length && !o.proof_points.length && !o.avoid.length)
+    return (
+      <Card title="Seller guide">
+        <p className={styles.note}>{`No seller guide for ${o.name} yet.`}</p>
+      </Card>
+    );
+  return (
+    <Card>
+      <SellerGuide offer={o} />
+    </Card>
+  );
+}
+
 /** §4b: outcomes, HubSpot activity and the review record; the assignment and committee on the right. */
 export function AssignedView(props: ViewProps) {
   const { tenant, me, account, review, onFind } = props;
@@ -194,6 +226,7 @@ export function AssignedView(props: ViewProps) {
       </div>
       <aside className={styles.rail} aria-label="Account details">
         <AssignmentCard review={review} />
+        {review.lead_offer && hasScope(me, 'offers:read') && <SellerGuideCard tenant={tenant} offerId={review.lead_offer.offer_id} />}
         <BuyingCommittee tenant={tenant} me={me} account={account} onFind={onFind} />
       </aside>
     </div>

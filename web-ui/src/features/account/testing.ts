@@ -3,6 +3,7 @@ import { exactly, problem } from '../../test/http';
 import { serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
 import type { AccountReview } from '../review/api';
+import { BLUEPRINT } from '../offers/testing';
 import { LEADER, REASONS, SELLERS, STATUSES } from '../review/testing';
 import type { StagesView } from '../settings/stages/api';
 import type { AccountDetail, AccountScore, Brief, BriefSection, Committee, Conflict, CrmCheck, Fact, Handoffs } from './api';
@@ -266,6 +267,7 @@ export function serveAccount(opts: Served = {}) {
   serveMe({ taazaa: { scopes: opts.scopes ?? PAGE_LEADER, user: { id: 'usr_zach', name: 'Zach Wiant', email: 'zach@taazaa.com' } } });
   server.use(
     http.get('/api/v1/stages', () => HttpResponse.json(opts.stages ?? STAGES)),
+    http.get('/api/v1/offers/off_mb', () => HttpResponse.json({ ...BLUEPRINT, practice_lead_name: null, can_delete: false })),
     http.get('/api/v1/accounts/acc_mdc', () => HttpResponse.json(opts.account ?? ACCOUNT)),
     http.get('/api/v1/accounts/acc_mdc/review', () => HttpResponse.json(opts.review ?? REVIEW)),
     http.get('/api/v1/accounts/acc_mdc/score', () =>
