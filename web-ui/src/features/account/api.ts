@@ -340,7 +340,40 @@ export const planQuery = (tenant: string, id: string) =>
     queryFn: () => apiFetch<Plan>(path(id, '/plan'), { tenant }),
   });
 
-export type StepPatch = { status?: StepStatus; note?: string | null; owner_user_id?: string | null; due_date?: string };
+export type StepPatch = {
+  status?: StepStatus;
+  note?: string | null;
+  owner_user_id?: string | null;
+  due_date?: string;
+  title?: string;
+  detail?: string | null;
+  day?: number;
+  channel?: StepChannel;
+  subject?: string | null;
+  body?: string | null;
+  crm_task?: boolean;
+  target_buying_roles?: string[];
+};
+
+export type NewStep = {
+  day: number;
+  channel: StepChannel;
+  owner_role: OwnerRole;
+  title: string;
+  detail?: string | null;
+  subject?: string | null;
+  body?: string | null;
+  target_buying_roles?: string[];
+  crm_task?: boolean;
+};
+
+/** Returns the whole plan. */
+export const addStep = (tenant: string, planId: string, body: NewStep) =>
+  apiFetch<Plan>(`/plans/${encodeURIComponent(planId)}/steps`, { tenant, method: 'POST', body });
+
+/** Returns the whole plan. A done step is a 409: skip it instead. */
+export const removeStep = (tenant: string, planId: string, stepId: string) =>
+  apiFetch<Plan>(`/plans/${encodeURIComponent(planId)}/steps/${encodeURIComponent(stepId)}`, { tenant, method: 'DELETE' });
 
 /** Returns the whole plan. */
 export const patchStep = (tenant: string, planId: string, stepId: string, body: StepPatch) =>

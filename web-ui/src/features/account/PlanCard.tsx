@@ -12,6 +12,7 @@ import { Menu, MenuItem } from '../../ui/Menu';
 import { useToast } from '../../ui/Toast';
 import type { CurrentAssignment } from '../review/api';
 import { errorText, useRun } from '../settings/shared';
+import { EditPlanDrawer } from './EditPlanDrawer';
 import { planAction, planQuery, type Plan, type PlanActionName } from './api';
 import styles from './Account.module.css';
 import { StepRow } from './PlanStep';
@@ -136,6 +137,7 @@ export function PlanCard({ tenant, me, accountId, onFind }: { tenant: string; me
   const { run, busy } = useRun();
   const toast = useToast();
   const [abandoning, setAbandoning] = useState(false);
+  const [editing, setEditing] = useState(false);
   const plan = useQuery({ ...planQuery(tenant, accountId), enabled: hasScope(me, 'playbooks:read') });
 
   if (!hasScope(me, 'playbooks:read')) return null;
@@ -172,6 +174,11 @@ export function PlanCard({ tenant, me, accountId, onFind }: { tenant: string; me
       actions={
         <span className={styles.planHead}>
           <span className={cx(styles.muted, styles.small)}>{`${p.playbook.name} · Day ${day} of ${total}`}</span>
+          {canWrite && (
+            <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+              Edit plan
+            </Button>
+          )}
           {canWrite && (
             <Menu
               align="end"
@@ -213,6 +220,7 @@ export function PlanCard({ tenant, me, accountId, onFind }: { tenant: string; me
         </ul>
         <History plan={p} />
       </div>
+      {canWrite && <EditPlanDrawer tenant={tenant} plan={p} open={editing} onClose={() => setEditing(false)} onPlan={setPlan} />}
       {abandoning && (
         <AbandonDialog
           onClose={() => setAbandoning(false)}
