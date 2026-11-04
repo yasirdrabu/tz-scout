@@ -13,7 +13,10 @@ import { POST as bulkRoute } from '@/http/routes/v1/review-queue/bulk/route';
 import { GET as countRoute } from '@/http/routes/v1/review-queue/count/route';
 import { GET as queueRoute } from '@/http/routes/v1/review-queue/route';
 import { GET as getSettings, PUT as putSettings } from '@/http/routes/v1/settings/review/route';
+import { GET as getSuggestion } from '@/http/routes/v1/accounts/[id]/playbook-suggestion/route';
 import { seedMockCrm } from '@/modules/crm';
+import { createOffer, createPractice } from '@/modules/offers';
+import { archiveTemplate, createTemplate, setOfferPlaybook } from '@/modules/playbooks';
 import { assignmentCreated } from '@/modules/routing';
 import { membership } from '@/modules/tenancy/db/schema';
 import { SYSTEM_GRANTOR, addMember, createApiKey, createTenant, handleDevSignIn, setPrincipalCacheTtl, type Permission } from '@/modules/tenancy';
@@ -23,6 +26,7 @@ import { newId } from '@/platform/ids';
 import { runOutbox } from '../helpers/run-outbox';
 import { arrivedAccount, setSummary } from '../routing/helpers';
 import { inTenant, seedUser, uniqueSlug } from '../tenancy/helpers';
+import { completeOffer } from '../offers/helpers';
 import { call, freshTenant, keyFor, personAndAgent, SEND } from './intake-helpers';
 
 type Who = 'owner' | 'leader' | 'leader2' | 'seller' | 'seller2' | 'operator' | 'limited';
@@ -514,5 +518,64 @@ describe('review settings', () => {
     expect((await put({ auto_accept_working_days: 3 }, 'leader')).status).toBe(403);
     expect((await viaKey(await keyIn(['settings:manage']), putSettings, 'settings/review', 'PUT', { auto_accept_working_days: 3, version: await version() })).status).toBe(403);
     expect((await (await as('owner', getSettings, 'settings/review')).json()).auto_accept_working_days).toBeNull();
+  });
+});
+
+describe('playbook choice on assign', () => {
+  const step = { day: 0, channel: 'email', ownerRole: 'seller', title: 'Open' } as const;
+  const createdFor = async (accountId: string) =>
+    (await adminDb.select().from(outbox).where(eq(outbox.tenantId, tenantId)).orderBy(outbox.seq))
+      .map((r) => r.payload as { type: string; data: { accountId?: string; templateId?: string | null; noPlaybook?: boolean } })
+      .filter((e) => e.type === assignmentCreated.type && e.data.accountId === accountId)
+      .map((e) => e.data);
+
+  it('playbook_id absent, null or an id; an unknown or archived one is a 400 and assigns nothing', async () => {
+    const tpl = await run((ctx) => createTemplate(ctx, { name: 'Choice A', status: 'active', steps: [step] }));
+    const old = await run((ctx) => createTemplate(ctx, { name: 'Choice Old', status: 'active', steps: [step] }));
+    await run((ctx) => archiveTemplate(ctx, old.id));
+    const [a, b, c, d] = [await account('Pc A'), await account('Pc B'), await account('Pc C'), await account('Pc D')];
+    expect((await as('leader', accountAction, `accounts/${a}:assign`, 'POST', { seller_user_id: ids.seller })).status).toBe(202);
+    expect((await as('leader', accountAction, `accounts/${b}:assign`, 'POST', { seller_user_id: ids.seller, playbook_id: null })).status).toBe(202);
+    expect((await as('leader', accountAction, `accounts/${c}:assign`, 'POST', { seller_user_id: ids.seller, playbook_id: tpl.id })).status).toBe(202);
+    expect((await createdFor(a))[0]).toMatchObject({ templateId: null, noPlaybook: false });
+    expect((await createdFor(b))[0]).toMatchObject({ templateId: null, noPlaybook: true });
+    expect((await createdFor(c))[0]).toMatchObject({ templateId: tpl.id, noPlaybook: false });
+    for (const bad of ['tpl_missing', old.id]) {
+      const res = await as('leader', accountAction, `accounts/${d}:assign`, 'POST', { seller_user_id: ids.seller, playbook_id: bad });
+      expect(res.status).toBe(400);
+      expect((await res.json()).errors).toEqual([{ path: 'playbook_id', message: "That playbook isn't available." }]);
+    }
+    expect(await createdFor(d)).toEqual([]);
+  });
+
+  it('the bulk assign takes one playbook_id for the run', async () => {
+    const tpl = await run((ctx) => createTemplate(ctx, { name: 'Choice Bulk', status: 'active', steps: [step] }));
+    const [a, b] = [await account('Pb A'), await account('Pb B')];
+    const res = await as('leader', bulkRoute, 'review-queue/bulk', 'POST', { account_ids: [a, b], action: 'assign', seller_user_id: ids.seller, playbook_id: tpl.id });
+    expect(res.status).toBe(200);
+    for (const id of [a, b]) expect((await createdFor(id))[0]).toMatchObject({ templateId: tpl.id });
+    const bad = await as('leader', bulkRoute, 'review-queue/bulk', 'POST', { account_ids: [a], action: 'assign', seller_user_id: ids.seller, playbook_id: 'tpl_missing' });
+    expect(bad.status).toBe(400);
+  });
+
+  it('the suggestion is the lead offer playbook for the account tier, else none', async () => {
+    const practice = await run((ctx) => createPractice(ctx, { name: 'Sugg Practice', slug: `sugg-${Date.now().toString(36)}` }));
+    const best = await run((ctx) => createOffer(ctx, { name: 'Best Offer', practiceId: practice.id, ...completeOffer }));
+    const lead = await run((ctx) => createOffer(ctx, { name: 'Lead Offer', practiceId: practice.id, ...completeOffer }));
+    const tpl = await run((ctx) => createTemplate(ctx, { name: 'Sugg Plan', status: 'active', steps: [step, { ...step, day: 5, title: 'Follow up' }] }));
+    await run((ctx) => setOfferPlaybook(ctx, best.id, 'act_now', tpl.id));
+    const a = await account('Sugg Co');
+    const ask = (who: Who = 'leader') => as(who, getSuggestion, `accounts/${a}/playbook-suggestion`);
+    await setSummary(tenant(), a, { tier: 'act_now', bestOfferId: best.id });
+    expect(await (await ask()).json()).toEqual({ playbook: { id: tpl.id, name: 'Sugg Plan', steps: 2, days: 5 }, reason: 'offer_tier', offer: { id: best.id, name: 'Best Offer' }, tier: 'act_now' });
+    await setSummary(tenant(), a, { tier: 'nurture' });
+    expect(await (await ask()).json()).toEqual({ playbook: null, reason: 'none' });
+    await setSummary(tenant(), a, { tier: 'act_now', leadOfferOverrideId: lead.id });
+    expect(await (await ask()).json()).toEqual({ playbook: null, reason: 'none' });
+    await setSummary(tenant(), a, { leadOfferOverrideId: null });
+    await run((ctx) => archiveTemplate(ctx, tpl.id));
+    expect(await (await ask()).json()).toEqual({ playbook: null, reason: 'none' });
+    expect((await ask('seller')).status).toBe(403);
+    expect((await as('limited', getSuggestion, `accounts/${await account('Hidden Co')}/playbook-suggestion`)).status).toBe(404);
   });
 });

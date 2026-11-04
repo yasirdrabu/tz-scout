@@ -52,7 +52,7 @@ export async function acceptLocked(ctx: ModuleContext, a: Assignment, how: 'sell
     .update(assignment)
     .set({ status: 'accepted', acceptedHow: how, respondedAt: at })
     .where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.id, a.id)));
-  await publish(ctx, assignmentAccepted, { assignmentId: a.id, accountId: a.accountId, sellerUserId: a.sellerUserId, acceptedHow: how });
+  await publish(ctx, assignmentAccepted, { assignmentId: a.id, accountId: a.accountId, sellerUserId: a.sellerUserId, acceptedHow: how, templateId: a.templateId, noPlaybook: a.noPlaybook });
   await moveStage(ctx, a.accountId, 'assigned', `${a.id}:accepted`);
 }
 

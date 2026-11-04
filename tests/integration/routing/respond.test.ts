@@ -59,7 +59,7 @@ describe('accept and decline (REV-E2-S2, REV-E2-S3)', () => {
     expect(await assignmentOf(id)).toMatchObject({ status: 'accepted', acceptedHow: 'seller' });
     expect(await reviewOf(a)).toMatchObject({ stage: 'assigned', currentAssignmentId: id });
     const events = await published(t, a);
-    expect(events.find((e) => e.type === assignmentAccepted.type)!.data).toEqual({ assignmentId: id, accountId: a, sellerUserId: seller, acceptedHow: 'seller' });
+    expect(events.find((e) => e.type === assignmentAccepted.type)!.data).toEqual({ assignmentId: id, accountId: a, sellerUserId: seller, acceptedHow: 'seller', templateId: null, noPlaybook: false });
     expect(await snapshotCount(t, a)).toBe(3); // creation, approve-and-assign, accept
     await runOutbox(t.tenantId);
     expect(await summaryOf(t, a)).toMatchObject({ ownerUserId: seller, stage: 'assigned' });

@@ -7,6 +7,7 @@ import { assign, markSeen, moveToStage, previewAssign, type AssignInput } from '
 import { can } from '@/modules/tenancy';
 import { parseBody } from '../../_lib/body';
 import { idAndAction, notFound } from '../../_lib/path';
+import { playbookChoice } from '../../_lib/playbook-choice';
 import { accepted, byAction, v1Route } from '../../_lib/v1-route';
 import { accountOf, arrivalOutcome } from '../respond';
 import { patchAccountBody, patchFacts } from '../schemas';
@@ -42,6 +43,7 @@ const assignBody = z.strictObject({
   notes: z.string().nullish(),
   lead_offer_id: z.string().nullish(),
   ownership_decision: z.enum(['assign', 'keep']).optional(),
+  playbook_id: z.string().nullish(),
 });
 const previewBody = z.strictObject({ seller_user_id: z.string() });
 const moveStageBody = z.strictObject({ stage: z.string(), note: z.string().nullish() });
@@ -75,7 +77,8 @@ export const POST = byAction('accounts', {
   }),
   assign: v1Route({ permission: 'assign:act', peopleOnly: true }, async (req, _principal, ctx) => {
     const { id } = idAndAction(req, 'accounts');
-    return accepted(await assign(ctx, id, await parseBody<AssignInput>(req, assignBody)));
+    const { playbookId, ...input } = await parseBody<AssignInput & { playbookId?: string | null }>(req, assignBody);
+    return accepted(await assign(ctx, id, { ...input, ...(await playbookChoice(ctx, playbookId)) }));
   }),
   'assign-preview': v1Route({ permission: 'assign:act', peopleOnly: true }, async (req, _principal, ctx) => {
     const { id } = idAndAction(req, 'accounts');
