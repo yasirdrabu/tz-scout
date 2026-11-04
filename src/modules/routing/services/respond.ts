@@ -138,7 +138,7 @@ export async function withdraw(
   }
   if (!OPEN_STATUSES.includes(a.status)) throw conflict('That assignment is not open.');
 
-  if (opts.reassignTo) return { assignmentId, reassigned: await assign(ctx, a.accountId, { sellerUserId: opts.reassignTo }) };
+  if (opts.reassignTo) return { assignmentId, reassigned: await assign(ctx, a.accountId, { sellerUserId: opts.reassignTo, templateId: a.templateId, noPlaybook: a.noPlaybook }) };
   await withdrawLocked(ctx, a, by);
   await publishReviewSnapshot(ctx, a.accountId);
   return { assignmentId, reassigned: null };

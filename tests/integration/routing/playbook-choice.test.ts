@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { activityObserved } from '@/modules/crm/contracts/events';
-import { accept, assign, assignmentAccepted, assignmentCreated, autoAccept, bulk } from '@/modules/routing';
+import { accept, assign, assignmentAccepted, assignmentCreated, autoAccept, bulk, withdraw } from '@/modules/routing';
 import { assignment, routingSetting } from '@/modules/routing/db/schema';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -85,6 +85,16 @@ describe('the assignment playbook choice', () => {
     await t.run((ctx) => ctx.tx.update(assignment).set({ assignedAt: new Date('2026-01-05T10:00:00Z') }).where(eq(assignment.id, made.id)));
     await t.run((ctx) => autoAccept(ctx, new Date('2026-06-01T10:00:00Z')));
     expect((await events(a, assignmentAccepted.type))[0]!.data).toMatchObject({ acceptedHow: 'auto_timeout', templateId: 'tpl_timeout', noPlaybook: false });
+  });
+
+  it('a withdraw with reassignTo keeps the playbook choice', async () => {
+    const other = await member(t, 'seller');
+    for (const choice of [{ noPlaybook: true }, { templateId: 'tpl_keep' }]) {
+      const a = await arrivedAccount(t);
+      const made = await asPerson(t, (ctx) => assign(ctx, a, { sellerUserId: seller, ...choice }));
+      const { reassigned } = await asPerson(t, (ctx) => withdraw(ctx, made.id, { reassignTo: other }));
+      expect(await assignmentOf(reassigned!.id)).toMatchObject({ templateId: choice.templateId ?? null, noPlaybook: choice.noPlaybook ?? false });
+    }
   });
 
   it('events stored before the choice existed still parse', () => {
