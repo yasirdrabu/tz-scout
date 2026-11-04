@@ -30,7 +30,7 @@ export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: 
   const committee = useQuery(committeeQuery(tenant, account.id)).data;
   const required = committee?.roles.filter((r) => r.required) ?? [];
   const gapRows = committee?.roles.filter((r) => r.status === 'gap') ?? [];
-  const saveRoles = (p: Person, body: { role_keys: string[]; confirm_role_keys?: string[] }, done: string) =>
+  const saveRoles = (p: Person, body: { role_keys?: string[]; confirm_role_keys?: string[] }, done: string) =>
     run(async () => {
       await editPerson(tenant, p.id, body);
       await queryClient.invalidateQueries({ queryKey: ['account', tenant, account.id] });
@@ -46,13 +46,13 @@ export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: 
         ) : undefined
       }
     >
-      {committee && <p className={styles.muted}>{`${committee.offer?.name ?? 'Core roles'}: ${committee.summary.text}`}</p>}
+      {committee && <p className={styles.muted}>{`${committee.core_roles || !committee.offer ? 'Core roles' : committee.offer.name}: ${committee.summary.text}`}</p>}
       {account.people.length === 0 ? (
         <>
           <p className={styles.note}>
             {committee
               ? `No people yet. Add someone you know, or Enrich will look for ${listWithAnd(required.map((r) => r.label))}.`
-              : 'No people yet. Add someone you know, or Enrich will look for a business owner, commercial buyer and technical buyer.'}
+              : 'No people yet. Add someone you know, or Enrich will look for a business owner, a commercial buyer and a technical buyer.'}
           </p>
           {committee && find && required.length > 0 && (
             <Button size="sm" variant="secondary" onClick={() => onFind(required.map((r) => r.key))}>
@@ -79,7 +79,7 @@ export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: 
                           <span className={styles.chip}>Guessed from title</span>
                           {write && (
                             <>
-                              <button type="button" className={styles.textButton} disabled={busy} aria-label={`Confirm ${r.label} for ${name}`} onClick={() => void saveRoles(p, { role_keys: keys, confirm_role_keys: [r.key] }, `${r.label} confirmed for ${name}.`)}>
+                              <button type="button" className={styles.textButton} disabled={busy} aria-label={`Confirm ${r.label} for ${name}`} onClick={() => void saveRoles(p, { confirm_role_keys: [r.key] }, `${r.label} confirmed for ${name}.`)}>
                                 Confirm
                               </button>
                               <button type="button" className={styles.textButton} disabled={busy} aria-label={`Remove ${r.label} from ${name}`} onClick={() => void saveRoles(p, { role_keys: keys.filter((k) => k !== r.key) }, `${r.label} removed from ${name}.`)}>

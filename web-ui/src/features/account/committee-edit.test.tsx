@@ -42,7 +42,7 @@ describe('Editing the buying committee', () => {
     expect(r.getByText('Wants a pilot first · Zach Lee, Nov 3')).toBeInTheDocument();
   });
 
-  it('Confirm sends the current roles and the key, then refetches', async () => {
+  it('Confirm sends only the key, then refetches', async () => {
     serveAccount({ account: ACCOUNT_DANA });
     const { sent, reads } = servePatch();
     renderApp(URL);
@@ -52,7 +52,7 @@ describe('Editing the buying committee', () => {
     const before = { ...reads };
     await userEvent.click(button);
     expect(await screen.findByText('Technical buyer confirmed for Dana Ortiz.')).toBeInTheDocument();
-    expect(sent).toEqual([{ role_keys: ['business_owner', 'technical_buyer'], confirm_role_keys: ['technical_buyer'] }]);
+    expect(sent).toEqual([{ confirm_role_keys: ['technical_buyer'] }]);
     await waitFor(() => {
       expect(reads.account).toBeGreaterThan(before.account);
       expect(reads.committee).toBeGreaterThan(before.committee);

@@ -54,8 +54,9 @@ describe('GET /accounts/{id}/committee', () => {
   it('returns the lead offer coverage and ?offer_id= switches it', async () => {
     const lead = await committee();
     expect(lead.status).toBe(200);
-    expect(Object.keys(lead.body).sort()).toEqual(['gaps', 'offer', 'roles', 'summary']);
+    expect(Object.keys(lead.body).sort()).toEqual(['core_roles', 'gaps', 'offer', 'roles', 'summary']);
     expect(lead.body.offer).toEqual({ id: techOffer, name: 'Tech Offer' });
+    expect(lead.body.core_roles).toBe(false);
     expect(lead.body.roles.map((r: { key: string; required: boolean; status: string }) => [r.key, r.required, r.status])).toEqual([
       ['technical_buyer', true, 'guessed'],
       ['procurement', false, 'gap'],

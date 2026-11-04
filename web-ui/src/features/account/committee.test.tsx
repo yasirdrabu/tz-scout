@@ -41,6 +41,19 @@ describe('Committee coverage and Find', () => {
     expect(await (await rail()).findByText('Core roles: 1 of 3 roles covered')).toBeInTheDocument();
   });
 
+  it('says Core roles when the offer fell back to the core three', async () => {
+    serveAccount({ committee: { ...COMMITTEE, core_roles: true } });
+    renderApp(URL);
+    expect(await (await rail()).findByText('Core roles: 1 of 3 roles covered')).toBeInTheDocument();
+  });
+
+  it('an empty rail whose committee failed to load uses the same core-three wording as the loaded one', async () => {
+    serveAccount({ account: { ...ACCOUNT, people: [] } });
+    server.use(http.get('/api/v1/accounts/acc_mdc/committee', () => HttpResponse.json({ title: 'Down' }, { status: 500 })));
+    renderApp(URL);
+    expect(await (await rail()).findByText('No people yet. Add someone you know, or Enrich will look for a business owner, a commercial buyer and a technical buyer.')).toBeInTheDocument();
+  });
+
   it('Find on a gap opens Enrich with only that role ticked', async () => {
     serveAccount({ scopes: WITH_FIND });
     serveEnrichment();

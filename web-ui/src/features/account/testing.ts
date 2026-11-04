@@ -50,6 +50,7 @@ export const COMMITTEE: Committee = {
   ],
   summary: { covered: 1, required: 3, text: '1 of 3 roles covered' },
   gaps: ['commercial_buyer', 'technical_buyer'],
+  core_roles: false,
 };
 
 /** The same offer for an account with no people (Coastline): every role is a gap. */

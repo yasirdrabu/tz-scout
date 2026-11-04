@@ -119,9 +119,9 @@ async function peopleOf(ctx: ModuleContext, accountIds: string[]): Promise<Perso
     mobilePhone: p.mobilePhone,
     linkedinUrl: p.linkedinUrl,
     isPrimary: p.isPrimary,
-    decisionNote: p.decisionNote,
-    decisionNoteBy: noteOf(p.id)?.pinnedBy ? { id: noteOf(p.id)!.pinnedBy!, name: who.get(noteOf(p.id)!.pinnedBy!) ?? null } : null,
-    decisionNoteAt: noteOf(p.id)?.pinnedBy ? noteOf(p.id)!.pinnedAt : null,
+    decisionNote: p.decisionNote || null,
+    decisionNoteBy: p.decisionNote && noteOf(p.id)?.pinnedBy ? { id: noteOf(p.id)!.pinnedBy!, name: who.get(noteOf(p.id)!.pinnedBy!) ?? null } : null,
+    decisionNoteAt: p.decisionNote && noteOf(p.id)?.pinnedBy ? noteOf(p.id)!.pinnedAt : null,
     roles: roles
       .filter((r) => r.personId === p.id)
       .map((r) => ({

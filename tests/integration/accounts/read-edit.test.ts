@@ -316,6 +316,21 @@ describe('editPerson confirmRoleKeys', () => {
   });
 });
 
+describe('PersonView decision note', () => {
+  it('a cleared note reads as null with no author or time', async () => {
+    const d = domain();
+    const out = await seed({ account: { name: 'Note Co', domain: d }, people: [{ firstName: 'Ana', email: `ana@${d}` }] });
+    const [ana] = out.personIds as [string];
+    await asPerson((ctx) => editPerson(ctx, ana, { decisionNote: 'Wants a pilot first' }));
+    let [p] = await t.run((ctx) => listPeople(ctx, out.accountId));
+    expect(p).toMatchObject({ decisionNote: 'Wants a pilot first', decisionNoteBy: { id: 'usr_editor' } });
+    expect(p!.decisionNoteAt).toBeInstanceOf(Date);
+    await asPerson((ctx) => editPerson(ctx, ana, { decisionNote: '' }));
+    [p] = await t.run((ctx) => listPeople(ctx, out.accountId));
+    expect(p).toMatchObject({ decisionNote: null, decisionNoteBy: null, decisionNoteAt: null });
+  });
+});
+
 describe('editPerson guards', () => {
   it('refuses an archived person and maps a duplicate email to 409', async () => {
     const d = domain();

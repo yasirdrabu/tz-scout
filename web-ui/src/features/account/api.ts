@@ -70,6 +70,7 @@ export type Committee = {
   roles: CommitteeRole[];
   summary: { covered: number; required: number; text: string };
   gaps: string[];
+  core_roles: boolean;
 };
 
 /** Under `['account', tenant, id]`, so a finished enrichment request refreshes it with the rest. */

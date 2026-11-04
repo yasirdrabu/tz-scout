@@ -131,7 +131,7 @@ export async function matchOrAddPerson(
     : [];
   // Guesses only fill a person with no roles, and only when this arrival states none.
   if (!wanted.length && (!match || !(await hasRoles(ctx, personId)))) {
-    const guesses = [...new Set([...(input.guessedRoleKeys ?? []), ...guessRolesFromTitle(input.title)])];
+    const guesses = [...new Set([...(input.guessedRoleKeys ?? []), ...guessRolesFromTitle(input.title ?? match?.title)])];
     const active = guesses.length
       ? await ctx.tx
           .select({ key: buyingRole.key })

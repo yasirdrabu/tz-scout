@@ -13,6 +13,8 @@ export type Committee = {
   roles: CommitteeRole[];
   summary: CommitteeSummary;
   gaps: string[];
+  /** True when the required roles are the core three: no offer, or the offer has no active required roles. */
+  coreRoles: boolean;
 };
 
 const notFound = (what: string) => new ScoutError({ slug: 'not-found', status: 404, title: `That ${what} was not found.` });
@@ -47,7 +49,7 @@ export async function getCommittee(ctx: ModuleContext, accountId: string, offerI
     roles,
     people.map((p) => ({
       id: p.id,
-      name: [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unnamed contact',
+      name: [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Someone',
       title: p.title,
       roles: p.roles.map((r) => ({ key: r.key, origin: r.origin })),
     })),

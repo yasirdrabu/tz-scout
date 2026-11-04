@@ -111,3 +111,13 @@ describe('roles guessed from a title (Ruling 6)', () => {
     expect(roles.map((r) => `${r.roleKey}:${r.origin}`)).toEqual(['champion:guessed_from_title']);
   });
 });
+
+describe('a guess from the stored title (final review)', () => {
+  it('a later arrival without a title guesses from the matched person stored title', async () => {
+    const email = `cto@${domain()}`;
+    const first = await add({ firstName: 'Cy', lastName: 'Tao', email, title: 'CTO' });
+    await t.run((ctx) => ctx.tx.delete(personRole).where(eq(personRole.personId, first.personId)));
+    await add({ firstName: 'Cy', lastName: 'Tao', email }, first.accountId);
+    expect(await rolesOf(first.personId)).toEqual(['technical_buyer:guessed_from_title']);
+  });
+});

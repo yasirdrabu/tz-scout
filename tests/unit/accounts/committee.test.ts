@@ -19,6 +19,15 @@ describe('coverage', () => {
     ]);
     expect(c.summary).toEqual({ covered: 0, required: 3, text: '0 of 3 roles covered' });
     expect(c.gaps).toEqual(['business_owner', 'commercial_buyer', 'technical_buyer']);
+    expect(c.coreRoles).toBe(true);
+  });
+
+  it('coreRoles is false for an offer with active required roles and true when it falls back to the core three', () => {
+    expect(coverage(ROLES, [], { requiredRoles: ['technical_buyer'], optionalRoles: [] }).coreRoles).toBe(false);
+    const archived = ROLES.map((r) => (r.key === 'technical_buyer' ? { ...r, archived: true } : r));
+    const c = coverage(archived, [], { requiredRoles: ['technical_buyer'], optionalRoles: ['procurement'] });
+    expect(c.coreRoles).toBe(true);
+    expect(c.roles.filter((r) => r.required).map((r) => r.key)).toEqual(['business_owner', 'commercial_buyer']);
   });
 
   it('counts required roles only and keeps optional gaps out of the summary', () => {

@@ -19,7 +19,7 @@ export function coverage(
   roles: RoleInput[],
   people: PersonInput[],
   offer: OfferInput,
-): { roles: CommitteeRole[]; summary: CommitteeSummary; gaps: string[] } {
+): { roles: CommitteeRole[]; summary: CommitteeSummary; gaps: string[]; coreRoles: boolean } {
   const active = roles.filter((r) => !r.archived).sort((a, b) => a.sort - b.sort || a.key.localeCompare(b.key));
   const live = (keys: string[]) => keys.filter((k) => active.some((r) => r.key === k));
   const hasOffer = !!offer && live(offer.requiredRoles).length > 0;
@@ -40,6 +40,7 @@ export function coverage(
   return {
     roles: rows,
     summary: { covered, required: need.length, text: `${covered} of ${need.length} ${need.length === 1 ? 'role' : 'roles'} covered` },
+    coreRoles: !hasOffer,
     gaps: need.filter((r) => r.status === 'gap').map((r) => r.key),
   };
 }
