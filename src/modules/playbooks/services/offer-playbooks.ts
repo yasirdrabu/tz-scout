@@ -118,9 +118,10 @@ export async function pendingPlaybookNames(ctx: ModuleContext, items: PendingCho
   const templateIds = [...new Set([...chosen.values()].filter((t): t is string => !!t))];
   const names = new Map(
     (templateIds.length
-      ? await ctx.tx.select({ id: playbookTemplate.id, name: playbookTemplate.name }).from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), inArray(playbookTemplate.id, templateIds)))
+      ? await ctx.tx.select({ id: playbookTemplate.id, name: playbookTemplate.name, status: playbookTemplate.status }).from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), inArray(playbookTemplate.id, templateIds)))
       : []
-    ).map((t) => [t.id, t.name]),
+    ).filter((t) => t.status !== 'archived')
+    .map((t) => [t.id, t.name]),
   );
   for (const [key, t] of chosen) out.set(key, t ? (names.get(t) ?? null) : null);
   return out;

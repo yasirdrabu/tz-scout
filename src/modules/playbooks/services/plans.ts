@@ -263,36 +263,37 @@ export async function stopPlan(ctx: ModuleContext, planId: string, reason: strin
   await move(ctx, plan, 'stopped', reason, 'stopped', { reason, skipped: open.map((s) => s.id) }, open.length > 0 ? ['status', 'steps'] : ['status'], reason);
 }
 
-export type NextStep = { planId: string; playbookName: string; title: string; dueDate: string; overdue: boolean; dueToday: boolean; ownerUserId: string | null };
+export type NextStep = { title: string; dueDate: string; overdue: boolean; dueToday: boolean; ownerUserId: string | null };
+export type PlanSummary = { planId: string; playbookName: string; nextStep: NextStep | null };
 
 /**
- * The next step of each account's open plan, for the lists (Ruling 15): the earliest `todo` or `in_progress` step by
- * due date, then order. One query for any number of ids. Only `active` plans count, so a paused plan shows no next
- * step, and neither does a plan with nothing left open. Accounts without one are absent from the map. The caller
- * passes ids its list already filtered for visibility.
+ * For the lists (Ruling 15): each account with an open plan (`active` or `paused`) and that plan's playbook name,
+ * plus its next step, the earliest `todo` or `in_progress` step by due date, then order. `nextStep` is null when the
+ * plan is paused or has nothing left open, but the name still shows. One query for any number of ids. Accounts
+ * without an open plan are absent. The caller passes ids its list already filtered for visibility.
  */
-export async function nextSteps(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, NextStep>> {
-  const out = new Map<string, NextStep>();
+export async function nextSteps(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, PlanSummary>> {
+  const out = new Map<string, PlanSummary>();
   if (accountIds.length === 0) return out;
   const rows = await ctx.tx
-    .select({ accountId: accountPlan.accountId, planId: accountPlan.id, playbookName: playbookTemplate.name, step: planStep })
+    .select({ accountId: accountPlan.accountId, planId: accountPlan.id, status: accountPlan.status, playbookName: playbookTemplate.name, step: planStep })
     .from(accountPlan)
-    .innerJoin(planStep, and(eq(planStep.tenantId, accountPlan.tenantId), eq(planStep.planId, accountPlan.id)))
     .innerJoin(playbookTemplate, eq(playbookTemplate.id, accountPlan.templateId))
-    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.status, 'active'), inArray(accountPlan.accountId, accountIds), inArray(planStep.status, OPEN_STEP)));
+    .leftJoin(planStep, and(eq(planStep.tenantId, accountPlan.tenantId), eq(planStep.planId, accountPlan.id), inArray(planStep.status, OPEN_STEP)))
+    .where(and(eq(accountPlan.tenantId, ctx.tenantId), inArray(accountPlan.status, ['active', 'paused']), inArray(accountPlan.accountId, accountIds)));
   const today = localDate(Date.now(), await tenantTimezone(ctx));
   const byAccount = new Map<string, typeof rows>();
   for (const r of rows) byAccount.set(r.accountId, [...(byAccount.get(r.accountId) ?? []), r]);
   for (const [accountId, list] of byAccount) {
-    const pick = pickNextStep(list.map((r) => ({ ...r, status: r.step.status, dueDate: r.step.dueDate, order: r.step.order })));
-    if (!pick) continue;
+    const first = list[0]!;
+    const open = first.status === 'active' ? list.filter((r) => r.step) : [];
+    const pick = pickNextStep(open.map((r) => ({ step: r.step!, status: r.step!.status, dueDate: r.step!.dueDate, order: r.step!.order })));
     out.set(accountId, {
-      planId: pick.planId,
-      playbookName: pick.playbookName,
-      title: pick.step.title,
-      dueDate: pick.step.dueDate,
-      ...dueFlags(pick.step.dueDate, today),
-      ownerUserId: pick.step.ownerUserId,
+      planId: first.planId,
+      playbookName: first.playbookName,
+      nextStep: pick
+        ? { title: pick.step.title, dueDate: pick.step.dueDate, ...dueFlags(pick.step.dueDate, today), ownerUserId: pick.step.ownerUserId }
+        : null,
     });
   }
   return out;

@@ -23,10 +23,10 @@ export const GET = v1Route({ peopleOnly: true }, async (req, principal, ctx) => 
   if (mine) requirePermission(principal, 'assignments:respond');
   else if (!can(principal, 'assign:act')) requirePermission(principal, 'review:act');
   const page = await listAssignments(ctx, { mine, status, cursor: url.searchParams.get('cursor') || undefined, limit: pageLimit(url) });
-  const plans = await planFields(ctx, page.data.map((r) => r.accountId));
+  const plans = await planFields(ctx, principal, page.data.map((r) => r.accountId));
   const pending = await pendingPlaybookNames(
     ctx,
-    page.data.filter((r) => r.status === 'pending').map((r) => ({ key: r.id, accountId: r.accountId, offerId: r.offerId, templateId: r.templateId, noPlaybook: r.noPlaybook })),
+    (can(principal, 'playbooks:read') ? page.data : []).filter((r) => r.status === 'pending').map((r) => ({ key: r.id, accountId: r.accountId, offerId: r.offerId, templateId: r.templateId, noPlaybook: r.noPlaybook })),
   );
   return {
     ...page,

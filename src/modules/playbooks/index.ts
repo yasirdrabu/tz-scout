@@ -79,6 +79,7 @@ export {
   updateStep,
   type HistoryView,
   type NextStep,
+  type PlanSummary,
   type PlanView,
   type StepPatch,
   type StepStatus,
