@@ -312,13 +312,12 @@ describe('Assign dialog', () => {
       const rfp = within(cards).getByRole('radio', { name: /^Public sector RFP/ });
       expect(rfp).toBeChecked();
       expect(rfp.closest('label')).toHaveTextContent('Recommended for this account');
-      expect(rfp.closest('label')).toHaveTextContent('3 steps over 14 days');
-      expect(rfp.closest('label')).toHaveTextContent('For agencies with an open notice.');
+      expect(rfp.closest('label')).toHaveTextContent('3 steps over 14 days · For agencies with an open notice.');
       expect(within(cards).getByRole('radio', { name: /^Warm intro/ })).not.toBeChecked();
       expect(within(cards).getByRole('radio', { name: /^No playbook/ })).not.toBeChecked();
       // Draft and retired playbooks are not offered.
       expect(within(cards).getAllByRole('radio')).toHaveLength(3);
-      expect(await within(dialog).findByText('Scout sends Miami-Dade County DTPW to HubSpot with Ash Patel as owner and logs the brief and starts Public sector RFP when Ash accepts.')).toBeInTheDocument();
+      expect(await within(dialog).findByText('Scout sends Miami-Dade County DTPW to HubSpot with Ash Patel as owner and logs the brief, and starts Public sector RFP when Ash accepts.')).toBeInTheDocument();
       await go(dialog);
       expect(seen.body).toEqual({ seller_user_id: 'usr_ash' });
     });
@@ -330,7 +329,7 @@ describe('Assign dialog', () => {
       renderApp('/t/taazaa/queue?peek=acc_mdc');
       const dialog = await openFromPeek();
       await userEvent.click(await within(dialog).findByRole('radio', { name: /^Warm intro/ }));
-      expect(await within(dialog).findByText(/and logs the brief and starts Warm intro when Ash accepts\.$/)).toBeInTheDocument();
+      expect(await within(dialog).findByText(/and logs the brief, and starts Warm intro when Ash accepts\.$/)).toBeInTheDocument();
       await go(dialog);
       expect(seen.body).toEqual({ seller_user_id: 'usr_ash', playbook_id: 'plb_warm' });
     });
@@ -400,7 +399,7 @@ describe('Assign dialog', () => {
         expect.stringMatching(/^No playbook/),
       ]);
       expect(within(cards).getByRole('radio', { name: /^Recommended for each account/ })).toBeChecked();
-      expect(await within(dialog).findByText(/and starts each account's recommended playbook when Ash accepts\.$/)).toBeInTheDocument();
+      expect(await within(dialog).findByText(/, and starts each account's recommended playbook when Ash accepts\.$/)).toBeInTheDocument();
       const button = within(dialog).getByRole('button', { name: 'Assign to Ash Patel' });
       await waitFor(() => expect(button).toBeEnabled());
       await userEvent.click(button);

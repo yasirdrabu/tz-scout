@@ -289,3 +289,9 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+.tags {
+  display: flex;
+  gap: 6px;
+  align-self: start;
+}

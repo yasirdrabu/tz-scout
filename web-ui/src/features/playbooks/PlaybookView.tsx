@@ -193,7 +193,12 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
                   {CHANNEL_WORD[s.channel]} · {OWNER_WORD[s.owner_role]}
                 </p>
               </div>
-              {s.channel === 'email' ? <span className={styles.tag}>Draft ready for AE</span> : s.crm_task ? <span className={styles.tag}>HubSpot task</span> : null}
+              {(s.channel === 'email' || s.crm_task) && (
+                <span className={styles.tags}>
+                  {s.channel === 'email' && <span className={styles.tag}>Draft ready for AE</span>}
+                  {s.crm_task && <span className={styles.tag}>HubSpot task</span>}
+                </span>
+              )}
             </li>
           ))}
         </ol>

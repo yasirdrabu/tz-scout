@@ -356,7 +356,7 @@ account opens (from the account page) or the row leaves (queue).
   `playbook_id`), then the active playbooks, then "No playbook"; one choice applies to every account.
 - **Note for {AE}**: "What should they know first?" (optional, up to 4,000 characters).
 - Footer sentence: "Scout sends {account} to HubSpot with {AE} as owner and logs the brief." (R2 adds
-  "and starts {playbook} on {date}"; built as "... and starts {playbook} when {AE first name} accepts.", with
+  "and starts {playbook} on {date}"; built as "... logs the brief, and starts {playbook} when {AE first name} accepts.", with
   nothing added for "No playbook") or, with the warning, "Scout sends {account} to HubSpot and
   leaves {owner} as owner."
 - `Cancel`, `Assign to {AE full name}`. Toast "Assigned to {AE}. Sending {account} to HubSpot." or

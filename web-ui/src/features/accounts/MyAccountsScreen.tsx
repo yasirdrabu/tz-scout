@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { countsQuery, hasScope, meQuery } from '../../api/me';
 import { cx } from '../../lib/cx';
 import { useFormat } from '../../lib/useFormat';
@@ -41,13 +41,27 @@ export function MyAccountsScreen() {
   const active = useHeldRows(activeLatest, 'accepted', idOf);
   const updates = pending.updates + active.updates;
 
-  async function refresh() {
-    pending.follow();
-    active.follow();
+  const later = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(later.current), []);
+
+  async function invalidate() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['my-assignments', tenant] }),
       queryClient.invalidateQueries({ queryKey: ['me-counts', tenant] }),
     ]);
+  }
+
+  async function refresh() {
+    pending.follow();
+    active.follow();
+    await invalidate();
+  }
+
+  /** The plan is created after the accept returns, so refresh again shortly to pick up the first next step. */
+  async function refreshAfterAccept() {
+    await refresh();
+    clearTimeout(later.current);
+    later.current = setTimeout(() => void invalidate(), 2000);
   }
 
   const n = counts.data?.new_assignments;
@@ -91,7 +105,7 @@ export function MyAccountsScreen() {
         <EmptyState title="No accounts assigned to you yet">When a leader assigns one, it shows here for you to accept.</EmptyState>
       ) : (
         <>
-          {pending.rows.length > 0 && <NewAssignments tenant={tenant} rows={pending.rows} count={n ?? null} onChanged={refresh} />}
+          {pending.rows.length > 0 && <NewAssignments tenant={tenant} rows={pending.rows} count={n ?? null} onChanged={refresh} onAccepted={refreshAfterAccept} />}
           <Active tenant={tenant} rows={active.rows} showSteps={showSteps} />
         </>
       )}
@@ -99,7 +113,7 @@ export function MyAccountsScreen() {
   );
 }
 
-function NewAssignments({ tenant, rows, count, onChanged }: { tenant: string; rows: Assignment[]; count: number | null; onChanged: () => Promise<void> }) {
+function NewAssignments({ tenant, rows, count, onChanged, onAccepted }: { tenant: string; rows: Assignment[]; count: number | null; onChanged: () => Promise<void>; onAccepted: () => Promise<void> }) {
   const assigners = [...new Set(rows.map((r) => r.assigned_by_name ?? ''))];
   const assigner = assigners.length === 1 && assigners[0] ? assigners[0] : 'the person who assigned it';
   return (
@@ -113,7 +127,7 @@ function NewAssignments({ tenant, rows, count, onChanged }: { tenant: string; ro
       <p className={styles.note}>{rows.some((r) => r.playbook_name) ? `Accept to start the playbook. Declining returns the account to ${assigner}.` : `Accept to take it on. Declining returns the account to ${assigner}.`}</p>
       <ul className={styles.list}>
         {rows.map((a) => (
-          <NewRow key={a.id} tenant={tenant} a={a} onChanged={onChanged} />
+          <NewRow key={a.id} tenant={tenant} a={a} onChanged={onChanged} onAccepted={onAccepted} />
         ))}
       </ul>
     </section>
@@ -138,7 +152,7 @@ function AccountLink({ tenant, id, name, seen }: { tenant: string; id: string; n
   );
 }
 
-function NewRow({ tenant, a, onChanged }: { tenant: string; a: Assignment; onChanged: () => Promise<void> }) {
+function NewRow({ tenant, a, onChanged, onAccepted }: { tenant: string; a: Assignment; onChanged: () => Promise<void>; onAccepted: () => Promise<void> }) {
   const f = useFormat();
   const { run, busy } = useRun();
   const [declining, setDeclining] = useState(false);
@@ -170,7 +184,7 @@ function NewRow({ tenant, a, onChanged }: { tenant: string; a: Assignment; onCha
               onClick={() =>
                 void run(async () => {
                   await acceptAssignment(tenant, a.id);
-                  await onChanged();
+                  await onAccepted();
                 }, a.playbook_name ? `Accepted. ${a.playbook_name} starts today.` : `Accepted. ${name} is in your accounts.`)
               }
             >

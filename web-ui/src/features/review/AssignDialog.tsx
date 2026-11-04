@@ -70,11 +70,11 @@ function stopLine(name: string, p: Preflight, w: Words): string {
 const NONE = '__none';
 const RECOMMENDED = '__recommended';
 
-/** " and starts {playbook} when {AE first name} accepts" (Ruling 6); nothing for "No playbook". */
+/** ", and starts {playbook} when {AE first name} accepts" (Ruling 6); nothing for "No playbook". */
 function startsText(shown: boolean, choice: string, name: string | null, aeFirst: string): string {
   if (!shown || choice === NONE) return '';
-  if (choice === RECOMMENDED) return ` and starts each account's recommended playbook when ${aeFirst} accepts`;
-  return name ? ` and starts ${name} when ${aeFirst} accepts` : '';
+  if (choice === RECOMMENDED) return `, and starts each account's recommended playbook when ${aeFirst} accepts`;
+  return name ? `, and starts ${name} when ${aeFirst} accepts` : '';
 }
 
 function focusOf(s: Seller): string {
@@ -288,8 +288,7 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
                 title={p.name}
                 {...(single && defaultChoice === p.id ? { tag: 'Recommended for this account' } : {})}
               >
-                {span(p.steps, p.days)}
-                {p.description && <span className={styles.muted}>{p.description}</span>}
+                {p.description ? `${span(p.steps, p.days)} · ${p.description}` : span(p.steps, p.days)}
               </PlaybookCard>
             ))}
             <PlaybookCard radios={playbookRadios} value={NONE} checked={choice === NONE} onPick={setPickedPlaybook} title="No playbook" {...(single && defaultChoice === NONE ? { tag: 'Recommended for this account' } : {})}>

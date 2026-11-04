@@ -89,6 +89,7 @@ describe('Playbook detail (§20)', () => {
     expect(one).toHaveTextContent('Reference the notice.');
     expect(one).toHaveTextContent('Email · Seller');
     expect(one).toHaveTextContent('Draft ready for AE');
+    expect(one).toHaveTextContent('HubSpot task');
     const two = screen.getByText('Connect on LinkedIn').closest('li')!;
     expect(two).toHaveTextContent('No detail yet.');
     expect(two).toHaveTextContent('LinkedIn · Seller');

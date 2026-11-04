@@ -156,6 +156,27 @@ describe('My accounts', () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: 'New assignments' })).toBeNull());
   });
 
+  it('refetches counts and the list again about 2 seconds after an accept, when the plan exists', async () => {
+    const s = serve();
+    let counts = 0;
+    server.use(
+      http.get('/api/v1/me/counts', () => {
+        counts += 1;
+        return HttpResponse.json({ review_queue: null, new_assignments: 0 });
+      }),
+      http.post(exactly('/api/v1/assignments/asg_1:accept'), () => {
+        s.setPending([]);
+        return HttpResponse.json({ ...MIAMI, status: 'accepted' });
+      }),
+    );
+    renderApp('/t/taazaa/my');
+    await userEvent.click(await screen.findByRole('button', { name: 'Accept Miami-Dade County DTPW' }));
+    await screen.findByText('Accepted. Miami-Dade County DTPW is in your accounts.');
+    await waitFor(() => expect(counts).toBeGreaterThanOrEqual(2));
+    const immediate = counts;
+    await waitFor(() => expect(counts).toBeGreaterThan(immediate), { timeout: 4000 });
+  }, 10000);
+
   it('declines with a reason from the assignment list, and a note when the reason needs one', async () => {
     serve();
     let body: unknown = null;
