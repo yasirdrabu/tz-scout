@@ -20,7 +20,10 @@ export type Person = {
   email?: string | null;
   is_primary: boolean;
   decision_note: string | null;
-  roles: { key: string; origin: string; label: string }[];
+  /** Who wrote the note and when; null when a source wrote it. */
+  decision_note_by?: { id: string; name: string | null } | null;
+  decision_note_at?: string | null;
+  roles: { key: string; origin: string; label: string; set_by_name?: string | null; set_at?: string | null }[];
 };
 
 export type AccountSignal = {
@@ -270,5 +273,11 @@ export type NewPerson = { name: string; title?: string; email?: string; buying_r
 
 export const addPerson = (tenant: string, id: string, person: NewPerson) =>
   apiFetch<{ person_id: string }>(path(id, '/people'), { tenant, method: 'POST', body: person });
+
+export type PersonPatch = { role_keys?: string[]; confirm_role_keys?: string[]; decision_note?: string };
+
+/** An empty `decision_note` clears it: the API takes a string, not null. */
+export const editPerson = (tenant: string, personId: string, body: PersonPatch) =>
+  apiFetch<Person>(`/people/${encodeURIComponent(personId)}`, { tenant, method: 'PATCH', body });
 
 export const personName = (p: Pick<Person, 'first_name' | 'last_name'>) => [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Someone';

@@ -302,3 +302,24 @@ export function serveAccount(opts: Served = {}) {
   );
   return { sent, note };
 }
+
+/** An account whose one person, Dana, holds a stated role and a guessed one, with a note a person wrote. */
+export const ACCOUNT_DANA: AccountDetail = {
+  ...ACCOUNT,
+  people: [
+    {
+      id: 'per_dana',
+      first_name: 'Dana',
+      last_name: 'Ortiz',
+      title: 'VP Engineering',
+      is_primary: true,
+      decision_note: 'Wants a pilot first',
+      decision_note_by: { id: 'usr_zl', name: 'Zach Lee' },
+      decision_note_at: '2026-11-03T15:00:00Z',
+      roles: [
+        { key: 'business_owner', origin: 'stated', label: 'Business owner', set_by_name: null, set_at: null },
+        { key: 'technical_buyer', origin: 'guessed_from_title', label: 'Technical buyer', set_by_name: null, set_at: null },
+      ],
+    },
+  ],
+};

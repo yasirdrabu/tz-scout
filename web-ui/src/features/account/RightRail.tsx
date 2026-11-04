@@ -12,18 +12,29 @@ import { useToast } from '../../ui/Toast';
 import { addNote, notesQuery, type AccountReview } from '../review/api';
 import { NOTE_MAX } from '../review/ReasonPicker';
 import { errorText, useRun } from '../settings/shared';
-import { accountQuery, addPerson, buyingRolesQuery, checkCrm, committeeQuery, crmCheckQuery, listWithAnd, personName, type AccountDetail, type CrmCheck } from './api';
+import { accountQuery, addPerson, buyingRolesQuery, checkCrm, committeeQuery, crmCheckQuery, editPerson, listWithAnd, personName, type AccountDetail, type CrmCheck, type Person } from './api';
+import { EditPersonDialog } from './EditPersonDialog';
 import styles from './Account.module.css';
 
 /** §4a 8. Buying committee: people with their role labels and notes; `Add a person` with `people:write`. */
 export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: { tenant: string; me: Me; account: AccountDetail; canAdd?: boolean; onFind: (roles: string[]) => void }) {
   const [adding, setAdding] = useState(false);
-  const add = canAdd && hasScope(me, 'people:write');
+  const [editing, setEditing] = useState<Person | null>(null);
+  const queryClient = useQueryClient();
+  const f = useFormat();
+  const { run, busy } = useRun();
+  const write = hasScope(me, 'people:write');
+  const add = canAdd && write;
   const find = hasScope(me, 'enrichment:request');
   // Loading or failed: the rail is today's, with no coverage.
   const committee = useQuery(committeeQuery(tenant, account.id)).data;
   const required = committee?.roles.filter((r) => r.required) ?? [];
   const gapRows = committee?.roles.filter((r) => r.status === 'gap') ?? [];
+  const saveRoles = (p: Person, body: { role_keys: string[]; confirm_role_keys?: string[] }, done: string) =>
+    run(async () => {
+      await editPerson(tenant, p.id, body);
+      await queryClient.invalidateQueries({ queryKey: ['account', tenant, account.id] });
+    }, done);
   return (
     <Card
       title="Buying committee"
@@ -57,8 +68,40 @@ export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: 
               <span className={styles.stack}>
                 <strong>{personName(p)}</strong>
                 {p.title && <span className={styles.muted}>{p.title}</span>}
-                {p.roles.length > 0 && <span>{p.roles.map((r) => r.label).join(', ')}</span>}
-                {p.decision_note && <span className={styles.muted}>{p.decision_note}</span>}
+                {p.roles.map((r) => {
+                  const keys = p.roles.map((x) => x.key);
+                  const name = personName(p);
+                  return (
+                    <span key={r.key} className={styles.roleLine}>
+                      <span>{r.label}</span>
+                      {r.origin === 'guessed_from_title' && (
+                        <>
+                          <span className={styles.chip}>Guessed from title</span>
+                          {write && (
+                            <>
+                              <button type="button" className={styles.textButton} disabled={busy} aria-label={`Confirm ${r.label} for ${name}`} onClick={() => void saveRoles(p, { role_keys: keys, confirm_role_keys: [r.key] }, `${r.label} confirmed for ${name}.`)}>
+                                Confirm
+                              </button>
+                              <button type="button" className={styles.textButton} disabled={busy} aria-label={`Remove ${r.label} from ${name}`} onClick={() => void saveRoles(p, { role_keys: keys.filter((k) => k !== r.key) }, `${r.label} removed from ${name}.`)}>
+                                Remove
+                              </button>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </span>
+                  );
+                })}
+                {p.decision_note && (
+                  <span className={styles.muted}>{p.decision_note_by && p.decision_note_at ? `${p.decision_note} · ${p.decision_note_by.name ?? 'Someone'}, ${f.monthDay(p.decision_note_at)}` : p.decision_note}</span>
+                )}
+                {write && (
+                  <span>
+                    <button type="button" className={styles.textButton} aria-label={`Edit ${personName(p)}`} onClick={() => setEditing(p)}>
+                      Edit
+                    </button>
+                  </span>
+                )}
               </span>
             </li>
           ))}
@@ -78,6 +121,7 @@ export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: 
           ))}
         </ul>
       )}
+      {editing && <EditPersonDialog tenant={tenant} accountId={account.id} person={editing} onClose={() => setEditing(null)} />}
       {adding && <AddPersonDialog tenant={tenant} id={account.id} onClose={() => setAdding(false)} />}
     </Card>
   );
