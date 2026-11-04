@@ -97,7 +97,7 @@ export async function editPerson(ctx: ModuleContext, personId: string, patch: Pe
       : (await ctx.tx.select({ roleKey: personRole.roleKey }).from(personRole).where(and(eq(personRole.tenantId, ctx.tenantId), eq(personRole.personId, personId)))).map((r) => r.roleKey);
     if (confirm.some((k) => !held.includes(k))) {
       const message = 'Only a role the person holds can be confirmed.';
-      throw new ScoutError({ slug: 'validation', status: 400, title: message, errors: [{ path: 'confirm_role_keys', message }] });
+      throw new ScoutError({ slug: 'validation', status: 400, title: 'Check the request.', errors: [{ path: 'confirm_role_keys', message }] });
     }
   }
 

@@ -10,6 +10,7 @@ import { setPrincipalCacheTtl } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { completeOffer } from '../offers/helpers';
+import { call, keyFor } from './intake-helpers';
 import { workspace, type Workspace } from './review-helpers';
 
 let w: Workspace;
@@ -105,5 +106,37 @@ describe('PATCH /people/{id} confirm_role_keys and note', () => {
     expect(p).toMatchObject({ decision_note: 'Champion, wants a pilot.', decision_note_by: { id: leader, name: 'Dana Ruiz' }, decision_note_at: expect.any(String) });
     const listed = await (await w.as(leader, listPeople, `accounts/${account}/people`)).json();
     expect(listed.data[0]).toMatchObject({ decision_note_by: { name: 'Dana Ruiz' } });
+  });
+});
+
+describe('review fixes', () => {
+  it('the committee of an account outside the data limit is a 404', async () => {
+    const seller = await w.person('seller', { name: 'Sam Seller', dataLimit: { kind: 'own_accounts' } });
+    expect((await w.as(seller, getCommitteeRoute, `accounts/${account}/committee`)).status).toBe(404);
+  });
+
+  it('an API key sending confirm_role_keys is a 400', async () => {
+    const key = await keyFor(w.tenant, ['accounts:read', 'people:write'], { dataLimit: { kind: 'all' } });
+    const res = await call(patchPerson, key, `people/${ana}`, { method: 'PATCH', body: { confirm_role_keys: ['technical_buyer'] } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).errors[0].path).toBe('confirm_role_keys');
+  });
+
+  it('decision_note_by is null for a note a source wrote; a person note over 1,000 characters on POST is a 400', async () => {
+    const res = await w.as(leader, addPerson, `accounts/${account}/people`, 'POST', { first_name: 'Bo', last_name: 'Kay', notes: 'From the CRM.' });
+    expect(res.status).toBe(201);
+    const bo = (await res.json()).person_id;
+    const listed = await (await w.as(leader, listPeople, `accounts/${account}/people`)).json();
+    expect(listed.data.find((p: { id: string }) => p.id === bo)).toMatchObject({ decision_note: 'From the CRM.', decision_note_by: null, decision_note_at: null });
+    const long = await w.as(leader, addPerson, `accounts/${account}/people`, 'POST', { first_name: 'Cy', notes: 'x'.repeat(1001) });
+    expect(long.status).toBe(400);
+    expect((await long.json()).errors).toEqual([{ path: 'notes', message: 'Keep the note under 1,000 characters.' }]);
+  });
+
+  it('confirms a role added in the same PATCH', async () => {
+    const res = await w.as(leader, patchPerson, `people/${ana}`, 'PATCH', { role_keys: ['technical_buyer', 'procurement'], confirm_role_keys: ['procurement'] });
+    expect(res.status).toBe(200);
+    const roles = (await res.json()).roles as { key: string; origin: string }[];
+    expect(roles.find((r) => r.key === 'procurement')).toMatchObject({ origin: 'set_by_person' });
   });
 });

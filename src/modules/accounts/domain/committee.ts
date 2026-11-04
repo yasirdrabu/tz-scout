@@ -20,10 +20,11 @@ export function coverage(
   people: PersonInput[],
   offer: OfferInput,
 ): { roles: CommitteeRole[]; summary: CommitteeSummary; gaps: string[] } {
-  const hasOffer = !!offer && offer.requiredRoles.length > 0;
-  const required = hasOffer ? offer.requiredRoles : CORE_ROLES;
-  const optional = hasOffer ? offer.optionalRoles.filter((k) => !required.includes(k)) : [];
   const active = roles.filter((r) => !r.archived).sort((a, b) => a.sort - b.sort || a.key.localeCompare(b.key));
+  const live = (keys: string[]) => keys.filter((k) => active.some((r) => r.key === k));
+  const hasOffer = !!offer && live(offer.requiredRoles).length > 0;
+  const required = hasOffer ? live(offer.requiredRoles) : CORE_ROLES;
+  const optional = hasOffer ? live(offer.optionalRoles).filter((k) => !required.includes(k)) : [];
   const rows: CommitteeRole[] = active
     .filter((r) => required.includes(r.key) || optional.includes(r.key))
     .map((r) => {

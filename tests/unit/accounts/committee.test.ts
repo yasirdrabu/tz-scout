@@ -77,3 +77,13 @@ describe('coverage', () => {
     expect(coverage(ROLES, [], { requiredRoles: [], optionalRoles: ['procurement'] }).summary.required).toBe(3);
   });
 });
+
+describe('coverage fallback', () => {
+  it('uses the core three when every required role of the offer is archived', () => {
+    const roles = ROLES.map((r) => (r.key === 'technical_buyer' ? { ...r, archived: true } : r));
+    const c = coverage(roles, [], { requiredRoles: ['technical_buyer'], optionalRoles: ['procurement'] });
+    expect(c.summary.required).toBe(2);
+    expect(c.summary.text).not.toContain('0 of 0');
+    expect(c.roles.every((r) => r.required)).toBe(true);
+  });
+});

@@ -102,7 +102,8 @@ async function peopleOf(ctx: ModuleContext, accountIds: string[]): Promise<Perso
           ),
         )
     : [];
-  const who = await userNames(ctx, [...notes.map((n) => n.pinnedBy), ...roles.map((r) => r.setBy)].filter((x): x is string => !!x));
+  const ids = [...notes.map((n) => n.pinnedBy), ...roles.map((r) => r.setBy)].filter((x): x is string => !!x);
+  const who = ids.length ? await userNames(ctx, ids) : new Map<string, string>();
   const noteOf = (personId: string) => notes.find((n) => n.personId === personId);
   const labels = roles.length ? new Map((await allBuyingRoles(ctx)).map((r) => [r.key, r.label])) : new Map<string, string>();
   const view = (p: PersonRow): PersonView => ({
