@@ -19,7 +19,7 @@ const BUSINESS_OWNER = matcher(BUSINESS);
 
 /** Roles a title suggests, case-insensitive on word boundaries. `business_owner` only when no other rule matched. */
 export function guessRolesFromTitle(title: string | null | undefined): string[] {
-  const t = (title ?? '').toLowerCase().replace(/[&,]/g, ' ');
+  const t = (title ?? '').toLowerCase().replace(/[&,-]/g, ' ').replace(/\s+/g, ' ');
   if (!t.trim()) return [];
   const roles = RULES.filter(([, re]) => re.test(t)).map(([key]) => key);
   if (!roles.length && BUSINESS_OWNER.test(t)) roles.push('business_owner');

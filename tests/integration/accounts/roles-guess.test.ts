@@ -75,6 +75,16 @@ describe('roles guessed from a title (Ruling 6)', () => {
     expect(await rolesOf(a.personId)).toEqual(['champion:set_by_person']);
   });
 
+  it('a later arrival stating a role leaves a set_by_person row of that key as it was', async () => {
+    const a = await add({ firstName: 'Kept', lastName: 'Set' });
+    await t.run((ctx) =>
+      ctx.tx.insert(personRole).values({ tenantId: ctx.tenantId, personId: a.personId, roleKey: 'champion', origin: 'set_by_person', setBy: 'usr_keeper' }),
+    );
+    await add({ firstName: 'Kept', lastName: 'Set', roleKeys: ['champion'] }, a.accountId);
+    const rows = await t.run((ctx) => ctx.tx.select().from(personRole).where(eq(personRole.personId, a.personId)));
+    expect(rows).toEqual([expect.objectContaining({ roleKey: 'champion', origin: 'set_by_person', setBy: 'usr_keeper' })]);
+  });
+
   it('an existing person with no roles gets guesses on the next arrival', async () => {
     const a = await add({ firstName: 'No', lastName: 'Roles' });
     expect(await rolesOf(a.personId)).toEqual([]);

@@ -19,6 +19,8 @@ const cases: [string | null, string[]][] = [
   ['Chief Executive Officer', ['commercial_buyer']],
   ['Finance Director', ['commercial_buyer']],
   ['Vice President of Operations', ['business_owner']],
+  ['Vice-President of Operations', ['business_owner']],
+  ['Vice  President of Sales', ['business_owner']],
   ['Director of Operations', ['business_owner']],
   ['Senior Buyer, Infrastructure', ['technical_buyer', 'procurement']],
   ['Sourcing Director', ['procurement']],

@@ -207,6 +207,7 @@ describe('people for buying roles (ENR-E3-S1-AC1)', () => {
 
   it('a person found for two roles is revealed once and keeps both roles', async () => {
     const mock = apolloMock();
+    // Found people also get title guesses on top of the searched role, so the title must guess nothing here.
     const same = [{ name: 'Dana', first_name: 'Dana', title: 'Founder', provider_ref: 'stub-same' }];
     registerAdapter('apollo', { mock: () => ({ ...mock, peopleSearch: async () => ({ value: same, creditsUsed: 0 }) }) });
     const { accountId } = await accountFrom(t, agentSourceId);
