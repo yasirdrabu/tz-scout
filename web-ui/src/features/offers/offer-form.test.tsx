@@ -33,6 +33,22 @@ describe('Offer form (§19)', () => {
     expect(app.path()).toBe('/t/taazaa/offers/prc_ai/off_mb');
   });
 
+  it('shows required and optional buying roles; a role ticked in one group is disabled in the other; saving sends both', async () => {
+    const seen = serveOffers({ offers: [offer({ id: 'off_r', name: 'Roled', practice_id: 'prc_ai', target_buying_roles: ['technical_buyer'] })] });
+    const user = userEvent.setup();
+    renderApp('/t/taazaa/offers/prc_ai/off_r?edit=offer');
+    const d = await drawer('Edit offer');
+    const required = await within(d).findByRole('group', { name: 'Required buying roles' });
+    const optional = within(d).getByRole('group', { name: 'Optional buying roles' });
+    expect(within(required).getByRole('checkbox', { name: 'Technical buyer' })).toBeChecked();
+    expect(within(optional).getByRole('checkbox', { name: 'Technical buyer' })).toBeDisabled();
+    await user.click(within(optional).getByRole('checkbox', { name: 'Procurement' }));
+    expect(within(required).getByRole('checkbox', { name: 'Procurement' })).toBeDisabled();
+    await user.click(within(d).getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Changes to Roled saved.');
+    expect(bodies(seen, 'PATCH', '/offers/off_r')[0]).toMatchObject({ target_buying_roles: ['technical_buyer'], optional_buying_roles: ['procurement'] });
+  });
+
   it('a save that does not touch the price leaves the price fields out, so a range stays', async () => {
     const seen = serveOffers({ offers: [offer({ id: 'off_r', name: 'Ranged', practice_id: 'prc_ai', price_min_cents: 2_500_000, price_max_cents: 4_500_050, price_label: '$25,000 to $45,000.50' })] });
     const user = userEvent.setup();

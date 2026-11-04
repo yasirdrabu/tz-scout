@@ -282,6 +282,33 @@ describe('R1 offer and practice routes (Rulings 12 to 14)', () => {
     await bad({ why_us: 'x'.repeat(4001) }, 'why_us');
   });
 
+  it('keeps required and optional buying roles, and refuses unknown keys and overlaps', async () => {
+    const make = (body: Record<string, unknown>) => w.as(w.owner, createOfferRoute, 'offers', 'POST', { name: 'Roles', practice_id: practice, promise: 'x', ...body });
+    const messages = async (res: Response) => (await res.json()).errors.map((e: { message: string }) => e.message);
+
+    const unknown = await make({ target_buying_roles: ['wizard'] });
+    expect(unknown.status).toBe(400);
+    expect(await messages(unknown)).toContain('Unknown buying role: wizard');
+    const overlap = await make({ target_buying_roles: ['procurement'], optional_buying_roles: ['procurement'] });
+    expect(overlap.status).toBe(400);
+    expect(await messages(overlap)).toContain("A role can't be both required and optional: Procurement");
+
+    const made = await make({ target_buying_roles: ['technical_buyer'], optional_buying_roles: ['procurement'] });
+    expect(made.status).toBe(201);
+    const o = await made.json();
+    expect(o).toMatchObject({ target_buying_roles: ['technical_buyer'], optional_buying_roles: ['procurement'] });
+
+    const patch = (body: Record<string, unknown>) => w.as(w.owner, patchOffer, `offers/${o.id}`, 'PATCH', body);
+    // Checked against the stored lists: procurement is already optional.
+    const merged = await patch({ target_buying_roles: ['procurement'] });
+    expect(merged.status).toBe(400);
+    expect(await messages(merged)).toContain("A role can't be both required and optional: Procurement");
+    expect((await patch({ optional_buying_roles: ['wizard'] })).status).toBe(400);
+    const swapped = await patch({ target_buying_roles: ['procurement'], optional_buying_roles: ['technical_buyer'] });
+    expect(swapped.status).toBe(200);
+    expect(await swapped.json()).toMatchObject({ target_buying_roles: ['procurement'], optional_buying_roles: ['technical_buyer'] });
+  });
+
   it('a content edit keeps an active offer active; a buyer edit sends it back with the warning', async () => {
     const o = await create('Edit me');
     expect((await w.as(operator, offerAction, `offers/${o.id}:approve`, 'POST')).status).toBe(200);

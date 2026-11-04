@@ -1,0 +1,1 @@
+ALTER TABLE "offers"."offer" ADD COLUMN "optional_buying_roles" text[] DEFAULT '{}'::text[] NOT NULL;

@@ -6,6 +6,7 @@ import { Button } from '../../ui/Button';
 import { Drawer } from '../../ui/Drawer';
 import { Field } from '../../ui/Field';
 import { useToast } from '../../ui/Toast';
+import { buyingRolesQuery } from '../account/api';
 import { errorText, LoadingRows } from '../settings/shared';
 import { approveOffer, createOffer, offerQuery, patchOffer, unapproveOffer, type Offer, type OfferBody, type OfferStatus, type Practice, type PriceModel } from './api';
 import { ChipsInput } from './ChipsInput';
@@ -39,6 +40,8 @@ type Values = {
   typicalDeal: string;
   salesCycleDays: string;
   targetTitles: string[];
+  requiredRoles: string[];
+  optionalRoles: string[];
   industries: string[];
   sizeMin: string;
   sizeMax: string;
@@ -66,6 +69,8 @@ function valuesOf(o: Offer | undefined, practiceId: string, copy: boolean): Valu
     typicalDeal: dollars(o?.typical_deal_cents ?? null),
     salesCycleDays: num(o?.sales_cycle_days ?? null),
     targetTitles: o?.target_titles ?? [],
+    requiredRoles: o?.target_buying_roles ?? [],
+    optionalRoles: o?.optional_buying_roles ?? [],
     industries: o?.industries ?? [],
     sizeMin: num(o?.company_size_min ?? null),
     sizeMax: num(o?.company_size_max ?? null),
@@ -107,6 +112,8 @@ function bodyOf(v: Values, base: Values | null): OfferBody {
     typical_deal_cents: cents(v.typicalDeal),
     sales_cycle_days: int(v.salesCycleDays),
     target_titles: v.targetTitles,
+    target_buying_roles: v.requiredRoles,
+    optional_buying_roles: v.optionalRoles,
     industries: v.industries,
     company_size_min: int(v.sizeMin),
     company_size_max: int(v.sizeMax),
@@ -134,6 +141,8 @@ const FIELD_OF: Record<string, keyof Values> = {
   sales_cycle_days: 'salesCycleDays',
   company_size_min: 'sizeMin',
   company_size_max: 'sizeMax',
+  target_buying_roles: 'requiredRoles',
+  optional_buying_roles: 'optionalRoles',
 };
 
 type Props = {
@@ -191,6 +200,7 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
   const navigate = useNavigate();
   const toast = useToast();
   const statusName = useId();
+  const roles = useQuery(buyingRolesQuery(tenant)).data?.data ?? [];
   const [v, setV] = useState<Values>(() => valuesOf(initial, practiceId, mode === 'new'));
   // What the price fields are compared with: the offer as loaded, then as last saved. A new offer sends them all.
   const [base, setBase] = useState<Values | null>(() => (mode === 'edit' ? valuesOf(initial, practiceId, false) : null));
@@ -288,6 +298,23 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
       {(c) => <textarea {...c} className="input" rows={3} value={v[k]} data-field={k} onChange={(e) => set(k, e.target.value)} />}
     </Field>
   );
+  const roleGroup = (k: 'requiredRoles' | 'optionalRoles', label: string, other: 'requiredRoles' | 'optionalRoles') => (
+    <fieldset className={styles.radios}>
+      <legend className={styles.legendTitle}>{label}</legend>
+      {roles.map((r) => (
+        <label key={r.key} className={styles.radio}>
+          <input
+            type="checkbox"
+            checked={v[k].includes(r.key)}
+            disabled={v[other].includes(r.key)}
+            onChange={(e) => set(k, e.target.checked ? [...v[k], r.key] : v[k].filter((x) => x !== r.key))}
+          />
+          <span>{r.label}</span>
+        </label>
+      ))}
+      {errors[k] && <p className={styles.formError}>{errors[k]}</p>}
+    </fieldset>
+  );
   const number = (k: 'amount' | 'amountMax' | 'lengthWeeks' | 'typicalDeal' | 'salesCycleDays' | 'sizeMin' | 'sizeMax', label: string, hint?: string) => (
     <Field label={label} error={errors[k] ?? null} {...(hint ? { hint } : {})}>
       {(c) => <input {...c} className="input" type="number" min={0} step={k === 'amount' || k === 'amountMax' || k === 'typicalDeal' ? 'any' : 1} inputMode={k === 'amount' || k === 'amountMax' || k === 'typicalDeal' ? 'decimal' : 'numeric'} value={v[k]} onChange={(e) => set(k, e.target.value)} />}
@@ -364,6 +391,8 @@ function Fields({ tenant, mode, initial, practiceId, practices, field, onClose }
           <Field label="Target titles or roles" hint="Press Enter after each one.">
             {(c) => <ChipsInput control={c} values={v.targetTitles} onChange={(x) => set('targetTitles', x)} />}
           </Field>
+          {roles.length > 0 && roleGroup('requiredRoles', 'Required buying roles', 'optionalRoles')}
+          {roles.length > 0 && roleGroup('optionalRoles', 'Optional buying roles', 'requiredRoles')}
           <Field label="Industries" hint="Press Enter after each one.">
             {(c) => <ChipsInput control={c} values={v.industries} onChange={(x) => set('industries', x)} />}
           </Field>

@@ -36,6 +36,7 @@ export const TAAZAA_PRACTICES = [
 ];
 
 const M = 100_000_000; // $1M in cents
+const BUYING_ROLES = { targetBuyingRoles: ['business_owner', 'technical_buyer', 'commercial_buyer'], optionalBuyingRoles: ['procurement'] };
 const MIDMARKET = {
   companySizeMin: 100,
   companySizeMax: 2500,
@@ -67,6 +68,7 @@ export const TAAZAA_OFFERS: SeedOffer[] = [
     grossMargin: 0.6,
     salesCycleDays: 30,
     targetTitles: ['CEO', 'COO', 'VP Operations', 'President', 'Operating Partner'],
+    ...BUYING_ROLES,
     industries: ['Commercial real estate', 'Property management', 'Healthcare services', 'Logistics', 'Professional services', 'Insurance', 'Private equity', 'Manufacturing'],
     proofPoints: ['Scored opportunity register and a number one build brief in two weeks', 'Tobi: 32% more revenue and 100% on-time trips after AI-assisted dispatch', 'Snapform: intake from 3 hours to 45 minutes'],
     ...MIDMARKET,
@@ -84,6 +86,7 @@ export const TAAZAA_OFFERS: SeedOffer[] = [
     grossMargin: 0.6,
     salesCycleDays: 45,
     targetTitles: ['CIO', 'CISO', 'Head of Data', 'Chief Compliance Officer', 'CTO', 'VP Engineering'],
+    ...BUYING_ROLES,
     industries: ['Healthcare services', 'Financial services', 'Insurance', 'Legal services', 'Software', 'Commercial real estate', 'Professional services'],
     proofPoints: ['Readiness and governance score across six domains, 0 to 4', 'Gap to control map plus a remediation roadmap that becomes the next SOW', 'MediPulse AI: clinician-facing assistant built with retrieval and per-user memory'],
     ...MIDMARKET,
@@ -101,6 +104,7 @@ export const TAAZAA_OFFERS: SeedOffer[] = [
     grossMargin: 0.5,
     salesCycleDays: 21,
     targetTitles: ['COO', 'VP Operations', 'Director of Operations', 'Controller', 'Revenue Cycle Director'],
+    ...BUYING_ROLES,
     industries: ['Commercial real estate', 'Healthcare services', 'Logistics', 'Legal services', 'Insurance', 'Transportation', 'Property management'],
     proofPoints: ['Snapform: intake from 3 hours to 45 minutes', 'Safeguard AI: 80% less processing time at 98% accuracy', 'Quote Harness: worked example of a Sprint build'],
     ...MIDMARKET,
@@ -118,6 +122,7 @@ export const TAAZAA_OFFERS: SeedOffer[] = [
     grossMargin: 0.55,
     salesCycleDays: 60,
     targetTitles: ['VP Operations', 'Head of Investments', 'Chief Risk Officer', 'VP Medical Affairs', 'VP Customer Success', 'Head of Corporate Development'],
+    ...BUYING_ROLES,
     industries: ['Commercial real estate', 'Private equity', 'Financial services', 'Healthcare services', 'Life sciences', 'Food and beverage', 'Software'],
     proofPoints: ['About 70% reusable shell, 30% configured to your data and systems', 'Every answer cites its source; every step is audited', 'Taurex: 85% faster responses with numbers computed outside the model'],
     ...MIDMARKET,
@@ -135,6 +140,7 @@ export const TAAZAA_OFFERS: SeedOffer[] = [
     grossMargin: 0.55,
     salesCycleDays: 60,
     targetTitles: ['CEO', 'COO', 'President'],
+    ...BUYING_ROLES,
     industries: ['Commercial real estate', 'Professional services', 'Healthcare services', 'Distribution', 'IT services', 'Construction'],
     proofPoints: ['Taazaa runs on it first: sales, bid discovery and content', 'Blueprint fee credited if you proceed'],
     ...MIDMARKET,
@@ -152,6 +158,7 @@ export const TAAZAA_OFFERS: SeedOffer[] = [
     grossMargin: 0.6,
     salesCycleDays: 30,
     targetTitles: ['COO', 'CIO', 'IT Director', 'Owner', 'VP Operations'],
+    ...BUYING_ROLES,
     industries: ['Logistics', 'Property management', 'Healthcare services', 'Insurance', 'Manufacturing', 'Nonprofit', 'Government services', 'Professional services'],
     proofPoints: ["Guarantee: if Release 1 can't be fixed-priced from the Blueprint, the Blueprint is free"],
     ...MIDMARKET,
@@ -167,6 +174,7 @@ export const TAAZAA_OFFERS: SeedOffer[] = [
     priceMinCents: 2_000_000,
     priceMaxCents: 4_500_000,
     targetTitles: ['CIO', 'CTO', 'Chief Data Officer', 'VP Data', 'Director of IT', 'COO'],
+    ...BUYING_ROLES,
     approved: false,
     cases: [],
   },
@@ -178,6 +186,7 @@ export const TAAZAA_OFFERS: SeedOffer[] = [
     priceMinCents: 1_500_000,
     priceMaxCents: 3_500_000,
     targetTitles: ['CMO', 'VP Marketing', 'VP Growth', 'Head of Demand Generation', 'CEO'],
+    ...BUYING_ROLES,
     approved: false,
     cases: [],
   },
