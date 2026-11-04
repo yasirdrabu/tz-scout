@@ -1,5 +1,5 @@
 // Public interface of the playbooks module. Other modules import only this file or `contracts/*`.
-export { briefUpdated } from './contracts/events';
+export { briefUpdated, planChanged, planCreated, planNotStarted, stepCompleted } from './contracts/events';
 export { briefDraftJob, briefSweepJob, DRAFT_MAX_ATTEMPTS } from './contracts/jobs';
 export { SWEEP_CRON, seedPlaybooksDefaults } from './defaults';
 export { sweepBriefs } from './services/sweep';
@@ -15,6 +15,10 @@ export {
   briefOnSignal,
   briefUnfreezeOnDeclined,
   briefUnfreezeOnWithdrawn,
+  planOnAccepted,
+  planOnMerged,
+  planPauseOnDeclined,
+  planPauseOnWithdrawn,
   playbooksConsumers,
   playbooksTenantDefaults,
 } from './consumers';
@@ -59,3 +63,23 @@ export {
   type TemplateSummary,
 } from './services/templates';
 export { MAPPED_TIERS, NOT_AVAILABLE, offerPlaybooks, playbookFor, setOfferPlaybook, type MappedTier, type OfferPlaybookView } from './services/offer-playbooks';
+export {
+  FINISH_STEPS,
+  MAX_NOTE,
+  NEEDS_REASON,
+  PLAN_ENDED,
+  STEP_STATUSES,
+  abandonPlan,
+  completePlan,
+  getPlan,
+  pausePlan,
+  resumePlan,
+  stopPlan,
+  updateStep,
+  type HistoryView,
+  type PlanView,
+  type StepPatch,
+  type StepStatus,
+  type StepView as PlanStepView,
+} from './services/plans';
+export { pauseOnWithdrawn, plansOnMerge, startPlan } from './services/start';

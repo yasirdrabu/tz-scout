@@ -42,7 +42,7 @@ module adds an event or tool.
 | `routing.review.changed` | REV | After every write to an account's review: `accountId`, `version` (`account_review.version`) and a full `snapshot` (`reviewStatusKey`, `ownerUserId`, `ownerHistoryUserIds`, `hasOpenAssignment`, `stage`, `reviewFlags`) | ACC (account summary) |
 | `routing.status.changed` | REV | Review status moved; carries `from`, `to` | ANL, webhooks |
 | `routing.assignment.created` | REV | Leader assigned an account to a seller. Carries `bulkId` (null for a single assign; one `blk_` id for every assignment in one bulk action), which CRM uses to group handoffs into one batch | CRM (handoff), PLB (plan), ANL |
-| `routing.assignment.accepted` / `.declined` | REV | Seller response; decline carries the reason and its `reasonLabel` (the words the person saw) | ANL, SRC (trust), CRM (decline undoes handoff), PLB (pause plan) |
+| `routing.assignment.accepted` / `.declined` | REV | Seller response; decline carries the reason and its `reasonLabel` (the words the person saw) | ANL, SRC (trust), CRM (decline undoes handoff), PLB (accepted starts the plan; carries `templateId`, `noPlaybook` and `assignedBy`) |
 | `routing.assignment.withdrawn` | REV | Assigner withdrew or replaced an open assignment | CRM (undo handoff), PLB |
 | `routing.stage.changed` | REV | Account moved funnel stage (arrived to won, or an exit) | ANL, SRC (status for agents), webhooks |
 | `crm.handoff.completed` / `.failed` | CRM | Account pushed to the CRM (or failed). `completed` carries `companyLifecycle` (`none`, `open_deal`, `customer`) and `observedAt` | ANL, webhooks, REV (handoff flag), ACC (`crm_status`) |
@@ -51,8 +51,10 @@ module adds an event or tool.
 | `crm.lead.qualified` | CRM | A contact's lifecycle change matched the qualified-lead rule (`connectionId`, `contactId`). Internal; it keeps CRM from importing Intake | SRC (arrival) |
 | `crm.activity.observed` | CRM | Email, call, meeting or task seen in the CRM since handoff | PLB, ANL |
 | `crm.deal.changed` | CRM | Deal created or moved (open, won, lost) with amount; carries `companyLifecycle` and `observedAt` | PLB, ANL, SRC (trust), OFF (wins), REV (stage), ACC (`crm_status`) |
-| `playbooks.plan.created` / `.changed` | PLB | Account plan applied or edited | CRM (tasks), ANL |
-| `playbooks.step.completed` | PLB | A step was done | ANL |
+| `playbooks.plan.created` | PLB | A plan started when an assignment was accepted. Carries `planId`, `accountId`, `offerId` and `tier` (null when the assigner picked a playbook for an account with no lead offer or mappable tier), `templateId`, `templateVersion`, `assignmentId`, `sellerUserId`, `stopWhen` and `steps[{id, order, day, channel, title, ownerUserId, dueDate, crmTask, subject, body}]` | CRM (tasks), ANL |
+| `playbooks.plan.changed` | PLB | A plan or its steps changed: `planId`, `accountId`, `status` (`active`, `paused`, `completed`, `stopped`, `abandoned`), `changed` (any of `status`, `steps`, `owners`) and `reason?`. Also published when a withdrawal pauses the plan, a new acceptance resumes it, or a merge abandons one | CRM (tasks), ANL |
+| `playbooks.plan.not_started` | PLB | An accepted assignment started no plan: `accountId`, `assignmentId`, `reason` (`no_playbook_chosen`, `no_offer_playbook`, `template_archived` or `plan_open`) | ANL |
+| `playbooks.step.completed` | PLB | A step was done: `planId`, `stepId`, `accountId`, `channel`, `doneBy`, `doneAt` | ANL |
 | `playbooks.outcome.recorded` | PLB | Reply, meeting, opportunity, won or lost on an account | SRC (trust), ANL |
 | `playbooks.learning.recorded` | PLB | Retro written; may propose a template edit | PLB, ANL |
 | `playbooks.brief.updated` | PLB | Brief sections drafted or edited | CRM (refresh note on next push) |

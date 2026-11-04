@@ -1,0 +1,185 @@
+import { and, asc, eq, inArray } from 'drizzle-orm';
+import { accountNames, getSummaries, listPeople } from '@/modules/accounts';
+import { getOffer } from '@/modules/offers';
+import type { z } from 'zod';
+import type { assignmentAccepted } from '@/modules/routing/contracts/events';
+import { tenantTimezone, userNames } from '@/modules/tenancy';
+import type { ModuleContext } from '@/platform/context';
+import { ScoutError } from '@/platform/errors';
+import { publish } from '@/platform/events/outbox';
+import { newId } from '@/platform/ids';
+import { planCreated, planNotStarted } from '../contracts/events';
+import { accountPlan, planStep, playbookTemplate, templateStep } from '../db/schema';
+import { buildPlan, type OwnerRole, type StepChannel, type StopWhen, type Tier } from '../domain/plan';
+import { MAPPED_TIERS, playbookFor } from './offer-playbooks';
+import { publishChanged, recordChange } from './plans';
+
+type Accepted = z.output<typeof assignmentAccepted.data>;
+type NotStarted = 'no_playbook_chosen' | 'no_offer_playbook' | 'template_archived' | 'plan_open';
+
+const OPEN = ['active', 'paused'];
+
+async function notStarted(ctx: ModuleContext, d: Accepted, reason: NotStarted): Promise<void> {
+  await publish(ctx, planNotStarted, { accountId: d.accountId, assignmentId: d.assignmentId, reason }, { type: 'account', id: d.accountId });
+}
+
+/** The template row with a share lock, so a delete (which locks it for update) waits until this plan is written. */
+async function lockedTemplate(ctx: ModuleContext, id: string) {
+  const [t] = await ctx.tx.select().from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), eq(playbookTemplate.id, id))).for('share');
+  return t && t.status !== 'archived' ? t : null;
+}
+
+/** The accepted assignment comes back to an account whose plan was paused: the plan resumes, with the new seller on its open seller steps (Ruling 10). */
+async function resumeOnAccept(ctx: ModuleContext, plan: typeof accountPlan.$inferSelect, d: Accepted): Promise<void> {
+  const [row] = await ctx.tx
+    .update(accountPlan)
+    .set({ status: 'active', statusReason: null, sellerUserId: d.sellerUserId, assignmentId: d.assignmentId, updatedAt: new Date() })
+    .where(eq(accountPlan.id, plan.id))
+    .returning();
+  await ctx.tx
+    .update(planStep)
+    .set({ ownerUserId: d.sellerUserId })
+    .where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, plan.id), eq(planStep.ownerRole, 'seller'), inArray(planStep.status, ['todo', 'in_progress'])));
+  await recordChange(ctx, plan.id, 'resumed', { reason: 'accepted', assignmentId: d.assignmentId, sellerUserId: d.sellerUserId });
+  await publishChanged(ctx, row!, ['status', 'owners']);
+}
+
+/**
+ * `routing.assignment.accepted` (Ruling 2): starts the account's plan. A redelivery is a no-op (one plan per assignment).
+ * A paused plan resumes instead; an active one blocks a new plan. Which playbook: the assignment's choice, else the
+ * lead offer's playbook for the account's tier (Ruling 3).
+ */
+export async function startPlan(ctx: ModuleContext, e: { data: Accepted; occurredAt: string }): Promise<void> {
+  const d = e.data;
+  const [again] = await ctx.tx.select({ id: accountPlan.id }).from(accountPlan).where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.assignmentId, d.assignmentId)));
+  if (again) return;
+
+  const [open] = await ctx.tx
+    .select()
+    .from(accountPlan)
+    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, d.accountId), inArray(accountPlan.status, OPEN)))
+    .for('update');
+  if (open?.status === 'paused') return resumeOnAccept(ctx, open, d);
+  if (open) return notStarted(ctx, d, 'plan_open');
+
+  if (d.noPlaybook) return notStarted(ctx, d, 'no_playbook_chosen');
+  const [summary] = await getSummaries(ctx, [d.accountId]);
+  const leadOfferId = summary ? (summary.leadOfferOverrideId ?? summary.bestOfferId) : null;
+  const tier = (MAPPED_TIERS as readonly string[]).includes(summary?.tier ?? '') ? (summary!.tier as Tier) : null;
+
+  let templateId: string;
+  if (d.templateId) {
+    templateId = d.templateId;
+  } else {
+    const mapped = leadOfferId && tier ? await playbookFor(ctx, leadOfferId, tier) : null;
+    if (!mapped) return notStarted(ctx, d, 'no_offer_playbook');
+    templateId = mapped.templateId;
+  }
+  const template = await lockedTemplate(ctx, templateId);
+  if (!template) return notStarted(ctx, d, 'template_archived');
+  const steps = await ctx.tx
+    .select()
+    .from(templateStep)
+    .where(and(eq(templateStep.tenantId, ctx.tenantId), eq(templateStep.templateId, template.id), eq(templateStep.templateVersion, template.version)))
+    .orderBy(asc(templateStep.order));
+
+  const offer = leadOfferId
+    ? await getOffer(ctx, leadOfferId).catch((err: unknown) => {
+        if (err instanceof ScoutError && err.status === 404) return null;
+        throw err;
+      })
+    : null;
+  const names = await userNames(ctx, [d.sellerUserId]);
+  const draft = buildPlan({
+    template: { id: template.id, version: template.version, stopWhen: template.stopWhen as StopWhen },
+    steps: steps.map((s) => ({ ...s, channel: s.channel as StepChannel, ownerRole: s.ownerRole as OwnerRole })),
+    startAt: new Date(e.occurredAt),
+    timezone: await tenantTimezone(ctx),
+    sellerUserId: d.sellerUserId,
+    leaderUserId: d.assignedBy,
+    people: (await listPeople(ctx, d.accountId)).map((p) => ({ id: p.id, firstName: p.firstName, roles: p.roles.map((r) => ({ key: r.key, origin: r.origin })) })),
+    account: { name: (await accountNames(ctx, [d.accountId])).get(d.accountId) ?? '' },
+    offer: offer ? { id: offer.id, name: offer.name, promise: offer.promise } : null,
+    tier,
+    seller: { firstName: names.get(d.sellerUserId)?.trim().split(/\s+/)[0] ?? null },
+  });
+
+  const planId = newId('pln');
+  await ctx.tx.insert(accountPlan).values({
+    id: planId,
+    tenantId: ctx.tenantId,
+    accountId: d.accountId,
+    offerId: draft.offerId,
+    tier: draft.tier,
+    templateId: draft.templateId,
+    templateVersion: draft.templateVersion,
+    assignmentId: d.assignmentId,
+    sellerUserId: d.sellerUserId,
+    stopWhen: draft.stopWhen,
+    startDate: draft.startDate,
+  });
+  const rows = draft.steps.map((s) => ({ ...s, id: newId('stp'), tenantId: ctx.tenantId, planId }));
+  if (rows.length > 0) await ctx.tx.insert(planStep).values(rows);
+  await recordChange(ctx, planId, 'created', { templateId: draft.templateId, templateVersion: draft.templateVersion, assignmentId: d.assignmentId });
+  await publish(
+    ctx,
+    planCreated,
+    {
+      planId,
+      accountId: d.accountId,
+      offerId: draft.offerId,
+      tier: draft.tier,
+      templateId: draft.templateId,
+      templateVersion: draft.templateVersion,
+      assignmentId: d.assignmentId,
+      sellerUserId: d.sellerUserId,
+      stopWhen: draft.stopWhen,
+      steps: rows.map((r) => ({
+        id: r.id,
+        order: r.order,
+        day: r.day,
+        channel: r.channel,
+        title: r.title,
+        ownerUserId: r.ownerUserId,
+        dueDate: r.dueDate,
+        crmTask: r.crmTask,
+        subject: r.subject,
+        body: r.body,
+      })),
+    },
+    { type: 'account', id: d.accountId },
+  );
+}
+
+/** A withdrawn (or declined) assignment pauses its running plan; the next acceptance resumes it. No plan, no effect. */
+export async function pauseOnWithdrawn(ctx: ModuleContext, assignmentId: string): Promise<void> {
+  const [plan] = await ctx.tx
+    .select()
+    .from(accountPlan)
+    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.assignmentId, assignmentId), eq(accountPlan.status, 'active')))
+    .for('update');
+  if (!plan) return;
+  const [row] = await ctx.tx.update(accountPlan).set({ status: 'paused', statusReason: 'withdrawn', updatedAt: new Date() }).where(eq(accountPlan.id, plan.id)).returning();
+  await recordChange(ctx, plan.id, 'paused', { reason: 'withdrawn', assignmentId });
+  await publishChanged(ctx, row!, ['status'], 'withdrawn');
+}
+
+/**
+ * `accounts.account.merged`: the merged account's plans move to the survivor. When both have an open plan, the survivor's
+ * stays and the merged account's is abandoned with reason 'merged'.
+ */
+export async function plansOnMerge(ctx: ModuleContext, survivorId: string, mergedId: string): Promise<void> {
+  const mine = await ctx.tx.select().from(accountPlan).where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, mergedId))).for('update');
+  if (mine.length === 0) return;
+  const [kept] = await ctx.tx
+    .select({ id: accountPlan.id })
+    .from(accountPlan)
+    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, survivorId), inArray(accountPlan.status, OPEN)));
+  const loser = mine.find((p) => OPEN.includes(p.status));
+  if (kept && loser) {
+    await ctx.tx.update(accountPlan).set({ status: 'abandoned', statusReason: 'merged', updatedAt: new Date() }).where(eq(accountPlan.id, loser.id));
+    await recordChange(ctx, loser.id, 'abandoned', { reason: 'merged', survivorId });
+  }
+  await ctx.tx.update(accountPlan).set({ accountId: survivorId }).where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, mergedId)));
+  if (kept && loser) await publishChanged(ctx, { id: loser.id, accountId: survivorId, status: 'abandoned' }, ['status'], 'merged');
+}

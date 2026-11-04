@@ -40,8 +40,9 @@ export type PlanInput = {
   leaderUserId: string | null;
   people: PlanPerson[];
   account: { name: string };
-  offer: { id: string; name: string; promise: string | null };
-  tier: Tier;
+  /** Null when the account has no lead offer; offer placeholders then stay as written. */
+  offer: { id: string; name: string; promise: string | null } | null;
+  tier: Tier | null;
   seller: { firstName: string | null };
 };
 
@@ -68,8 +69,8 @@ export type PlanStepDraft = {
 export type PlanDraft = {
   templateId: string;
   templateVersion: number;
-  offerId: string;
-  tier: Tier;
+  offerId: string | null;
+  tier: Tier | null;
   stopWhen: StopWhen;
   /** 'YYYY-MM-DD' */
   startDate: string;
@@ -112,8 +113,8 @@ export function buildPlan(input: PlanInput): PlanDraft {
       const linked = linkedPeople(input.people, s.targetBuyingRoles);
       const vars: PlaceholderVars = {
         'account.name': input.account.name,
-        'offer.name': input.offer.name,
-        'offer.promise': input.offer.promise,
+        'offer.name': input.offer?.name ?? null,
+        'offer.promise': input.offer?.promise ?? null,
         'seller.first_name': input.seller.firstName,
         'person.first_name': linked[0]?.firstName ?? null,
       };
@@ -138,7 +139,7 @@ export function buildPlan(input: PlanInput): PlanDraft {
   return {
     templateId: input.template.id,
     templateVersion: input.template.version,
-    offerId: input.offer.id,
+    offerId: input.offer?.id ?? null,
     tier: input.tier,
     stopWhen: input.template.stopWhen,
     startDate,

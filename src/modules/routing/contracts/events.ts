@@ -56,6 +56,8 @@ export const assignmentAccepted = defineEvent(
     /** The assignment's playbook choice. Events stored before these parse as null and false. */
     templateId: z.string().nullable().default(null),
     noPlaybook: z.boolean().default(false),
+    /** Who assigned it (the leader), so the plan can own leader steps. Events stored before it parse as null. */
+    assignedBy: z.string().nullable().default(null),
   }),
 );
 

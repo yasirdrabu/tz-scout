@@ -168,8 +168,9 @@ export const accountPlan = playbooks.table(
     id: text('id').primaryKey(), // pln_
     tenantId: text('tenant_id').notNull(),
     accountId: text('account_id').notNull(),
-    offerId: text('offer_id').notNull(),
-    tier: text('tier').notNull(),
+    /** Null when the assigner picked a playbook for an account with no lead offer or no mappable tier. */
+    offerId: text('offer_id'),
+    tier: text('tier'),
     templateId: text('template_id')
       .notNull()
       .references(() => playbookTemplate.id),
