@@ -20,7 +20,7 @@ People decide (D6). Nothing reaches a CRM without an assignment made by a person
 | `decline_reason_def` | `id`, `tenant_id`, `key`, `label`, `applies_to` (`review`, `assignment`, `both`), `archived_at` |
 | `account_review` | `account_id` (pk with tenant), `status_key`, `status_changed_at`, `status_changed_by`, `lead_offer_override_id`, `insights` (markdown, leader notes), `insights_by`, `insights_at`, `current_assignment_id`, `stage`, `stage_changed_at`, `flags` (json: `newFrom {sourceId, at}`, `declinedBySeller {assignmentId, sellerUserId, sellerName, reasonKey, reasonLabel, at}`, `handoff {handoffId, assignmentId, state, reason?, currentOwnerName?, at}` where `state` is `sending`, `in_crm`, `needs_decision`, `failed` or `cancelled`; a later `at` wins, and an event for an assignment that is not the account's latest is ignored; `conflicts`, `enrichment_requested`, `low_trust` come later), `version` (bumped by every write), `merged_into` (set when merged away; the row is then read-only) |
 | `status_change` | `id`, `tenant_id`, `account_id`, `from_key`, `to_key`, `note`, `reason_key`, `by`, `at` |
-| `assignment` | `id` (`asg_`), `tenant_id`, `account_id`, `seller_user_id`, `assigned_by`, `assigned_at`, `notes` (markdown), `template_id` (opaque id passed to Playbooks), `status` (`pending`, `accepted`, `declined`, `withdrawn`, `replaced`), `responded_at`, `accepted_how` (`seller`, `crm_activity`, `auto_timeout`), `decline_reason_key`, `decline_note`, `previous_assignment_id` |
+| `assignment` | `id` (`asg_`), `tenant_id`, `account_id`, `seller_user_id`, `assigned_by`, `assigned_at`, `notes` (markdown), `template_id` (opaque id passed to Playbooks; null means the tier default), `no_playbook` (bool, default false; true means the assigner chose "No playbook"), `status` (`pending`, `accepted`, `declined`, `withdrawn`, `replaced`), `responded_at`, `accepted_how` (`seller`, `crm_activity`, `auto_timeout`), `decline_reason_key`, `decline_note`, `previous_assignment_id` |
 | `stage_change` | `id`, `tenant_id`, `account_id`, `from_stage`, `to_stage`, `cause_event_id`, `at` |
 | `routing_setting` | `tenant_id`, `auto_accept_working_days` (1 to 10, or null for off; default 2) |
 
@@ -37,10 +37,12 @@ derived from the handoff status (not a funnel stage).
 | Scoring and matching | current score, tier, best offer for queue sorting and filters |
 | CRM sync | `preflightOwnership(accountId, sellerUserId)` before assignment; handoff status for the stage tracker |
 
-Review and routing does not call Playbooks: the assign dialog's playbook picker is rendered by the
-account page (Playbooks owns the page) and passed in as `templateId`. In R1 there is no playbook
-picker: the assign dialog sends `templateId: null` and no plan is created; the picker arrives in R2
-with plans (spec's call, D27).
+Review and routing does not call Playbooks. The assign API takes an optional `playbook_id`: absent
+means the tier default (stored as `template_id = null, no_playbook = false`), `null` means "No
+playbook" (`no_playbook = true`), an id is stored as `template_id`. The HTTP layer checks that the id
+is a non-archived template before routing sees it (400 "That playbook isn't available."); routing
+only stores and passes it on. Playbooks starts the plan on `routing.assignment.accepted` (R2c-1); in
+R1 the dialog sent no choice and no plan was created.
 
 ## Epics
 
@@ -57,8 +59,8 @@ with plans (spec's call, D27).
 | Event | Data |
 |---|---|
 | `routing.status.changed` | `accountId`, `from`, `to`, `countsAsReviewed`, `isDeclined`, `returnsToSource`, `note`, `reasonKey`, `by` |
-| `routing.assignment.created` | `assignmentId`, `accountId`, `sellerUserId`, `assignedBy`, `templateId`, `offerId` (lead offer), `notes`, `ownershipDecision` (`assign`, `keep`), `previousAssignmentId`, `bulkId` (nullable; one `blk_` id for each bulk action) |
-| `routing.assignment.accepted` | `assignmentId`, `accountId`, `sellerUserId`, `acceptedHow` |
+| `routing.assignment.created` | `assignmentId`, `accountId`, `sellerUserId`, `assignedBy`, `templateId`, `noPlaybook`, `offerId` (lead offer), `notes`, `ownershipDecision` (`assign`, `keep`), `previousAssignmentId`, `bulkId` (nullable; one `blk_` id for each bulk action) |
+| `routing.assignment.accepted` | `assignmentId`, `accountId`, `sellerUserId`, `acceptedHow`, `templateId` (null by default), `noPlaybook` (false by default), `assignedBy` (null by default; Playbooks gives the leader's steps to them) |
 | `routing.assignment.declined` | `assignmentId`, `accountId`, `sellerUserId`, `reasonKey`, `reasonLabel`, `note` |
 | `routing.assignment.withdrawn` | `assignmentId`, `accountId`, `by`, `replacedBy` (assignment id or null) |
 | `routing.stage.changed` | `accountId`, `from`, `to`, `causeEventId` |
@@ -100,7 +102,8 @@ JSON field names are snake_case.
 | `GET/POST /api/v1/accounts/{id}/notes` | `accounts:read` / `review:act` or `accounts:write` | The account's notes (Decision 3; table `accounts.account_note`) |
 | `GET/PUT /api/v1/settings/review/statuses`, `/reasons`; `POST /api/v1/settings/review:reset` | read: `review:act`, `assignments:respond` or `settings:manage`; write: `settings:manage` | Status and reason editor (Decision 2) |
 | `PUT /api/v1/accounts/{id}/insights` | `review:act` | Leader insights |
-| `POST /api/v1/accounts/{id}:assign` | `assign:act` | Create an assignment; 202 |
+| `POST /api/v1/accounts/{id}:assign` | `assign:act` | Create an assignment; 202. Optional `playbook_id` (a template id, or `null` for no playbook; the bulk assign takes the same field) |
+| `GET /api/v1/accounts/{id}/playbook-suggestion` | `assign:act` | The playbook the dialog preselects (served by Playbooks data at the HTTP layer; PLB-E2) |
 | `POST /api/v1/assignments/{id}:accept` | `assignments:respond` | Seller accepts own assignment (checked by ownership of the assignment, not account visibility; another seller gets 404) |
 | `POST /api/v1/assignments/{id}:decline` | `assignments:respond` | Seller declines own assignment, pending or already accepted; reason key required. The stage returns to `reviewed` |
 | `POST /api/v1/assignments/{id}:withdraw` | `assign:act` | Withdraw or reassign. Only the person who assigned it or an owner-role member may; anyone who can assign can still end it by assigning the account to someone else |

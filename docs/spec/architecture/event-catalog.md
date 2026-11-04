@@ -41,9 +41,9 @@ module adds an event or tool.
 | `offers.offer.approved` / `.archived` / `.changed` | OFF | Offer lifecycle | SCO (rescore), PLB |
 | `routing.review.changed` | REV | After every write to an account's review: `accountId`, `version` (`account_review.version`) and a full `snapshot` (`reviewStatusKey`, `ownerUserId`, `ownerHistoryUserIds`, `hasOpenAssignment`, `stage`, `reviewFlags`) | ACC (account summary) |
 | `routing.status.changed` | REV | Review status moved; carries `from`, `to` | ANL, webhooks |
-| `routing.assignment.created` | REV | Leader assigned an account to a seller. Carries `bulkId` (null for a single assign; one `blk_` id for every assignment in one bulk action), which CRM uses to group handoffs into one batch | CRM (handoff), PLB (plan), ANL |
+| `routing.assignment.created` | REV | Leader assigned an account to a seller. Carries the playbook choice (`templateId`, `noPlaybook`) and `bulkId` (null for a single assign; one `blk_` id for every assignment in one bulk action), which CRM uses to group handoffs into one batch | CRM (handoff), PLB (plan), ANL |
 | `routing.assignment.accepted` / `.declined` | REV | Seller response; decline carries the reason and its `reasonLabel` (the words the person saw) | ANL, SRC (trust), CRM (decline undoes handoff), PLB (accepted starts the plan; carries `templateId`, `noPlaybook` and `assignedBy`) |
-| `routing.assignment.withdrawn` | REV | Assigner withdrew or replaced an open assignment | CRM (undo handoff), PLB |
+| `routing.assignment.withdrawn` | REV | Assigner withdrew or replaced an open assignment | CRM (undo handoff), PLB (pauses the plan) |
 | `routing.stage.changed` | REV | Account moved funnel stage (arrived to won, or an exit) | ANL, SRC (status for agents), webhooks |
 | `crm.handoff.completed` / `.failed` | CRM | Account pushed to the CRM (or failed). `completed` carries `companyLifecycle` (`none`, `open_deal`, `customer`) and `observedAt` | ANL, webhooks, REV (handoff flag), ACC (`crm_status`) |
 | `crm.handoff.cancelled` | CRM | A handoff was declined, withdrawn or stopped before it finished, or a completed handoff was undone. Internal | REV (handoff flag) |

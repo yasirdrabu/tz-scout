@@ -13,8 +13,11 @@ reason, and the reason is tracked so leaders see why accounts bounce.
   as reviewed; assigning from Ready for review, In review or Sent back to source sets it to the tenant's
   first status that counts as reviewed, is not declined and does not return to the source (Approved) in
   the same action (one click: "Approve and assign").
-- Assignment fields: seller (members with the seller capability), notes, playbook template (optional,
-  passed through; **R2**, absent in R1 where `templateId` is always null, D27), lead offer (defaults to
+- Assignment fields: seller (members with the seller capability), notes, playbook choice (optional
+  `playbook_id`: absent means the tier's playbook, `null` means "No playbook", an id means that
+  template; stored as `template_id` and `no_playbook`, passed through on `created` and `accepted`;
+  an archived or unknown template is 400 "That playbook isn't available."; a reassignment after a
+  withdrawal keeps the choice; the plan starts when the assignment is accepted, PLB-E2), lead offer (defaults to
   best offer; an override is stored on `account_review`).
 - One open assignment per account. Assigning again replaces the open one (`replaced`) and notifies the
   previous seller.
@@ -39,11 +42,11 @@ reason, and the reason is tracked so leaders see why accounts bounce.
 As a leader, I want to approve and assign in one step with notes and a playbook, so that a reviewed
 account reaches an AE in seconds.
 - REV-E2-S1-AC1 From the account page or the queue, Approve and assign opens a dialog with seller,
-  lead offer and notes (plus playbook from R2); submitting creates the assignment and publishes
+  lead offer, notes and playbook (preselected, changeable, or "No playbook"); submitting creates the assignment and publishes
   `routing.assignment.created`.
 - REV-E2-S1-AC2 The ownership preflight (REV-E3) runs before submit; if it says stop, the dialog shows
   why and offers "Push anyway, keep their owner" or cancel.
-- REV-E2-S1-AC3 Bulk assign applies the same seller (and, from R2, playbook) to up to 50 selected accounts and
+- REV-E2-S1-AC3 Bulk assign applies the same seller (and one playbook choice) to up to 50 selected accounts and
   reports each result.
 
 ### REV-E2-S2 Seller accepts
