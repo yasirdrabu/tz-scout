@@ -38,8 +38,10 @@ wins: each offer picks a playbook per tier, steps are by day, and a playbook has
 - **Activating.** A template needs at least one step before it can be `active`, otherwise 400 "Add
   at least one step."
 - **Duplicate.** Copies the template (current version's steps) as a draft named "{name} (copy)".
-- **Archive.** The template stops being chosen. Running plans are untouched. An offer mapping that
-  still points at it counts as "no playbook" when a plan would start.
+- **Archive.** The template stops being chosen. Running plans are untouched. Archiving deletes the
+  template's `offer_playbook` rows in the same transaction, so each of those offer tiers reads "no
+  playbook" (the Retire confirm says "It will be removed from {n} offer tiers"; R2c-2). A retired offer's
+  tiers cannot be changed: 409 "This offer is retired."
 - **Delete.** Allowed only when no plan ever used the template and no `offer_playbook` row points at
   it. Otherwise 409 "This playbook has run on accounts. Retire it instead." Delete removes the
   template's steps first.

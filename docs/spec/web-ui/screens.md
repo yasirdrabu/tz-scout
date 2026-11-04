@@ -332,7 +332,7 @@ account opens (from the account page) or the row leaves (queue).
 
 ## 6. Assign dialog
 
-**Tag** R1 (playbook choice R2) · **Who** `assign:act`
+**Tag** R1 (playbook choice R2, shipped in R2c-2) · **Who** `assign:act`
 
 620 px modal. Title "Assign {account}" or "Assign {n} accounts" with the names underneath; sub
 "{offer} · {practice}".
@@ -351,10 +351,13 @@ account opens (from the account page) or the row leaves (queue).
   `GET /api/v1/accounts/{id}/playbook-suggestion`; none when nothing is mapped). Change it by picking
   another card, or pick "No playbook". The plan starts when the AE accepts; nothing is sent
   automatically, steps are drafts the AE sends. Sends `playbook_id` (absent when left on the
-  default, `null` for "No playbook"). In bulk, one choice applies to every account.
+  default, `null` for "No playbook"). Only active playbooks are offered. Hidden without
+  `playbooks:read`. In bulk the first card is "Recommended for each account" (the default, which sends no
+  `playbook_id`), then the active playbooks, then "No playbook"; one choice applies to every account.
 - **Note for {AE}**: "What should they know first?" (optional, up to 4,000 characters).
 - Footer sentence: "Scout sends {account} to HubSpot with {AE} as owner and logs the brief." (R2 adds
-  "and starts {playbook} on {date}") or, with the warning, "Scout sends {account} to HubSpot and
+  "and starts {playbook} on {date}"; built as "... and starts {playbook} when {AE first name} accepts.", with
+  nothing added for "No playbook") or, with the warning, "Scout sends {account} to HubSpot and
   leaves {owner} as owner."
 - `Cancel`, `Assign to {AE full name}`. Toast "Assigned to {AE}. Sending {account} to HubSpot." or
   "Assigned {n} accounts to {AE}. Sending them to HubSpot." The send runs after the dialog closes; the
@@ -371,15 +374,16 @@ account opens (from the account page) or the row leaves (queue).
 
 ## 7. My accounts
 
-**Tag** R1 (next step and due dates R2) · **Route** `/t/:tenant/my` · **Who** `assignments:respond`
+**Tag** R1 (next step and due dates R2, shipped in R2c-2) · **Route** `/t/:tenant/my` · **Who** `assignments:respond`
 
-Title "My accounts", subtitle "{n} new assignments to accept." (R2 adds "{n} next step due today,
-{n} overdue.")
+Title "My accounts", subtitle "{n} new assignments to accept." (R2 adds "{n} next step(s) due today" and
+"{n} overdue"; a clause with a zero count is dropped, e.g. "2 next steps due today." or "1 overdue."; singular
+and plural follow the count. From `GET /api/v1/me/counts`.)
 - **New assignments** (badge, hint "Accept to take it on. Declining returns the account to
   {assigner}."; R2: "Accept to start the playbook. ..."): rows with account link, "{offer}" (R2:
   " · {playbook} playbook", from `playbook_name`; none when the leader picked "No playbook" or
   nothing is mapped), "Assigned by {name} · {when}", the quoted note, `Decline`, `Accept`
-  (toast "Accepted. {account} is in your accounts."; R2: "Accepted. {playbook} starts {day}."). The
+  (toast "Accepted. {account} is in your accounts."; with a playbook: "Accepted. {playbook} starts today."). The
   row shows the handoff state when the HubSpot send has not finished.
 - **Accepted automatically.** An assignment the AE has not answered after {n} working days (Settings
   > Review statuses, default 2), or one they already acted on in HubSpot (a reply or a meeting), is
@@ -393,7 +397,9 @@ Title "My accounts", subtitle "{n} new assignments to accept." (R2 adds "{n} nex
   `Cancel`, `Decline and return to {assigner}`. Toast "Declined. {account} is back with {assigner},
   with your reason."
 - **Active** table: Account (name and offer), Stage chip, Next step (R2), Due (R2: "Due today" amber,
-  "{n} days overdue" red, or a date), Last HubSpot activity (text and when). Row opens the account
+  "{n} days overdue" or "1 day overdue" red, or the date), Last HubSpot activity (text and when). Next step
+  and Due show only when the API returns them (they are null without `playbooks:read`, and then the
+  columns are hidden). Row opens the account
   page.
 - Empty: "No accounts assigned to you yet. When a leader assigns one, it shows here for you to accept."
   Loading and error as the shared pattern.
@@ -409,7 +415,8 @@ stage from the API plus `All` and `Other` (sent back, not pursued, lost). Search
 Filter: Owner (sellers and "Unassigned"), Practice, Source.
 
 Columns: Account (name, "{industry} · {location}"), Stage chip, Owner (initials and name or
-"Unassigned"), Best offer (and practice), Priority, Source, Next step (and due; R2), Last activity
+"Unassigned"), Best offer (and practice), Priority, Source, Next step (and due words beneath; R2, shown only with
+`playbooks:read`; shipped in R2c-2), Last activity
 (and when), Value (amount and "Open deal" or "Won"; with no won or open deal, the best offer's
 revenue potential in USD with "Estimated", R2a; the CSV value kind is "Estimated" too). Footer "Sorted by stage, then
 priority". Every row opens its account page. Filtered empty: "No accounts match these filters" / "Try
@@ -683,12 +690,16 @@ Draft, Retired), `Add offer`.
   {name}"; `Duplicate`, `Retire` or `Delete` (Delete only for an offer that never matched an
   account), `Edit offer`. Price ("Fixed fee · 6 weeks"); stats Accounts matched, Won, Win rate;
   `See accounts for this offer` (All accounts filtered). Sections Summary, Ideal customer, Key offer,
-  Why us, Why now (empty "Not written yet. Add it"). Playbook by tier (R2): Act now, Good fit, Watch
-  selects with "{n} steps over {d} days · {x}% book a meeting", note "Changing a playbook affects
+  Why us, Why now (empty "Not written yet. Add it"). Playbook by tier (R2, shipped in R2c-2): Act now, Good
+  fit, Watch selects (active playbooks only; shown with `offers:manage` or `playbooks:manage`, read-only
+  text otherwise; read-only on a retired offer, where the API answers 409 "This offer is retired.") with "{n} steps over {d} days · {x}% book a meeting", note "Changing a playbook affects
   accounts accepted from now on. Accounts already running keep the playbook they started with."
   Initial message with `Copy`: read-only, the first email step of the tier's playbook (`first_email`,
-  per tier; edit it in the playbook). Seller guide (R2): Talking points, When they say (objection and
-  answer), Proof points, Avoid.
+  per tier, one block each with its subject and body; `Copy` toasts "Initial message copied."; note
+  "Scout fills in {account.name}, {person.first_name} and the other placeholders when the plan starts.";
+  edit it in the playbook). Seller guide (R2): Talking points, When they say (objection and answer),
+  Proof points, Avoid. Editing the guide needs `offers:manage` and never sends an approved offer back to
+  Draft. The account page shows the guide for the account's lead offer, read-only.
 - **Offer form** (fields per Decision 16): Title ("Give the offer a title."), Practice, Status
   (Active "Scout matches accounts to it", Draft "Hidden from matching"; Retired "Kept for history"
   is set by `Retire` and can't be undone), Pricing (Fixed fee, Starting at, Per month, Custom quote),
@@ -696,7 +707,9 @@ Draft, Retired), `Add offer`.
   description, then Key offer, Why us, Why now), Who it's for (typical deal size, sales cycle in
   days, target titles, "Required buying roles" and "Optional buying roles" checkbox groups (R2b-3; a role
   ticked in one is disabled in the other; the API refuses an overlap), industries, company size), Talking points,
-  Objections ("One per line, written as: objection | answer"), Proof points, Avoid. `Cancel`,
+  Objections ("One per line, written as: objection | answer"; the objection may not contain "|", and a line
+  without one is a field error, "Write each line as: objection | answer"), Proof points, Avoid. Each list
+  holds at most 20 items. `Cancel`,
   `Save changes` or `Add offer`.
   - Making an offer Active needs a deal size, a sales cycle, a target title or role, and industries
     or a company size. When the API refuses, the form lists what is missing ("To make this offer
@@ -713,19 +726,28 @@ Draft, Retired), `Add offer`.
 
 ## 20. Playbooks
 
-**Tag** R2 · **Route** `/t/:tenant/playbooks/:id?` · **Who** `playbooks:read`; edits
+**Tag** R2 (shipped in R2c-2) · **Route** `/t/:tenant/playbooks/:id?` · **Who** `playbooks:read`; edits
 `playbooks:manage`
 
 The mockup's model wins (Decision 25): each offer picks a playbook per tier, steps are by day, and a
 playbook has a stop rule. Steps are always drafts for the AE to send; nothing is sent automatically
-(user, 2026-11-02). `docs/spec/playbooks/` matches this; the API ships in R2c-1 and this screen in
-R2c-2 (the stop rule is enforced in R2c-3).
+(user, 2026-11-02). `docs/spec/playbooks/` matches this; the API shipped in R2c-1 and this screen in
+R2c-2. Not yet (R2c-3): the plan view on the account page, HubSpot tasks for `crm_task` steps, and
+enforcing the stop rule (it is stored and shown).
 
 List: "Playbooks", sub "The steps an AE follows after accepting an account. Each offer picks a
 playbook for each tier." `New playbook`. Four-step explainer (Offer and tier pick it; Starts on
 acceptance; Scout prepares each step; Stops on a result). Table: Playbook (name, description),
 Status, Steps ("{n} steps over {d} days", channel mix), Runs on (offers or "Not assigned"), Running,
 Reply rate, Meeting rate (rates R3). Footnote on the 90-day window.
+
+Anyone with `playbooks:read` sees it; the list shows every status, the pickers only active ones. Edit
+controls need `playbooks:manage`. Delete shows when nothing is running and the playbook runs on no offer;
+otherwise `Retire` (a 409 on delete shows the API's message and offers Retire). Retire's confirm says
+"It will be removed from {n} offer tiers. Accounts already running it keep going." The form is a drawer
+(`?edit=new` on the list, `?edit=playbook` on the detail; Assign is `?assign=offer`) and sends each step
+with only `order`, `day`, `channel`, `owner_role`, `title`, `detail`, `target_buying_roles`, `crm_task`,
+`subject` and `body`.
 
 Detail: title and status, description, `Duplicate`, `Retire` or `Delete`, `Edit playbook`; tiles
 Running now, Finished, Replied, Booked a meeting, Won (R3); Steps (Day {n}, channel badge, title,
