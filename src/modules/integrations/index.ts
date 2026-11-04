@@ -11,6 +11,7 @@ export {
   disconnect,
   ensureConnectionId,
   listConnections,
+  markConnectionFailing,
   recentCalls,
   saveCredential,
   setConnectionSettings,

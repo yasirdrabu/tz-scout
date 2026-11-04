@@ -7,7 +7,7 @@ import { log } from '@/platform/log';
 import { config } from '@/platform/config';
 import { registerInboundRoute } from '@/modules/tenancy';
 import { callLog, connection, credential } from './db/schema';
-import { adapterFactories, isKnownProvider, providerName, type Adapter } from './providers';
+import { adapterFactories, isKnownProvider, needsCredential, providerName, type Adapter } from './providers';
 import { capUnit, LOCK_TIMEOUT, recordUsage, reserve, settle, type Reservation } from './services/caps';
 import type { CapUnit } from './domain/caps';
 import { credentialAad, openValue } from './services/vault';
@@ -198,8 +198,11 @@ export async function runCall<T>(
   }
   const mockOnly = config.forceMock || ctx.environment === 'test';
   const { conn, cred } = await prepare(ctx, provider, !mockOnly && !!factories.live);
+  // A provider that needs no key (the company website) is ready without a credential.
+  const keyless = !needsCredential(provider);
+  const ready = !!cred || keyless;
 
-  if (!mockOnly && mode === 'normal' && conn.mode === 'live' && (!cred || !factories.live)) {
+  if (!mockOnly && mode === 'normal' && conn.mode === 'live' && (!ready || !factories.live)) {
     throw new ScoutError({
       slug: 'connection_not_ready',
       status: 409,
@@ -207,7 +210,7 @@ export async function runCall<T>(
       detail: 'Save a credential and test the connection.',
     });
   }
-  const useLive = !mockOnly && !!factories.live && !!cred && (mode === 'test' || conn.mode === 'live');
+  const useLive = !mockOnly && !!factories.live && ready && (mode === 'test' || conn.mode === 'live');
   const logBase = {
     tenantId: ctx.tenantId,
     connectionId: conn.id,
@@ -278,6 +281,8 @@ export async function runCall<T>(
         value,
         settings: (conn.settings ?? {}) as Record<string, unknown>,
       });
+    } else if (useLive && factories.live) {
+      adapter = factories.live({ kind: 'none', value: '', settings: (conn.settings ?? {}) as Record<string, unknown> });
     } else adapter = factories.mock(ctx);
     result = await fn(adapter, { scrub });
     try {
@@ -333,7 +338,9 @@ export async function runCall<T>(
       if (outcome === 'rate_limited') return;
       // Only calls that reached the real service say anything about the connection's health:
       // a sample-data success must not mark a never-tested credential as connected.
-      if (!useLive) return;
+      // A provider with no key (the company website) has no credential to go bad: a failed call is the target's
+      // fault (one company's site down), so it never moves the connection's health.
+      if (!useLive || keyless) return;
       // Skip the status change when the caller's open transaction holds the row: it would wait for us.
       const locked = await tx.execute(
         sql`select 1 from integrations.connection where tenant_id = ${ctx.tenantId} and id = ${conn.id} for update skip locked`,

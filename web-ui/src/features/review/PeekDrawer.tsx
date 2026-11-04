@@ -8,6 +8,7 @@ import { useFormat } from '../../lib/useFormat';
 import { Button } from '../../ui/Button';
 import { Drawer } from '../../ui/Drawer';
 import { IconButton } from '../../ui/IconButton';
+import { EnrichDialog } from '../enrichment/EnrichDialog';
 import { useRun } from '../settings/shared';
 import {
   addNote,
@@ -57,6 +58,7 @@ const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isConte
 /** §3 Queue peek drawer: scores, inline Details, Why now, Notes and Changes for one account, with previous and next (`j`, `k`). */
 export function PeekDrawer(props: PeekProps) {
   const { tenant, accountId, row, position, onPrev, onNext, onClose } = props;
+  const [enriching, setEnriching] = useState(false);
   // On the window, so the keys work wherever focus is (a button that went disabled drops it), but
   // not while the person types or while a dialog opened from the drawer is on top.
   useEffect(() => {
@@ -104,6 +106,11 @@ export function PeekDrawer(props: PeekProps) {
                 Approve and assign
               </Button>
             )}
+            {hasScope(props.me, 'enrichment:request') && (
+              <Button size="sm" variant="secondary" onClick={() => setEnriching(true)}>
+                Enrich
+              </Button>
+            )}
             <Button size="sm" variant="secondary" onClick={() => props.onSendBack(row)}>
               Send back
             </Button>
@@ -112,6 +119,9 @@ export function PeekDrawer(props: PeekProps) {
       }
     >
       {row ? <Body key={row.account_id} {...props} row={row} /> : <p className={styles.note}>This account isn&apos;t in this view of the queue now. Open its full page to see it.</p>}
+      {enriching && row && (
+        <EnrichDialog tenant={tenant} me={props.me} accountId={row.account_id} name={row.name} onClose={() => setEnriching(false)} onDone={props.onChanged} />
+      )}
     </Drawer>
   );
 }
@@ -287,7 +297,7 @@ function Body({ tenant, me, row, onChanged, onSendBack, tiers, statuses }: PeekP
         <div className={styles.detail}>
           <span>Flags</span>
           <div className={cx(styles.detailValue, styles.plain)}>
-            {hasFlags ? <RowFlags row={row} date={f.date} /> : <span className={styles.muted}>None</span>}
+            {hasFlags ? <RowFlags row={row} date={f.date} showRequester /> : <span className={styles.muted}>None</span>}
             {declined && <span className={styles.muted}>{`Declined by ${declined.seller_name} on ${f.date(declined.at)}: ${declined.reason_label}`}</span>}
             {handoff?.state === 'failed' && hasScope(me, 'crm:push') && (
               <span>

@@ -5,7 +5,7 @@ import { adminDb } from '@/platform/db/client';
 import { auditLog, schedule } from '@/platform/db/schema';
 import { withTenant } from '@/platform/db/tenant';
 import { defineJob } from '@/platform/events/registry';
-import { pauseSchedule, resumeSchedule, runNow, schedulerTick, upsertSchedule } from '@/platform/scheduler';
+import { ensureSchedule, pauseSchedule, resumeSchedule, runNow, schedulerTick, upsertSchedule } from '@/platform/scheduler';
 
 const job = defineJob('platform.sched_test', z.object({ n: z.number().optional() }));
 const admin = { actor: { kind: 'user', id: 'usr_admin' } as const };
@@ -48,6 +48,32 @@ describe('scheduler', () => {
     expect(after.lastRunAt?.getTime()).toBe(before.nextRunAt.getTime());
     expect(await schedulerTick(now)).toBe(0);
     expect(await jobCount()).toBe(1);
+  });
+
+  it('ensureSchedule makes a missing schedule, and leaves an existing one alone with no audit row', async () => {
+    const input = { tenantId: 't_platform', jobName: job.name, cron: '*/5 * * * *', timezone: 'UTC', payload: {} };
+    const id = await ensureSchedule(admin, input);
+    const audits = () => adminDb.select().from(auditLog).where(and(eq(auditLog.subjectId, id), eq(auditLog.action, 'platform.schedule.upserted')));
+    expect(await audits()).toHaveLength(1);
+    expect(await ensureSchedule(admin, { ...input, cron: '0 * * * *' })).toBe(id);
+    expect(await audits()).toHaveLength(1);
+    expect((await row(id)).cron).toBe('*/5 * * * *');
+  });
+
+  it('two first-ever ensureSchedule calls at once both resolve to one row and one audit row', async () => {
+    const input = { tenantId: 't_platform', jobName: job.name, cron: '*/5 * * * *', timezone: 'UTC', payload: {} };
+    // Several rounds of several callers, so the race between the check and the insert is actually hit.
+    for (let round = 0; round < 4; round++) {
+      await adminDb.execute(sql`delete from platform.schedule`);
+      const ids = await Promise.all(Array.from({ length: 6 }, () => ensureSchedule(admin, input)));
+      expect(new Set(ids).size).toBe(1);
+    }
+    const [a, b] = await Promise.all([ensureSchedule(admin, input), ensureSchedule(admin, input)]);
+    expect(a).toBe(b);
+    const rows = await adminDb.select().from(schedule).where(and(eq(schedule.tenantId, 't_platform'), eq(schedule.jobName, job.name)));
+    expect(rows.map((r) => r.id)).toEqual([a]);
+    const audits = await adminDb.select().from(auditLog).where(and(eq(auditLog.subjectId, a), eq(auditLog.action, 'platform.schedule.upserted')));
+    expect(audits).toHaveLength(1);
   });
 
   it('two concurrent ticks publish one job in total', async () => {

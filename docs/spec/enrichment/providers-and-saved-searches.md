@@ -1,6 +1,9 @@
 # ENR-E2 Providers and saved searches
 
-Status: Draft · Release: R1
+Status: Providers shipped in R2b-2 (ENR-E2-S1); saved searches not yet · Release: R1
+
+R2b-2 shipped plan docs/plans/2026-11-03-r2b-2-enrichment.md. Its rulings for providers are below
+("R2b-2 rulings"); where they differ from the Rules, the rulings win.
 
 ## Why
 
@@ -38,6 +41,67 @@ both called directly (D34). Each sits behind an adapter with mock and live versi
   (SRC-E3-S4).
 - The run shows its estimate before "Run now" and on the schedule page.
 
+## R2b-2 rulings
+
+Rulings 2 and 3 are the user's answers of 2026-11-03; the build rulings are Claude's calls,
+2026-11-03.
+
+- **Ruling 2 (user). Vibe is sample data only.** The Vibe adapter registers only a mock side, built on
+  v1's pure mapping (`vibe.ts`, `vibeExport.ts`) carried into `adapters/vibe/mapping.ts` with its v1
+  tests, and it answers the same operations and credits as Apollo. Setting Vibe live keeps INT's 409
+  "This service can't run live yet." A live adapter is a follow-up, once there is a key and confirmed
+  endpoints. This differs from the providers table above, which calls Vibe directly.
+- **Ruling 3 (user). Website read is in.**
+  - **Provider:** `website` in INT's list (`name: 'Company website'`, `usedFor: 'Reads company
+    websites'`, interface owner `enrichment`, release R2, `needsCredential: false`). It goes live with
+    no credential, and its Test connection answers "Ready to read company websites. No key is needed."
+  - **Live adapter:** fetches the home page and up to 4 same-host linked pages whose path or link text
+    matches `about|services|industries|contact`, with user agent `TaazaaScout/1.0
+    (+https://scout.taazaa.ai/bot)`, in at most 30 seconds in all and 2 MB per page.
+  - **Mock adapter:** two fixed sample pages for any domain.
+  - **Reading:** the pages go to AI task `read_website` (prompt v1.1), whose output is `{description,
+    industry_guess, technologies[], facts:[{key, value, url}]}`, every item citing a page URL. Size
+    clues are not asked for, since nothing stored them (final review M1). Its `rules` take the title
+    and meta description, technologies from a fixed fingerprint list in the HTML, and no industry
+    guess. With Claude on mock, or at its limit, the rules output is used and the request's result says
+    "Read by rules". A website read uses 0 credits; its Claude cost goes through `anthropic`.
+  - **Website facts (final review I3).** A website read writes only the description, the industry,
+    the technologies, and these `facts` keys: `founded_year` (a 4-digit year), `employees` (a whole
+    number), `hq_city`, `hq_state`, `hq_country` (as the ISO code intake stores, so "United States" is
+    "US") and `keywords` (split on commas). Any other key, or a value its column can't take, is dropped,
+    so page text can't set the account's domain, name, parent, or scoring and research facts. The
+    prompt asks for these keys only.
+- **Website safety (build ruling).** The domain comes from account data, so the reader reaches only
+  public sites:
+  - Host names are checked before a request, and every address a name resolves to is checked when the
+    connection is made (DNS checked at connect, so rebinding has no window). Private, loopback,
+    link-local, CGNAT, documentation, benchmarking and multicast ranges are blocked, as are the 6to4
+    relay 192.88.99.0/24 and the IPv6 forms that carry an IPv4 address (NAT64, 6to4 `2002::/16`,
+    Teredo `2001:0::/32`).
+  - **HTML reading (final review C1).** The title, text, links and meta tags are read from the first
+    256 KB of a page only, in one forward scan with no backtracking regex (an anchor never closed keeps
+    its link, with its text up to the next `<a`), so a hostile or broken page
+    (unclosed tags, a binary blob with no content type) costs linear time and cannot freeze a worker.
+  - Redirects are followed by hand, at most 3 hops, each hop checked; linked pages stay on the
+    company's host.
+  - `robots.txt` is read as RFC 9309 reads it: the `User-agent: *` group and any group naming Scout,
+    merged; `Allow` and `Disallow` with `*` and a trailing `$`; the longest match decides, Allow wins a
+    tie. A 4xx means no rules; a 5xx means read nothing (disallow all). A disallowed page is skipped
+    and the home page is still read when allowed.
+  - A home page that can't be reached, or answers 4xx, fails as `bad_request` "Scout couldn't reach
+    {domain}." A home-page 5xx, a dropped connection or a DNS hiccup retries (`unknown`); a 429 is
+    `rate_limited`. When the 30 seconds run out before the home page is read, the read fails as
+    `timeout`; after that it keeps the pages it has. A linked page that fails is skipped.
+  - The website provider does no connection health bookkeeping: a failed read is that company's site,
+    not Scout's connection, so it never marks the connection failing or connected.
+- **Apollo live** ports v1's `apollo.ts`: the key from INT as `x-api-key`, every response zod-parsed,
+  401 is `auth`, 403 is `bad_request` with v1's master-key message, 429 is `rate_limited`, "insufficient
+  credits" is `out_of_credits`. Test connection calls `organizations/enrich?domain=apollo.io`. People
+  search uses `q_organization_domains_list[]` and keeps only the first name and title the free search
+  gives; the reveal fills in the rest.
+- **Apollo mock** ports v1's `mock.ts`: deterministic per domain, reporting credits as Apollo would, and
+  tests can make it fail with `setMockFailure(kind | null)`.
+
 ## Stories
 
 ### ENR-E2-S1 Provider adapters
@@ -48,8 +112,8 @@ Scout runs end to end without keys.
 - ENR-E2-S1-AC4 The Vibe adapter, tested against stubbed Vibe responses, returns companies, people and
   business events as `arrival.v1` items with `creditsUsed`, and a saved search can pick `vibe` as its
   provider. v1's `vibe.test.ts` and `vibeExport.test.ts` cases pass through the carried-over mapping.
-- ENR-E2-S1-AC2 The website reader returns description, industry guess, size clues and technologies as
-  facts with the page URL; with the Claude connection mode = mock it returns rule-based extraction labelled
+- ENR-E2-S1-AC2 The website reader returns description, industry guess and technologies as facts with
+  the page URL (size clues dropped in R2b-2, final review M1); with the Claude connection mode = mock it returns rule-based extraction labelled
   "Read by rules".
 - ENR-E2-S1-AC3 `health()` results show on the integration's page in INT.
 

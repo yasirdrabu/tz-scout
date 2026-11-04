@@ -111,9 +111,10 @@ export const feedbackRecorded = defineEvent(
   1,
   z.object({
     sourceId: z.string(),
-    arrivalId: z.string(),
+    // Null when the source had no resolved arrival for the account (Ruling 10, R2b-2).
+    arrivalId: z.string().nullable(),
     accountId: z.string(),
-    kind: z.enum(['conflict_lost', 'declined_at_review', 'sent_back', 'declined_by_seller', 'enrichment_declined']),
+    kind: z.enum(['conflict_lost', 'declined_at_review', 'sent_back', 'declined_by_seller', 'enrichment_declined', 'enrichment_expired']),
     reasonKey: z.string().nullable(),
     note: z.string().nullable(),
   }),

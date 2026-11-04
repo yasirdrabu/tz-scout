@@ -22,4 +22,6 @@ import '@/modules/crm/contracts/events';
 import '@/modules/crm';
 import '@/modules/playbooks/contracts/events';
 import '@/modules/playbooks';
+import '@/modules/enrichment/contracts/events';
+import '@/modules/enrichment';
 import './compose';

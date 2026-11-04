@@ -250,11 +250,10 @@ export const sourceFeedback = intake.table(
     id: text('id').primaryKey(), // fb_
     tenantId: text('tenant_id').notNull(),
     sourceId: text('source_id').notNull(),
-    arrivalId: text('arrival_id')
-      .notNull()
-      .references(() => arrival.id),
+    // Null when the source had no resolved arrival for the account (an agent's enrichment request, Ruling 10).
+    arrivalId: text('arrival_id').references(() => arrival.id),
     accountId: text('account_id').notNull(),
-    kind: text('kind').notNull(), // conflict_lost | declined_at_review | sent_back | declined_by_seller | enrichment_declined
+    kind: text('kind').notNull(), // conflict_lost | declined_at_review | sent_back | declined_by_seller | enrichment_declined | enrichment_expired
     reasonKey: text('reason_key'),
     note: text('note'),
     byUserId: text('by_user_id'), // who sent it back or declined it; null on rows stored before it

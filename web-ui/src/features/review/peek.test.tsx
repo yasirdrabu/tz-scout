@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { problem } from '../../test/http';
 import { renderApp, serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
-import { LEADER, serveQueue } from './testing';
+import { LEADER, MIAMI, COASTLINE, PINEGATE, serveQueue } from './testing';
 
 const params = (href: string) => new URL(href, 'http://app').searchParams;
 const drawer = () => screen.getByRole('dialog', { name: /Miami-Dade County DTPW|Coastline Credit Union|Pinegate University/ });
@@ -43,6 +43,14 @@ describe('Queue peek drawer', () => {
     expect(params(app.path()).get('peek')).toBe('acc_ccu');
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(params(app.path()).has('peek')).toBe(false));
+  });
+
+  it('says who asked for enrichment in the peek, and just "Enrichment requested" on the row', async () => {
+    serveQueue({ rows: [{ ...MIAMI, enrichment_requested: true, enrichment_requested_by: "Yasir's agent" }, COASTLINE, PINEGATE] });
+    renderApp('/t/taazaa/queue?peek=acc_mdc');
+    const peek = await screen.findByRole('dialog', { name: 'Miami-Dade County DTPW' });
+    expect(within(peek).getByText("Enrichment requested by Yasir's agent")).toBeInTheDocument();
+    expect(screen.getAllByText('Enrichment requested')).toHaveLength(1);
   });
 
   it('shows Why now, notes and changes from the API', async () => {

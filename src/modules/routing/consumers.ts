@@ -1,10 +1,12 @@
 import { accountMerged } from '@/modules/accounts/contracts/events';
 import { activityObserved, dealChanged, handoffCancelled, handoffCompleted, handoffFailed, handoffNeedsDecision } from '@/modules/crm/contracts/events';
+import { requestApproved, requestCancelled, requestCompleted, requestDeclined, requestFailed, requestFlagged } from '@/modules/enrichment/contracts/events';
 import { arrivalResolved } from '@/modules/intake/contracts/events';
 import { memberRemoved, tenantCreated } from '@/modules/tenancy/contracts/events';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { seedRoutingDefaults } from './defaults';
 import { onCrmActivity, onCrmDeal, onHandoffCancelled, onHandoffCompleted, onHandoffFailed, onHandoffNeedsDecision } from './services/crm-events';
+import { closeEnrichment, openEnrichment } from './services/enrichment-open';
 import { reviewOnArrival, reviewOnMerge } from './services/review';
 import { withdrawForRemovedMember } from './services/respond';
 
@@ -62,5 +64,17 @@ export const routingCrmHandoffFailed = defineConsumer({ name: 'routing.crm_hando
 export const routingCrmHandoffNeedsDecision = defineConsumer({ name: 'routing.crm_handoff.needs_decision', event: handoffNeedsDecision, orderedBy: (e) => e.data.accountId, handle: onHandoffNeedsDecision });
 export const routingCrmHandoffCancelled = defineConsumer({ name: 'routing.crm_handoff.cancelled', event: handoffCancelled, orderedBy: (e) => e.data.accountId, handle: onHandoffCancelled });
 
+/**
+ * The queue's "Enrichment requested" chip. A flagged or approved request opens a row (the same request is the same row);
+ * declined, cancelled, completed and failed close it. Events for one account can run in either order, so a close that
+ * arrives first leaves a closed row that the open event then can't reopen.
+ */
+export const routingEnrichmentFlagged = defineConsumer({ name: 'routing.enrichment_flagged', event: requestFlagged, orderedBy: (e) => e.data.accountId, handle: async (e, ctx) => openEnrichment(ctx, e.data) });
+export const routingEnrichmentApproved = defineConsumer({ name: 'routing.enrichment_approved', event: requestApproved, orderedBy: (e) => e.data.accountId, handle: async (e, ctx) => openEnrichment(ctx, e.data) });
+export const routingEnrichmentDeclined = defineConsumer({ name: 'routing.enrichment_declined', event: requestDeclined, orderedBy: (e) => e.data.accountId, handle: async (e, ctx) => closeEnrichment(ctx, e.data) });
+export const routingEnrichmentCancelled = defineConsumer({ name: 'routing.enrichment_cancelled', event: requestCancelled, orderedBy: (e) => e.data.accountId, handle: async (e, ctx) => closeEnrichment(ctx, e.data) });
+export const routingEnrichmentCompleted = defineConsumer({ name: 'routing.enrichment_completed', event: requestCompleted, orderedBy: (e) => e.data.accountId, handle: async (e, ctx) => closeEnrichment(ctx, e.data) });
+export const routingEnrichmentFailed = defineConsumer({ name: 'routing.enrichment_failed', event: requestFailed, orderedBy: (e) => e.data.accountId, handle: async (e, ctx) => closeEnrichment(ctx, e.data) });
+
 /** Every routing consumer, for the worker's list. */
-export const routingConsumers = [routingTenantDefaults, routingArrivalResolved, routingAccountMerged, routingMemberRemoved, routingCrmActivity, routingCrmDeal, routingCrmHandoffCompleted, routingCrmHandoffFailed, routingCrmHandoffNeedsDecision, routingCrmHandoffCancelled];
+export const routingConsumers = [routingTenantDefaults, routingArrivalResolved, routingAccountMerged, routingMemberRemoved, routingCrmActivity, routingCrmDeal, routingCrmHandoffCompleted, routingCrmHandoffFailed, routingCrmHandoffNeedsDecision, routingCrmHandoffCancelled, routingEnrichmentFlagged, routingEnrichmentApproved, routingEnrichmentDeclined, routingEnrichmentCancelled, routingEnrichmentCompleted, routingEnrichmentFailed];

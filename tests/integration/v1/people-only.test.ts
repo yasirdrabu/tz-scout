@@ -10,6 +10,7 @@ import { POST as batchAction } from '@/http/routes/v1/batches/[id]/route';
 import { POST as accountAction } from '@/http/routes/v1/accounts/[id]/route';
 import { PUT as putPractices } from '@/http/routes/v1/accounts/[id]/practices/route';
 import { DELETE as deleteOverride } from '@/http/routes/v1/accounts/[id]/exclusion-override/route';
+import { POST as enrichmentAction } from '@/http/routes/v1/enrichment-requests/[id]/route';
 import { POST as signalAction } from '@/http/routes/v1/signals/[id]/route';
 import { POST as conflictAction } from '@/http/routes/v1/conflicts/[id]/route';
 import { GET as getExclusions } from '@/http/routes/v1/settings/exclusions/route';
@@ -339,6 +340,25 @@ describe('accounts', () => {
     // A seller who cannot see the account gets 404.
     const hidden = await seedAccount({ account: {} as never, soleProprietor: true, people: [{ firstName: 'Hid', lastName: 'Den', email: `hid@${domain()}` }] as never });
     expect((await as('seller', accountAction, `accounts/${hidden}:convert-shell`, 'POST', { name: 'X', domain: domain() })).status).toBe(404);
+  });
+});
+
+describe('enrichment requests', () => {
+  it('approve and decline: an API key with the scope gets the people-only copy', async () => {
+    const key = (
+      await run((ctx) => createApiKey(ctx, { name: 'k', environment: 'live', scopes: ['enrichment:approve'], sourceId: ash.agentId }, SYSTEM_GRANTOR))
+    ).secret;
+    for (const action of ['approve', 'decline']) {
+      const res = await enrichmentAction(
+        new Request(`http://x/api/v1/enrichment-requests/enr_1:${action}`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ reason: 'no' }),
+        }),
+      );
+      expect(res.status).toBe(403);
+      expect((await res.json()).detail).toBe('Only a person can approve spend.');
+    }
   });
 });
 

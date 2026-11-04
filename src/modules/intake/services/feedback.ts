@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import { and, asc, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, or, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds } from '@/modules/accounts';
 import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
@@ -14,7 +14,8 @@ export type FeedbackKind = z.infer<typeof feedbackRecorded.data>['kind'];
 export type FeedbackView = {
   id: string;
   sourceId: string;
-  arrivalId: string;
+  /** Null when the source had no resolved arrival for the account (Ruling 10, R2b-2). */
+  arrivalId: string | null;
   accountId: string;
   kind: string;
   reasonKey: string | null;
@@ -78,11 +79,36 @@ export async function recordConflictLost(
   return writeFeedback(ctx, { ...f, kind: 'conflict_lost', reasonKey: null, note: f.winnerSourceName }, bySource);
 }
 
+/**
+ * R2b-2 Ruling 10: one source is told, such as the source that asked for an enrichment a leader declined, and not the
+ * rest of its chain. The row is pinned to that source's latest resolved arrival for the account, or to none when it
+ * has none (an agent asking about an account it never sent). Idempotent per (source, kind, cause event).
+ */
+export async function recordSourceFeedback(
+  ctx: ModuleContext,
+  f: { sourceId: string; accountId: string; kind: FeedbackKind; note: string | null; byUserId?: string | null; causeEventId: string },
+): Promise<number> {
+  const [latest] = await ctx.tx
+    .select({ id: arrival.id })
+    .from(arrival)
+    .where(
+      and(
+        eq(arrival.tenantId, ctx.tenantId),
+        eq(arrival.accountId, f.accountId),
+        eq(arrival.status, 'resolved'),
+        or(eq(arrival.personSourceId, f.sourceId), eq(arrival.agentSourceId, f.sourceId), eq(arrival.vendorSourceId, f.sourceId)),
+      ),
+    )
+    .orderBy(desc(arrival.receivedAt), desc(arrival.id))
+    .limit(1);
+  return writeFeedback(ctx, { ...f, reasonKey: null }, new Map([[f.sourceId, latest?.id ?? null]]));
+}
+
 /** One row per (source, arrival) and `intake.feedback.recorded` for each new one; returns how many were new. */
 async function writeFeedback(
   ctx: ModuleContext,
   f: { accountId: string; kind: FeedbackKind; reasonKey: string | null; note: string | null; byUserId?: string | null; causeEventId: string },
-  arrivalBySource: Map<string, string>,
+  arrivalBySource: Map<string, string | null>,
 ): Promise<number> {
   const values = [...arrivalBySource].map(([sourceId, arrivalId]) => ({
     id: newId('fb'),
@@ -104,7 +130,7 @@ async function writeFeedback(
         ctx,
         feedbackRecorded,
         { sourceId: r.sourceId, arrivalId: r.arrivalId, accountId: r.accountId, kind: f.kind, reasonKey: r.reasonKey, note: r.note },
-        { type: 'arrival', id: r.arrivalId },
+        r.arrivalId ? { type: 'arrival', id: r.arrivalId } : { type: 'source', id: r.sourceId },
       );
     }
     added += inserted.length;

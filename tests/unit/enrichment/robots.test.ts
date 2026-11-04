@@ -1,0 +1,50 @@
+import { describe, expect, it } from 'vitest';
+import { parseRobots } from '@/modules/enrichment/adapters/website/robots';
+
+describe('robots.txt', () => {
+  it('Disallow: /about blocks /about/team but not /', () => {
+    const r = parseRobots('User-agent: *\nDisallow: /about\n');
+    expect(r.allows('/about/team')).toBe(false);
+    expect(r.allows('/about')).toBe(false);
+    expect(r.allows('/')).toBe(true);
+    expect(r.allows('/services')).toBe(true);
+  });
+
+  it('reads the * and Scout groups, and ignores other robots', () => {
+    const r = parseRobots(['User-agent: Googlebot', 'Disallow: /services', '', 'User-agent: TaazaaScout', 'Disallow: /contact # not for us', '', 'User-agent: *', 'Disallow: /private'].join('\n'));
+    expect(r.allows('/services')).toBe(true);
+    expect(r.allows('/contact')).toBe(false);
+    expect(r.allows('/private/x')).toBe(false);
+  });
+
+  it('a group can name several agents', () => {
+    const r = parseRobots('User-agent: Bingbot\nUser-agent: scout\nDisallow: /industries\n');
+    expect(r.allows('/industries/health')).toBe(false);
+  });
+
+  it('an empty Disallow allows everything, and so does no file', () => {
+    expect(parseRobots('User-agent: *\nDisallow:\n').allows('/about')).toBe(true);
+    expect(parseRobots('').allows('/')).toBe(true);
+  });
+
+  it('Disallow: / blocks every page', () => {
+    expect(parseRobots('user-agent: *\r\ndisallow: /\r\n').allows('/')).toBe(false);
+  });
+
+  it('reads * as any run of characters and a trailing $ as the end of the path', () => {
+    const r = parseRobots('User-agent: *\nDisallow: /*about\nDisallow: /*.pdf$\n');
+    expect(r.allows('/company/about-us')).toBe(false);
+    expect(r.allows('/files/brochure.pdf')).toBe(false);
+    expect(r.allows('/files/brochure.pdf?x=1')).toBe(true);
+    expect(r.allows('/services')).toBe(true);
+  });
+
+  it('the longest matching rule decides, and Allow wins a tie (RFC 9309)', () => {
+    const r = parseRobots('User-agent: *\nDisallow: /about\nAllow: /about/team\nAllow: /x\nDisallow: /x\nDisallow: /\nAllow: /$\n');
+    expect(r.allows('/about/team/lead')).toBe(true);
+    expect(r.allows('/about/history')).toBe(false);
+    expect(r.allows('/x')).toBe(true);
+    expect(r.allows('/')).toBe(true);
+    expect(r.allows('/contact')).toBe(false);
+  });
+});

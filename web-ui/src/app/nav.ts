@@ -8,6 +8,7 @@ export type TenantPath =
   | '/t/$tenant/queue'
   | '/t/$tenant/my'
   | '/t/$tenant/accounts'
+  | '/t/$tenant/enrichment'
   | '/t/$tenant/sources'
   | '/t/$tenant/batches'
   | '/t/$tenant/offers'
@@ -47,6 +48,7 @@ export const NAV: NavGroup[] = [
         badge: { count: 'new_assignments', label: 'new assignments' },
       },
       { label: 'All accounts', kind: 'tenant', to: '/t/$tenant/accounts', rule: { all: ['accounts:read'] } },
+      { label: 'Enrichment', kind: 'tenant', to: '/t/$tenant/enrichment', rule: { any: ['enrichment:approve', 'enrichment:request'] } },
     ],
   },
   {

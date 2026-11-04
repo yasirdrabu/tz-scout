@@ -28,6 +28,7 @@ export const row = (r: Partial<QueueRow> & Pick<QueueRow, 'account_id' | 'name'>
   flags: {},
   conflict_count: 0,
   enrichment_requested: false,
+  enrichment_requested_by: null,
   source: { source_id: 'src_rfp', name: 'RFP Watch', kind: 'agent', via: 'Marcus Lee · GovSpend' },
   lead_offer: { offer_id: 'off_mb', name: 'Modernization Blueprint', practice_id: 'prc_data', practice_name: 'Data and Engineering for AI Readiness', chosen: false },
   previous_tier: null,

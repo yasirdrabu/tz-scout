@@ -16,7 +16,7 @@ const header = async () => (await screen.findByRole('heading', { level: 1, name:
 beforeEach(() => localStorage.clear());
 
 describe('Account page header', () => {
-  it('shows the account card, origin, pills, status and the review actions, without Enrich', async () => {
+  it('shows the account card, origin, pills, status and the review actions, with no Enrich without enrichment:request', async () => {
     serveAccount();
     renderApp('/t/taazaa/accounts/acc_mdc');
     const card = await header();
@@ -28,6 +28,14 @@ describe('Account page header', () => {
     expect(within(card).getByRole('button', { name: 'Send back' })).toBeInTheDocument();
     expect(within(card).getByRole('button', { name: 'Approve and assign' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Enrich' })).toBeNull();
+  });
+
+  it('shows Enrich with enrichment:request', async () => {
+    serveAccount({ scopes: [...PAGE_LEADER, 'enrichment:request'] });
+    server.use(http.get('/api/v1/enrichment-requests', () => HttpResponse.json({ data: [], next_cursor: null })));
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const card = await header();
+    expect(within(card).getByRole('button', { name: 'Enrich' })).toBeInTheDocument();
   });
 
   it('names who set a reviewer status, and hides actions the person cannot take', async () => {

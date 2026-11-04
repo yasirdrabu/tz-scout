@@ -124,7 +124,8 @@ async function withVendor(ctx: ModuleContext, chain: SourceChain, viaVendor: str
   return vendor ? { ...chain, vendorSourceId: vendor.id } : chain;
 }
 
-async function findByRef(ctx: ModuleContext, sourceId: string, externalRef: string) {
+/** The arrival a source already sent with this `external_ref`, if any: what a repeat of it would be answered with. */
+export async function findByRef(ctx: ModuleContext, sourceId: string, externalRef: string) {
   const [row] = await ctx.tx
     .select({ id: arrival.id, status: arrival.status })
     .from(arrival)

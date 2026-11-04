@@ -18,10 +18,11 @@ create schema if not exists scoring;
 create schema if not exists routing;
 create schema if not exists crm;
 create schema if not exists playbooks;
+create schema if not exists enrichment;
 
-grant usage on schema platform, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks to scout_app;
-grant select, insert, update, delete on all tables in schema platform, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks to scout_app;
-grant usage, select on all sequences in schema platform, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks to scout_app;
+grant usage on schema platform, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment to scout_app;
+grant select, insert, update, delete on all tables in schema platform, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment to scout_app;
+grant usage, select on all sequences in schema platform, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment to scout_app;
 
 do $$ begin
   if to_regclass('platform.audit_log') is not null then
@@ -32,7 +33,7 @@ do $$ begin
   end if;
 end $$;
 
-alter default privileges in schema platform, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks
+alter default privileges in schema platform, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment
   grant select, insert, update, delete on tables to scout_app;
-alter default privileges in schema platform, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks
+alter default privileges in schema platform, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment
   grant usage, select on sequences to scout_app;

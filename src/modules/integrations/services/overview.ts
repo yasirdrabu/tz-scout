@@ -4,7 +4,7 @@ import type { ModuleContext } from '@/platform/context';
 import { scrubError } from '@/platform/scrub-error';
 import { CREDENTIAL_LABELS, providerGroup } from '../domain/labels';
 import { callLog, connection, credential } from '../db/schema';
-import { PROVIDERS, providerName } from '../providers';
+import { PROVIDERS, needsCredential, providerName } from '../providers';
 import { periodBounds } from '../domain/caps';
 import { listCaps, type CapView } from './caps';
 import { requireProvider, type ConnectionMode, type ConnectionStatus } from './connections';
@@ -33,6 +33,8 @@ export type IntegrationRow = {
   /** Average response time of today's calls, null when there were none. */
   avgMs: number | null;
   credentials: IntegrationCredential[];
+  /** False for a service that needs no key (the company website): the screen shows no key field. */
+  needsCredential: boolean;
 };
 
 /** Microsoft sign-in is set up for all of Scout, not per workspace, so it is not a row (screens.md §21b). */
@@ -98,6 +100,7 @@ async function rowsFor(ctx: ModuleContext, keys: string[]): Promise<IntegrationR
       cap,
       errorsToday: usage?.errors ?? 0,
       avgMs: usage ? usage.avg : null,
+      needsCredential: needsCredential(key),
       credentials: row
         ? creds
             .filter((c) => c.connectionId === row.id)

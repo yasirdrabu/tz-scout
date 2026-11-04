@@ -75,8 +75,8 @@ export const locationOf = (r: { hq_city: string | null; hq_state: string | null 
 export const kindAndPlace = (r: { industry: string | null; hq_city: string | null; hq_state: string | null }) =>
   [r.industry, locationOf(r)].filter(Boolean).join(' · ');
 
-/** The flag chips a queue row shows, in the order of screens.md §2. */
-export function RowFlags({ row, date }: { row: QueueRow; date: (when: string) => string }) {
+/** The flag chips a queue row shows, in the order of screens.md §2. The peek also says who asked for enrichment. */
+export function RowFlags({ row, date, showRequester = false }: { row: QueueRow; date: (when: string) => string; showRequester?: boolean }) {
   const f = row.flags;
   const chips = [
     f.declined_by_seller && (
@@ -102,7 +102,7 @@ export function RowFlags({ row, date }: { row: QueueRow; date: (when: string) =>
     ),
     row.enrichment_requested && (
       <Flag key="enrich" tone="gray">
-        Enrichment requested
+        {showRequester && row.enrichment_requested_by ? `Enrichment requested by ${row.enrichment_requested_by}` : 'Enrichment requested'}
       </Flag>
     ),
   ].filter(Boolean);

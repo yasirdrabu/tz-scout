@@ -59,6 +59,9 @@ const person = z
     phone: text,
     linkedin_url: text,
     notes: text,
+    /** The accounts fact values, from a provider that checked the email (Ruling 12). */
+    email_status: z.enum(['verified', 'guessed', 'unavailable', 'bounced']).nullish(),
+    seniority: z.string().max(40).nullish(),
   })
   .strict();
 

@@ -48,6 +48,7 @@ COPY --from=build --chown=node:node /app/src/modules/scoring/db/migrations ./src
 COPY --from=build --chown=node:node /app/src/modules/routing/db/migrations ./src/modules/routing/db/migrations
 COPY --from=build --chown=node:node /app/src/modules/crm/db/migrations ./src/modules/crm/db/migrations
 COPY --from=build --chown=node:node /app/src/modules/playbooks/db/migrations ./src/modules/playbooks/db/migrations
+COPY --from=build --chown=node:node /app/src/modules/enrichment/db/migrations ./src/modules/enrichment/db/migrations
 COPY --chown=node:node --chmod=755 infra/docker/entrypoint.sh ./entrypoint.sh
 USER node
 EXPOSE 4240

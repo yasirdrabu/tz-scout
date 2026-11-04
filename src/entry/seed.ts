@@ -42,6 +42,7 @@ const DEV_KEY_SCOPES = [
   'imports:run',
   'offers:read',
   'status:read',
+  'enrichment:request',
 ] as const;
 
 const TENANTS = [

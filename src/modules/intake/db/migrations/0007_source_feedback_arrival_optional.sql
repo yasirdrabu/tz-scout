@@ -1,0 +1,1 @@
+ALTER TABLE "intake"."source_feedback" ALTER COLUMN "arrival_id" DROP NOT NULL;

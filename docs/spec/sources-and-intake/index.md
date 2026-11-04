@@ -32,7 +32,7 @@ checks, caps and trust only work if every arrival goes through here. That includ
 | `warm_intro` | `id` (`wi_`), `arrival_id`, `account_id`, `introducer_user_id`, `introducer_name`, `introducer_email`, `relationship_text`, `relationship_key`, `note`, `points`, `effective_points` (what counts: half of `points`, rounded down, until confirmed), `confirmed`, `confirmed_by`, `confirmed_at`, `repriced_change_id` (`wic_`) | One per arrival that declares an intro |
 | `warm_intro_rule` | `id` (`wir_`), `tenant_id`, `introducer_user_id` or `introducer_email`, `introducer_name`, `relationship_key`, `points` | Points per introducer and relationship |
 | `arrival_outcome` | `arrival_id`, `account_id`, source chain ids, `max_stage`, `declined`, `conflicts_lost`, `updated_at` | Read model for trust, built from events |
-| `source_feedback` | `id` (`fb_`), `source_id`, `arrival_id`, `account_id`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`), `reason_key`, `note`, `cause`, `created_at` | What a source is told about its arrivals. One row (and one event) per distinct source in the chain for each cause, pinned to that source's latest resolved arrival: unique on (tenant, source, kind, cause). A seller's decline carries the seller's reason key and note |
+| `source_feedback` | `id` (`fb_`), `source_id`, `arrival_id` (null when the source has no resolved arrival for the account, R2b-2), `account_id`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`, `enrichment_expired`), `reason_key`, `note`, `cause`, `created_at` | What a source is told about its arrivals. One row (and one event) per distinct source in the chain for each cause, pinned to that source's latest resolved arrival: unique on (tenant, source, kind, cause). A seller's decline carries the seller's reason key and note |
 
 New id prefixes this module introduces: `imp_` (file import), `map_` (column mapping), `wi_` (warm
 intro).
@@ -102,7 +102,7 @@ definition behind the `own_source` data limit.
 | `intake.source.trust_changed` | `sourceId`, `level` (`person`, `agent`, `vendor`), `from`, `to`, `sampleSize`, `cause` (`outcomes`, `conflict_lost`, `warm_intro_points`) |
 | `intake.warm_intro.confirmed` | `warmIntroId`, `arrivalId`, `accountId`, `relationshipKey`, `points`, `changeId` |
 | `intake.warm_intro.repriced` | `changeId` |
-| `intake.feedback.recorded` | `sourceId`, `arrivalId`, `accountId`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`), `reasonKey`, `note` |
+| `intake.feedback.recorded` | `sourceId`, `arrivalId` (nullable, R2b-2), `accountId`, `kind` (`conflict_lost`, `declined_at_review`, `sent_back`, `declined_by_seller`, `enrichment_declined`, `enrichment_expired`), `reasonKey`, `note` |
 
 ## API endpoints
 

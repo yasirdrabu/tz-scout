@@ -208,3 +208,21 @@ export const pipelineStage = routing.table(
     check('pipeline_stage_kind', sql`${t.kind} in ('flow', 'exit')`),
   ],
 );
+
+/**
+ * Enrichment requests that are open for an account, kept by the routing consumers for the queue chip (Ruling 11).
+ * A terminal event sets `closed_at` (inserting the row if it arrived first), so a late flagged or approved
+ * event can't bring a closed request back.
+ */
+export const enrichmentOpen = routing.table(
+  'enrichment_open',
+  {
+    tenantId: text('tenant_id').notNull(),
+    accountId: text('account_id').notNull(),
+    requestId: text('request_id').notNull(),
+    requestedByLabel: text('requested_by_label').notNull(),
+    closedAt: at('closed_at'),
+    createdAt: at('created_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.requestId] }), index('enrichment_open_account_idx').on(t.tenantId, t.accountId)],
+);

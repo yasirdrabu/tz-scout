@@ -19,10 +19,10 @@ export {
   warmIntroConfirmed,
   warmIntroRepriced,
 } from './contracts/events';
-export { normaliseDomain } from './domain/normalise';
+export { countryCode, normaliseDomain } from './domain/normalise';
 export { importRunJob, qualifiedLeadsPollJob, resolveJob, waitingExpireJob } from './contracts/jobs';
 export { intakeAccountMerged, intakeConflictFeedback, intakeLeadQualified, intakeSellerDeclineFeedback, intakeStatusFeedback, intakeTenantDefaults } from './consumers';
-export { feedbackForArrival, listFeedback, recordConflictLost, recordFeedback, type ArrivalFeedback, type FeedbackKind, type FeedbackView } from './services/feedback';
+export { feedbackForArrival, listFeedback, recordConflictLost, recordFeedback, recordSourceFeedback, type ArrivalFeedback, type FeedbackKind, type FeedbackView } from './services/feedback';
 export { importRunHandler, qualifiedLeadsPollHandler, resolveHandler, waitingExpireHandler } from './jobs';
 export {
   FIRST_POLL_LOOKBACK_MS,
@@ -57,6 +57,7 @@ export {
   bestTrustForAccounts,
   chainsForAccount,
   childSources,
+  ensureVendorSource,
   intakeSourceAccess,
   intakeSourceInfo,
   intakeSourceValidator,
@@ -110,6 +111,7 @@ export {
 } from './services/warm-intros';
 export { pickRule } from './domain/warm-intro';
 export {
+  findByRef as findArrivalByRef,
   isStrictChannel,
   submitArrival,
   submitBatch,
@@ -179,3 +181,17 @@ export {
 } from './services/batches-read';
 export { BATCH_STATUS_KEYS, BATCH_STATUS_LABELS, type BatchStatusKey } from './domain/batch-status';
 export { retryBatch } from './services/retry';
+// The pure Vibe Prospecting mapping, shared with the enrichment module's sample Vibe adapter (one copy of the rules).
+export {
+  fromVibeExportRow,
+  fromVibeProspectRow,
+  isParty,
+  mapEvent,
+  nameKey,
+  seniority,
+  topicLabel,
+  vibeSignals,
+  type VibeCompany,
+  type VibeEvent,
+  type VibePerson,
+} from './import/layouts/vibe';

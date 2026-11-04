@@ -254,7 +254,7 @@ describe('Vibe export rows', () => {
 describe('people from a Vibe prospects export', () => {
   it('maps names, title, email, phone and the LinkedIn link', () => {
     const p = fromVibeProspectRow({ prospect_id: 'p1', business_id: 'b1', prospect_first_name: 'Priya', prospect_last_name: 'Raman', prospect_job_title: 'chief digital and information officer', contact_professional_email: 'PRaman@lakeview-health.com', contact_professional_email_status: 'valid', prospect_linkedin: 'linkedin.com/in/x' });
-    expect(p).toEqual({ prospectId: 'p1', businessId: 'b1', firstName: 'Priya', lastName: 'Raman', title: 'Chief digital and information officer', email: 'praman@lakeview-health.com', phone: null, linkedin: 'https://linkedin.com/in/x' });
+    expect(p).toEqual({ prospectId: 'p1', businessId: 'b1', firstName: 'Priya', lastName: 'Raman', title: 'Chief digital and information officer', email: 'praman@lakeview-health.com', emailStatus: 'valid', phone: null, linkedin: 'https://linkedin.com/in/x' });
     expect(fromVibeProspectRow({ business_id: 'b1' })).toBeNull();
   });
 

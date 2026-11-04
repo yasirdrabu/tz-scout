@@ -215,6 +215,12 @@ roles, optional), `provider_hint` (`apollo`, `vibe`, optional), `reason` (req, m
 Output: `{ "request_id": "enr_...", "status": "flagged", "summary": "Flagged for approval. Estimated cost 12 credits." }`.
 Scopes: `enrichment:request`.
 
+REST only until the MCP server exists (R2b-2, enrichment Ruling 13): an agent's key calls `POST
+/api/v1/accounts/{id}/enrichment-requests` with `{kind, provider_key, roles?, reason}`, which always
+creates a `flagged` request. The mapping from `what` to a request kind is in
+[enrichment/requests-and-approval.md](../enrichment/requests-and-approval.md) ("MCP tools"); the tool
+itself is built with the server.
+
 ### list_offers
 
 Description: "List the practices and offers this company sells, with who they're for. Use this to aim

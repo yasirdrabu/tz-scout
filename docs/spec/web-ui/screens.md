@@ -48,7 +48,7 @@ the app goes to the return path or the landing screen of the last used workspace
 
 ## 2. Review queue
 
-**Tag** R1 (the conflicts flag is R2a, enrichment requests R2) · **Route**
+**Tag** R1 (the conflicts flag is R2a, enrichment requests R2, shipped in R2b-2) · **Route**
 `/t/:tenant/queue?tier=&practice=&offer=&source=&status=&peek=:accountId` · **Who** `review:act`
 (owners, leaders and operators by default, W6)
 
@@ -76,7 +76,7 @@ columns / Show, hide and reorder. Saved for you only." with `Reset`; the choice 
 | Tier | chip: Act now (plum), Good fit (light plum), Watch (gray), lowest tier (white); "Was {old}" after a rescore, "Changed by {name}" when someone set it by hand (Decision 4) | Act now |
 | Source | source name; "via" line underneath | RFP Watch / Marcus Lee · GovSpend |
 | Review status | colored dot and name from Settings > Review statuses; "{status} by {name}" for a status a reviewer set (C13) | Ready for review |
-| Flags | chips: "Declined by {AE}" amber (reason and date on hover and in the peek), "New from {source}" gray, "Warm intro" green, the handoff chip when the row is assigned; R2a: "{n} conflicts" or "1 conflict" amber (the API filter `flag=conflicts` lists only those rows); R2: "Enrichment requested" gray | Warm intro |
+| Flags | chips: "Declined by {AE}" amber (reason and date on hover and in the peek), "New from {source}" gray, "Warm intro" green, the handoff chip when the row is assigned; R2a: "{n} conflicts" or "1 conflict" amber (the API filter `flag=conflicts` lists only those rows); R2: "Enrichment requested" gray while the account has an open enrichment request (`flagged`, `approved` or `running`; several open requests make one chip) | Warm intro |
 | Notes | comment icon and count | 1 |
 | Arrived | date | Oct 24 |
 
@@ -114,8 +114,9 @@ Sorted by priority, highest first (the mockup has no sortable headers; none in t
 
 **Layout.** 460 px drawer. Header: up and down arrows (previous and next in the filtered list, also
 `j` and `k`), "{i} of {n}", `Open full page`, close. Title, "{industry} · {location} · {domain}".
-Buttons `Approve and assign` (Assign dialog), `Enrich` (R2; toast "Enrichment started for {name}. New
-signals appear in about 2 minutes."), `Send back` (Send-back dialog).
+Buttons `Approve and assign` (Assign dialog), `Enrich` (R2, shipped in R2b-2; with
+`enrichment:request`; opens the Enrich dialog, §4c, and shows its toasts), `Send back` (Send-back
+dialog).
 
 **Body.**
 - Scores: Priority, Fit, Buying intent.
@@ -131,7 +132,8 @@ signals appear in about 2 minutes."), `Send back` (Send-back dialog).
     (§5). Picking a declined status asks for a decline reason first (and a note when the reason
     needs one). Reopening a declined account asks for a note and puts it back in review.
   Read only: Source ("{source} · {via}"), Flags (chips or "None"; "Declined by {AE} on {date}:
-  {reason}").
+  {reason}"; the enrichment chip reads "Enrichment requested by {label}" here, for example
+  "Enrichment requested by Yasir's agent").
 - Why now: the two newest dated signals; empty "No dated signals yet. Run Enrich to search
   procurement portals, news and job posts."
 - Notes (Decision 3): "{n} notes", newest first, each "author · date · text"; textarea "Add a note
@@ -158,13 +160,23 @@ review by Dana", "Sent back to source"; after assignment the handoff state, for 
 {owner}"; "Waiting on enrichment" is R2), "{industry} · {location} · {domain}", pills Practice and
 Best offer, origin line "From {source} ({via}) · Batch {id} · Arrived {date}" or "Assigned to {AE} by
 {leader} on {date}". Buttons in review: `Enrich` (R2), `Send back`, `Approve and assign`. After:
-`Reassign`, `Open in HubSpot` (opens the CRM record in a new tab), `Retry sending` when the HubSpot
-send failed (with `crm:push`).
+`Enrich` (R2b-2: sellers work assigned accounts and may ask for enrichment), `Reassign`, `Open in
+HubSpot` (opens the CRM record in a new tab), `Retry sending` when the HubSpot send failed (with
+`crm:push`). `Enrich` shows with `enrichment:request` and opens the Enrich dialog (§4c).
 
 **Notices under the card.** "Declined by {AE} on {date}: {reason}. Assign someone else or send it
 back." for an account an AE declined. "This account is linked to two HubSpot companies. Merge them in
 HubSpot so Scout knows which one to update." when the API reports the conflict. "HubSpot needs a
 decision" with the API's message when the send stopped on a decision.
+
+Enrichment (R2b-2, with `enrichment:request`): one line per request that is open (`flagged`,
+`approved`, `running`) or was made or decided in the last 7 days, newest first: "{kind label} from
+{provider}: {status text}", for example "People for buying roles from Apollo: Waiting for approval"
+or "People for buying roles from Apollo: Found 2". Kind labels and status texts come from the API
+(requests-and-approval.md). The lines refresh every 10 seconds while any request is `approved` or
+`running`, and stop once none is. When a request leaves `approved` or `running`, the rest of the
+account (its people, buying committee, facts and score) is read again, so what it found shows without a
+reload.
 
 **Stage tracker.** One step per pipeline stage, names and order from the API (C6), each with its
 date, the current step marked, "Waiting on you" on the review step for a reviewer, "Next" on the next
@@ -250,6 +262,40 @@ step.
   "{account id} · Error ref {ref}".
 - Not found or outside the person's data limit: "This account isn't in your workspace, or you don't
   have access to it." with a link back.
+
+### 4c. Enrich dialog
+
+**Tag** R2 (shipped in R2b-2) · **Who** `enrichment:request` (every role but viewers by default);
+running at once needs `enrichment:approve` and a person (requests-and-approval.md Ruling 1)
+
+Opened by `Enrich` on the account page (both views) and in the queue peek (§3). Title "Enrich
+{account}".
+- **What to find** (select, in this order): People for buying roles (default), Reveal emails,
+  Company facts, Fresh signals, Read the website.
+- **Provider** (select): Apollo (default) and Vibe Prospecting; for Read the website only Company
+  website.
+- **Buying roles** (People for buying roles): a checkbox per role from `GET /api/v1/buying-roles`, in
+  their order; checked to start with are the core roles (business owner, commercial buyer, technical
+  buyer) with no person on the account yet, so a first run stays small. While they
+  load: "Loading buying roles"; if they fail: "Buying roles didn't load. {error}". Sending with none
+  checked: "Pick at least one buying role."
+- **People** (Reveal emails): a checkbox per person on the account without an email, the first 25
+  checked to start with ("Loading people" while the account loads). With none: "Everyone here already
+  has an email." and the send button is off. With more than 25 checked: "Pick up to 25 people." under
+  the list, no estimate, and the send button is off (one request reveals at most 25, as the API allows).
+- **Estimate line** from `GET /api/v1/accounts/{id}/enrichment-estimate`, asked again whenever the
+  kind, provider, roles or people change: the API's `text`, for example "Up to 3 credits, about
+  $0.30 · Sample" or "Free. Claude usage up to $0.05". While it loads: "Working out the cost"; if it
+  fails: "The estimate didn't load. {error}".
+- **Why is this worth it?** (textarea, up to 500 characters), shown only when the request would wait
+  for approval (anyone but a person with `enrichment:approve`). Required: "Say why this is worth the
+  spend." (also when the API returns it at `reason`).
+- Buttons `Cancel`, and `Run enrichment` for an approver or `Ask for approval` otherwise.
+- Toasts: started "Enrichment started for {name}. New signals appear in about 2 minutes."; flagged
+  "Sent for approval. A leader will see it in Enrichment requests."; joined (an open request of the
+  same kind already existed, Ruling 6) "Already requested. You'll see the results here too." The
+  account's requests refresh, so the notice under the card shows the new line.
+- Other errors show under the form with the API's message.
 
 ## 5. Send-back dialog
 
@@ -346,6 +392,35 @@ Columns: Account (name, "{industry} · {location}"), Stage chip, Owner (initials
 revenue potential in USD with "Estimated", R2a; the CSV value kind is "Estimated" too). Footer "Sorted by stage, then
 priority". Every row opens its account page. Filtered empty: "No accounts match these filters" / "Try
 another stage or owner, or clear the filters to see every account in this workspace." `Clear filters`.
+
+## 8a. Enrichment requests
+
+**Tag** R2 (shipped in R2b-2) · **Route** `/t/:tenant/enrichment` · **Who** `enrichment:approve` or
+`enrichment:request`; Approve and Decline need `enrichment:approve` and a person
+
+Nav item "Enrichment" in the Work group, after All accounts. Title "Enrichment", subtitle "Requests to
+find people, facts and signals for an account. A leader approves the ones that cost real credits."
+Tabs `Waiting for approval` (status `flagged`) and `All`. Rows come from
+`GET /api/v1/enrichment-requests`, newest first, within the person's data limit; `Load more` pages
+by cursor.
+
+Columns: Account (link to the account page), What (kind label), Provider, Requested by ("Dana Ruiz",
+"Yasir's agent"), Reason ("—" when none), Estimate (the API's text), then Age on the Waiting tab
+("Today", "1 day", "3 days") or Status on All (the API's status text, for example "Found 2",
+"Declined: Not this quarter", "Expired after 14 days").
+
+Actions, on the Waiting tab, for a person with `enrichment:approve`:
+- `Approve`: toast "Approved. Enrichment started for {account}." A 409 (someone already decided)
+  shows the API's message, for example "This request is already approved.", and the list refreshes.
+- `Decline` opens a dialog "Decline enrichment for {account}" with "Why decline?" (required, up to
+  500 characters; empty: "Say why you're declining."), `Cancel`, `Decline`. Toast "Declined.
+  {requester} will see your reason."
+
+States:
+- Waiting empty: "Nothing waiting" / "Nothing waiting. Requests from sellers and agents show here for
+  a leader to approve."
+- All empty: "No requests" / "No enrichment requests yet."
+- Loading "Loading enrichment requests"; error "Enrichment requests didn't load" with `Try again`.
 
 ## 9. Overview
 
@@ -942,3 +1017,6 @@ mockups only show the profile button.)
 4. Owner checks results (R3): Funnel by source, drill into a source, open a batch and a won account.
 5. First-time setup: sign in with Microsoft, connect HubSpot (paste token, test, switch to live),
    invite AEs and copy them the sign-in link, create an API key for an agent.
+6. Enrichment (R2b-2): a seller opens their account, Enrich, People for buying roles, Technical
+   buyer, says why and asks for approval; the owner approves it in Enrichment, and the account's
+   notice reaches "Found {n}" with the new person in the buying committee.

@@ -132,6 +132,51 @@ export async function upsertSchedule(adminCtx: AdminCtx, input: ScheduleInput, n
 }
 
 /**
+ * The schedule for (tenant, job), made only when there is none. The check takes no lock, and an existing schedule is
+ * left as it is (even when its cron differs) with no audit row, so callers on a hot path (every enrichment request)
+ * neither serialize on the row nor audit each time. Two first callers at once are safe: the insert does nothing on
+ * the (tenant, job) conflict, and only the caller whose insert made the row audits it. Returns the id.
+ */
+export async function ensureSchedule(adminCtx: AdminCtx, input: ScheduleInput, now = new Date()): Promise<string> {
+  const find = async (tx: Pick<Tx, 'select'>) =>
+    (
+      await tx
+        .select({ id: schedule.id })
+        .from(schedule)
+        .where(and(eq(schedule.tenantId, input.tenantId), eq(schedule.jobName, input.jobName)))
+    )[0]?.id;
+  const onControl = input.tenantId === PLATFORM_TENANT;
+  const inTx = <T>(fn: (tx: Tx) => Promise<T>): Promise<T> =>
+    adminCtx.tx ? adminCtx.tx.transaction(fn) : onControl ? withControlAdmin(fn) : withWorkspaceAdmin(input.tenantId, fn);
+  const found = adminCtx.tx ? await find(adminCtx.tx) : await inTx(find);
+  if (found) return found;
+
+  const def = jobFor(input.jobName);
+  const payload = def.data.parse(input.payload ?? {}) as object;
+  const nextRunAt = nextRun(input.cron, input.timezone, now);
+  return inTx(async (tx) => {
+    const [made] = await tx
+      .insert(schedule)
+      .values({ id: newId('sch'), tenantId: input.tenantId, jobName: input.jobName, cron: input.cron, timezone: input.timezone, payload, nextRunAt })
+      .onConflictDoNothing({ target: [schedule.tenantId, schedule.jobName] })
+      .returning({ id: schedule.id });
+    if (!made) return (await find(tx))!;
+    await auditScheduleChange(
+      {
+        action: 'platform.schedule.upserted',
+        actor: adminCtx.actor,
+        correlationId: adminCtx.correlationId,
+        subject: { type: 'schedule', id: made.id },
+        after: { tenantId: input.tenantId, jobName: input.jobName, cron: input.cron, timezone: input.timezone },
+      },
+      tx,
+      onControl,
+    );
+    return made.id;
+  });
+}
+
+/**
  * Runs `fn` on the schedule row `id`, locked, in the database that holds it: the caller's control
  * transaction (`adminCtx.tx`) or a new one first, then each workspace database. 404 when none has it.
  */
