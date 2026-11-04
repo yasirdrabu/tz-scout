@@ -34,7 +34,7 @@ describe('permissions', () => {
     ['imports:run', { owner: true, leader: true, seller: false, operator: true }],
     ['analytics:read', { owner: true, leader: true, seller: true, operator: true }],
     ['costs:write', { owner: true, leader: true, seller: false, operator: true }],
-    ['playbooks:write', { owner: true, leader: true, seller: true, operator: false }],
+    ['playbooks:write', { owner: true, leader: true, seller: true, operator: true }],
     ['playbooks:manage', { owner: true, leader: true, seller: false, operator: true }],
     ['offers:read', { owner: true, leader: true, seller: true, operator: true }],
     ['status:read', { owner: true, leader: true, seller: true, operator: true }],

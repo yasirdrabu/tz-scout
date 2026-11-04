@@ -283,6 +283,8 @@ export async function archiveTemplate(ctx: ModuleContext, id: string): Promise<T
       .update(playbookTemplate)
       .set({ status: 'archived', updatedBy: ctx.actor.id, updatedAt: new Date() })
       .where(eq(playbookTemplate.id, id));
+    // An archived template cannot fill a tier; running plans keep their copy.
+    await ctx.tx.delete(offerPlaybook).where(and(eq(offerPlaybook.tenantId, ctx.tenantId), eq(offerPlaybook.templateId, id)));
     await audit(ctx, { action: 'playbooks.template.archived', subject: subjectOf(id), before: { status: before.status }, after: { status: 'archived' } });
   }
   return getTemplate(ctx, id);

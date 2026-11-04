@@ -104,6 +104,20 @@ describe('list, duplicate, archive, delete', () => {
     expect((await t.run((ctx) => archiveTemplate(ctx, made.id))).status).toBe('archived');
   });
 
+  it('archiving removes the offer mapping so the tier shows null; running plans stay', async () => {
+    const made = await t.run((ctx) => createTemplate(ctx, { name: 'To archive', status: 'active', steps: [email] }));
+    await t.run((ctx) => setOfferPlaybook(ctx, offerId, 'good_fit', made.id));
+    const planId = newId('pln');
+    await t.run((ctx) =>
+      ctx.tx.insert(accountPlan).values({ id: planId, tenantId: ctx.tenantId, accountId: newId('acc'), offerId, tier: 'good_fit', templateId: made.id, templateVersion: 1, assignmentId: newId('asg'), stopWhen: 'never', startDate: '2026-11-04' }),
+    );
+    expect((await t.run((ctx) => offerPlaybooks(ctx, offerId))).find((v) => v.tier === 'good_fit')!.playbook).toMatchObject({ id: made.id });
+    await t.run((ctx) => archiveTemplate(ctx, made.id));
+    expect((await t.run((ctx) => offerPlaybooks(ctx, offerId))).find((v) => v.tier === 'good_fit')).toEqual({ tier: 'good_fit', playbook: null, firstEmail: null });
+    const [plan] = await t.run((ctx) => ctx.tx.select().from(accountPlan).where(eq(accountPlan.id, planId)));
+    expect(plan).toMatchObject({ status: 'active', templateId: made.id });
+  });
+
   it('deletes an unused template and refuses one a plan or an offer uses (409)', async () => {
     const unused = await t.run((ctx) => createTemplate(ctx, { name: 'Unused', steps: [email] }));
     await t.run((ctx) => deleteTemplate(ctx, unused.id));

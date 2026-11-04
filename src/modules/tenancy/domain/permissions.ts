@@ -80,6 +80,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'review:act',
     'scoring:manage',
     'playbooks:read',
+    'playbooks:write',
     'playbooks:manage',
     'offers:manage',
     'campaigns:manage',
