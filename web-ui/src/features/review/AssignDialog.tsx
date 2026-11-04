@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { ApiError } from '../../api/errors';
 import { hasScope, type Me } from '../../api/me';
 import { formatMoney } from '../../lib/format';
@@ -10,8 +10,9 @@ import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { Field } from '../../ui/Field';
 import { useToast } from '../../ui/Toast';
+import { playbooksQuery, span } from '../playbooks/api';
 import { errorText } from '../settings/shared';
-import { assign, bulk, previewAssign, previewBulkAssign, sellersQuery, type BulkResult, type DialogAccount, type Preflight, type Seller } from './api';
+import { assign, bulk, playbookSuggestionQuery, previewAssign, previewBulkAssign, sellersQuery, type BulkResult, type DialogAccount, type Preflight, type Seller } from './api';
 import { NOTE_MAX } from './ReasonPicker';
 import styles from './Review.module.css';
 
@@ -65,6 +66,17 @@ function stopLine(name: string, p: Preflight, w: Words): string {
   return `${name}: ${p.current_owner_name ?? 'The current owner'}, ${why}`;
 }
 
+/** Card values that are not a playbook id. */
+const NONE = '__none';
+const RECOMMENDED = '__recommended';
+
+/** " and starts {playbook} when {AE first name} accepts" (Ruling 6); nothing for "No playbook". */
+function startsText(shown: boolean, choice: string, name: string | null, aeFirst: string): string {
+  if (!shown || choice === NONE) return '';
+  if (choice === RECOMMENDED) return ` and starts each account's recommended playbook when ${aeFirst} accepts`;
+  return name ? ` and starts ${name} when ${aeFirst} accepts` : '';
+}
+
 function focusOf(s: Seller): string {
   if (s.all_practices) return 'All practices';
   return s.practices.length > 0 ? s.practices.map((p) => p.name).join(', ') : 'No practice access yet';
@@ -83,6 +95,11 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
   const single = accounts.length === 1 ? accounts[0]! : null;
   const sellers = useQuery(sellersQuery(tenant, ids));
   const [picked, setPicked] = useState<string | null>(null);
+  const [pickedPlaybook, setPickedPlaybook] = useState<string | null>(null);
+  const playbookRadios = useId();
+  const canPlaybooks = hasScope(me, 'playbooks:read');
+  const playbookList = useQuery({ ...playbooksQuery(tenant), enabled: canPlaybooks });
+  const suggestion = useQuery({ ...playbookSuggestionQuery(tenant, single?.account_id ?? ''), enabled: canPlaybooks && !!single });
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +136,15 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
   const owners = [...new Set(stops.map((s) => s.preflight.current_owner_name))];
   const keptOwner = owners.length === 1 && owners[0] ? owners[0] : 'the current HubSpot owner';
 
+  // Playbook cards: shown once the active playbooks (and, for one account, its suggestion) have loaded.
+  const active = (playbookList.data ?? []).filter((p) => p.status === 'active');
+  const showPlaybooks = canPlaybooks && playbookList.isSuccess && (!single || suggestion.isSuccess);
+  const defaultChoice = single ? (suggestion.data?.playbook?.id ?? NONE) : RECOMMENDED;
+  const choice = pickedPlaybook ?? defaultChoice;
+  const choiceName = active.find((p) => p.id === choice)?.name ?? (choice === suggestion.data?.playbook?.id ? suggestion.data.playbook.name : null);
+  // Only a choice that differs from the default is sent; "No playbook" is an explicit null.
+  const playbookBody = !showPlaybooks || choice === defaultChoice ? {} : { playbook_id: choice === NONE ? null : choice };
+
   const title = single ? `Assign ${single.name}` : `Assign ${accounts.length} accounts`;
   const offer = single?.lead_offer;
   const sub = single ? [offer?.name, offer?.practice_name].filter(Boolean).join(' · ') : accounts.map((a) => a.name).join(', ');
@@ -127,7 +153,7 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
   const sentence = !seller
     ? null
     : stops.length === 0
-      ? `Scout sends ${single ? single.name : plural(assignable.length || accounts.length, 'account', 'accounts')} to HubSpot with ${seller.name} as owner and logs the brief.`
+      ? `Scout sends ${single ? single.name : plural(assignable.length || accounts.length, 'account', 'accounts')} to HubSpot with ${seller.name} as owner and logs the brief${startsText(showPlaybooks, choice, choiceName, firstName(seller.name))}.`
       : single || moving === 0
         ? `Scout sends ${single ? single.name : plural(stops.length, 'account', 'accounts')} to HubSpot and leaves ${keptOwner} as owner.`
         : // Each group as it will go (the decision is per account).
@@ -138,7 +164,7 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
     if (!seller) return;
     setBusy(true);
     setError(null);
-    const base = { seller_user_id: seller.user_id, ...(note.trim() ? { notes: note.trim() } : {}) };
+    const base = { seller_user_id: seller.user_id, ...(note.trim() ? { notes: note.trim() } : {}), ...playbookBody };
     try {
       if (single) {
         await assign(tenant, single.account_id, { ...base, ...(stops.length > 0 ? { ownership_decision: 'keep' as const } : {}) });
@@ -244,6 +270,34 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
           </fieldset>
         )}
 
+        {showPlaybooks && (
+          <fieldset className={styles.cards}>
+            <legend className={styles.label}>Playbook</legend>
+            {!single && (
+              <PlaybookCard radios={playbookRadios} value={RECOMMENDED} checked={choice === RECOMMENDED} onPick={setPickedPlaybook} title="Recommended for each account">
+                Each account starts the playbook its offer and tier point to.
+              </PlaybookCard>
+            )}
+            {active.map((p) => (
+              <PlaybookCard
+                key={p.id}
+                radios={playbookRadios}
+                value={p.id}
+                checked={choice === p.id}
+                onPick={setPickedPlaybook}
+                title={p.name}
+                {...(single && defaultChoice === p.id ? { tag: 'Recommended for this account' } : {})}
+              >
+                {span(p.steps, p.days)}
+                {p.description && <span className={styles.muted}>{p.description}</span>}
+              </PlaybookCard>
+            ))}
+            <PlaybookCard radios={playbookRadios} value={NONE} checked={choice === NONE} onPick={setPickedPlaybook} title="No playbook" {...(single && defaultChoice === NONE ? { tag: 'Recommended for this account' } : {})}>
+              The AE works it with no set steps.
+            </PlaybookCard>
+          </fieldset>
+        )}
+
         {seller && unavailable && (
           <div role="alert" className={styles.blocked}>
             HubSpot isn&apos;t answering, so Scout can&apos;t check who owns this company. Try again in a moment.{' '}
@@ -315,5 +369,21 @@ export function AssignDialog({ tenant, me, accounts, onClose, onDone }: AssignPr
         )}
       </div>
     </Dialog>
+  );
+}
+
+function PlaybookCard({ radios, value, checked, onPick, title, tag, children }: { radios: string; value: string; checked: boolean; onPick: (v: string) => void; title: string; tag?: string; children: ReactNode }) {
+  return (
+    // eslint-disable-next-line jsx-a11y/label-has-associated-control -- the input is nested; the text arrives as props
+    <label className={styles.aeCard}>
+      <input type="radio" name={radios} checked={checked} onChange={() => onPick(value)} />
+      <span className={styles.aeText}>
+        <span className={styles.aeName}>
+          {title}
+          {tag && <span className={styles.best}>{tag}</span>}
+        </span>
+        <span className={styles.muted}>{children}</span>
+      </span>
+    </label>
   );
 }

@@ -43,6 +43,12 @@ export function formatDay(when: When, timeZone: string): string {
   return formatDate(when, isCalendarDate(when) ? 'UTC' : timeZone);
 }
 
+/** Whole calendar days from a plain "YYYY-MM-DD" to today in the timezone; positive once the day has passed. */
+export function daysSince(day: string, timeZone: string, now: When = new Date()): number {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(toDate(now));
+  return Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${day.slice(0, 10)}T00:00:00Z`)) / 86_400_000);
+}
+
 /** "Aug 2" in the given IANA timezone. */
 export function formatMonthDay(when: When, timeZone: string): string {
   return new Intl.DateTimeFormat(LOCALE, { timeZone, month: 'short', day: 'numeric' }).format(toDate(when));

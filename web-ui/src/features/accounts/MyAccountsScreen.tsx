@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
-import { countsQuery } from '../../api/me';
+import { countsQuery, hasScope, meQuery } from '../../api/me';
 import { cx } from '../../lib/cx';
 import { useFormat } from '../../lib/useFormat';
 import { useHeldRows } from '../../lib/useHeldRows';
@@ -16,6 +16,7 @@ import { HandoffChip } from '../review/parts';
 import { ReasonPicker, reasonReady } from '../review/ReasonPicker';
 import review from '../review/Review.module.css';
 import { errorText, LoadFailed, LoadingRows, useRun } from '../settings/shared';
+import { DueWords } from './NextStep';
 import { acceptAssignment, activityText, declineAssignment, markSeen, myAssignmentsQuery, type Assignment } from './api';
 import styles from './Accounts.module.css';
 
@@ -29,6 +30,8 @@ export function MyAccountsScreen() {
   const f = useFormat();
   const queryClient = useQueryClient();
   const counts = useQuery(countsQuery(tenant));
+  const me = useQuery(meQuery(tenant));
+  const showSteps = !!me.data && hasScope(me.data, 'playbooks:read');
   const pendingQ = useInfiniteQuery(myAssignmentsQuery(tenant, 'pending'));
   const activeQ = useInfiniteQuery(myAssignmentsQuery(tenant, 'accepted'));
   const pendingLatest = useMemo(() => pendingQ.data?.pages.flatMap((p) => p.data), [pendingQ.data]);
@@ -48,7 +51,15 @@ export function MyAccountsScreen() {
   }
 
   const n = counts.data?.new_assignments;
-  const subtitle = n === null || n === undefined ? 'Your assignments and the accounts you work.' : n === 1 ? '1 new assignment to accept.' : `${f.number(n)} new assignments to accept.`;
+  const due = counts.data?.next_steps_due_today ?? null;
+  const late = counts.data?.next_steps_overdue ?? null;
+  const newText = n === 1 ? '1 new assignment to accept.' : `${f.number(n ?? 0)} new assignments to accept.`;
+  // Next-step counts are null without playbooks:read. With them, clauses that are zero are dropped.
+  const stepText = [due ? (due === 1 ? '1 next step due today' : `${f.number(due)} next steps due today`) : null, late ? `${f.number(late)} overdue` : null].filter(Boolean).join(', ');
+  const subtitle =
+    n === null || n === undefined
+      ? 'Your assignments and the accounts you work.'
+      : [n > 0 || !stepText ? newText : null, stepText ? `${stepText}.` : null].filter(Boolean).join(' ');
   const failed = pendingQ.isError ? pendingQ : activeQ.isError ? activeQ : null;
 
   return (
@@ -81,7 +92,7 @@ export function MyAccountsScreen() {
       ) : (
         <>
           {pending.rows.length > 0 && <NewAssignments tenant={tenant} rows={pending.rows} count={n ?? null} onChanged={refresh} />}
-          <Active tenant={tenant} rows={active.rows} />
+          <Active tenant={tenant} rows={active.rows} showSteps={showSteps} />
         </>
       )}
     </div>
@@ -99,7 +110,7 @@ function NewAssignments({ tenant, rows, count, onChanged }: { tenant: string; ro
         </h2>
         {count !== null && count > 0 && <Badge count={count} label="new assignments" />}
       </div>
-      <p className={styles.note}>{`Accept to take it on. Declining returns the account to ${assigner}.`}</p>
+      <p className={styles.note}>{rows.some((r) => r.playbook_name) ? `Accept to start the playbook. Declining returns the account to ${assigner}.` : `Accept to take it on. Declining returns the account to ${assigner}.`}</p>
       <ul className={styles.list}>
         {rows.map((a) => (
           <NewRow key={a.id} tenant={tenant} a={a} onChanged={onChanged} />
@@ -160,7 +171,7 @@ function NewRow({ tenant, a, onChanged }: { tenant: string; a: Assignment; onCha
                 void run(async () => {
                   await acceptAssignment(tenant, a.id);
                   await onChanged();
-                }, `Accepted. ${name} is in your accounts.`)
+                }, a.playbook_name ? `Accepted. ${a.playbook_name} starts today.` : `Accepted. ${name} is in your accounts.`)
               }
             >
               Accept
@@ -233,7 +244,7 @@ function DeclinePanel({ tenant, a, name, by, onCancel, onChanged }: { tenant: st
   );
 }
 
-function Active({ tenant, rows }: { tenant: string; rows: Assignment[] }) {
+function Active({ tenant, rows, showSteps }: { tenant: string; rows: Assignment[]; showSteps: boolean }) {
   const f = useFormat();
   const navigate = useNavigate();
   return (
@@ -251,6 +262,12 @@ function Active({ tenant, rows }: { tenant: string; rows: Assignment[] }) {
                 <th scope="col">Account</th>
                 <th scope="col">Stage</th>
                 <th scope="col">Last HubSpot activity</th>
+                {showSteps && (
+                  <>
+                    <th scope="col">Next step</th>
+                    <th scope="col">Due</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -272,6 +289,12 @@ function Active({ tenant, rows }: { tenant: string; rows: Assignment[] }) {
                       'No activity yet'
                     )}
                   </td>
+                  {showSteps && (
+                    <>
+                      <td className={cx(!a.next_step && table.muted)}>{a.next_step ? a.next_step.title : 'No next step'}</td>
+                      <td>{a.next_step && <DueWords step={a.next_step} />}</td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>

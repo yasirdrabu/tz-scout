@@ -2,6 +2,7 @@ import { http, HttpResponse } from 'msw';
 import { exactly } from '../../test/http';
 import { serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
+import { draftPlaybook, rfp } from '../playbooks/testing';
 import type { Columns, LastRescore, QueueFacets, QueueRow, Reason, RescoreRun, ReviewStatus, Sellers } from './api';
 
 // Fixtures in the API's shapes (snake_case), for the review screens' tests.
@@ -218,4 +219,28 @@ export function serveQueue(
     http.post(exactly('/api/v1/accounts/acc_mdc:assign-preview'), () => HttpResponse.json({ preflight: NEW_PREFLIGHT, approves_to: null, replaces: null })),
   );
   return seen;
+}
+
+export const WITH_PLAYBOOKS = [...LEADER, 'playbooks:read'];
+
+/** The playbook cards' reads: the playbooks (active, draft, retired) and the suggestion for each account. */
+export function servePlaybookChoice(suggested: string | null = 'plb_rfp') {
+  const playbooks = [
+    rfp(),
+    rfp({ id: 'plb_warm', name: 'Warm intro', description: 'A short note to a known contact.', steps: 2, days: 5 }),
+    draftPlaybook(),
+    rfp({ id: 'plb_old', name: 'Old playbook', status: 'archived' }),
+  ];
+  server.use(
+    http.get('/api/v1/playbooks', () => HttpResponse.json({ data: playbooks, next_cursor: null })),
+    http.get('/api/v1/accounts/:id/playbook-suggestion', () => {
+      const p = playbooks.find((x) => x.id === suggested);
+      return HttpResponse.json({
+        playbook: p ? { id: p.id, name: p.name, steps: p.steps, days: p.days } : null,
+        reason: p ? 'offer_tier' : 'none',
+        offer: { id: 'off_mb', name: 'Modernization Blueprint' },
+        tier: 'act_now',
+      });
+    }),
+  );
 }

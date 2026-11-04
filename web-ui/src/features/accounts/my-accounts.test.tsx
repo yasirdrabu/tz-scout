@@ -20,6 +20,7 @@ const assignment = (a: Partial<Assignment> & Pick<Assignment, 'id' | 'account_id
   offer_id: 'off_mb',
   offer_name: 'Modernization Blueprint',
   playbook_name: null,
+  next_step: null,
   stage: 'reviewed',
   stage_label: 'Reviewed',
   last_activity: null,
@@ -40,11 +41,11 @@ const PALISADE = assignment({
   last_activity: { kind: 'reply', at: '2026-10-29T10:00:00Z' },
 });
 
-function serve(opts: { pending?: Assignment[]; active?: Assignment[] } = {}) {
+function serve(opts: { pending?: Assignment[]; active?: Assignment[]; scopes?: string[]; counts?: Record<string, number | null> } = {}) {
   let pending = opts.pending ?? [MIAMI];
-  serveMe({ taazaa: { scopes: ['assignments:respond', 'accounts:read'] } });
+  serveMe({ taazaa: { scopes: opts.scopes ?? ['assignments:respond', 'accounts:read'] } });
   server.use(
-    http.get('/api/v1/me/counts', () => HttpResponse.json({ review_queue: null, new_assignments: pending.length })),
+    http.get('/api/v1/me/counts', () => HttpResponse.json({ review_queue: null, new_assignments: pending.length, ...opts.counts })),
     http.get('/api/v1/assignments', ({ request }) => {
       const status = new URL(request.url).searchParams.get('status');
       return HttpResponse.json({ data: status === 'pending' ? pending : (opts.active ?? [PALISADE]), next_cursor: null });
@@ -55,6 +56,11 @@ function serve(opts: { pending?: Assignment[]; active?: Assignment[] } = {}) {
 }
 
 beforeEach(() => localStorage.clear());
+
+const READER = ['assignments:respond', 'accounts:read', 'playbooks:read'];
+/** A plain calendar date this many days from today, in the browser's zone (the tests' tenant has none). */
+const dayFromToday = (n: number) => new Date(Date.now() + n * 86_400_000).toLocaleDateString('en-CA');
+const step = (title: string, n: number) => ({ title, due_date: dayFromToday(n), overdue: n < 0, due_today: n === 0 });
 
 describe('My accounts', () => {
   it('lists new assignments and the active accounts', async () => {
@@ -76,6 +82,64 @@ describe('My accounts', () => {
     expect(row).toHaveTextContent('Accepted automatically');
     expect(row).toHaveTextContent('Engaged');
     expect(row).toHaveTextContent('Email reply');
+  });
+
+  it('says what is due in the subtitle, dropping zero clauses', async () => {
+    serve({ scopes: READER, counts: { next_steps_due_today: 2, next_steps_overdue: 1 } });
+    renderApp('/t/taazaa/my');
+    expect(await screen.findByText('1 new assignment to accept. 2 next steps due today, 1 overdue.')).toBeInTheDocument();
+  });
+
+  it('drops the zero clauses, with singular and plural', async () => {
+    serve({ scopes: READER, pending: [], counts: { next_steps_due_today: 1, next_steps_overdue: 0 } });
+    renderApp('/t/taazaa/my');
+    expect(await screen.findByText('1 next step due today.')).toBeInTheDocument();
+  });
+
+  it('keeps the plain subtitle and hides Next step and Due without playbooks:read', async () => {
+    serve({ active: [{ ...PALISADE, next_step: step('Call', 0) }], counts: { next_steps_due_today: null, next_steps_overdue: null } });
+    renderApp('/t/taazaa/my');
+    expect(await screen.findByText('1 new assignment to accept.')).toBeInTheDocument();
+    const active = screen.getByRole('region', { name: 'Active' });
+    expect(within(active).queryByRole('columnheader', { name: 'Next step' })).toBeNull();
+    expect(within(active).queryByRole('columnheader', { name: 'Due' })).toBeNull();
+  });
+
+  it('names the playbook in the hint and the accept toast when the row has one', async () => {
+    const withPlaybook = { ...MIAMI, playbook_name: 'Public sector RFP' };
+    const s = serve({ pending: [withPlaybook], scopes: READER });
+    server.use(
+      http.post(exactly('/api/v1/assignments/asg_1:accept'), () => {
+        s.setPending([]);
+        return HttpResponse.json({ ...MIAMI, status: 'accepted' });
+      }),
+    );
+    renderApp('/t/taazaa/my');
+    const fresh = await screen.findByRole('region', { name: 'New assignments' });
+    expect(fresh).toHaveTextContent('Accept to start the playbook. Declining returns the account to Dana Whitfield.');
+    expect(fresh).toHaveTextContent('Modernization Blueprint · Public sector RFP playbook');
+    await userEvent.click(within(fresh).getByRole('button', { name: 'Accept Miami-Dade County DTPW' }));
+    expect(await screen.findByText('Accepted. Public sector RFP starts today.')).toBeInTheDocument();
+  });
+
+  it('shows Next step and Due in the Active table with the due words', async () => {
+    const rows = [
+      { ...PALISADE, id: 'a1', account_id: 'acc_1', account_name: 'Due Co', next_step: step('Intro email', 0) },
+      { ...PALISADE, id: 'a2', account_id: 'acc_2', account_name: 'Late Co', next_step: step('Call the sponsor', -3) },
+      { ...PALISADE, id: 'a3', account_id: 'acc_3', account_name: 'Day Co', next_step: step('Follow up', -1) },
+      { ...PALISADE, id: 'a4', account_id: 'acc_4', account_name: 'Soon Co', next_step: { title: 'Check in', due_date: '2031-03-05', overdue: false, due_today: false } },
+      { ...PALISADE, id: 'a5', account_id: 'acc_5', account_name: 'Bare Co', next_step: null },
+    ];
+    serve({ pending: [], active: rows, scopes: READER });
+    renderApp('/t/taazaa/my');
+    const active = await screen.findByRole('region', { name: 'Active' });
+    expect(within(active).getByRole('columnheader', { name: 'Next step' })).toBeInTheDocument();
+    const rowOf = (name: string) => within(active).getByRole('link', { name }).closest('tr')!;
+    expect(rowOf('Due Co')).toHaveTextContent('Intro emailDue today');
+    expect(rowOf('Late Co')).toHaveTextContent('Call the sponsor3 days overdue');
+    expect(rowOf('Day Co')).toHaveTextContent('Follow up1 day overdue');
+    expect(rowOf('Soon Co')).toHaveTextContent('Check inMar 5, 2031');
+    expect(rowOf('Bare Co')).toHaveTextContent('No next step');
   });
 
   it('accepts an assignment', async () => {

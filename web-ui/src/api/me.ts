@@ -49,7 +49,13 @@ export function rememberWorkspaceOnServer(slug: string): Promise<void> {
 }
 
 /** Sidebar badges: null when the person cannot see that screen. */
-export type Counts = { review_queue: number | null; new_assignments: number | null };
+export type Counts = {
+  review_queue: number | null;
+  new_assignments: number | null;
+  /** Null without `playbooks:read`. */
+  next_steps_due_today?: number | null;
+  next_steps_overdue?: number | null;
+};
 
 export const countsQuery = (tenant: string) =>
   queryOptions({

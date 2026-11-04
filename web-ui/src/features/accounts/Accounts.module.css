@@ -150,3 +150,13 @@
   gap: 8px;
   white-space: nowrap;
 }
+
+.dueToday {
+  color: var(--near);
+  font-weight: 600;
+}
+
+.overdue {
+  color: var(--bad);
+  font-weight: 600;
+}

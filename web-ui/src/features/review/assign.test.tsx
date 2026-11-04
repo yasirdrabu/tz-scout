@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { exactly, problem } from '../../test/http';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
-import { NEW_PREFLIGHT, row, serveQueue } from './testing';
+import { NEW_PREFLIGHT, row, servePlaybookChoice, serveQueue, WITH_PLAYBOOKS } from './testing';
 
 const OPEN_DEAL = {
   result: 'stop',
@@ -282,5 +282,158 @@ describe('Assign dialog', () => {
     expect(await screen.findByText('Assigned 2 accounts to Maya Chen. Sending them to HubSpot.')).toBeInTheDocument();
     expect(body).toEqual({ account_ids: ['acc_mdc', 'acc_pgu'], action: 'assign', seller_user_id: 'usr_maya' });
     expect(screen.queryByRole('region', { name: 'Bulk actions' })).toBeNull();
+  });
+
+  describe('playbook choice', () => {
+    const assignBody = () => {
+      const seen: { body: unknown } = { body: undefined };
+      server.use(
+        http.post(exactly('/api/v1/accounts/acc_mdc:assign'), async ({ request }) => {
+          seen.body = await request.json();
+          return HttpResponse.json({ id: 'asg_1', status: 'pending' }, { status: 202 });
+        }),
+      );
+      return seen;
+    };
+    const go = async (dialog: HTMLElement) => {
+      const button = within(dialog).getByRole('button', { name: 'Assign to Ash Patel' });
+      await waitFor(() => expect(button).toBeEnabled());
+      await userEvent.click(button);
+      await screen.findByText('Assigned to Ash Patel. Sending Miami-Dade County DTPW to HubSpot.');
+    };
+
+    it('lists the active playbooks and No playbook, preselects the suggestion, and sends nothing when it is kept', async () => {
+      serveQueue({ scopes: WITH_PLAYBOOKS });
+      servePlaybookChoice('plb_rfp');
+      const seen = assignBody();
+      renderApp('/t/taazaa/queue?peek=acc_mdc');
+      const dialog = await openFromPeek();
+      const cards = await within(dialog).findByRole('group', { name: 'Playbook' });
+      const rfp = within(cards).getByRole('radio', { name: /^Public sector RFP/ });
+      expect(rfp).toBeChecked();
+      expect(rfp.closest('label')).toHaveTextContent('Recommended for this account');
+      expect(rfp.closest('label')).toHaveTextContent('3 steps over 14 days');
+      expect(rfp.closest('label')).toHaveTextContent('For agencies with an open notice.');
+      expect(within(cards).getByRole('radio', { name: /^Warm intro/ })).not.toBeChecked();
+      expect(within(cards).getByRole('radio', { name: /^No playbook/ })).not.toBeChecked();
+      // Draft and retired playbooks are not offered.
+      expect(within(cards).getAllByRole('radio')).toHaveLength(3);
+      expect(await within(dialog).findByText('Scout sends Miami-Dade County DTPW to HubSpot with Ash Patel as owner and logs the brief and starts Public sector RFP when Ash accepts.')).toBeInTheDocument();
+      await go(dialog);
+      expect(seen.body).toEqual({ seller_user_id: 'usr_ash' });
+    });
+
+    it('sends the playbook id when another one is picked, and the footer follows', async () => {
+      serveQueue({ scopes: WITH_PLAYBOOKS });
+      servePlaybookChoice('plb_rfp');
+      const seen = assignBody();
+      renderApp('/t/taazaa/queue?peek=acc_mdc');
+      const dialog = await openFromPeek();
+      await userEvent.click(await within(dialog).findByRole('radio', { name: /^Warm intro/ }));
+      expect(await within(dialog).findByText(/and logs the brief and starts Warm intro when Ash accepts\.$/)).toBeInTheDocument();
+      await go(dialog);
+      expect(seen.body).toEqual({ seller_user_id: 'usr_ash', playbook_id: 'plb_warm' });
+    });
+
+    it('No playbook sends null and adds nothing to the footer', async () => {
+      serveQueue({ scopes: WITH_PLAYBOOKS });
+      servePlaybookChoice('plb_rfp');
+      const seen = assignBody();
+      renderApp('/t/taazaa/queue?peek=acc_mdc');
+      const dialog = await openFromPeek();
+      await userEvent.click(await within(dialog).findByRole('radio', { name: /^No playbook/ }));
+      expect(await within(dialog).findByText('Scout sends Miami-Dade County DTPW to HubSpot with Ash Patel as owner and logs the brief.')).toBeInTheDocument();
+      await go(dialog);
+      expect(seen.body).toEqual({ seller_user_id: 'usr_ash', playbook_id: null });
+    });
+
+    it('with no suggestion, No playbook is preselected and tagged, and sending nothing keeps the default', async () => {
+      serveQueue({ scopes: WITH_PLAYBOOKS });
+      servePlaybookChoice(null);
+      const seen = assignBody();
+      renderApp('/t/taazaa/queue?peek=acc_mdc');
+      const dialog = await openFromPeek();
+      const none = await within(dialog).findByRole('radio', { name: /^No playbook/ });
+      expect(none).toBeChecked();
+      expect(none.closest('label')).toHaveTextContent('Recommended for this account');
+      await go(dialog);
+      expect(seen.body).toEqual({ seller_user_id: 'usr_ash' });
+    });
+
+    it('without playbooks:read the section is hidden and nothing is sent', async () => {
+      serveQueue();
+      servePlaybookChoice('plb_rfp');
+      const seen = assignBody();
+      renderApp('/t/taazaa/queue?peek=acc_mdc');
+      const dialog = await openFromPeek();
+      await within(dialog).findByRole('radio', { name: /^Ash Patel/ });
+      expect(within(dialog).queryByRole('group', { name: 'Playbook' })).toBeNull();
+      await go(dialog);
+      expect(seen.body).toEqual({ seller_user_id: 'usr_ash' });
+    });
+
+    it('bulk: the first card is Recommended for each account and sends no playbook_id', async () => {
+      serveQueue({ scopes: WITH_PLAYBOOKS });
+      servePlaybookChoice();
+      let body: Record<string, unknown> | null = null;
+      server.use(
+        http.post('/api/v1/review-queue/assign-preview', async ({ request }) => {
+          const { account_ids } = (await request.json()) as { account_ids: string[] };
+          return HttpResponse.json({ data: account_ids.map((id) => ({ account_id: id, ok: true, preflight: NEW_PREFLIGHT, approves_to: null, replaces: null })) });
+        }),
+        http.post('/api/v1/review-queue/bulk', async ({ request }) => {
+          body = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ results: (body.account_ids as string[]).map((id) => ({ account_id: id, ok: true })) });
+        }),
+      );
+      renderApp('/t/taazaa/queue');
+      await screen.findByRole('button', { name: 'Miami-Dade County DTPW' });
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Select Miami-Dade County DTPW' }));
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Select Pinegate University' }));
+      await userEvent.click(within(screen.getByRole('region', { name: 'Bulk actions' })).getByRole('button', { name: 'Assign to an AE' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Assign 2 accounts' });
+      const cards = await within(dialog).findByRole('group', { name: 'Playbook' });
+      expect(within(cards).getAllByRole('radio').map((r) => r.closest('label')!.textContent)).toEqual([
+        expect.stringMatching(/^Recommended for each account/),
+        expect.stringMatching(/^Public sector RFP/),
+        expect.stringMatching(/^Warm intro/),
+        expect.stringMatching(/^No playbook/),
+      ]);
+      expect(within(cards).getByRole('radio', { name: /^Recommended for each account/ })).toBeChecked();
+      expect(await within(dialog).findByText(/and starts each account's recommended playbook when Ash accepts\.$/)).toBeInTheDocument();
+      const button = within(dialog).getByRole('button', { name: 'Assign to Ash Patel' });
+      await waitFor(() => expect(button).toBeEnabled());
+      await userEvent.click(button);
+      await screen.findByText('Assigned 2 accounts to Ash Patel. Sending them to HubSpot.');
+      expect(body).toEqual({ account_ids: ['acc_mdc', 'acc_pgu'], action: 'assign', seller_user_id: 'usr_ash' });
+    });
+
+    it('bulk: one playbook for every account is sent as playbook_id', async () => {
+      serveQueue({ scopes: WITH_PLAYBOOKS });
+      servePlaybookChoice();
+      let body: Record<string, unknown> | null = null;
+      server.use(
+        http.post('/api/v1/review-queue/assign-preview', async ({ request }) => {
+          const { account_ids } = (await request.json()) as { account_ids: string[] };
+          return HttpResponse.json({ data: account_ids.map((id) => ({ account_id: id, ok: true, preflight: NEW_PREFLIGHT, approves_to: null, replaces: null })) });
+        }),
+        http.post('/api/v1/review-queue/bulk', async ({ request }) => {
+          body = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ results: (body.account_ids as string[]).map((id) => ({ account_id: id, ok: true })) });
+        }),
+      );
+      renderApp('/t/taazaa/queue');
+      await screen.findByRole('button', { name: 'Miami-Dade County DTPW' });
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Select Miami-Dade County DTPW' }));
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Select Pinegate University' }));
+      await userEvent.click(within(screen.getByRole('region', { name: 'Bulk actions' })).getByRole('button', { name: 'Assign to an AE' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Assign 2 accounts' });
+      await userEvent.click(await within(dialog).findByRole('radio', { name: /^Warm intro/ }));
+      const button = within(dialog).getByRole('button', { name: 'Assign to Ash Patel' });
+      await waitFor(() => expect(button).toBeEnabled());
+      await userEvent.click(button);
+      await screen.findByText('Assigned 2 accounts to Ash Patel. Sending them to HubSpot.');
+      expect(body).toEqual({ account_ids: ['acc_mdc', 'acc_pgu'], action: 'assign', seller_user_id: 'usr_ash', playbook_id: 'plb_warm' });
+    });
   });
 });

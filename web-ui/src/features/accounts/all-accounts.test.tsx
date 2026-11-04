@@ -49,9 +49,9 @@ const ROWS = [
   account({ account_id: 'acc_anchor', name: 'Anchor Bay Logistics', owner_user_id: null, owner_name: null, stage: 'declined', stage_label: 'Not pursued', last_activity: null, value: { amount_cents: 7_500_000, currency: 'USD', kind: 'estimated', deal_name: null } }),
 ];
 
-function serve(rows = ROWS) {
+function serve(rows = ROWS, scopes = ['accounts:read']) {
   const seen: URL[] = [];
-  serveMe({ taazaa: { scopes: ['accounts:read'] } });
+  serveMe({ taazaa: { scopes } });
   server.use(
     http.get('/api/v1/accounts', ({ request }) => {
       const u = new URL(request.url);
@@ -91,6 +91,31 @@ describe('All accounts', () => {
     expect(screen.getByText('Showing 2 of 14')).toBeInTheDocument();
     expect(screen.getByText('Sorted by stage, then priority')).toBeInTheDocument();
     expect(seen[0]!.searchParams.get('sort')).toBe('stage_priority');
+  });
+
+  it('shows a Next step column with the due words beneath, between Source and Last activity', async () => {
+    const day = (n: number) => new Date(Date.now() + n * 86_400_000).toLocaleDateString('en-CA');
+    serve(
+      [
+        account({ account_id: 'acc_hollis', name: 'Hollis Freight Lines', next_step: { title: 'Intro email', due_date: day(0), overdue: false, due_today: true } }),
+        account({ account_id: 'acc_anchor', name: 'Anchor Bay Logistics', next_step: { title: 'Call the sponsor', due_date: day(-2), overdue: true, due_today: false } }),
+        account({ account_id: 'acc_none', name: 'No Plan Co', next_step: null }),
+      ],
+      ['accounts:read', 'playbooks:read'],
+    );
+    renderApp('/t/taazaa/accounts');
+    const headers = (await screen.findAllByRole('columnheader')).map((h) => h.textContent);
+    expect(headers.slice(5, 8)).toEqual(['Source', 'Next step', 'Last activity']);
+    expect((await screen.findByRole('link', { name: 'Hollis Freight Lines' })).closest('tr')).toHaveTextContent('Intro emailDue today');
+    expect(screen.getByRole('link', { name: 'Anchor Bay Logistics' }).closest('tr')).toHaveTextContent('Call the sponsor2 days overdue');
+    expect(screen.getByRole('link', { name: 'No Plan Co' }).closest('tr')).toHaveTextContent('None');
+  });
+
+  it('hides the Next step column without playbooks:read', async () => {
+    serve();
+    renderApp('/t/taazaa/accounts');
+    await screen.findByRole('link', { name: 'Hollis Freight Lines' });
+    expect(screen.queryByRole('columnheader', { name: 'Next step' })).toBeNull();
   });
 
   it('keeps the stage, search and filters in the URL and sends them to the API', async () => {
