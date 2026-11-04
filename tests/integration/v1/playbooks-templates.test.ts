@@ -128,6 +128,10 @@ describe('/api/v1/offers/{id}/playbooks', () => {
     const archived = await w.as(operator, putOfferPlaybook, `offers/${offerId}/playbooks/watch`, 'PUT', { playbook_id: pb.id });
     expect(archived.status).toBe(400);
     expect((await archived.json()).title).toBe("That playbook isn't available.");
+    const draft = await (await w.as(leader, createRoute, 'playbooks', 'POST', { name: 'Still a draft', steps })).json();
+    const drafted = await w.as(operator, putOfferPlaybook, `offers/${offerId}/playbooks/watch`, 'PUT', { playbook_id: draft.id });
+    expect(drafted.status).toBe(400);
+    expect((await drafted.json()).title).toBe("That playbook isn't available.");
 
     const cleared = await (await w.as(operator, putOfferPlaybook, `offers/${offerId}/playbooks/act_now`, 'PUT', { playbook_id: null })).json();
     expect(cleared.data[0].playbook).toBeNull();

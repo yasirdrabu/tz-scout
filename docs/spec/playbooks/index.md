@@ -67,9 +67,9 @@ Turn a scored account into a plan people can run, and learn from how it went. Th
 | Event | Data |
 |---|---|
 | `playbooks.plan.created` | `planId`, `accountId`, `offerId`, `tier` (both null when no lead offer or mappable tier), `templateId`, `templateVersion`, `assignmentId`, `sellerUserId`, `stopWhen`, `steps` (id, order, day, channel, title, ownerUserId, dueDate, crmTask, subject, body) |
-| `playbooks.plan.changed` | `planId`, `accountId`, `status`, `changed` (any of `status`, `steps`, `owners`), `reason?` |
+| `playbooks.plan.changed` | `planId`, `accountId`, `status`, `changed` (any of `status`, `steps`, `owners`, `account`), `reason?`, `previousAccountId?` (a merge repoint) and `steps[{id, status, ownerUserId, dueDate, title, crmTask}]`, the steps the change touched (a step edit: that step; owner moves on a resume or take-over: the moved steps; a stop: the skipped steps; empty for a status-only change) |
 | `playbooks.step.completed` | `planId`, `stepId`, `accountId`, `channel`, `doneBy`, `doneAt` |
-| `playbooks.plan.not_started` | `accountId`, `assignmentId`, `reason` (`no_playbook_chosen`, `no_offer_playbook`, `template_archived`, `plan_open`) |
+| `playbooks.plan.not_started` | `accountId`, `assignmentId`, `reason` (`no_playbook_chosen`, `no_offer_playbook`, `template_unavailable`) |
 | `playbooks.outcome.recorded` | `outcomeId`, `accountId`, `kind`, `occurredAt`, `source`, `amountCents`, `creditedStepIds` |
 | `playbooks.learning.recorded` | `retroId`, `accountId`, `result`, `templateId`, `proposalIds` |
 | `playbooks.brief.updated` | `accountId`, `sectionKeys`, `origin` |

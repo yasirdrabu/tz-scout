@@ -53,7 +53,7 @@ export async function offerPlaybooks(ctx: ModuleContext, offerId: string): Promi
   return out;
 }
 
-/** Sets or clears (`null`) the playbook an offer starts for a tier. An archived or unknown template is a 400. Returns the three tiers. */
+/** Sets or clears (`null`) the playbook an offer starts for a tier. Only an active template can be mapped; any other is a 400. Returns the three tiers. */
 export async function setOfferPlaybook(ctx: ModuleContext, offerId: string, tier: string, templateId: string | null): Promise<OfferPlaybookView[]> {
   if (!(MAPPED_TIERS as readonly string[]).includes(tier)) throw invalid('tier', 'Use act_now, good_fit or watch.');
   const subject = { type: 'offer', id: offerId };
@@ -66,7 +66,7 @@ export async function setOfferPlaybook(ctx: ModuleContext, offerId: string, tier
     .select({ status: playbookTemplate.status })
     .from(playbookTemplate)
     .where(and(eq(playbookTemplate.id, templateId), eq(playbookTemplate.tenantId, ctx.tenantId)));
-  if (!t || t.status === 'archived') throw invalid('playbook_id', NOT_AVAILABLE);
+  if (!t || t.status !== 'active') throw invalid('playbook_id', NOT_AVAILABLE);
   await ctx.tx
     .insert(offerPlaybook)
     .values({ tenantId: ctx.tenantId, offerId, tier, templateId, updatedBy: ctx.actor.id })
@@ -78,7 +78,7 @@ export async function setOfferPlaybook(ctx: ModuleContext, offerId: string, tier
   return offerPlaybooks(ctx, offerId);
 }
 
-/** The template mapped to an offer and tier, or null. Not filtered by status: the caller decides what an archived template means. */
+/** The template mapped to an offer and tier, or null. Not filtered by status: the caller decides what a template that is not active means. */
 export async function playbookFor(ctx: ModuleContext, offerId: string, tier: string): Promise<{ templateId: string; status: string; version: number } | null> {
   const [row] = await ctx.tx
     .select({ templateId: playbookTemplate.id, status: playbookTemplate.status, version: playbookTemplate.version })
@@ -120,7 +120,7 @@ export async function pendingPlaybookNames(ctx: ModuleContext, items: PendingCho
     (templateIds.length
       ? await ctx.tx.select({ id: playbookTemplate.id, name: playbookTemplate.name, status: playbookTemplate.status }).from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), inArray(playbookTemplate.id, templateIds)))
       : []
-    ).filter((t) => t.status !== 'archived')
+    ).filter((t) => t.status === 'active')
     .map((t) => [t.id, t.name]),
   );
   for (const [key, t] of chosen) out.set(key, t ? (names.get(t) ?? null) : null);

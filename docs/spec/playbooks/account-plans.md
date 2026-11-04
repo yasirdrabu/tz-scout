@@ -24,7 +24,7 @@ Out of R2c (user, 2026-11-04): outreach sequences, call prep, proposals and outc
   2. Otherwise the `offer_playbook` row for the account's lead offer and tier. The lead offer is
      `leadOfferOverrideId ?? bestOfferId`, and the tier is the account's tier, both read at accept
      time. With no row, no plan starts.
-  3. A template that is archived or has been deleted is never started: no plan.
+  3. Only an `active` template is started. A draft, archived or deleted one starts no plan.
   When no plan starts, `playbooks.plan.not_started` says why.
 - **Building a plan** (pure, `domain/plan.ts`).
   - Each step's due date is the start date plus `day` calendar days, moved to the next working day
@@ -44,8 +44,13 @@ Out of R2c (user, 2026-11-04): outreach sequences, call prep, proposals and outc
 - **One open plan per account.** An account has at most one plan that is `active` or `paused`
   (enforced by a partial unique index).
   - Accepting again: an accepted assignment for an account with a `paused` plan resumes it. Its open
-    seller steps (`todo` or `in_progress`) move to the new seller, and no new plan is made.
-  - An `active` plan blocks a new one (`not_started`, reason `plan_open`).
+    seller steps (`todo` or `in_progress`) move to the new seller, its open leader steps to the new
+    assigner (when the event carries one), and no new plan is made. Resuming keeps due dates;
+    overdue steps show as overdue.
+  - An `active` plan of another assignment is taken over the same way (status stays `active`, the plan
+    points at the new assignment, history kind `taken_over`, `plan.changed` with `owners`). This is the
+    accept arriving before the old assignment withdrawal; the late withdrawal then finds no plan
+    and does nothing.
   - A redelivered `accepted` event makes no second plan (one plan per assignment).
   - If an account was merged, the plan starts or resumes on the survivor. When both accounts have an
     open plan at merge, the survivor's stays and the other is `abandoned` (reason `merged`).
@@ -87,9 +92,9 @@ Out of R2c (user, 2026-11-04): outreach sequences, call prep, proposals and outc
   - An accepted assignment or an account shows the plan's name; `next_step` is null when the plan is
     paused or has nothing open. Accounts show only their open plan.
   - A pending assignment shows the playbook that will start (the assigner's pick, else the offer's
-    tier mapping), null for "No playbook", for nothing mapped, or for an archived template. Declined,
+    tier mapping), null for "No playbook", for nothing mapped, or for a template that is not active. Declined,
     withdrawn and replaced rows show neither. Assignment rows also carry `template_id` and
-    `no_playbook`.
+    `no_playbook` (null without `playbooks:read`, like `playbook_name`).
   - One query per page, whatever its size.
 - `GET /api/v1/me/counts` adds `next_steps_due_today` and `next_steps_overdue`: the caller's own
   `todo` and `in_progress` steps in active plans (null without `playbooks:read`).
@@ -113,11 +118,11 @@ largest step day. A step has `id`, `template_step_id`, `order`, `day`, `channel`
 
 **Assignment choice.** `playbook_id` is optional: absent means the tier default (stored as
 `template_id = null, no_playbook = false`); `null` means "No playbook" (`no_playbook = true`); an id
-is stored as `template_id` after the check that it is a non-archived template (400 "That playbook
+is stored as `template_id` after the check that it is an `active` template (400 "That playbook
 isn't available." on `playbook_id`). Bulk assign takes one choice for the whole run, checked before
 anything is assigned. A reassignment after a withdrawal keeps the leader's choice. The suggestion
 route returns `reason: none` and a null playbook when there is no lead offer, no tier, nothing
-mapped, or the mapped template is archived.
+mapped, or the mapped template is not active. In that case it also returns `offer: null` and the account tier (or null); a deleted lead offer counts as none. An account outside the caller data limit is a 404.
 
 ## Events
 
@@ -126,13 +131,13 @@ Published (shapes in `architecture/event-catalog.md`):
 | Event | Data |
 |---|---|
 | `playbooks.plan.created` | `planId`, `accountId`, `offerId` and `tier` (null as above), `templateId`, `templateVersion`, `assignmentId`, `sellerUserId`, `stopWhen`, `steps[{id, order, day, channel, title, ownerUserId, dueDate, crmTask, subject, body}]` |
-| `playbooks.plan.changed` | `planId`, `accountId`, `status`, `changed` (any of `status`, `steps`, `owners`), `reason?` |
+| `playbooks.plan.changed` | `planId`, `accountId`, `status`, `changed` (any of `status`, `steps`, `owners`, `account`), `reason?`, `previousAccountId?` (a merge repoint) and `steps[{id, status, ownerUserId, dueDate, title, crmTask}]`, the steps the change touched (a step edit: that step; owner moves on a resume or take-over: the moved steps; a stop: the skipped steps; empty for a status-only change) |
 | `playbooks.step.completed` | `planId`, `stepId`, `accountId`, `channel`, `doneBy`, `doneAt` |
-| `playbooks.plan.not_started` | `accountId`, `assignmentId`, `reason`: `no_playbook_chosen`, `no_offer_playbook`, `template_archived` (also a deleted template) or `plan_open`; lets the screens explain an empty plan |
+| `playbooks.plan.not_started` | `accountId`, `assignmentId`, `reason`: `no_playbook_chosen`, `no_offer_playbook` or `template_unavailable` (draft, archived or deleted template); lets the screens explain an empty plan |
 
 `plan.changed` is published for step edits (`steps`, plus `owners` when the owner moved), the four
 plan actions (`status`), a withdrawal pause (`status`, reason `withdrawn`), a resume on accept
-(`status`, `owners`), a stop (`status`, plus `steps` when open steps were skipped; reason is the stop
+(`status`, `owners`) or take-over (`owners`), a merge repoint (`account`, with `previousAccountId`), a stop (`status`, plus `steps` when open steps were skipped; reason is the stop
 reason) and a merge abandon (`status`, reason `merged`).
 
 Consumed: `routing.assignment.accepted` (start or resume the plan; carries `templateId`,

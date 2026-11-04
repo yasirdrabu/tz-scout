@@ -12,10 +12,10 @@ import { planCreated, planNotStarted } from '../contracts/events';
 import { accountPlan, planStep, playbookTemplate, templateStep } from '../db/schema';
 import { buildPlan, type OwnerRole, type StepChannel, type StopWhen, type Tier } from '../domain/plan';
 import { MAPPED_TIERS, playbookFor } from './offer-playbooks';
-import { publishChanged, recordChange } from './plans';
+import { publishChanged, recordChange, snapshot } from './plans';
 
 type Accepted = z.output<typeof assignmentAccepted.data>;
-type NotStarted = 'no_playbook_chosen' | 'no_offer_playbook' | 'template_archived' | 'plan_open';
+type NotStarted = 'no_playbook_chosen' | 'no_offer_playbook' | 'template_unavailable';
 
 const OPEN = ['active', 'paused'];
 
@@ -26,27 +26,34 @@ async function notStarted(ctx: ModuleContext, d: Accepted, reason: NotStarted): 
 /** The template row with a share lock, so a delete (which locks it for update) waits until this plan is written. */
 async function lockedTemplate(ctx: ModuleContext, id: string) {
   const [t] = await ctx.tx.select().from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), eq(playbookTemplate.id, id))).for('share');
-  return t && t.status !== 'archived' ? t : null;
+  return t && t.status === 'active' ? t : null;
 }
 
-/** The accepted assignment comes back to an account whose plan was paused: the plan resumes, with the new seller on its open seller steps (Ruling 10). */
-async function resumeOnAccept(ctx: ModuleContext, plan: typeof accountPlan.$inferSelect, d: Accepted): Promise<void> {
+/**
+ * An accepted assignment reaches an account whose open plan belongs to another assignment (Ruling 10). A paused plan
+ * resumes (the accept came back after a withdrawal). An active one is taken over: the accept for the new assignment
+ * arrived before the old one's withdrawal, and routing allows one open assignment per account, so the old one is no
+ * longer open. Either way the plan points at the new assignment, open seller steps go to the new seller and open
+ * leader steps to the new assigner. Due dates stay: a resumed plan shows its late steps as overdue.
+ */
+async function takeOver(ctx: ModuleContext, plan: typeof accountPlan.$inferSelect, d: Accepted): Promise<void> {
+  const resuming = plan.status === 'paused';
   const [row] = await ctx.tx
     .update(accountPlan)
     .set({ status: 'active', statusReason: null, sellerUserId: d.sellerUserId, assignmentId: d.assignmentId, updatedAt: new Date() })
     .where(eq(accountPlan.id, plan.id))
     .returning();
-  await ctx.tx
-    .update(planStep)
-    .set({ ownerUserId: d.sellerUserId })
-    .where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, plan.id), eq(planStep.ownerRole, 'seller'), inArray(planStep.status, ['todo', 'in_progress'])));
-  await recordChange(ctx, plan.id, 'resumed', { reason: 'accepted', assignmentId: d.assignmentId, sellerUserId: d.sellerUserId });
-  await publishChanged(ctx, row!, ['status', 'owners']);
+  const open = and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, plan.id), inArray(planStep.status, ['todo', 'in_progress']));
+  const moved = await ctx.tx.update(planStep).set({ ownerUserId: d.sellerUserId }).where(and(open, eq(planStep.ownerRole, 'seller'))).returning();
+  if (d.assignedBy) moved.push(...(await ctx.tx.update(planStep).set({ ownerUserId: d.assignedBy }).where(and(open, eq(planStep.ownerRole, 'leader'))).returning()));
+  const detail = { reason: 'accepted', assignmentId: d.assignmentId, previousAssignmentId: plan.assignmentId, sellerUserId: d.sellerUserId };
+  await recordChange(ctx, plan.id, resuming ? 'resumed' : 'taken_over', detail);
+  await publishChanged(ctx, row!, resuming ? ['status', 'owners'] : ['owners'], undefined, { steps: moved.map(snapshot) });
 }
 
 /**
  * `routing.assignment.accepted` (Ruling 2): starts the account's plan. A redelivery is a no-op (one plan per assignment).
- * A paused plan resumes instead; an active one blocks a new plan. Which playbook: the assignment's choice, else the
+ * An open plan (paused or active) of another assignment is taken over instead of a new one starting. Which playbook: the assignment's choice, else the
  * lead offer's playbook for the account's tier (Ruling 3).
  */
 export async function startPlan(ctx: ModuleContext, e: { data: Accepted; occurredAt: string }): Promise<void> {
@@ -60,8 +67,7 @@ export async function startPlan(ctx: ModuleContext, e: { data: Accepted; occurre
     .from(accountPlan)
     .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, d.accountId), inArray(accountPlan.status, OPEN)))
     .for('update');
-  if (open?.status === 'paused') return resumeOnAccept(ctx, open, d);
-  if (open) return notStarted(ctx, d, 'plan_open');
+  if (open) return takeOver(ctx, open, d);
 
   if (d.noPlaybook) return notStarted(ctx, d, 'no_playbook_chosen');
   const [summary] = await getSummaries(ctx, [d.accountId]);
@@ -77,7 +83,7 @@ export async function startPlan(ctx: ModuleContext, e: { data: Accepted; occurre
     templateId = mapped.templateId;
   }
   const template = await lockedTemplate(ctx, templateId);
-  if (!template) return notStarted(ctx, d, 'template_archived');
+  if (!template) return notStarted(ctx, d, 'template_unavailable');
   const steps = await ctx.tx
     .select()
     .from(templateStep)
@@ -182,5 +188,10 @@ export async function plansOnMerge(ctx: ModuleContext, survivorId: string, merge
     await recordChange(ctx, loser.id, 'abandoned', { reason: 'merged', survivorId });
   }
   await ctx.tx.update(accountPlan).set({ accountId: survivorId }).where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, mergedId)));
-  if (kept && loser) await publishChanged(ctx, { id: loser.id, accountId: survivorId, status: 'abandoned' }, ['status'], 'merged');
+  for (const p of mine) {
+    const abandoned = kept && loser && p.id === loser.id;
+    await publishChanged(ctx, { id: p.id, accountId: survivorId, status: abandoned ? 'abandoned' : p.status }, abandoned ? ['status', 'account'] : ['account'], abandoned ? 'merged' : undefined, {
+      previousAccountId: mergedId,
+    });
+  }
 }

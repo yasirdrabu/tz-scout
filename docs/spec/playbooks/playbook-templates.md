@@ -72,7 +72,7 @@ never imports playbooks, so the offers routes call it at the HTTP layer.
   message**, read-only with Copy (the offer form no longer has an initial message field).
 - `PUT /api/v1/offers/{id}/playbooks/{tier}` with `{playbook_id | null}` sets or clears the mapping.
   It needs `offers:manage` or `playbooks:manage` (the Playbooks screen's Assign dialog is a
-  playbooks action). An unknown tier is 400; an unknown or archived template is 400 "That playbook
+  playbooks action). An unknown tier is 400; an unknown, draft or archived template is 400 "That playbook
   isn't available."
 - Changing a mapping affects accounts accepted from then on. Running plans keep their playbook.
 

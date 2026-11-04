@@ -7,7 +7,7 @@ const unavailable = () =>
 
 /**
  * The assigner's playbook choice as routing takes it. Absent (undefined) is "no choice yet"; null is "no playbook";
- * a string must be a template that exists and is not archived, else 400.
+ * a string must be an active template, else 400.
  */
 export async function playbookChoice(ctx: ModuleContext, playbookId: string | null | undefined): Promise<{ templateId?: string; noPlaybook?: boolean }> {
   if (playbookId === undefined) return {};
@@ -16,6 +16,6 @@ export async function playbookChoice(ctx: ModuleContext, playbookId: string | nu
     if (e instanceof ScoutError && e.status === 404) return null;
     throw e;
   });
-  if (!t || t.status === 'archived') throw unavailable();
+  if (!t || t.status !== 'active') throw unavailable();
   return { templateId: playbookId };
 }

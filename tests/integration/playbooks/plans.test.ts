@@ -21,6 +21,7 @@ import {
 import { accountPlan, planChange, planStep } from '@/modules/playbooks/db/schema';
 import { tenant } from '@/modules/tenancy/db/schema';
 import { accept, assign, assignmentAccepted, withdraw } from '@/modules/routing';
+import { assignmentWithdrawn } from '@/modules/routing/contracts/events';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
 import { newId } from '@/platform/ids';
@@ -33,6 +34,7 @@ let t: Tenant;
 let seller: string;
 let seller2: string;
 let leader: string;
+let leader2: string;
 let offerId: string;
 let templateId: string;
 
@@ -48,6 +50,7 @@ beforeAll(async () => {
   seller = await member(t, 'seller');
   seller2 = await member(t, 'seller');
   leader = await member(t, 'leader');
+  leader2 = await member(t, 'leader');
   const practice = await t.run((ctx) => createPractice(ctx, { name: 'Main' }));
   offerId = (await t.run(async (ctx) => approveOffer(ctx, (await createOffer(ctx, { name: 'Pilot', practiceId: practice.id, ...completeOffer })).id))).id;
   templateId = (await t.run((ctx) => createTemplate(ctx, { name: 'Act now flow', status: 'active', steps }))).id;
@@ -157,40 +160,73 @@ describe('a plan starts on accept', () => {
     await t.run((ctx) => archiveTemplate(ctx, old));
     const explicit = await account({ templateId: old, name: 'Archived Co' });
     expect(await plansOf(explicit.accountId)).toHaveLength(0);
-    expect((await events('playbooks.plan.not_started', explicit.accountId))[0]!.data.reason).toBe('template_archived');
+    expect((await events('playbooks.plan.not_started', explicit.accountId))[0]!.data.reason).toBe('template_unavailable');
+
+    const draft = (await t.run((ctx) => createTemplate(ctx, { name: 'Still a draft', steps: [steps[0]!] }))).id;
+    const drafted = await account({ templateId: draft, name: 'Draft Co' });
+    expect(await plansOf(drafted.accountId)).toHaveLength(0);
+    expect((await events('playbooks.plan.not_started', drafted.accountId))[0]!.data.reason).toBe('template_unavailable');
 
     const mapped = (await t.run((ctx) => createTemplate(ctx, { name: 'Mapped then archived', status: 'active', steps: [steps[0]!] }))).id;
     await t.run((ctx) => setOfferPlaybook(ctx, offerId, 'good_fit', mapped));
     await t.run((ctx) => archiveTemplate(ctx, mapped));
     const viaOffer = await account({ tier: 'good_fit', name: 'Mapped Co' });
-    expect((await events('playbooks.plan.not_started', viaOffer.accountId))[0]!.data.reason).toBe('template_archived');
+    expect((await events('playbooks.plan.not_started', viaOffer.accountId))[0]!.data.reason).toBe('template_unavailable');
     await t.run((ctx) => setOfferPlaybook(ctx, offerId, 'good_fit', null));
   });
 
-  it('a template deleted after it was chosen starts no plan (template_archived), without an error', async () => {
+  it('a template deleted after it was chosen starts no plan (template_unavailable), without an error', async () => {
     const gone = (await t.run((ctx) => createTemplate(ctx, { name: 'Deleted before accept', steps: [steps[0]!] }))).id;
     const made = await account({ templateId: gone, acceptIt: false, name: 'Gone Co' });
     await t.run((ctx) => deleteTemplate(ctx, gone));
     await acceptAs(made.assignmentId, seller);
     await runPlaybooks(t.tenantId);
     expect(await plansOf(made.accountId)).toHaveLength(0);
-    expect((await events('playbooks.plan.not_started', made.accountId))[0]!.data.reason).toBe('template_archived');
+    expect((await events('playbooks.plan.not_started', made.accountId))[0]!.data.reason).toBe('template_unavailable');
   });
 
-  it('an active plan blocks a second one (plan_open)', async () => {
-    const { accountId } = await account({ name: 'Open Co' });
+  it('an accept that beats the old assignment withdrawal takes the active plan over; the late withdrawal is a no-op', async () => {
+    const { accountId, assignmentId } = await account({ name: 'Open Co' });
+    const [plan] = await plansOf(accountId);
+    const rows = await stepsOf(plan!.id);
+    await asSeller((ctx) => updateStep(ctx, plan!.id, rows[0]!.id, { status: 'done' }));
+    const later = newId('asg');
     await publishTestEvent(t.tenantId, assignmentAccepted, {
-      assignmentId: newId('asg'),
+      assignmentId: later,
       accountId,
       sellerUserId: seller2,
       acceptedHow: 'seller',
       templateId: null,
       noPlaybook: false,
-      assignedBy: leader,
+      assignedBy: leader2,
     });
     await runPlaybooks(t.tenantId);
-    expect(await plansOf(accountId)).toHaveLength(1);
-    expect((await events('playbooks.plan.not_started', accountId))[0]!.data.reason).toBe('plan_open');
+    await publishTestEvent(t.tenantId, assignmentWithdrawn, { assignmentId, accountId, by: leader2, replacedBy: later });
+    await runPlaybooks(t.tenantId);
+
+    const plans = await plansOf(accountId);
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({ id: plan!.id, status: 'active', statusReason: null, sellerUserId: seller2, assignmentId: later });
+    const after = await stepsOf(plan!.id);
+    expect(after[0]).toMatchObject({ status: 'done', ownerUserId: seller });
+    expect(after[1]).toMatchObject({ ownerRole: 'leader', ownerUserId: leader2 });
+    expect(after[2]).toMatchObject({ ownerRole: 'operator', ownerUserId: null });
+    expect(after[3]).toMatchObject({ ownerRole: 'seller', ownerUserId: seller2 });
+    expect(after.map((r) => r.dueDate)).toEqual(rows.map((r) => r.dueDate));
+    expect(await events('playbooks.plan.not_started', accountId)).toHaveLength(0);
+    const changed = (await events('playbooks.plan.changed', accountId)).pop()!.data;
+    expect(changed).toMatchObject({ status: 'active', changed: ['owners'] });
+    expect(changed.steps.map((x: { id: string }) => x.id).sort()).toEqual([after[1]!.id, after[3]!.id].sort());
+    expect(changed.steps.find((x: { id: string }) => x.id === after[3]!.id)).toEqual({
+      id: after[3]!.id,
+      status: 'todo',
+      ownerUserId: seller2,
+      dueDate: after[3]!.dueDate,
+      title: 'Follow up',
+      crmTask: true,
+    });
+    const history = await t.run((ctx) => ctx.tx.select().from(planChange).where(eq(planChange.planId, plan!.id)));
+    expect(history.map((h) => h.kind)).toContain('taken_over');
   });
 
   it('a withdrawal pauses the plan, and a new acceptance resumes it with the new seller on the open seller steps', async () => {
@@ -204,7 +240,7 @@ describe('a plan starts on accept', () => {
     await runPlaybooks(t.tenantId);
     expect((await plansOf(accountId))[0]).toMatchObject({ status: 'paused', statusReason: 'withdrawn' });
 
-    const again = await asLeader((ctx) => assign(ctx, accountId, { sellerUserId: seller2 }));
+    const again = await asPerson(t, (ctx) => assign(ctx, accountId, { sellerUserId: seller2 }), { userId: leader2 });
     await acceptAs(again.id, seller2);
     await runPlaybooks(t.tenantId);
 
@@ -213,9 +249,12 @@ describe('a plan starts on accept', () => {
     expect(plans[0]).toMatchObject({ id: plan!.id, status: 'active', statusReason: null, sellerUserId: seller2, assignmentId: again.id });
     const rows = await stepsOf(plan!.id);
     expect(rows[0]).toMatchObject({ status: 'done', ownerUserId: seller });
-    expect(rows[1]).toMatchObject({ ownerRole: 'leader', ownerUserId: leader });
+    expect(rows[1]).toMatchObject({ ownerRole: 'leader', ownerUserId: leader2 });
     expect(rows[2]).toMatchObject({ ownerRole: 'operator', ownerUserId: null });
     expect(rows[3]).toMatchObject({ ownerRole: 'seller', ownerUserId: seller2, status: 'in_progress' });
+    const resumed = (await events('playbooks.plan.changed', accountId)).pop()!.data;
+    expect(resumed.steps.map((x: { id: string }) => x.id).sort()).toEqual([rows[1]!.id, rows[3]!.id].sort());
+    expect((await events('playbooks.plan.changed', accountId)).find((e) => e.data.status === 'paused')!.data.steps).toEqual([]);
     const changed = (await events('playbooks.plan.changed', accountId)).map((e) => ({ status: e.data.status, changed: e.data.changed }));
     expect(changed).toContainEqual({ status: 'paused', changed: ['status'] });
     expect(changed).toContainEqual({ status: 'active', changed: ['status', 'owners'] });
@@ -244,6 +283,8 @@ describe('a plan starts on accept', () => {
     const [lonePlan] = await plansOf(lone.accountId);
     await merge(lone.accountId, empty);
     expect(await plansOf(empty)).toEqual([expect.objectContaining({ id: lonePlan!.id, status: 'active' })]);
+    const repointed = (await events('playbooks.plan.changed', empty)).pop()!.data;
+    expect(repointed).toMatchObject({ planId: lonePlan!.id, accountId: empty, previousAccountId: lone.accountId, changed: ['account'], status: 'active', steps: [] });
   });
 });
 
@@ -317,6 +358,9 @@ describe('running a plan', () => {
     expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { ownerUserId: 'usr_nobody' })))).toMatchObject({ status: 400 });
     const moved = await asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { ownerUserId: seller2, dueDate: '2030-01-15' }));
     expect(moved.steps[0]).toMatchObject({ ownerUserId: seller2, dueDate: '2030-01-15' });
+    const edited = (await events('playbooks.plan.changed', accountId)).pop()!.data;
+    expect(edited).toMatchObject({ changed: ['steps', 'owners'] });
+    expect(edited.steps).toEqual([{ id: s.id, status: 'todo', ownerUserId: seller2, dueDate: '2030-01-15', title: 'Intro', crmTask: true }]);
     expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { dueDate: 'soon' })))).toMatchObject({ status: 400 });
     expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { dueDate: '2026-02-31' })))).toMatchObject({ status: 400 });
     expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { dueDate: '2028-02-29' })))).toBeNull();
@@ -344,6 +388,8 @@ describe('running a plan', () => {
     expect((await plansOf(accountId))[0]).toMatchObject({ status: 'stopped', statusReason: 'replied' });
     expect((await stepsOf(plan!.id)).map((s) => s.status)).toEqual(['done', 'skipped', 'skipped', 'skipped']);
     expect((await events('playbooks.plan.changed', accountId)).pop()!.data).toMatchObject({ status: 'stopped', changed: ['status', 'steps'], reason: 'replied' });
+    const stopped = (await events('playbooks.plan.changed', accountId)).pop()!.data;
+    expect(stopped.steps.map((x: { id: string; status: string }) => [x.id, x.status])).toEqual((await stepsOf(plan!.id)).slice(1).map((r) => [r.id, 'skipped']));
     await t.run((ctx) => stopPlan(ctx, plan!.id, 'again'));
     expect((await plansOf(accountId))[0]!.statusReason).toBe('replied');
   });

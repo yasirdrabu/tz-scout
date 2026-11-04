@@ -47,7 +47,11 @@ export const planCreated = defineEvent(
   }),
 );
 
-/** Any change to a plan after it started: status, steps or owners. */
+/**
+ * Any change to a plan after it started: status, steps, owners or its account (a merge repoint, with `previousAccountId`).
+ * `steps` lists the steps the change touched (a step edit: that step; owner moves: the moved steps; a stop: the skipped
+ * steps); it is empty for a status-only change.
+ */
 export const planChanged = defineEvent(
   'playbooks.plan.changed',
   1,
@@ -55,8 +59,19 @@ export const planChanged = defineEvent(
     planId: z.string(),
     accountId: z.string(),
     status: planStatus,
-    changed: z.array(z.enum(['status', 'steps', 'owners'])),
+    changed: z.array(z.enum(['status', 'steps', 'owners', 'account'])),
     reason: z.string().optional(),
+    previousAccountId: z.string().optional(),
+    steps: z.array(
+      z.object({
+        id: z.string(),
+        status: z.enum(['todo', 'in_progress', 'done', 'skipped']),
+        ownerUserId: z.string().nullable(),
+        dueDate: z.string(),
+        title: z.string(),
+        crmTask: z.boolean(),
+      }),
+    ),
   }),
 );
 
@@ -80,6 +95,6 @@ export const planNotStarted = defineEvent(
   z.object({
     accountId: z.string(),
     assignmentId: z.string(),
-    reason: z.enum(['no_playbook_chosen', 'no_offer_playbook', 'template_archived', 'plan_open']),
+    reason: z.enum(['no_playbook_chosen', 'no_offer_playbook', 'template_unavailable']),
   }),
 );

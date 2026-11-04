@@ -8,6 +8,7 @@ import { approveOffer, createOffer, createPractice } from '@/modules/offers';
 import { archiveTemplate, createTemplate, setOfferPlaybook } from '@/modules/playbooks';
 import { localDate } from '@/modules/playbooks/domain/plan';
 import { accept, assign } from '@/modules/routing';
+import { GET as accountAssignmentsRoute } from '@/http/routes/v1/accounts/[id]/assignments/route';
 import { ROLE_PERMISSIONS, setPrincipalCacheTtl, setRolePermissions } from '@/modules/tenancy';
 import { tenant } from '@/modules/tenancy/db/schema';
 import { adminDb, closeDbs } from '@/platform/db/client';
@@ -109,6 +110,15 @@ describe('next step in the lists', () => {
     await asPerson(w.tenant, (ctx) => assign(ctx, id, { sellerUserId: seller, templateId: other.id }), { userId: leader });
     const rows = (await json(await w.as(seller, assignmentsRoute, 'assignments?mine=true&status=pending'))).data as Row[];
     expect(rows.find((r) => r.account_id === id)).toMatchObject({ next_step: null, playbook_name: 'Picked flow' });
+  });
+
+  it('a pending row whose picked or mapped playbook is a draft names none', async () => {
+    const draft = await w.run((ctx) => createTemplate(ctx, { name: 'Draft flow', steps }));
+    const id = await w.account('Draft Pick Co');
+    await setSummary(w.tenant, id, { tier: 'act_now', bestOfferId: offerId });
+    await asPerson(w.tenant, (ctx) => assign(ctx, id, { sellerUserId: seller, templateId: draft.id }), { userId: leader });
+    const rows = (await json(await w.as(seller, assignmentsRoute, 'assignments?mine=true&status=pending'))).data as Row[];
+    expect(rows.find((r) => r.account_id === id)).toMatchObject({ playbook_name: null, template_id: draft.id });
   });
 
   it('the accounts list shows next_step and playbook_name, null for an account with no plan', async () => {
@@ -256,11 +266,19 @@ describe('another timezone, and without playbooks:read', () => {
     await asPerson(w2.tenant, (ctx) => assign(ctx, pending, { sellerUserId: seller2 }), { userId: leader2 });
     const withRead = (await json(await w2.as(seller2, assignmentsRoute, 'assignments?mine=true'))).data as Row[];
     expect(withRead.find((r) => r.account_id === account2)?.playbook_name).toBe('NY flow');
+    expect(withRead.find((r) => r.account_id === pending)).toMatchObject({ template_id: null, no_playbook: false });
     const without = ROLE_PERMISSIONS.seller.filter((p) => p !== 'playbooks:read' && p !== 'playbooks:write');
     await w2.run((ctx) => setRolePermissions(ctx, 'seller', without));
     setPrincipalCacheTtl(0);
     const rows = (await json(await w2.as(seller2, assignmentsRoute, 'assignments?mine=true'))).data as Row[];
     expect(rows.length).toBeGreaterThanOrEqual(2);
-    for (const r of rows) expect(r).toMatchObject({ next_step: null, playbook_name: null });
+    for (const r of rows) expect(r).toMatchObject({ next_step: null, playbook_name: null, template_id: null, no_playbook: null });
+
+    // The same for a leader on one account's assignments.
+    const history = (id: string) => w2.as(leader2, accountAssignmentsRoute, `accounts/${id}/assignments`);
+    expect((await json(await history(pending))).data[0]).toMatchObject({ template_id: null, no_playbook: false });
+    await w2.run((ctx) => setRolePermissions(ctx, 'leader', ROLE_PERMISSIONS.leader.filter((p) => p !== 'playbooks:read' && p !== 'playbooks:manage' && p !== 'playbooks:write')));
+    setPrincipalCacheTtl(0);
+    expect((await json(await history(pending))).data[0]).toMatchObject({ template_id: null, no_playbook: null });
   });
 });

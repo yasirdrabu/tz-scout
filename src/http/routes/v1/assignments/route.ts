@@ -28,11 +28,12 @@ export const GET = v1Route({ peopleOnly: true }, async (req, principal, ctx) => 
     ctx,
     (can(principal, 'playbooks:read') ? page.data : []).filter((r) => r.status === 'pending').map((r) => ({ key: r.id, accountId: r.accountId, offerId: r.offerId, templateId: r.templateId, noPlaybook: r.noPlaybook })),
   );
+  const readPlaybooks = can(principal, 'playbooks:read');
   return {
     ...page,
     data: page.data.map((r) => {
       const plan = r.status === 'accepted' ? plans.get(r.accountId) : undefined;
-      return { ...r, nextStep: plan?.nextStep ?? null, playbookName: r.status === 'pending' ? (pending.get(r.id) ?? null) : (plan?.playbookName ?? null) };
+      return { ...r, templateId: readPlaybooks ? r.templateId : null, noPlaybook: readPlaybooks ? r.noPlaybook : null, nextStep: plan?.nextStep ?? null, playbookName: r.status === 'pending' ? (pending.get(r.id) ?? null) : (plan?.playbookName ?? null) };
     }),
   };
 });

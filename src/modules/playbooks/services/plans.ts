@@ -20,7 +20,8 @@ export const MAX_NOTE = 2000;
 
 export type Plan = typeof accountPlan.$inferSelect;
 export type Step = typeof planStep.$inferSelect;
-type Changed = ('status' | 'steps' | 'owners')[];
+type Changed = ('status' | 'steps' | 'owners' | 'account')[];
+type StepSnapshot = { id: string; status: StepStatus; ownerUserId: string | null; dueDate: string; title: string; crmTask: boolean };
 
 const OPEN_STEP = ['todo', 'in_progress'];
 const CLOSED = ['completed', 'stopped', 'abandoned'];
@@ -34,12 +35,36 @@ export async function recordChange(ctx: ModuleContext, planId: string, kind: str
   await ctx.tx.insert(planChange).values({ id: newId('pch'), tenantId: ctx.tenantId, planId, stepId, kind, detail: detail ?? null, by: ctx.actor.id });
 }
 
-/** Publishes `playbooks.plan.changed` for a plan row. */
-export async function publishChanged(ctx: ModuleContext, plan: Pick<Plan, 'id' | 'accountId' | 'status'>, changed: Changed, reason?: string): Promise<void> {
+/** What `plan.changed` says about a step it touched. */
+export const snapshot = (s: Pick<Step, 'id' | 'status' | 'ownerUserId' | 'dueDate' | 'title' | 'crmTask'>): StepSnapshot => ({
+  id: s.id,
+  status: s.status as StepStatus,
+  ownerUserId: s.ownerUserId,
+  dueDate: s.dueDate,
+  title: s.title,
+  crmTask: s.crmTask,
+});
+
+/** Publishes `playbooks.plan.changed` for a plan row, with the steps the change touched (none for a status-only change). */
+export async function publishChanged(
+  ctx: ModuleContext,
+  plan: Pick<Plan, 'id' | 'accountId' | 'status'>,
+  changed: Changed,
+  reason?: string,
+  extra: { steps?: StepSnapshot[]; previousAccountId?: string } = {},
+): Promise<void> {
   await publish(
     ctx,
     planChanged,
-    { planId: plan.id, accountId: plan.accountId, status: plan.status as 'active', changed, ...(reason ? { reason } : {}) },
+    {
+      planId: plan.id,
+      accountId: plan.accountId,
+      status: plan.status as 'active',
+      changed,
+      ...(reason ? { reason } : {}),
+      ...(extra.previousAccountId ? { previousAccountId: extra.previousAccountId } : {}),
+      steps: extra.steps ?? [],
+    },
     { type: 'account', id: plan.accountId },
   );
 }
@@ -190,7 +215,7 @@ export async function updateStep(ctx: ModuleContext, planId: string, stepId: str
     await ctx.tx.update(planStep).set(set).where(eq(planStep.id, stepId));
     await ctx.tx.update(accountPlan).set({ updatedAt: new Date() }).where(eq(accountPlan.id, planId));
     for (const [kind, detail] of changes) await recordChange(ctx, planId, kind, detail, stepId);
-    await publishChanged(ctx, plan, changes.some(([k]) => k === 'owner') ? ['steps', 'owners'] : ['steps']);
+    await publishChanged(ctx, plan, changes.some(([k]) => k === 'owner') ? ['steps', 'owners'] : ['steps'], undefined, { steps: [snapshot({ ...step, ...set })] });
     if (completed) {
       await publish(
         ctx,
@@ -205,10 +230,10 @@ export async function updateStep(ctx: ModuleContext, planId: string, stepId: str
   return view(ctx, fresh!);
 }
 
-async function move(ctx: ModuleContext, plan: Plan, status: string, statusReason: string | null, kind: string, detail: unknown, changed: Changed, reason?: string): Promise<Plan> {
+async function move(ctx: ModuleContext, plan: Plan, status: string, statusReason: string | null, kind: string, detail: unknown, changed: Changed, reason?: string, steps: StepSnapshot[] = []): Promise<Plan> {
   const [row] = await ctx.tx.update(accountPlan).set({ status, statusReason, updatedAt: new Date() }).where(eq(accountPlan.id, plan.id)).returning();
   await recordChange(ctx, plan.id, kind, detail);
-  await publishChanged(ctx, row!, changed, reason);
+  await publishChanged(ctx, row!, changed, reason, { steps });
   await audit(ctx, { action: `playbooks.plan.${kind}`, subject: { type: 'account_plan', id: plan.id }, after: { status, reason: statusReason } });
   return row!;
 }
@@ -259,8 +284,8 @@ export async function stopPlan(ctx: ModuleContext, planId: string, reason: strin
     .update(planStep)
     .set({ status: 'skipped' })
     .where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, planId), inArray(planStep.status, OPEN_STEP)))
-    .returning({ id: planStep.id });
-  await move(ctx, plan, 'stopped', reason, 'stopped', { reason, skipped: open.map((s) => s.id) }, open.length > 0 ? ['status', 'steps'] : ['status'], reason);
+    .returning();
+  await move(ctx, plan, 'stopped', reason, 'stopped', { reason, skipped: open.map((s) => s.id) }, open.length > 0 ? ['status', 'steps'] : ['status'], reason, open.sort((a, b) => a.order - b.order).map(snapshot));
 }
 
 export type NextStep = { title: string; dueDate: string; overdue: boolean; dueToday: boolean; ownerUserId: string | null };
