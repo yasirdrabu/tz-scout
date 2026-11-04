@@ -67,6 +67,7 @@ const assigned = (accountId: string, sellerUserId: string, bulkId: string | null
     sellerUserId,
     assignedBy: t.actor.id,
     templateId: null,
+    noPlaybook: false,
     offerId: null,
     notes: null,
     ownershipDecision: 'assign',

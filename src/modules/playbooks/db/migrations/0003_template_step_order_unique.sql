@@ -1,0 +1,2 @@
+DROP INDEX "playbooks"."template_step_order_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "template_step_order_uq" ON "playbooks"."template_step" USING btree ("template_id","template_version","order");

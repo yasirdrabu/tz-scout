@@ -26,6 +26,8 @@ import * as v1AccountsIdMatches from './routes/v1/accounts/[id]/matches/route';
 import * as v1AccountsIdNotes from './routes/v1/accounts/[id]/notes/route';
 import * as v1AccountsIdCommittee from './routes/v1/accounts/[id]/committee/route';
 import * as v1AccountsIdPeople from './routes/v1/accounts/[id]/people/route';
+import * as v1AccountsIdPlan from './routes/v1/accounts/[id]/plan/route';
+import * as v1AccountsIdPlaybookSuggestion from './routes/v1/accounts/[id]/playbook-suggestion/route';
 import * as v1AccountsIdPractices from './routes/v1/accounts/[id]/practices/route';
 import * as v1AccountsIdReviewStatus from './routes/v1/accounts/[id]/review-status/route';
 import * as v1AccountsIdReview from './routes/v1/accounts/[id]/review/route';
@@ -95,12 +97,18 @@ import * as v1MeWorkspace from './routes/v1/me/workspace/route';
 import * as v1MembersId from './routes/v1/members/[id]/route';
 import * as v1MembersDirectory from './routes/v1/members/directory/route';
 import * as v1Members from './routes/v1/members/route';
+import * as v1OffersIdPlaybooksTier from './routes/v1/offers/[id]/playbooks/[tier]/route';
+import * as v1OffersIdPlaybooks from './routes/v1/offers/[id]/playbooks/route';
 import * as v1OffersIdCaseStudies from './routes/v1/offers/[id]/case-studies/route';
 import * as v1OffersId from './routes/v1/offers/[id]/route';
 import * as v1OffersIdSignalRules from './routes/v1/offers/[id]/signal-rules/route';
 import * as v1Offers from './routes/v1/offers/route';
 import * as v1OffersStats from './routes/v1/offers/stats/route';
 import * as v1PeopleId from './routes/v1/people/[id]/route';
+import * as v1PlansId from './routes/v1/plans/[id]/route';
+import * as v1PlansIdStepsStepId from './routes/v1/plans/[id]/steps/[stepId]/route';
+import * as v1PlaybooksId from './routes/v1/playbooks/[id]/route';
+import * as v1Playbooks from './routes/v1/playbooks/route';
 import * as v1PracticesId from './routes/v1/practices/[id]/route';
 import * as v1Practices from './routes/v1/practices/route';
 import * as v1Rescore from './routes/v1/rescore/route';
@@ -174,6 +182,8 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/accounts/:id/notes`, module: v1AccountsIdNotes },
   { path: `${V1}/accounts/:id/committee`, module: v1AccountsIdCommittee },
   { path: `${V1}/accounts/:id/people`, module: v1AccountsIdPeople },
+  { path: `${V1}/accounts/:id/plan`, module: v1AccountsIdPlan },
+  { path: `${V1}/accounts/:id/playbook-suggestion`, module: v1AccountsIdPlaybookSuggestion },
   { path: `${V1}/accounts/:id/practices`, module: v1AccountsIdPractices },
   { path: `${V1}/accounts/:id/review-status`, module: v1AccountsIdReviewStatus },
   { path: `${V1}/accounts/:id/review`, module: v1AccountsIdReview },
@@ -245,10 +255,16 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/members`, module: v1Members },
   { path: `${V1}/offers/stats`, module: v1OffersStats },
   { path: `${V1}/offers/:id/case-studies`, module: v1OffersIdCaseStudies },
+  { path: `${V1}/offers/:id/playbooks`, module: v1OffersIdPlaybooks },
+  { path: `${V1}/offers/:id/playbooks/:tier`, module: v1OffersIdPlaybooksTier },
   { path: `${V1}/offers/:id`, module: v1OffersId },
   { path: `${V1}/offers/:id/signal-rules`, module: v1OffersIdSignalRules },
   { path: `${V1}/offers`, module: v1Offers },
   { path: `${V1}/people/:id`, module: v1PeopleId },
+  { path: `${V1}/playbooks/:id`, module: v1PlaybooksId },
+  { path: `${V1}/playbooks`, module: v1Playbooks },
+  { path: `${V1}/plans/:id/steps/:stepId`, module: v1PlansIdStepsStepId },
+  { path: `${V1}/plans/:id`, module: v1PlansId },
   { path: `${V1}/practices/:id`, module: v1PracticesId },
   { path: `${V1}/practices`, module: v1Practices },
   { path: `${V1}/rescore`, module: v1Rescore },

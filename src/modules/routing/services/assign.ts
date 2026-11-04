@@ -28,7 +28,7 @@ import { moveStage } from './stage';
 
 export const MAX_BULK = 50;
 
-export type AssignInput = { sellerUserId: string; notes?: string | null; leadOfferId?: string | null; ownershipDecision?: 'assign' | 'keep' };
+export type AssignInput = { sellerUserId: string; notes?: string | null; leadOfferId?: string | null; ownershipDecision?: 'assign' | 'keep'; templateId?: string | null; noPlaybook?: boolean };
 
 export type AssignmentView = {
   id: string;
@@ -162,7 +162,8 @@ export async function assign(ctx: ModuleContext, accountId: string, input: Assig
     sellerUserId: input.sellerUserId,
     assignedBy: by,
     notes,
-    templateId: null,
+    templateId: input.templateId ?? null,
+    noPlaybook: input.noPlaybook ?? false,
     ownershipDecision,
     previousAssignmentId: p.open?.id ?? null,
   };
@@ -191,7 +192,8 @@ export async function assign(ctx: ModuleContext, accountId: string, input: Assig
     accountId,
     sellerUserId: input.sellerUserId,
     assignedBy: by,
-    templateId: null,
+    templateId: values.templateId,
+    noPlaybook: values.noPlaybook,
     offerId,
     notes,
     ownershipDecision,

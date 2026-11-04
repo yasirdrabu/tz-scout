@@ -52,7 +52,7 @@ export async function acceptLocked(ctx: ModuleContext, a: Assignment, how: 'sell
     .update(assignment)
     .set({ status: 'accepted', acceptedHow: how, respondedAt: at })
     .where(and(eq(assignment.tenantId, ctx.tenantId), eq(assignment.id, a.id)));
-  await publish(ctx, assignmentAccepted, { assignmentId: a.id, accountId: a.accountId, sellerUserId: a.sellerUserId, acceptedHow: how });
+  await publish(ctx, assignmentAccepted, { assignmentId: a.id, accountId: a.accountId, sellerUserId: a.sellerUserId, acceptedHow: how, templateId: a.templateId, noPlaybook: a.noPlaybook, assignedBy: a.assignedBy });
   await moveStage(ctx, a.accountId, 'assigned', `${a.id}:accepted`);
 }
 
@@ -138,7 +138,7 @@ export async function withdraw(
   }
   if (!OPEN_STATUSES.includes(a.status)) throw conflict('That assignment is not open.');
 
-  if (opts.reassignTo) return { assignmentId, reassigned: await assign(ctx, a.accountId, { sellerUserId: opts.reassignTo }) };
+  if (opts.reassignTo) return { assignmentId, reassigned: await assign(ctx, a.accountId, { sellerUserId: opts.reassignTo, templateId: a.templateId, noPlaybook: a.noPlaybook }) };
   await withdrawLocked(ctx, a, by);
   await publishReviewSnapshot(ctx, a.accountId);
   return { assignmentId, reassigned: null };

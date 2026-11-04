@@ -346,8 +346,12 @@ account opens (from the account page) or the row leaves (queue).
   "Rita Gomez owns an open deal on this company: Transit data audit, $48,000, last activity Aug 2.
   Scout will send the account and leave Rita as owner. Ask Rita to hand it over if {AE} should lead."
   In bulk, the warning lists each affected account.
-- **Playbook** radio cards (R2): name, "{n} steps over {d} days", description, "Recommended for this
-  account."
+- **Playbook** radio cards (R2): name, "{n} steps over {d} days", description. The playbook for the
+  account's lead offer and tier is preselected with "Recommended for this account" (from
+  `GET /api/v1/accounts/{id}/playbook-suggestion`; none when nothing is mapped). Change it by picking
+  another card, or pick "No playbook". The plan starts when the AE accepts; nothing is sent
+  automatically, steps are drafts the AE sends. Sends `playbook_id` (absent when left on the
+  default, `null` for "No playbook"). In bulk, one choice applies to every account.
 - **Note for {AE}**: "What should they know first?" (optional, up to 4,000 characters).
 - Footer sentence: "Scout sends {account} to HubSpot with {AE} as owner and logs the brief." (R2 adds
   "and starts {playbook} on {date}") or, with the warning, "Scout sends {account} to HubSpot and
@@ -373,7 +377,8 @@ Title "My accounts", subtitle "{n} new assignments to accept." (R2 adds "{n} nex
 {n} overdue.")
 - **New assignments** (badge, hint "Accept to take it on. Declining returns the account to
   {assigner}."; R2: "Accept to start the playbook. ..."): rows with account link, "{offer}" (R2:
-  " · {playbook} playbook"), "Assigned by {name} · {when}", the quoted note, `Decline`, `Accept`
+  " · {playbook} playbook", from `playbook_name`; none when the leader picked "No playbook" or
+  nothing is mapped), "Assigned by {name} · {when}", the quoted note, `Decline`, `Accept`
   (toast "Accepted. {account} is in your accounts."; R2: "Accepted. {playbook} starts {day}."). The
   row shows the handoff state when the HubSpot send has not finished.
 - **Accepted automatically.** An assignment the AE has not answered after {n} working days (Settings
@@ -681,7 +686,8 @@ Draft, Retired), `Add offer`.
   Why us, Why now (empty "Not written yet. Add it"). Playbook by tier (R2): Act now, Good fit, Watch
   selects with "{n} steps over {d} days · {x}% book a meeting", note "Changing a playbook affects
   accounts accepted from now on. Accounts already running keep the playbook they started with."
-  Initial message with `Copy`. Seller guide (R2): Talking points, When they say (objection and
+  Initial message with `Copy`: read-only, the first email step of the tier's playbook (`first_email`,
+  per tier; edit it in the playbook). Seller guide (R2): Talking points, When they say (objection and
   answer), Proof points, Avoid.
 - **Offer form** (fields per Decision 16): Title ("Give the offer a title."), Practice, Status
   (Active "Scout matches accounts to it", Draft "Hidden from matching"; Retired "Kept for history"
@@ -689,7 +695,7 @@ Draft, Retired), `Add offer`.
   Amount, Length (weeks), the sections (Summary is the offer's promise, Ideal customer its
   description, then Key offer, Why us, Why now), Who it's for (typical deal size, sales cycle in
   days, target titles, "Required buying roles" and "Optional buying roles" checkbox groups (R2b-3; a role
-  ticked in one is disabled in the other; the API refuses an overlap), industries, company size), Initial message, Talking points,
+  ticked in one is disabled in the other; the API refuses an overlap), industries, company size), Talking points,
   Objections ("One per line, written as: objection | answer"), Proof points, Avoid. `Cancel`,
   `Save changes` or `Add offer`.
   - Making an offer Active needs a deal size, a sales cycle, a target title or role, and industries
@@ -710,9 +716,10 @@ Draft, Retired), `Add offer`.
 **Tag** R2 · **Route** `/t/:tenant/playbooks/:id?` · **Who** `playbooks:read`; edits
 `playbooks:manage`
 
-The mockup's model wins (Decision 25): each offer picks a playbook per tier, steps are by day, a
-playbook has a stop rule and a draft or send-automatically mode. `docs/spec/playbooks/` changes to
-match before the R2 plan.
+The mockup's model wins (Decision 25): each offer picks a playbook per tier, steps are by day, and a
+playbook has a stop rule. Steps are always drafts for the AE to send; nothing is sent automatically
+(user, 2026-11-02). `docs/spec/playbooks/` matches this; the API ships in R2c-1 and this screen in
+R2c-2 (the stop rule is enforced in R2c-3).
 
 List: "Playbooks", sub "The steps an AE follows after accepting an account. Each offer picks a
 playbook for each tier." `New playbook`. Four-step explainer (Offer and tier pick it; Starts on
@@ -722,14 +729,14 @@ Reply rate, Meeting rate (rates R3). Footnote on the 90-day window.
 
 Detail: title and status, description, `Duplicate`, `Retire` or `Delete`, `Edit playbook`; tiles
 Running now, Finished, Replied, Booked a meeting, Won (R3); Steps (Day {n}, channel badge, title,
-detail, "{channel} · {who}", automation tag "Draft ready for AE", "Sends automatically", "HubSpot
-task"); Runs on (offer, practice, tier chip, remove) with `Assign`; Rules (Starts when, Stops when,
-Pauses when, Drafts).
+detail, "{channel} · {who}", tag "Draft ready for AE" on email steps, "HubSpot task"); Runs on
+(offer, practice, tier chip, remove) with `Assign`; Rules (Starts when accepted, Stops when, Pauses
+when; drafts are always for the AE to review and send).
 
 Form: Name ("Give the playbook a name."), Status, When to use it, Stop when (They reply or book a
-meeting, They book a meeting, Run every step), Scout drafts (AE reviews before anything sends, Send
-emails automatically), Steps (Day, Channel, Done by, title, detail, reorder, remove; "Add at least
-one step."), `Add step`, `Cancel`, `Save changes` or `Create playbook`.
+meeting, They book a meeting, Run every step), Steps (Day 0 to 365, Channel: Email, LinkedIn, Call,
+Meeting or Task; Done by: Seller, Leader or Operator; title, detail, buying roles, subject and body
+on email steps, reorder, remove; "Add at least one step."), `Add step`, `Cancel`, `Save changes` or `Create playbook`.
 
 Assign dialog: "Assign {playbook}" / "Accounts matched to this offer and tier will start this
 playbook when an AE accepts them." Offer, tier checkboxes with "Already uses this playbook",

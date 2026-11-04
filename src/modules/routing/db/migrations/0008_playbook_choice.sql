@@ -1,0 +1,1 @@
+ALTER TABLE "routing"."assignment" ADD COLUMN "no_playbook" boolean DEFAULT false NOT NULL;

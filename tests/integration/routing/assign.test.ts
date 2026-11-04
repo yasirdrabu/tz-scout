@@ -46,6 +46,7 @@ describe('assign (REV-E2-S1)', () => {
       sellerUserId: seller,
       assignedBy: t.actor.id,
       templateId: null,
+      noPlaybook: false,
       offerId: null,
       notes: 'Call the CIO',
       ownershipDecision: 'assign',

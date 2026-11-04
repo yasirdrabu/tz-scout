@@ -112,6 +112,8 @@ export const assignment = routing.table(
     assignedAt: at('assigned_at').notNull().defaultNow(),
     notes: text('notes'),
     templateId: text('template_id'),
+    /** The assigner chose to send no playbook (templateId is then null). */
+    noPlaybook: boolean('no_playbook').notNull().default(false),
     status: text('status').notNull().default('pending'), // pending | accepted | declined | withdrawn | replaced
     respondedAt: at('responded_at'),
     acceptedHow: text('accepted_how'), // seller | crm_activity | auto_timeout

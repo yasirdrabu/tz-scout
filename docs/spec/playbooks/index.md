@@ -6,23 +6,27 @@ Module code PLB · Schema `playbooks` · Releases R1 to R3
 
 Turn a scored account into a plan people can run, and learn from how it went. This module owns:
 
-- **Playbook templates** per practice and per offer: the plays and steps an ABM motion is made of.
-- **Account plans**: a template applied to one account, customised by the leader, run by the AE.
+- **Playbook templates** (day-based steps) that each offer maps to a tier (`offer_playbook`): the steps
+  an ABM motion is made of. Drafts only: no step sends anything (user, 2026-11-02).
+- **Account plans**: a template applied to one account when its assignment is accepted, run by the
+  seller (customising by the leader is R2c-3).
 - **The account brief**: the written one-pager (overview, why now, decision makers, approach, value
   angle, risks), drafted by Claude per practice and edited by people.
 - **The account page** (layout A, chosen 2026-10-25): it composes data from Accounts, Scoring, Review
   and routing and CRM sync around the brief and the plan.
-- **Outreach, call prep and review, proposals** (carried from v1).
+- **Outreach, call prep and review, proposals** (carried from v1; out of R2c).
 - **Outcomes, the "what worked" score, retros and learnings** that feed back into templates.
 
 ## What it owns
 
 | Table | Key fields |
 |---|---|
-| `playbook_template` | `id` (`plb_`), `tenant_id`, `scope` (`practice`, `offer`), `practice_id`, `offer_id` (when scope offer), `name`, `description`, `motion` (`one_to_one`, `one_to_few`, `one_to_many`), `when_to_use` (text), `version` (int), `status` (`draft`, `active`, `archived`), `updated_by`, `updated_at` |
-| `template_step` | `id`, `template_id`, `template_version`, `order`, `week_offset` (int, 0 = week 1), `duration_days`, `type` (`email`, `call`, `linkedin`, `event`, `procurement`, `research`, `content`, `meeting`, `other`), `title`, `guidance` (text), `owner_role` (`seller`, `leader`, `operator`), `target_buying_roles` (text[]), `crm_task` (bool, default true) |
-| `account_plan` | `id` (`pln_`), `tenant_id`, `account_id`, `offer_id`, `template_id`, `template_version`, `status` (`draft`, `active`, `paused`, `completed`, `abandoned`), `start_date`, `assignment_id`, `customised` (bool), `created_by`, `created_at` |
-| `plan_step` | `id` (`stp_`), `plan_id`, `template_step_id` (null if added by hand), `order`, `type`, `title`, `guidance`, `owner_user_id`, `target_person_ids` (text[]), `due_date`, `status` (`todo`, `in_progress`, `done`, `skipped`), `done_at`, `done_by`, `note`, `origin` (`template`, `added`, `edited`), `crm_task_ref` (set by CRM sync via event) |
+| `playbook_template` | `id` (`plb_`), `tenant_id`, `name`, `description`, `when_to_use` (text), `status` (`draft`, `active`, `archived`), `stop_when` (`reply_or_meeting`, `meeting`, `never`), `version` (int, starts at 1), `created_by`, `updated_by`, `updated_at`. R2c-1. Not tied to a practice or offer (Decision 25) |
+| `template_step` | `id` (`pls_`), `template_id`, `template_version`, `order`, `day` (int 0 to 365, 0 = start day), `channel` (`email`, `linkedin`, `call`, `meeting`, `task`), `owner_role` (`seller`, `leader`, `operator`), `title`, `detail` (markdown), `target_buying_roles` (text[]), `crm_task` (bool, default true), `subject`, `body` (email only). Unique on (template, version, order). R2c-1 |
+| `offer_playbook` | `offer_id`, `tier` (`act_now`, `good_fit`, `watch`), `template_id`, `updated_by`, `updated_at`; key (tenant, offer, tier). R2c-1 |
+| `account_plan` | `id` (`pln_`), `tenant_id`, `account_id`, `offer_id` and `tier` (both null when the assigner picked a playbook for an account with no lead offer or mappable tier), `template_id`, `template_version`, `assignment_id` (unique), `seller_user_id`, `status` (`active`, `paused`, `completed`, `stopped`, `abandoned`), `status_reason`, `accepted_at`, `stop_when` (snapshot), `start_date`, `created_at`, `updated_at`. One `active` or `paused` plan per account (partial unique index). R2c-1. (`customised` arrives with R2c-3) |
+| `plan_step` | `id` (`stp_`), `plan_id`, `template_step_id` (null if added by hand, R2c-3), `order`, `day`, `channel`, `owner_role`, `owner_user_id`, `title`, `detail`, `target_person_ids` (text[]), `due_date`, `status` (`todo`, `in_progress`, `done`, `skipped`), `done_at`, `done_by`, `note`, `origin` (`template`, `added`, `edited`), `crm_task`, `subject`, `body`; `crm_task_ref` (set by CRM sync via event) arrives with R2c-3. R2c-1 |
+| `plan_change` | `id` (`pch_`), `plan_id`, `step_id`, `kind`, `detail` (json), `by`, `at`: the plan's history. R2c-1 |
 | `brief` | `account_id`, `tenant_id`, `offer_id`, `template_key`, `created_at`, `updated_at` |
 | `brief_section` | `account_id`, `key` (`overview`, `what_they_do`, `potential_size`, `why_now`, `decision_makers`, `approach`, `value_angle`, `risks`, plus practice-defined keys), `body` (markdown), `citations` (text[] of `fct_` and `sig_` ids), `origin` (`ai`, `human`, `rules`), `ai_run_id`, `edited_by`, `edited_at`, `version` |
 | `brief_template` | `key`, `tenant_id`, `practice_id`, `sections` (json: key, label, instructions for Claude, order, required) |
@@ -50,8 +54,8 @@ Turn a scored account into a plan people can run, and learn from how it went. Th
 
 | Epic | File | Release |
 |---|---|---|
-| PLB-E1 Playbook templates | [playbook-templates.md](playbook-templates.md) | R2 |
-| PLB-E2 Account plans | [account-plans.md](account-plans.md) | R2 |
+| PLB-E1 Playbook templates | [playbook-templates.md](playbook-templates.md) | R2 (data and API R2c-1, screens R2c-2) |
+| PLB-E2 Account plans | [account-plans.md](account-plans.md) | R2 (plans, API and events R2c-1; screens R2c-2; account page, CRM tasks and stop rule R2c-3) |
 | PLB-E3 Account brief | [account-brief.md](account-brief.md) | R1 (core sections, handoff package), R2 (practice templates, custom fields) |
 | PLB-E4 Account page | [account-page.md](account-page.md) | R1 (review view), R2 (full layout A) |
 | PLB-E5 Outreach, calls and proposals | [outreach-calls-and-proposals.md](outreach-calls-and-proposals.md) | R2 |
@@ -62,9 +66,10 @@ Turn a scored account into a plan people can run, and learn from how it went. Th
 
 | Event | Data |
 |---|---|
-| `playbooks.plan.created` | `planId`, `accountId`, `offerId`, `templateId`, `templateVersion`, `assignmentId`, `steps` (id, title, type, ownerUserId, dueDate, crmTask) |
-| `playbooks.plan.changed` | `planId`, `accountId`, `added`, `removed`, `edited` (step ids), `status` |
-| `playbooks.step.completed` | `planId`, `stepId`, `accountId`, `type`, `doneBy`, `doneAt` |
+| `playbooks.plan.created` | `planId`, `accountId`, `offerId`, `tier` (both null when no lead offer or mappable tier), `templateId`, `templateVersion`, `assignmentId`, `sellerUserId`, `stopWhen`, `steps` (id, order, day, channel, title, ownerUserId, dueDate, crmTask, subject, body) |
+| `playbooks.plan.changed` | `planId`, `accountId`, `status`, `changed` (any of `status`, `steps`, `owners`, `account`), `reason?`, `previousAccountId?` (a merge repoint) and `steps[{id, status, ownerUserId, dueDate, title, crmTask}]`, the steps the change touched (a step edit: that step; owner moves on a resume or take-over: the moved steps; a stop: the skipped steps; empty for a status-only change) |
+| `playbooks.step.completed` | `planId`, `stepId`, `accountId`, `channel`, `doneBy`, `doneAt` |
+| `playbooks.plan.not_started` | `accountId`, `assignmentId`, `reason` (`no_playbook_chosen`, `no_offer_playbook`, `superseded`, `template_unavailable`) |
 | `playbooks.outcome.recorded` | `outcomeId`, `accountId`, `kind`, `occurredAt`, `source`, `amountCents`, `creditedStepIds` |
 | `playbooks.learning.recorded` | `retroId`, `accountId`, `result`, `templateId`, `proposalIds` |
 | `playbooks.brief.updated` | `accountId`, `sectionKeys`, `origin` |
@@ -74,12 +79,12 @@ Turn a scored account into a plan people can run, and learn from how it went. Th
 | Event | Does | Ordered by account |
 |---|---|---|
 | `scoring.account.scored` | draft the brief the first time an account reaches act now or good fit (if AI is connected; rules otherwise); mark `why_now` stale when best offer changes | yes |
-| `routing.assignment.created` | create the account plan from the template chosen at assignment | yes |
-| `routing.assignment.declined` | set plan to `paused`, clear step owners | yes |
-| `crm.activity.observed` | mark matching plan steps done (CRM task completed); record reply and meeting outcomes | yes |
+| `routing.assignment.accepted` | start the plan (the assignment's choice, else the offer's tier playbook), or resume a paused one; R2c-1 | yes |
+| `routing.assignment.withdrawn` | pause the plan of that assignment; R2c-1 | yes |
+| `crm.activity.observed` | mark matching plan steps done (CRM task completed); stop the plan by its stop rule; record reply and meeting outcomes (R2c-3 and later) | yes |
 | `crm.deal.changed` | record opportunity, won, lost outcomes; prompt a retro on won or lost | yes |
 | `campaigns.meeting.held` | record a `meeting` outcome (R4) | yes |
-| `accounts.account.merged` | repoint plans, briefs and outcomes to the survivor | yes |
+| `accounts.account.merged` | repoint plans (R2c-1), briefs and outcomes to the survivor | yes |
 | `jobs.history.republish` | re-publish stored plan, step and outcome events with `replay: true` (see events-and-async.md) | no |
 
 ## Implements for other modules
@@ -95,11 +100,15 @@ JSON field names are snake_case.
 | `GET /api/v1/accounts/{id}/brief` | `playbooks:read` | Brief sections with citations, custom fields, committee and gaps, plan summary |
 | `PUT /api/v1/accounts/{id}/brief/sections/{key}` | `playbooks:write` | Replace a section's body, optional `if_version` (people and agents with the scope) |
 | `POST /api/v1/accounts/{id}:draft-brief` | `playbooks:write` | Redraft the brief now, optional `include_edited` (page section keys); 202 |
-| `GET /api/v1/accounts/{id}/plan` | `playbooks:read` | The account plan and steps |
-| `PATCH /api/v1/plans/{id}/steps/{step_id}` | `playbooks:write` | Update a step (status, owner, due, note) |
+| `GET /api/v1/accounts/{id}/plan` | `playbooks:read` | The open plan, else the latest, with steps and history (R2c-1) |
+| `PATCH /api/v1/plans/{id}/steps/{step_id}` | `playbooks:write` | Update a step (status, note, owner, due date) (R2c-1) |
+| `POST /api/v1/plans/{id}:pause`, `:resume`, `:complete`, `:abandon` | `playbooks:write` | Plan actions (R2c-1) |
+| `GET /api/v1/accounts/{id}/playbook-suggestion` | `assign:act` | The playbook the assign dialog preselects (R2c-1) |
 | `POST /api/v1/accounts/{id}/outcomes` | `playbooks:write` | Record a reply, meeting, opportunity, won or lost |
-| `GET /api/v1/playbooks`, `GET /api/v1/playbooks/{id}` | `playbooks:read` | Templates |
-| `POST /api/v1/playbooks`, `PATCH /api/v1/playbooks/{id}` | `playbooks:manage` | Create and edit templates; accept or reject proposals |
+| `GET /api/v1/playbooks`, `GET /api/v1/playbooks/{id}` | `playbooks:read` | Templates (R2c-1) |
+| `POST /api/v1/playbooks`, `PATCH /api/v1/playbooks/{id}`, `POST /api/v1/playbooks/{id}:duplicate`, `:archive`, `DELETE /api/v1/playbooks/{id}` | `playbooks:manage` | Create, edit, duplicate, retire and delete templates (R2c-1); accept or reject proposals (R3) |
+| `GET /api/v1/offers/{id}/playbooks` | `offers:read` | The offer's playbook per tier and its first email (R2c-1) |
+| `PUT /api/v1/offers/{id}/playbooks/{tier}` | `offers:manage` or `playbooks:manage` | Set or clear one tier (R2c-1) |
 
 ## MCP tools
 

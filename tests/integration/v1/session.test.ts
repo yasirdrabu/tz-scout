@@ -314,11 +314,11 @@ describe('GET /api/v1/me/counts', () => {
     });
     const s = await counts(req('/me/counts', { as: seller, tenant: alpha.slug }));
     expect(s.status).toBe(200);
-    expect(await s.json()).toEqual({ review_queue: null, new_assignments: 1 });
+    expect(await s.json()).toEqual({ review_queue: null, new_assignments: 1, next_steps_due_today: 0, next_steps_overdue: 0 });
     const o = await (await counts(req('/me/counts', { as: operator, tenant: alpha.slug }))).json();
-    expect(o).toEqual({ review_queue: 0, new_assignments: null });
+    expect(o).toEqual({ review_queue: 0, new_assignments: null, next_steps_due_today: 0, next_steps_overdue: 0 });
     const own = await (await counts(req('/me/counts', { as: owner, tenant: alpha.slug }))).json();
-    expect(own).toEqual({ review_queue: 0, new_assignments: 0 });
+    expect(own).toEqual({ review_queue: 0, new_assignments: 0, next_steps_due_today: 0, next_steps_overdue: 0 });
     const done = await adminDb
       .update(assignment)
       .set({ status: 'accepted' })

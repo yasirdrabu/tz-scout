@@ -34,6 +34,8 @@ export const assignmentCreated = defineEvent(
     sellerUserId: z.string(),
     assignedBy: z.string(),
     templateId: z.string().nullable(),
+    /** True when the assigner chose no playbook. Events stored before it parse as false. */
+    noPlaybook: z.boolean().default(false),
     offerId: z.string().nullable(),
     notes: z.string().nullable(),
     ownershipDecision: z.enum(['assign', 'keep']),
@@ -51,6 +53,11 @@ export const assignmentAccepted = defineEvent(
     accountId: z.string(),
     sellerUserId: z.string(),
     acceptedHow: z.enum(['seller', 'crm_activity', 'auto_timeout']),
+    /** The assignment's playbook choice. Events stored before these parse as null and false. */
+    templateId: z.string().nullable().default(null),
+    noPlaybook: z.boolean().default(false),
+    /** Who assigned it (the leader), so the plan can own leader steps. Events stored before it parse as null. */
+    assignedBy: z.string().nullable().default(null),
   }),
 );
 

@@ -15,6 +15,34 @@
       "when": 1793504168589,
       "tag": "0001_brief_drafting_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793796884851,
+      "tag": "0002_plan_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793798110210,
+      "tag": "0003_template_step_order_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793799265512,
+      "tag": "0004_plan_offer_optional",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793804144543,
+      "tag": "0005_plan_accepted_at",
+      "breakpoints": true
     }
   ]
 }

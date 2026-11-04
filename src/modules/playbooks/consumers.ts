@@ -1,6 +1,6 @@
 import { getSummaries } from '@/modules/accounts';
 import { accountMerged, factRecorded, personAdded, personUpdated, signalRecorded } from '@/modules/accounts/contracts/events';
-import { assignmentCreated, assignmentDeclined, assignmentWithdrawn, reviewChanged } from '@/modules/routing/contracts/events';
+import { assignmentAccepted, assignmentCreated, assignmentDeclined, assignmentWithdrawn, reviewChanged } from '@/modules/routing/contracts/events';
 import { accountScored } from '@/modules/scoring/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
 import type { ModuleContext } from '@/platform/context';
@@ -8,6 +8,7 @@ import { defineConsumer, type ConsumerDef } from '@/platform/runtime/consumers';
 import { freezeBrief, readBrief, requestDraft, unfreezeBrief } from './services/brief';
 import { seedPlaybooksDefaults } from './defaults';
 import { briefOnMerge } from './services/merge';
+import { pauseOnWithdrawn, plansOnMerge, startPlan } from './services/start';
 
 /** A redraft for an account that already has a brief (Ruling 2). */
 const redraft = (ctx: ModuleContext, accountId: string) => requestDraft(ctx, accountId, { onlyExisting: true }).then(() => undefined);
@@ -107,6 +108,30 @@ export const briefOnMerged = defineConsumer({
   handle: (e, ctx) => briefOnMerge(ctx, e.data.survivorId, e.data.mergedId),
 });
 
+/** Rulings 2 and 10: an accepted assignment starts the account's plan, or resumes its paused one. */
+export const planOnAccepted = defineConsumer({
+  name: 'playbooks.plan_on_accepted',
+  event: assignmentAccepted,
+  orderedBy: (e) => e.data.accountId,
+  handle: (e, ctx) => startPlan(ctx, e),
+});
+
+/** A withdrawn assignment pauses its running plan. */
+export const planPauseOnWithdrawn = defineConsumer({
+  name: 'playbooks.plan_pause_on_withdrawn',
+  event: assignmentWithdrawn,
+  orderedBy: (e) => e.data.accountId,
+  handle: (e, ctx) => pauseOnWithdrawn(ctx, e.data.assignmentId),
+});
+
+/** A merged account's plans move to the survivor. */
+export const planOnMerged = defineConsumer({
+  name: 'playbooks.plan_on_merged',
+  event: accountMerged,
+  orderedBy: (e) => e.data.survivorId,
+  handle: (e, ctx) => plansOnMerge(ctx, e.data.survivorId, e.data.mergedId),
+});
+
 /** Every playbooks consumer, for the worker's list. */
 export const playbooksConsumers: ConsumerDef[] = [
   playbooksTenantDefaults,
@@ -120,4 +145,7 @@ export const playbooksConsumers: ConsumerDef[] = [
   briefUnfreezeOnDeclined,
   briefUnfreezeOnWithdrawn,
   briefOnMerged,
+  planOnAccepted,
+  planPauseOnWithdrawn,
+  planOnMerged,
 ];

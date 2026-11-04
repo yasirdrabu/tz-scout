@@ -1,5 +1,5 @@
 // Public interface of the playbooks module. Other modules import only this file or `contracts/*`.
-export { briefUpdated } from './contracts/events';
+export { briefUpdated, planChanged, planCreated, planNotStarted, stepCompleted } from './contracts/events';
 export { briefDraftJob, briefSweepJob, DRAFT_MAX_ATTEMPTS } from './contracts/jobs';
 export { SWEEP_CRON, seedPlaybooksDefaults } from './defaults';
 export { sweepBriefs } from './services/sweep';
@@ -15,6 +15,9 @@ export {
   briefOnSignal,
   briefUnfreezeOnDeclined,
   briefUnfreezeOnWithdrawn,
+  planOnAccepted,
+  planOnMerged,
+  planPauseOnWithdrawn,
   playbooksConsumers,
   playbooksTenantDefaults,
 } from './consumers';
@@ -34,3 +37,52 @@ export { handoffPackage, playbooksHandoffPackage } from './services/package';
 export { bestOfferNames } from './services/best-offer';
 export { buildPackage, type PackageBrief, type PackageInput, type PackageSignal } from './domain/package';
 export { followUps } from './domain/follow-ups';
+export {
+  HAS_RUN,
+  NEEDS_NAME,
+  NEEDS_STEP,
+  OWNER_ROLES,
+  STEP_CHANNELS,
+  STOP_RULES,
+  TEMPLATE_STATUSES,
+  archiveTemplate,
+  createTemplate,
+  deleteTemplate,
+  duplicateTemplate,
+  getTemplate,
+  listTemplates,
+  updateTemplate,
+  type StepInput,
+  type StepView,
+  type Template,
+  type TemplateDetail,
+  type TemplateInput,
+  type TemplatePatch,
+  type TemplateStatus,
+  type TemplateSummary,
+} from './services/templates';
+export { MAPPED_TIERS, NOT_AVAILABLE, offerPlaybooks, pendingPlaybookNames, playbookFor, setOfferPlaybook, type MappedTier, type OfferPlaybookView, type PendingChoice } from './services/offer-playbooks';
+export {
+  FINISH_STEPS,
+  MAX_NOTE,
+  NEEDS_REASON,
+  PLAN_ENDED,
+  STEP_STATUSES,
+  abandonPlan,
+  completePlan,
+  getPlan,
+  myStepCounts,
+  nextSteps,
+  pausePlan,
+  resumePlan,
+  stopPlan,
+  updateStep,
+  type HistoryView,
+  type NextStep,
+  type PlanSummary,
+  type PlanView,
+  type StepPatch,
+  type StepStatus,
+  type StepView as PlanStepView,
+} from './services/plans';
+export { pauseOnWithdrawn, plansOnMerge, startPlan } from './services/start';

@@ -103,7 +103,7 @@ These sit in the HTTP layer (`src/http/routes/v1/_lib/v1-route.ts`, `src/modules
 | 22 | (Recommendation taken.) Rescoring stays whole-tenant; the footnote changes to say assigned accounts may change tier too. |
 | 23 | Build per-tenant infrastructure as in the mockup: its own database, file storage and encryption key per tenant, region, backups and point-in-time restore, schema version and migrations per tenant, provisioning and deletion states, seats, quotas, export, and owner-granted support access. This replaces the one-database-with-row-level-security model and is its own platform project (architecture change first: `docs/spec/architecture/`). Until it lands, the Tenants screen ships list, create, suspend and resume, and the other sections stay hidden. |
 | 24 | (As recommended.) Admin cross-tenant AI runs list with Succeeded, Failed, Stopped by limit; no daily cap, no Retry; tenant `GET /api/v1/ai-runs` kept for owners. |
-| 25 | (As recommended.) The mockup wins for Playbooks: `offer_playbook(offer_id, tier, template_id)`, day-based steps, a stop rule and a draft or auto-send mode go into `docs/spec/playbooks/` before its plan. |
+| 25 | (As recommended.) The mockup wins for Playbooks: `offer_playbook(offer_id, tier, template_id)`, day-based steps and a stop rule go into `docs/spec/playbooks/` before its plan. Drafts only replaced the draft or auto-send mode: nothing is sent automatically (user, 2026-11-02). Built in R2c-1. |
 | 26 | Cost budgets per category and month with the 90% alert and the 110% pause of paid pulls through integrations `checkCap`; return on spend from actual won amounts. R3. |
 | 6 | Pipeline stages are fully configurable (add, rename, reorder, delete, HubSpot stage, targets). This is a routing, CRM and analytics redesign and gets its own backend plan; until it lands the app reads stages from the API and the editor is hidden. **Status:** done 2026-11-01 (`docs/plans/2026-11-01-pipeline-stages.md`, REV-E5). |
 
@@ -361,8 +361,11 @@ then R2 and R3 screens.
 
 25. **Playbook per offer and tier (§6, §7, §19, §20; R2).**
     Mockup: each offer picks a playbook per tier; steps by "Day {n}"; Stop when; send automatically.
-    Backend spec today: templates scoped by practice or offer, `week_offset` steps, no tier mapping, no
+    Backend spec then: templates scoped by practice or offer, `week_offset` steps, no tier mapping, no
     stop rule, no auto-send (`docs/spec/playbooks/`).
+    Decided (a). Drafts only replaced auto-send: the user ruled on 2026-11-02 that nothing is sent
+    automatically, so the "Send emails automatically" choice and the "Sends automatically" tag are
+    gone. Spec rewritten and API built in R2c-1.
     Options: (a) add `offer_playbook(offer_id, tier, template_id)` and change the playbooks spec to
     days, stop rule and draft mode; (b) keep the backend spec and redraw the screen.
     Recommendation: (a), decided before the R2 playbooks plan. Cost: R2 scope, no R1 impact.
@@ -532,14 +535,14 @@ Files: `src/http/routes/v1/review-queue/**`, `src/http/routes/v1/accounts/[id]/{
 | 6 | Assign preview, CRM owner warning | READY | `POST /api/v1/accounts/{id}:assign-preview` `{seller_user_id}` (`assign:act`) | `{preflight{result:new\|assign\|stop\|blocked, message}, approves_to, replaces}`. `blocked` = AE has no HubSpot owner (no spec state). 503 `crm_unavailable` is a dialog state. |
 | 6 | Warning detail: deal name, amount, last activity, current owner | READY | `:assign-preview` | `preflight{result, message, reason:open_deal|customer|owned_elsewhere|no_owner|null, current_owner_name, deal{name, amount_cents, currency, last_activity_at}|null}`; `deal` only for `open_deal`, from the stored top open deal. |
 | 6 | "Scout adds {AE} as collaborator, leaves Rita owner" | SMALL GAP | `ownership_decision:'keep'` | `keep` pushes and does not change the owner (`crm/services/push.ts`, `keepCurrentOwner`); no collaborator code exists in crm. Reword (Spec corrections). |
-| 6, 7 | Playbook cards, playbook name | LATER (R2) | none | `assignment.template_id` is null in R1. |
+| 6, 7 | Playbook cards, playbook name | READY (API R2c-1; UI R2c-2) | `GET /api/v1/accounts/{id}/playbook-suggestion` (`assign:act`), `playbook_id` on `:assign` and bulk assign, `playbook_name` on `GET /api/v1/assignments` | Absent `playbook_id` means the tier default, `null` means "No playbook". Pending rows show the playbook that will start. |
 | 7 | New assignments list | SMALL GAP | `GET /api/v1/assignments?mine=true&status=pending` (`assignments:respond`) | Row has `assigned_by` as id. Add `assigned_by_name`, `offer_id`, `offer_name`. A page can be short with `next_cursor`: follow it. |
 | 7 | Subtitle and nav badge count | SMALL GAP | `GET /api/v1/assignments` `total`, or `GET /api/v1/me/counts` | No count today. |
 | 7 | Accept | READY | `POST /api/v1/assignments/{id}:accept` (`assignments:respond`) | 409 if already answered. Auto-accept after N working days (default 2) and on a CRM reply or meeting can change the list without the AE. |
 | 7 | Decline with reason (required) and note | SMALL GAP | `POST /api/v1/assignments/{id}:decline` `{reason_key, note}` | Reason list from `GET /api/v1/settings/review` needs `settings:manage`: same read fix; filter `applies_to` assignment or both. Note required only for `other`. Sets `declined_by_seller`, stage back to `reviewed`. |
 | 7 | Active table: account, stage, last HubSpot activity | SMALL GAP | `GET /api/v1/accounts?owner_user_id=me` | Neither assignments nor accounts list return stage plus last activity today. See accounts. |
 | 7 | `POST /api/v1/accounts/{id}:seen` clears "New from" | READY | `assignments:respond` | Call when the AE opens the account (spec omits it). |
-| 7 | "{n} next step due today", Next step, Due | LATER (R2) | none | Playbook steps. Interim: CRM task due dates in `follow_through.tasks`. |
+| 7 | "{n} next step due today", Next step, Due | READY (API R2c-1; UI R2c-2) | `next_step {title, due_date, overdue, due_today}` and `playbook_name` on `GET /api/v1/assignments` and `GET /api/v1/accounts`; `next_steps_due_today`, `next_steps_overdue` on `GET /api/v1/me/counts` | Only with `playbooks:read`; null otherwise or when there is no open step. |
 | 9 | Stage counts now, per stage and exits | NEW ENDPOINT | `GET /api/v1/stages/summary` (`analytics:read`, data-limited) | Current stage on `account_review.stage` (copied to `account_summary.stage`). Serves Overview from R1 data. |
 | 9 | Funnel bands: entered this period, "{x}% of {previous}" | NEW ENDPOINT | `GET /api/v1/stages/summary?from=&to=` | From `routing.stage_change` plus `account_review.created_at` for arrived (no `stage_change` row at arrival). `moveStage` writes only the destination: a jump must count skipped stages as passed. |
 | 10, 11 | Reviewed, Assigned, Won per source | READY | `GET /api/v1/sources/stats` (see intake) | Cumulative by `FUNNEL` rank; declined and lost count in Sent and Reviewed only (Ruling 4). |
@@ -858,9 +861,9 @@ services `src/modules/offers/services/{offers,practices}.ts`; schema `src/module
 | 19 | `Duplicate` | READY | `GET` then `POST /api/v1/offers` | Client copies fields into a draft. |
 | 19 | Create, edit practice | READY | `POST /api/v1/practices`, `PATCH /api/v1/practices/{id}` (`offers:manage`) | name, description, keywords, default playbook, brief template, sort. Lead missing (row above). |
 | 19 | `Delete practice` ("Move or delete its offers first") | READY | `POST /api/v1/practices/{id}:archive` | Archive only; blocks only while approved offers exist: 409 `practice-has-offers` "Retire or move its active offers first.". Decision 15. |
-| 19 | Initial message with Copy | LATER (R2) | none | Better owned by playbook templates. |
+| 19 | Initial message with Copy | READY (API R2c-1; UI R2c-2) | `GET /api/v1/offers/{id}/playbooks` `first_email {subject, body}` | Read-only: the first email step of the tier's playbook. The offer form drops the field. |
 | 19 | Seller guide: talking points, objections, avoid | LATER (R2) | none | Tagged R2 in screens.md. |
-| 19 | Playbook by tier, "{n} steps over {d} days", "{x}% book a meeting" | LATER (R2) | none | No offer-to-playbook-by-tier mapping; practice has `default_playbook_id` only. Rates R3. Decision 25. |
+| 19 | Playbook by tier, "{n} steps over {d} days", "{x}% book a meeting" | READY (API R2c-1; UI R2c-2); rate LATER (R3) | `GET /api/v1/offers/{id}/playbooks`, `PUT /api/v1/offers/{id}/playbooks/{tier}` (`offers:manage` or `playbooks:manage`) | `{tier, playbook {id, name, status, steps, days} or null, first_email}` for act_now, good_fit, watch. Decision 25. |
 
 ### Proposed changes
 
@@ -1024,33 +1027,35 @@ R1: items 1 to 5. Later: audit retention and sign-ins (Decision 20).
 ## playbooks
 
 R1 module: the account brief and the handoff package (Playbooks minimum). Spec `docs/spec/playbooks/index.md` (PLB), `playbook-templates.md`
-(PLB-E1, R2), `outcomes-and-what-worked.md` (PLB-E6, R3). Planned API: `GET /api/v1/playbooks`,
-`GET /api/v1/playbooks/{id}` (`playbooks:read`), `POST /api/v1/playbooks`, `PATCH /api/v1/playbooks/{id}`
-(`playbooks:manage`). The R1 items are built: the brief endpoints below and `HandoffPackageProvider` (registered in `src/entry/compose.ts`).
+(PLB-E1, R2), `account-plans.md` (PLB-E2, R2), `outcomes-and-what-worked.md` (PLB-E6, R3). R2c-1 built the templates, offer
+playbooks, plans and lists API (rows below); the screens are R2c-2, the account page, CRM tasks and stop rule R2c-3. Drafts only: nothing is sent
+automatically (user, 2026-11-02). The R1 items are built: the brief endpoints below and `HandoffPackageProvider` (registered in `src/entry/compose.ts`).
 Permissions `playbooks:read`, `playbooks:write`, `playbooks:manage` exist (leader, operator and owner
 hold manage; sellers hold read and write).
 
 | Screen § | Need | Status | Endpoint / proposed | Notes |
 |---|---|---|---|---|
 | 4a | Scout's recommendation, Brief (Overview, Approach, Value angle, Risks, Edit); review record brief (§4b) | READY | `GET /api/v1/accounts/{id}/brief` (`playbooks:read`), `PUT /api/v1/accounts/{id}/brief/sections/{key}`, `POST /api/v1/accounts/{id}:draft-brief` (`playbooks:write`) | Each piece has `written_by` and `label`; sections `version` for `if_version`. Decision 7. |
-| 6 | Playbook cards in the assign dialog | LATER (R2) | none | `assignment.template_id` null in R1. |
-| 7 | Playbook name, next step, due | LATER (R2) | none | |
-| 20 | List: name, description, status | LATER (R2) | `GET /api/v1/playbooks` | `playbook_template`: name, description, status `draft\|active\|archived`, scope practice or offer, motion. |
-| 20 | "{n} steps over {d} days", channel mix | LATER (R2) | `GET /api/v1/playbooks` `step_count`, `span_days`, `channels[]` | `template_step` has `week_offset`, `duration_days`, `type` (email, call, linkedin, event, procurement, research, content, meeting, other). Screen says "Day {n}". Decision 25. |
-| 20 | Runs on, tier chips, Assign dialog, "Replaces {x}" | LATER (R2) | `PUT /api/v1/offers/{id}/playbooks/{tier}` | No per-tier mapping; needs `offer_playbook(offer_id, tier, template_id)`. Decision 25. |
-| 20 | Running, Finished, Replied, Booked, Won, reply rate, meeting rate | LATER (R3) | none | Running from `account_plan.status` (R2); rates need outcomes (PLB-E6). |
-| 20 | Steps: day, channel, title, detail, who | LATER (R2) | `GET /api/v1/playbooks/{id}` | `owner_role` (seller, leader, operator) is "who". |
-| 20 | Tags "Sends automatically", "Draft ready for AE", "HubSpot task" | LATER (R2) | none | Only `crm_task` (bool) exists; no auto-send field. |
-| 20 | Rules: starts, stops, pauses, drafts | LATER (R2) | none | No `stop_when` or draft fields; pause on decline is fixed. |
-| 20 | Create, edit, reorder steps | LATER (R2) | `POST/PATCH /api/v1/playbooks` | Template `version` bumps; plans keep theirs (matches the screen). |
-| 20 | Duplicate, Retire, Delete | LATER (R2) | `POST /api/v1/playbooks/{id}:duplicate`, `:archive` | Duplicate and delete are not specified. |
+| 6 | Playbook cards in the assign dialog | READY (API R2c-1; UI R2c-2) | `GET /api/v1/accounts/{id}/playbook-suggestion` (`assign:act`); `playbook_id` on `:assign` and bulk assign | `{playbook {id, name, steps, days} or null, reason offer_tier or none, offer, tier}`. Preselected; change it or pick "No playbook" (`playbook_id: null`). |
+| 7 | Playbook name, next step, due | READY (API R2c-1; UI R2c-2) | `playbook_name`, `next_step` on `GET /api/v1/assignments`, `GET /api/v1/accounts`; counts on `GET /api/v1/me/counts` | See the row under screen 7 above. |
+| 4 | Playbook on the account page: plan, steps, history, tick off | READY (API R2c-1; UI R2c-3) | `GET /api/v1/accounts/{id}/plan` (`playbooks:read`), `PATCH /api/v1/plans/{id}/steps/{step_id}`, `POST /api/v1/plans/{id}:pause`, `:resume`, `:complete`, `:abandon` (`playbooks:write`) | Plan has `playbook {id, name, version}`, `newer_version`, `day`, `days`, `steps[]`, `history[]`. Customising a plan, CRM tasks and the stop rule are R2c-3. |
+| 20 | List: name, description, status | READY (API R2c-1; UI R2c-2) | `GET /api/v1/playbooks` | `status` draft, active or archived; also `stop_when`, `version`. No scope or motion. |
+| 20 | "{n} steps over {d} days", channel mix | READY (API R2c-1; UI R2c-2) | `GET /api/v1/playbooks` `steps` (count), `days`, `channels` (count per channel) | Steps have `day` and `channel` (email, linkedin, call, meeting, task). Decision 25. |
+| 20 | Runs on, tier chips, Assign dialog, "Replaces {x}" | READY (API R2c-1; UI R2c-2) | `runs_on [{offer_id, tier}]` on the list; `PUT /api/v1/offers/{id}/playbooks/{tier}` | `offer_playbook(offer_id, tier, template_id)`. An archived template is refused (400 "That playbook isn't available."). Decision 25. |
+| 20 | Running, Finished, Replied, Booked, Won, reply rate, meeting rate | Running READY (R2c-1); the rest LATER (R3) | `running` on the list | Running is the count of active plans; the rest needs outcomes (PLB-E6). |
+| 20 | Steps: day, channel, title, detail, who | READY (API R2c-1; UI R2c-2) | `GET /api/v1/playbooks/{id}` (`?version=`) | `owner_role` (seller, leader, operator) is "who". |
+| 20 | Tags "Draft ready for AE", "HubSpot task" | READY (API R2c-1; UI R2c-2) | step `channel` and `crm_task` | "Sends automatically" is gone: drafts only (Decision 25 note). |
+| 20 | Rules: starts, stops, pauses | READY (API R2c-1; UI R2c-2); stop rule enforced R2c-3 | `stop_when` (`reply_or_meeting`, `meeting`, `never`) | Starts when accepted. Pauses when the accepted assignment is withdrawn. Stored in R2c-1, acted on in R2c-3. |
+| 20 | Create, edit, reorder steps | READY (API R2c-1; UI R2c-2) | `POST /api/v1/playbooks`, `PATCH /api/v1/playbooks/{id}` (`playbooks:manage`) | Template `version` bumps on a step change to an active template; plans keep theirs (matches the screen). |
+| 20 | Duplicate, Retire, Delete | READY (API R2c-1; UI R2c-2) | `POST /api/v1/playbooks/{id}:duplicate`, `:archive`, `DELETE /api/v1/playbooks/{id}` | Delete is refused (409 "This playbook has run on accounts. Retire it instead.") once a plan used it or an offer maps it. |
 
 ### Proposed changes
 
 1. R1: `HandoffPackageProvider` per the release plan (feeds the brief and the handoff).
-2. R2 plan: `offer_playbook(offer_id, tier, template_id)` and `PUT /api/v1/offers/{id}/playbooks/{tier}`;
-   list fields `step_count, span_days, channels[], runs_on`; `stop_when`, `draft_mode`, `auto_send`;
-   day granularity; `POST /api/v1/playbooks/{id}:duplicate`, `:archive`.
+2. R2 plan (built in R2c-1): `offer_playbook(offer_id, tier, template_id)` and
+   `PUT /api/v1/offers/{id}/playbooks/{tier}`; list fields `steps, days, channels, runs_on, running`;
+   `stop_when`; day granularity; `POST /api/v1/playbooks/{id}:duplicate`, `:archive`. No draft or
+   auto-send field: drafts only.
 3. R3: Running and rates; C9 empty states until then.
 
 ### Release
