@@ -19,7 +19,7 @@ const api = (page: Page, path: string, method: string, body?: unknown) =>
         headers: { 'x-scout-tenant': 'taazaa', ...(body === undefined ? {} : { 'content-type': 'application/json' }), 'idempotency-key': crypto.randomUUID() },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
-      return { status: res.status, body: (await res.json().catch(() => null)) as Record<string, any> | null };
+      return { status: res.status, body: (await res.json().catch(() => null)) as Record<string, unknown> | null };
     },
     { path, method, body },
   );
@@ -41,7 +41,7 @@ test('a playbook is built, assigned to a tier, suggested on assign, and starts w
   try {
     // An offer of our own (a unique industry matches no other account), made Active.
     const practices = await api(page, 'practices', 'GET');
-    const practice = (practices.body!.data as { id: string; name: string }[])[0]!;
+    const practice = ((practices.body as { data: unknown }).data as { id: string; name: string }[])[0]!;
     const practiceId = practice.id;
     const created = await api(page, 'offers', 'POST', {
       name: offerName,
@@ -99,7 +99,7 @@ test('a playbook is built, assigned to a tier, suggested on assign, and starts w
     // A Good fit account of that offer.
     await sendAccount(page, accountName);
     const queue = await api(page, 'review-queue?limit=200', 'GET');
-    const row = (queue.body!.data as { name: string; account_id?: string; id?: string }[]).find((a) => a.name === accountName)!;
+    const row = ((queue.body as { data: unknown }).data as { name: string; account_id?: string; id?: string }[]).find((a) => a.name === accountName)!;
     const accountId = (row.account_id ?? row.id)!;
     expect((await api(page, `accounts/${accountId}/lead-offer`, 'PUT', { offer_id: offerId })).status).toBe(200);
     await expect
