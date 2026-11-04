@@ -44,7 +44,7 @@ describe('GET /accounts/{id}/brief', () => {
     const b = await res.json();
     expect(b).toMatchObject({ account_id: account, state: 'ready' });
     expect(Object.keys(b).sort()).toEqual(
-      ['account_id', 'last_drafted_at', 'offer_id', 'offer_name', 'opener', 'recommendation', 'sections', 'state', 'who_first', 'why_now'].sort(),
+      ['account_id', 'committee', 'last_drafted_at', 'offer_id', 'offer_name', 'opener', 'recommendation', 'sections', 'state', 'who_first', 'why_now'].sort(),
     );
     expect(b.recommendation).toMatchObject({ written_by: 'rules', label: 'Assembled from rules' });
     expect(b.recommendation.headline).toEqual(expect.any(String));

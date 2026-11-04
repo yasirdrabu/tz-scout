@@ -296,6 +296,26 @@ describe('primary contact', () => {
   });
 });
 
+describe('editPerson confirmRoleKeys', () => {
+  it('confirms a guessed role, publishes person.updated with roles, and refuses a role not held', async () => {
+    const d = domain();
+    const out = await seed({
+      account: { name: 'Confirm Co', domain: d },
+      people: [{ firstName: 'Ana', email: `ana@${d}`, guessedRoleKeys: ['technical_buyer'] }],
+    });
+    const [ana] = out.personIds as [string];
+    await expect(asPerson((ctx) => editPerson(ctx, ana, { confirmRoleKeys: ['procurement'] }))).rejects.toMatchObject({
+      status: 400,
+      errors: [{ path: 'confirm_role_keys', message: 'Only a role the person holds can be confirmed.' }],
+    });
+    await asPerson((ctx) => editPerson(ctx, ana, { confirmRoleKeys: ['technical_buyer'] }));
+    const roles = await t.run((ctx) => ctx.tx.select().from(personRole).where(eq(personRole.personId, ana)));
+    expect(roles).toEqual([expect.objectContaining({ roleKey: 'technical_buyer', origin: 'set_by_person', setBy: 'usr_editor' })]);
+    const updates = await eventsOf(out.accountId, 'accounts.person.updated');
+    expect(updates.at(-1)!.payload.data.changedKeys).toEqual(['roles']);
+  });
+});
+
 describe('editPerson guards', () => {
   it('refuses an archived person and maps a duplicate email to 409', async () => {
     const d = domain();

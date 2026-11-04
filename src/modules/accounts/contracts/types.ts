@@ -22,8 +22,11 @@ export type PersonView = {
   linkedinUrl: string | null;
   isPrimary: boolean;
   decisionNote: string | null;
+  /** Who set the current decision note and when; null when a source wrote it. */
+  decisionNoteBy: { id: string; name: string | null } | null;
+  decisionNoteAt: Date | null;
   /** `label` is the tenant's name for the role (the key when the role is gone). */
-  roles: { key: string; origin: RoleOrigin; label: string }[];
+  roles: { key: string; origin: RoleOrigin; label: string; setByName: string | null; setAt: Date | null }[];
 };
 
 export type AccountView = {

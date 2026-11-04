@@ -54,6 +54,8 @@ export {
 export { conflictExplainHandler, exclusionsRecheckHandler, exclusionsRecheckJob } from './jobs';
 export { conflictExplainJob } from './contracts/jobs';
 export { guessRolesFromTitle } from './domain/roles';
+export { coverage, CORE_ROLES, type CommitteePerson, type CommitteeRole, type CommitteeSummary, type CoverageStatus } from './domain/committee';
+export { getCommittee, type Committee } from './services/committee';
 export { mergeAccounts } from './services/merge';
 export { countAccounts, countAccountsBy, oldestCreatedAt, search, type FacetKey, type SearchQuery, type SearchRow, type SearchSort } from './services/search';
 export { listExclusionLists, listExclusionRules, setExclusionList, setExclusionRule, type ExclusionRuleView } from './services/settings';
