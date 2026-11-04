@@ -22,7 +22,7 @@ The page composes data from several modules through their public interfaces; Pla
      Account facts (with conflicts shown inline: both values, their sources, "Keep this one"), Risks.
    - Right: Buying committee (person, title, buying role pill, email quality, entry point note; gaps
      for the offer's `target_buying_roles` with "Find"), Possible approach, Our value angle, Playbook
-     (the plan's steps as a checklist with week, owner, due, status), Activity and outcomes.
+     (the plan's steps as a checklist with day, owner, due, status), Activity and outcomes.
 4. **Footer.** Sources and data dates, "Other offers that fit", score history link.
 
 All numbers right-aligned with tabular figures; status colours only for meaning (overdue amber,
@@ -37,6 +37,17 @@ conflicts amber, gaps red only when the offer requires that role).
 | Assigned, awaiting seller | Reassign, Withdraw | Assignment note and the plan |
 | In CRM / engaged / opportunity | Open in CRM, Log outcome, Edit plan | Playbook progress (done, due, overdue), Activity and outcomes, then the brief |
 | Won or lost | Write retro (primary) | Outcome summary, retro, learnings |
+
+R2c-3a (shipped): in the assigned view the Playbook card is the first card of the main column.
+Header "{name} · Day {d} of {n}" with "{x} of {y} done" and a bar; a card menu (Pause or Resume,
+Complete, Abandon with a required reason) and an `Edit plan` button, both with `playbooks:write` and
+only on open plans; rows with a checkbox, "Day n", the step title (click for the in-place detail: draft
+with Copy, linked people, "No {role} on file" with `Find`, and note, owner, due date and status
+editing), owner and status pill; a collapsed "History ({n})"; a closed plan shows its status line
+("Completed {date}", "Stopped: {reason}", "Abandoned: {reason}") and read-only rows. `Edit plan` opens
+a drawer to add, edit and remove steps (a done step's Remove is disabled: "Skip it instead."). Before
+acceptance the card reads "{playbook} starts when {AE first name} accepts." or "No playbook. ..."; in
+the review view a Playbook preview follows the Brief. Details in `account-plans.md`.
 
 Buttons whose permission the viewer lacks are hidden. A seller sees only accounts in their data scope.
 

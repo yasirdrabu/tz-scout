@@ -1,7 +1,7 @@
 # PLB-E2 Account plans
 
-Release R2 · plans, steps, events, API and lists shipped in R2c-1 · screens in R2c-2 · account page,
-CRM tasks and the stop rule in R2c-3
+Release R2 · plans, steps, events, API and lists shipped in R2c-1 · screens in R2c-2 · account page
+plan view and customising in R2c-3a · CRM tasks and the stop rule in R2c-3b
 
 ## Why
 
@@ -32,9 +32,12 @@ Out of R2c (user, 2026-11-04): outreach sequences, call prep, proposals and outc
     is due Monday.
   - `seller` steps go to the accepting seller, `leader` steps to the assigning leader (the `assignedBy`
     on the accepted event), `operator` steps to no one.
-  - Each step is linked to the account's people holding any of its `target_buying_roles` with origin
-    `stated` or `set_by_person`. Guessed roles don't count. If nobody holds the role, the step shows
-    "No {role} on file" and a "Find" action (Enrichment; screen work in R2c-2).
+  - Each step keeps a copy of its template step's `target_buying_roles`. Plan JSON reads the account's
+    people live: `people: [{id, name}]` are the current people holding any of those roles with origin
+    `stated` or `set_by_person` (guessed roles don't count), and `missing_roles: [key]` are the roles
+    nobody holds (archived roles are not reported). A person found by Enrich after acceptance therefore
+    shows at once. For a missing role the step shows "No {role} on file" and a "Find" action (opens the
+    Enrich dialog with that role). `target_person_ids` stays as stored history.
   - Placeholders in `subject`, `body` and `detail` are rendered (see PLB-E1).
   - **Snapshot:** the plan keeps `template_id`, `template_version`, `offer_id`, `tier`, `stop_when`
     and the rendered steps (`origin: template`). Rescoring after accept, or editing the template,
@@ -70,18 +73,42 @@ Out of R2c (user, 2026-11-04): outreach sequences, call prep, proposals and outc
   - Done sets `done_at` and `done_by` and publishes `playbooks.step.completed`; moving a step off
     done clears them.
   - Pausing does not block step edits; only a closed plan does.
+- **Customising a plan (R2c-3a).** Everyone with `playbooks:write` (people only) can change one
+  plan's steps. Each change sets `account_plan.customised = true` (plan JSON `customised`), records
+  history and publishes `plan.changed` with `changed: ['steps']` (plus `owners` when an owner is set).
+  - **Add:** `POST /api/v1/plans/{id}/steps` with `{day, channel, owner_role, title, detail?, subject?,
+    body?, target_buying_roles?, crm_task?, owner_user_id?}`; strict body. The due date is the plan
+    start plus `day`, moved to a working day in the tenant timezone. The owner comes from the role
+    (seller: the plan seller; leader: the owner of an existing leader step, else none; operator: none)
+    unless `owner_user_id` is given. The step has `origin: added`; its order is after the last step
+    whose day is at or below the new day, and later steps shift up. Subject and body are kept for
+    email only. Buying roles are checked against the workspace's active roles, keeping keys the step
+    already holds.
+  - **Edit:** `PATCH` also takes `title`, `detail`, `day`, `channel`, `subject`, `body`, `crm_task` and
+    `target_buying_roles`. A content change sets `origin: edited` (an added step stays `added`) and
+    records one `step_edited` entry listing each field's `from` and `to`. A new `day` recomputes the
+    due date and moves the step unless `due_date` is also sent. Moving to a non-email channel clears
+    subject and body. Values equal to the current ones change nothing. Status, note, owner and due
+    date alone do not set `customised`.
+  - **Remove:** `DELETE /api/v1/plans/{id}/steps/{step_id}`. A done step is refused with 409 "A done
+    step can't be removed. Skip it instead."; a closed plan with 409 "This plan has ended." Orders are
+    not renumbered on removal.
 - **Plan actions:** pause, resume, complete and abandon. Abandon requires `reason` ("Say why you're
   abandoning it."). Complete needs every step `done` or `skipped`, otherwise 409 "Finish or skip
   every step first." Pausing a paused plan, or resuming an active one, returns it unchanged.
 - **History.** Every change is recorded in `plan_change` (who, when, what: `created`, `paused`,
-  `resumed`, `completed`, `abandoned`, `stopped`, `step_status`, `note`, `owner`, `due_date`), written
+  `resumed`, `completed`, `abandoned`, `stopped`, `step_status`, `note`, `owner`, `due_date`, and since
+  R2c-3a `step_added`, `step_edited`, `step_removed`), written
   to the audit log, and published as `playbooks.plan.changed`. History is newest first, capped at
   200.
 - **Visibility.** Plans follow account visibility: outside the caller's data limit the account, the
   plan and every plan action are 404.
-- **Not in R2c-1:** customising a plan (adding, editing or removing steps; `customised`) is R2c-3. A
-  step done in the CRM marking the step done (`crm.activity.observed`), CRM tasks created from the
-  plan and the stop rule are R2c-3.
+- **Display rules (R2c-3a).** Units are days. The header reads "{name} · Day {d} of {n}": `d` is
+  `plan.day + 1` capped at `n`, `n` is `plan.days + 1`. Progress reads "{x} of {y} done": `x` counts
+  done and skipped steps, `y` all steps, and the bar shows x/y. A newer template version shows "A
+  newer version of {playbook} exists. This plan keeps the steps it started with." (no compare yet).
+- **Not in R2c-3a (R2c-3b):** a step done in the CRM marking the step done
+  (`crm.activity.observed`), CRM tasks created from the plan and the stop rule.
 
 ## Where plans show (R2c-1 API)
 
@@ -106,17 +133,34 @@ Out of R2c (user, 2026-11-04): outreach sequences, call prep, proposals and outc
 | Method and path | Scope | Does |
 |---|---|---|
 | `GET /api/v1/accounts/{id}/plan` | `playbooks:read` | The open plan, else the latest, else 404 |
-| `PATCH /api/v1/plans/{id}/steps/{step_id}` | `playbooks:write` | Update a step (status, note, owner, due date); returns the whole plan |
+| `PATCH /api/v1/plans/{id}/steps/{step_id}` | `playbooks:write` | Update a step (status, note, owner, due date; since R2c-3a also title, detail, day, channel, subject, body, `crm_task`, `target_buying_roles`); returns the whole plan |
+| `POST /api/v1/plans/{id}/steps` | `playbooks:write` | Add a step to this plan (201); returns the whole plan |
+| `DELETE /api/v1/plans/{id}/steps/{step_id}` | `playbooks:write` | Remove a step that is not done; returns the whole plan |
 | `POST /api/v1/plans/{id}:pause`, `:resume`, `:complete`, `:abandon` | `playbooks:write` | Plan actions; abandon takes `reason`; return the whole plan |
 | `GET /api/v1/accounts/{id}/playbook-suggestion` | `assign:act` | For the assign dialog: `{playbook: {id, name, steps, days} \| null, reason: offer_tier \| none, offer: {id, name} \| null, tier}` |
 | `POST /api/v1/accounts/{id}:assign` and bulk assign (`POST /api/v1/review-queue/bulk`, action `assign`) | `assign:act` | Take an optional `playbook_id` (see below) |
 
 Plan shape: `{id, account_id, status, status_reason, playbook {id, name, version}, newer_version,
-offer_id, tier, assignment_id, seller_user_id, start_date, stop_when, day, days, steps[], history[]}`.
+offer_id, tier, assignment_id, seller_user_id, customised, start_date, stop_when, day, days, steps[], history[]}`.
 `day` is the days from `start_date` to today in the tenant timezone (at least 0); `days` is the
 largest step day. A step has `id`, `template_step_id`, `order`, `day`, `channel`, `owner_role`,
 `owner_user_id`, `owner_name`, `title`, `detail`, `target_person_ids`, `due_date`, `status`,
-`done_at`, `done_by`, `note`, `origin`, `crm_task`, `subject`, `body`, `overdue`, `due_today`.
+`done_at`, `done_by`, `note`, `origin`, `crm_task`, `subject`, `body`, `overdue`, `due_today`, and
+since R2c-3a `target_buying_roles`, `people [{id, name}]` and `missing_roles [key]`. History entries
+are `{id, kind, step_id, detail, by, by_name, at}`.
+
+**Statuses and pills.** A step row shows "Done", "Skipped" (neutral), "In progress", "Due {date}"
+(amber row) for a todo step that is overdue or due today, else "Not started". The checkbox toggles
+done and todo; unticking a done step returns it to todo and both changes are in the history.
+
+**Pending state.** Between assignment and acceptance there is no plan. `GET /accounts/{id}/review`'s
+`current_assignment` carries `playbook_name`, `template_id` and `no_playbook` (null without
+`playbooks:read`), and the account page shows "{playbook} starts when {AE first name} accepts." or
+"No playbook. {AE first name} works it with no set steps."
+
+**Preview.** Before assignment the review view shows a Playbook card from
+`GET /accounts/{id}/playbook-suggestion` (`assign:act`) and the template's steps: "{name} · {n} steps
+over {d} days · starts when accepted", rows "Day {n}", step, owner role, "Not started".
 
 **Assignment choice.** `playbook_id` is optional: absent means the tier default (stored as
 `template_id = null, no_playbook = false`); `null` means "No playbook" (`no_playbook = true`); an id
@@ -133,11 +177,11 @@ Published (shapes in `architecture/event-catalog.md`):
 | Event | Data |
 |---|---|
 | `playbooks.plan.created` | `planId`, `accountId`, `offerId` and `tier` (null as above), `templateId`, `templateVersion`, `assignmentId`, `sellerUserId`, `stopWhen`, `steps[{id, order, day, channel, title, ownerUserId, dueDate, crmTask, subject, body}]` |
-| `playbooks.plan.changed` | `planId`, `accountId`, `status`, `changed` (any of `status`, `steps`, `owners`, `account`), `reason?`, `previousAccountId?` (a merge repoint) and `steps[{id, status, ownerUserId, dueDate, title, crmTask}]`, the steps the change touched (a step edit: that step; owner moves on a resume or take-over: the moved steps; a stop: the skipped steps; empty for a status-only change) |
+| `playbooks.plan.changed` | `planId`, `accountId`, `status`, `changed` (any of `status`, `steps`, `owners`, `account`), `reason?`, `previousAccountId?` (a merge repoint) and `steps[{id, order, day, channel, title, detail, subject, body, status, ownerUserId, dueDate, crmTask}]`, the steps the change touched (a step edit: that step plus any steps its move shifted; an add: the new step and the steps it pushed down; owner moves on a resume or take-over: the moved steps; a stop: the skipped steps; empty for a status-only change). A removed step is `{id, removed: true}`. Every field but `id` is optional so older rows parse |
 | `playbooks.step.completed` | `planId`, `stepId`, `accountId`, `channel`, `doneBy`, `doneAt` |
 | `playbooks.plan.not_started` | `accountId`, `assignmentId`, `reason`: `no_playbook_chosen`, `no_offer_playbook`, `superseded` or `template_unavailable` (draft, archived or deleted template); lets the screens explain an empty plan |
 
-`plan.changed` is published for step edits (`steps`, plus `owners` when the owner moved), the four
+`plan.changed` is published for step edits, adds and removals (`steps`, plus `owners` when the owner moved or was set), the four
 plan actions (`status`), a withdrawal pause (`status`, reason `withdrawn`), a resume on accept
 (`status`, `owners`) or take-over (`owners`), a merge repoint (`account`, with `previousAccountId`), a stop (`status`, plus `steps` when open steps were skipped; reason is the stop
 reason) and a merge abandon (`status`, reason `merged`).
@@ -157,11 +201,11 @@ As a seller, I want the plan built when I accept, so that I start with clear ste
 - PLB-E2-S1-AC3 An account never has two open plans; a second accept resumes a paused plan or does
   nothing. (R2c-1)
 
-### PLB-E2-S2 Customise a plan (R2c-3)
+### PLB-E2-S2 Customise a plan (R2c-3a; CRM tasks R2c-3b)
 As a leader, I want to add, remove and edit steps for one account, so that the plan fits what I know
 about it.
 - PLB-E2-S2-AC1 Each change records who and when and shows on the plan's history.
-- PLB-E2-S2-AC2 Changes appear in the CRM tasks within seconds of saving (via CRM sync).
+- PLB-E2-S2-AC2 Changes appear in the CRM tasks within seconds of saving (via CRM sync). (R2c-3b; the events carry the fields it needs.)
 - PLB-E2-S2-AC3 Removing a step that is done is not allowed; it can be marked skipped instead.
 
 ### PLB-E2-S3 Run a plan (R2c-1 API, R2c-2 screens)
