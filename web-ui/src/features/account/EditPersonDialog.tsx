@@ -90,7 +90,10 @@ export function EditPersonDialog({ tenant, accountId, person, onClose }: { tenan
           )}
         </fieldset>
         <Field label="Decision note" hint="Where they stand. Up to 1,000 characters." error={noteError}>
-          {(c) => <textarea {...c} className="input" value={note} onChange={(e) => setNote(e.target.value)} />}
+          {(c) => <textarea {...c} className="input" value={note} onChange={(e) => {
+            setNote(e.target.value);
+            setNoteError(null);
+          }} />}
         </Field>
         {error && (
           <p className={styles.error} role="alert">

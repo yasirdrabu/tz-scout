@@ -115,6 +115,25 @@ describe('Editing the buying committee', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     const note = within(dialog).getByRole('textbox', { name: 'Decision note' });
     await waitFor(() => expect(note).toHaveAccessibleDescription(/Keep the note under 1,000 characters\./));
+    await userEvent.type(note, 'y');
+    expect(within(dialog).queryByText('Keep the note under 1,000 characters.')).toBeNull();
+  });
+
+  it('Save in the Edit dialog refetches the account and the committee', async () => {
+    serveAccount({ account: ACCOUNT_DANA });
+    const { reads } = servePatch();
+    renderApp(URL);
+    await userEvent.click(await (await rail()).findByRole('button', { name: 'Edit Dana Ortiz' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Dana Ortiz' });
+    await waitFor(() => expect(reads.committee).toBeGreaterThan(0));
+    const before = { ...reads };
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Decision note' }), '!');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await screen.findByText('Saved Dana Ortiz.');
+    await waitFor(() => {
+      expect(reads.account).toBeGreaterThan(before.account);
+      expect(reads.committee).toBeGreaterThan(before.committee);
+    });
   });
 
   it('without people:write there is no Confirm, Remove or Edit', async () => {
