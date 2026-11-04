@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { editPerson, upsertFromArrival } from '@/modules/accounts';
+import { editPerson, mergeAccounts, upsertFromArrival } from '@/modules/accounts';
 import { accountMerged } from '@/modules/accounts/contracts/events';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
 import {
@@ -13,11 +13,13 @@ import {
   pausePlan,
   resumePlan,
   setOfferPlaybook,
+  startPlan,
   stopPlan,
   updateStep,
   updateTemplate,
 } from '@/modules/playbooks';
 import { accountPlan, planChange, planStep } from '@/modules/playbooks/db/schema';
+import { tenant } from '@/modules/tenancy/db/schema';
 import { accept, assign, assignmentAccepted, withdraw } from '@/modules/routing';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -194,8 +196,9 @@ describe('a plan starts on accept', () => {
   it('a withdrawal pauses the plan, and a new acceptance resumes it with the new seller on the open seller steps', async () => {
     const { accountId, assignmentId } = await account({ name: 'Withdraw Co' });
     const [plan] = await plansOf(accountId);
-    const first = (await stepsOf(plan!.id))[0]!;
-    await asSeller((ctx) => updateStep(ctx, plan!.id, first.id, { status: 'done' }));
+    const rowsBefore = await stepsOf(plan!.id);
+    await asSeller((ctx) => updateStep(ctx, plan!.id, rowsBefore[0]!.id, { status: 'done' }));
+    await asSeller((ctx) => updateStep(ctx, plan!.id, rowsBefore[3]!.id, { status: 'in_progress' }));
 
     await asLeader((ctx) => withdraw(ctx, assignmentId));
     await runPlaybooks(t.tenantId);
@@ -211,7 +214,8 @@ describe('a plan starts on accept', () => {
     const rows = await stepsOf(plan!.id);
     expect(rows[0]).toMatchObject({ status: 'done', ownerUserId: seller });
     expect(rows[1]).toMatchObject({ ownerRole: 'leader', ownerUserId: leader });
-    expect(rows[3]).toMatchObject({ ownerRole: 'seller', ownerUserId: seller2 });
+    expect(rows[2]).toMatchObject({ ownerRole: 'operator', ownerUserId: null });
+    expect(rows[3]).toMatchObject({ ownerRole: 'seller', ownerUserId: seller2, status: 'in_progress' });
     const changed = (await events('playbooks.plan.changed', accountId)).map((e) => ({ status: e.data.status, changed: e.data.changed }));
     expect(changed).toContainEqual({ status: 'paused', changed: ['status'] });
     expect(changed).toContainEqual({ status: 'active', changed: ['status', 'owners'] });
@@ -233,11 +237,56 @@ describe('a plan starts on accept', () => {
     expect(after).toHaveLength(2);
     expect(after.find((p) => p.id === loserPlan!.id)).toMatchObject({ status: 'abandoned', statusReason: 'merged' });
     expect(after.filter((p) => p.status === 'active')).toHaveLength(1);
+    const lost = await t.run((ctx) => ctx.tx.select().from(planChange).where(eq(planChange.planId, loserPlan!.id)));
+    expect(lost.map((h) => h.kind)).toContain('abandoned');
     expect(await plansOf(loser.accountId)).toHaveLength(0);
 
     const [lonePlan] = await plansOf(lone.accountId);
     await merge(lone.accountId, empty);
     expect(await plansOf(empty)).toEqual([expect.objectContaining({ id: lonePlan!.id, status: 'active' })]);
+  });
+});
+
+describe('start date, merges and late events', () => {
+  const accepted = (accountId: string, over: Partial<Parameters<typeof startPlan>[1]['data']> = {}) => ({
+    occurredAt: '2026-11-07T02:00:00.000Z',
+    data: { assignmentId: newId('asg'), accountId, sellerUserId: seller, acceptedHow: 'seller' as const, templateId, noPlaybook: false, assignedBy: leader, ...over },
+  });
+
+  it('the start date follows the accept time in the tenant timezone (02:00 UTC Saturday in New York is Friday)', async () => {
+    const accountId = await arrivedAccount(t, { name: 'Zone Co' });
+    await adminDb.update(tenant).set({ timezone: 'America/New_York' }).where(eq(tenant.id, t.tenantId));
+    try {
+      await t.run((ctx) => startPlan(ctx, accepted(accountId)));
+    } finally {
+      await adminDb.update(tenant).set({ timezone: 'UTC' }).where(eq(tenant.id, t.tenantId));
+    }
+    const [plan] = await plansOf(accountId);
+    expect(plan!.startDate).toBe('2026-11-06');
+    // Day 0 is Friday; day 3 is Monday the 9th (Sunday moves on); day 5 Wednesday; day 7 Friday.
+    expect((await stepsOf(plan!.id)).map((s) => s.dueDate)).toEqual(['2026-11-06', '2026-11-09', '2026-11-11', '2026-11-13']);
+  });
+
+  it('a late accepted event for a merged-away account starts the plan on the survivor', async () => {
+    const survivor = await arrivedAccount(t, { name: 'Late Survivor' });
+    const gone = await arrivedAccount(t, { name: 'Late Gone' });
+    await asPerson(t, (ctx) => mergeAccounts(ctx, survivor, gone));
+    await t.run((ctx) => startPlan(ctx, accepted(gone)));
+    expect(await plansOf(gone)).toHaveLength(0);
+    expect(await plansOf(survivor)).toEqual([expect.objectContaining({ status: 'active', accountId: survivor })]);
+  });
+
+  it('a merge where only the merged account has an open plan moves it; the survivor keeps its ended plan', async () => {
+    const survivor = await account({ name: 'Ended Survivor' });
+    const [ended] = await plansOf(survivor.accountId);
+    await t.run((ctx) => stopPlan(ctx, ended!.id, 'replied'));
+    const other = await account({ name: 'Open Other' });
+    const [open] = await plansOf(other.accountId);
+    await publishTestEvent(t.tenantId, accountMerged, { survivorId: survivor.accountId, mergedId: other.accountId, mergedBy: leader });
+    await runPlaybooks(t.tenantId);
+    const after = await plansOf(survivor.accountId);
+    expect(after.map((p) => [p.id, p.status]).sort()).toEqual([[ended!.id, 'stopped'], [open!.id, 'active']].sort());
+    expect(await plansOf(other.accountId)).toHaveLength(0);
   });
 });
 
@@ -269,6 +318,8 @@ describe('running a plan', () => {
     const moved = await asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { ownerUserId: seller2, dueDate: '2030-01-15' }));
     expect(moved.steps[0]).toMatchObject({ ownerUserId: seller2, dueDate: '2030-01-15' });
     expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { dueDate: 'soon' })))).toMatchObject({ status: 400 });
+    expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { dueDate: '2026-02-31' })))).toMatchObject({ status: 400 });
+    expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { dueDate: '2028-02-29' })))).toBeNull();
     expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, s.id, { note: 'x'.repeat(2001) })))).toMatchObject({ status: 400 });
     expect(await rejects(asLeader((ctx) => updateStep(ctx, plan!.id, 'stp_missing', { note: 'x' })))).toMatchObject({ status: 404 });
   });

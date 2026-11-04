@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
-import { accountNames, getSummaries, listPeople } from '@/modules/accounts';
+import { accountNames, getSummaries, listPeople, resolveAccountId } from '@/modules/accounts';
 import { getOffer } from '@/modules/offers';
 import type { z } from 'zod';
 import type { assignmentAccepted } from '@/modules/routing/contracts/events';
@@ -50,7 +50,8 @@ async function resumeOnAccept(ctx: ModuleContext, plan: typeof accountPlan.$infe
  * lead offer's playbook for the account's tier (Ruling 3).
  */
 export async function startPlan(ctx: ModuleContext, e: { data: Accepted; occurredAt: string }): Promise<void> {
-  const d = e.data;
+  // A late event for an account that was merged away starts (or resumes) the plan on the survivor.
+  const d = { ...e.data, accountId: (await resolveAccountId(ctx, e.data.accountId))?.id ?? e.data.accountId };
   const [again] = await ctx.tx.select({ id: accountPlan.id }).from(accountPlan).where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.assignmentId, d.assignmentId)));
   if (again) return;
 

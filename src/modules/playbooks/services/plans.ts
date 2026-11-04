@@ -84,7 +84,7 @@ const daysBetween = (from: string, to: string) => {
 };
 
 async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
-  const [template] = await ctx.tx.select().from(playbookTemplate).where(eq(playbookTemplate.id, plan.templateId));
+  const [template] = await ctx.tx.select().from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), eq(playbookTemplate.id, plan.templateId)));
   const steps = await stepsOf(ctx, plan.id);
   const history = await ctx.tx
     .select()
@@ -135,6 +135,12 @@ export async function getPlan(ctx: ModuleContext, accountId: string): Promise<Pl
   return plan ? view(ctx, plan) : null;
 }
 
+/** 'YYYY-MM-DD' that is a real calendar day (2026-02-31 is not). */
+const isRealDate = (s: string) => {
+  const ms = Date.parse(`${s}T00:00:00Z`);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(ms) && new Date(ms).toISOString().slice(0, 10) === s;
+};
+
 export type StepPatch = { status?: StepStatus; note?: string | null; ownerUserId?: string | null; dueDate?: string };
 
 /** Changes a step: status, note, owner (a workspace member, or null for no one) or due date. Done publishes `playbooks.step.completed`. */
@@ -175,7 +181,7 @@ export async function updateStep(ctx: ModuleContext, planId: string, stepId: str
     changes.push(['owner', { from: step.ownerUserId, to: patch.ownerUserId }]);
   }
   if (patch.dueDate !== undefined && patch.dueDate !== step.dueDate) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(patch.dueDate) || Number.isNaN(Date.parse(`${patch.dueDate}T00:00:00Z`))) throw invalid('due_date', 'Use a date like 2026-12-31.');
+    if (!isRealDate(patch.dueDate)) throw invalid('due_date', 'Use a date like 2026-12-31.');
     set.dueDate = patch.dueDate;
     changes.push(['due_date', { from: step.dueDate, to: patch.dueDate }]);
   }

@@ -124,14 +124,6 @@ export const planPauseOnWithdrawn = defineConsumer({
   handle: (e, ctx) => pauseOnWithdrawn(ctx, e.data.assignmentId),
 });
 
-/** A declined assignment never had a plan, but a late decline of the running one pauses it the same way. */
-export const planPauseOnDeclined = defineConsumer({
-  name: 'playbooks.plan_pause_on_declined',
-  event: assignmentDeclined,
-  orderedBy: (e) => e.data.accountId,
-  handle: (e, ctx) => pauseOnWithdrawn(ctx, e.data.assignmentId),
-});
-
 /** A merged account's plans move to the survivor. */
 export const planOnMerged = defineConsumer({
   name: 'playbooks.plan_on_merged',
@@ -155,6 +147,5 @@ export const playbooksConsumers: ConsumerDef[] = [
   briefOnMerged,
   planOnAccepted,
   planPauseOnWithdrawn,
-  planPauseOnDeclined,
   planOnMerged,
 ];

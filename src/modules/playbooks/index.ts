@@ -17,7 +17,6 @@ export {
   briefUnfreezeOnWithdrawn,
   planOnAccepted,
   planOnMerged,
-  planPauseOnDeclined,
   planPauseOnWithdrawn,
   playbooksConsumers,
   playbooksTenantDefaults,
