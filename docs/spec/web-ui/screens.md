@@ -191,8 +191,10 @@ step.
    conflicting fact: {label}." or "Resolve {n} conflicting facts.", for example "Resolve 1
    conflicting fact: Contract value." `Resolve` jumps to the fact; after: "Facts agree. {label} set to
    {value}.", for example "Facts agree. Contract value set to $18,400,000."; money shows the full
-   amount, not "$18.4M"), committee gaps (R2; "Buying committee has no IT, security or
-   technical buyer." `Find with Enrich`), warm intros (R2, Claude's call, 2026-11-02; read from the live
+   amount, not "$18.4M"), committee gaps (R2b-3; "Buying committee has no {labels}." with the required gap roles in
+   buying-role order, lowercase, joined "a", "a or b", "a, b or c", for example "Buying committee has no commercial
+   buyer or technical buyer." `Find with Enrich` opens the Enrich dialog with every required gap picked;
+   optional gaps are not listed), warm intros (R2, Claude's call, 2026-11-02; read from the live
    intake intro, so it changes the moment someone confirms: confirmed "Warm intro from Ash Patel (someone
    on our team knows them), +8"; unconfirmed "Warm intro from Ash Patel (someone on our team knows them)
    · Unconfirmed, +4 of 8", which omits the base points, with a `Confirm` button only when the API says
@@ -222,9 +224,19 @@ step.
 7. **Playbook** preview (R2): "{name} · {n} steps over {d} days · starts when accepted", rows day,
    step, owner, status.
 8. **Right rail.**
-   - Buying committee: person (initials, name, title, role, note such as "Warm intro through Ash
-     Patel"); gap rows ("No IT or security contact yet", "No technical buyer yet") with `Find` (R2);
-     `Add a person` (form: name, title, email, role).
+   - Buying committee (R2b-3): under the title "{offer name}: {n} of {m} roles covered" ("Core roles: ..."
+     with no offer); person (initials, name, title, role chips, note such as "Warm intro through Ash
+     Patel"; with the editor known "{note} · {name}, {date}"). A guessed role chip reads "Guessed from title"
+     with `Confirm` and `Remove` (`people:write`); toasts "{role} confirmed for {name}." and "{role} removed
+     from {name}.". `Edit` opens the Edit person dialog (below). Gap rows ("No technical buyer yet";
+     optional "No procurement yet · Optional") with `Find`, which opens the Enrich dialog (§4c) with that
+     role picked; without `enrichment:request` the rows show with no button. A role only guessed is not a
+     gap row. With no people: "No people yet. Add someone you know, or Enrich will look for a business
+     owner, a commercial buyer and a technical buyer." and `Find with Enrich` (no gap rows).
+     `Add a person` (form: name, title, email, role, note up to 1,000 characters).
+   - **Edit person dialog** (`people:write`): title "Edit {name}"; checkbox group "Buying roles";
+     textarea "Decision note" with hint "Where they stand. Up to 1,000 characters."; `Save` and `Cancel`;
+     toast "Saved {name}." Errors show the API's message ("Keep the note under 1,000 characters.").
    - Notes ("Scout uses these in the brief"): the same note list as the peek drawer (§3), textarea
      "Add context Scout can't find. Relationships, past deals, timing." `Add note`.
    - Where it came from: Person > Agent > Data vendor chain, each source with its owner; tiles
@@ -247,7 +259,9 @@ step.
    `Show the full brief, signals and facts` (expands in place).
 5. **Right rail**: Assignment (AE, "Accepted {when}", "Accepted automatically {when}" or "Waiting for
    {AE} to accept", the assigner's quoted note, the handoff state); Buying committee with engagement
-   per person (R2: "Met Nov 4" green, "Opened, no reply" amber, "Not contacted" gray).
+   per person (R2: "Met Nov 4" green, "Opened, no reply" amber, "Not contacted" gray). The committee
+   coverage summary, gap rows, `Find`, `Confirm`/`Remove` and the Edit person dialog are the same as §4a
+   (shipped R2b-3); engagement per person is still R2 later.
 
 **States.**
 - Building: dashed card "Scout is still building this brief" / "Scores, dated signals and the brief
@@ -276,7 +290,10 @@ Opened by `Enrich` on the account page (both views) and in the queue peek (§3).
   website.
 - **Buying roles** (People for buying roles): a checkbox per role from `GET /api/v1/buying-roles`, in
   their order; checked to start with are the core roles (business owner, commercial buyer, technical
-  buyer) with no person on the account yet, so a first run stays small. While they
+  buyer) with no person on the account yet, so a first run stays small. The dialog takes
+  `initialRoles?: string[]` (R2b-3): when given, those roles are preselected in place of that default
+  (rail `Find` passes one role, the checklist every required gap). People found this way arrive as
+  guessed roles ("Guessed from title"), and the committee refreshes when the request finishes. While they
   load: "Loading buying roles"; if they fail: "Buying roles didn't load. {error}". Sending with none
   checked: "Pick at least one buying role."
 - **People** (Reveal emails): a checkbox per person on the account without an email, the first 25
@@ -671,7 +688,8 @@ Draft, Retired), `Add offer`.
   is set by `Retire` and can't be undone), Pricing (Fixed fee, Starting at, Per month, Custom quote),
   Amount, Length (weeks), the sections (Summary is the offer's promise, Ideal customer its
   description, then Key offer, Why us, Why now), Who it's for (typical deal size, sales cycle in
-  days, target titles or roles, industries, company size), Initial message, Talking points,
+  days, target titles, "Required buying roles" and "Optional buying roles" checkbox groups (R2b-3; a role
+  ticked in one is disabled in the other; the API refuses an overlap), industries, company size), Initial message, Talking points,
   Objections ("One per line, written as: objection | answer"), Proof points, Avoid. `Cancel`,
   `Save changes` or `Add offer`.
   - Making an offer Active needs a deal size, a sales cycle, a target title or role, and industries

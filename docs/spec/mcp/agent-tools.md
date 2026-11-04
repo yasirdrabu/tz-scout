@@ -161,6 +161,7 @@ or to decide what research is missing."
 Input: `account_id` (req), `sections` (optional list).
 Output: `{ "account_id", "sections": [{ "key": "why_now", "title": "Why now", "text": "...", "citations": ["sig_...", "fct_..."], "written_by": "claude|rules|person" }], "committee": [...], "gaps": [...], "plan": { "playbook": "Public sector RFP", "steps": [...] } }`.
 Scopes: `playbooks:read` (people's contact details need `people:read`).
+The `committee` part is available over REST only (`GET /api/v1/accounts/{id}/brief`, R2b-3) until the MCP server exists; the tool must call `getCommittee`.
 
 ### explain_score
 
@@ -191,6 +192,7 @@ decision. Use when you find someone missing from the buying committee."
 
 Input: `account_id` (req), `person` (PersonInput, req).
 Output: `{ "person_id": "per_...", "summary": "Added Alonzo Joseph as commercial buyer.", "committee_gaps": ["technical_buyer"] }`.
+`committee_gaps` comes from `getCommittee(...).gaps`; over REST today (`POST /api/v1/accounts/{id}/people`, `GET /api/v1/accounts/{id}/committee`) until the MCP server exists. "Ask an agent" in Find waits for the server too.
 Scopes: `people:write`. Duplicate people (same email or same name at the account) return the existing
 `person_id` with `"already_known": true`. Under the hood this is a targeted SRC arrival with
 `inline: true` (D23): it is stored as received, credited to the caller's source, and resolved within

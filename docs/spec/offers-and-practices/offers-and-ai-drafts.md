@@ -14,9 +14,15 @@ and what proof stands behind it. Nothing should be matched against an offer an o
 - Editing the **buyer definition** of an approved offer (industries, size, revenue, regions, titles,
   buying roles, exclusions) sends it back to draft (carried from v1). Editing other fields (promise,
   price, proof points) keeps it approved and publishes `offers.offer.changed`.
-- `target_buying_roles` lists which buying-committee roles the offer needs (for example business
-  owner, commercial buyer, technical buyer). Playbooks uses it to show committee gaps; Scoring counts a
-  person in one of these roles as "buyer on file".
+- `target_buying_roles` lists the **required** buying-committee roles (for example business owner,
+  commercial buyer, technical buyer); `optional_buying_roles` lists roles that help but are not needed
+  (shipped R2b-3). Accounts uses both for committee coverage; Playbooks uses it to show committee gaps;
+  Scoring counts a person in a required role as "buyer on file" and ignores the optional list. Create
+  and patch check every key against the tenant's buying roles (400 "Unknown buying role: {key}") and
+  refuse a role in both lists (400 "A role can't be both required and optional: {label}"); a patch
+  accepts a key already stored on the offer even if the role is archived. Editing only optional roles
+  keeps an approved offer approved. Seeded offers: required business owner, technical buyer, commercial
+  buyer; optional procurement. Existing workspaces get no data migration.
 - Money in cents; margin, expansion rate as decimals.
 
 ## Stories
