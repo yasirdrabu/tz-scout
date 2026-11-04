@@ -50,14 +50,14 @@ export function StepRow({ tenant, me, plan, step, canWrite, onPlan, onFind }: Pr
         )}
       </span>
       <span className={styles.muted}>{`Day ${step.day + 1}`}</span>
-      <button type="button" className={styles.planTitle} aria-expanded={open} aria-controls={detailId} onClick={() => setOpen((o) => !o)}>
+      <button type="button" className={styles.planTitle} aria-expanded={open} aria-controls={open ? detailId : undefined} onClick={() => setOpen((o) => !o)}>
         {step.title}
       </button>
       <span className={styles.muted}>{step.owner_name ?? OWNER_WORD[step.owner_role]}</span>
       <StatusPill step={step} />
       {open && (
         <div id={detailId} className={styles.planDetail}>
-          <StepDetail tenant={tenant} me={me} plan={plan} step={step} canWrite={canWrite} onPlan={onPlan} onFind={onFind} />
+          <StepDetail key={[step.status, step.owner_user_id, step.due_date, step.note].join("|")} tenant={tenant} me={me} plan={plan} step={step} canWrite={canWrite} onPlan={onPlan} onFind={onFind} />
         </div>
       )}
     </li>

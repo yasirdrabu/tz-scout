@@ -172,6 +172,7 @@ describe('The plan card', () => {
     const items = c.getAllByRole('listitem').filter((li) => /the plan|status/.test(li.textContent ?? ''));
     expect(items[0]).toHaveTextContent("Ash Patel changed a step's status · Nov 2, 10:00 AM");
     expect(items[1]).toHaveTextContent('Scout created the plan · Nov 2, 5:00 AM');
+    expect(items).toHaveLength(2);
   });
 });
 
@@ -268,5 +269,33 @@ describe('Assigned, not yet accepted', () => {
     renderApp(URL);
     await screen.findByRole('region', { name: 'Outcomes' });
     expect(screen.queryByRole('region', { name: 'Playbook' })).toBeNull();
+  });
+});
+
+describe('Plan step details stay in sync', () => {
+  it('ticking the row updates the open form and leaves Save disabled', async () => {
+    serveAccount({ review: ACCEPTED, plan: PLAN });
+    renderApp(URL);
+    const c = await card();
+    await userEvent.click(await c.findByRole('button', { name: 'Call the sponsor' }));
+    await userEvent.click(c.getByRole('checkbox', { name: 'Mark Call the sponsor done' }));
+    await waitFor(() => expect(c.getByLabelText('Status')).toHaveValue('done'));
+    expect(c.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('caps the day at the last day', async () => {
+    serveAccount({ review: ACCEPTED, plan: { ...PLAN, day: 40 } });
+    renderApp(URL);
+    expect(await (await card()).findByText('Public sector RFP · Day 11 of 11')).toBeInTheDocument();
+  });
+
+  it('a failed tick reverts the checkbox and shows the error', async () => {
+    serveAccount({ review: ACCEPTED, plan: PLAN });
+    server.use(http.patch('/api/v1/plans/pln_1/steps/stp_4', () => problem(409, 'This plan has ended.')));
+    renderApp(URL);
+    const c = await card();
+    await userEvent.click(await c.findByRole('checkbox', { name: 'Mark Call the sponsor done' }));
+    expect(await screen.findByText('This plan has ended.')).toBeInTheDocument();
+    expect(c.getByRole('checkbox', { name: 'Mark Call the sponsor done' })).not.toBeChecked();
   });
 });
