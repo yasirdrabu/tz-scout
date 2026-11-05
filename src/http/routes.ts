@@ -88,6 +88,7 @@ import * as v1IntegrationsKeyCalls from './routes/v1/integrations/[key]/calls/ro
 import * as v1IntegrationsKeyCredential from './routes/v1/integrations/[key]/credential/route';
 import * as v1IntegrationsKeyDisabled from './routes/v1/integrations/[key]/disabled/route';
 import * as v1IntegrationsKeyMode from './routes/v1/integrations/[key]/mode/route';
+import * as v1IntegrationsKeyRates from './routes/v1/integrations/[key]/rates/route';
 import * as v1IntegrationsKey from './routes/v1/integrations/[key]/route';
 import * as v1Integrations from './routes/v1/integrations/route';
 import * as v1MeCounts from './routes/v1/me/counts/route';
@@ -246,6 +247,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/integrations/:key/credential`, module: v1IntegrationsKeyCredential },
   { path: `${V1}/integrations/:key/disabled`, module: v1IntegrationsKeyDisabled },
   { path: `${V1}/integrations/:key/mode`, module: v1IntegrationsKeyMode },
+  { path: `${V1}/integrations/:key/rates`, module: v1IntegrationsKeyRates },
   { path: `${V1}/integrations/:key`, module: v1IntegrationsKey },
   { path: `${V1}/integrations`, module: v1Integrations },
   { path: `${V1}/me/counts`, module: v1MeCounts },

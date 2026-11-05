@@ -11,7 +11,7 @@ import { newId } from '@/platform/ids';
 import type { AnthropicAdapter, CompleteRequest } from './adapters/anthropic/contract';
 import { aiRunCompleted } from './contracts/events';
 import { aiRun, aiSetting } from './db/schema';
-import { costCents, worstCaseCents } from './pricing';
+import { claudePrices, type ClaudePrices } from './pricing';
 
 export type AiMode = 'live' | 'rules' | 'mock';
 export type AiStatus = 'ok' | 'invalid_output' | 'error' | 'refused_by_cap';
@@ -50,6 +50,8 @@ export type RunOpts = {
   rulesOnly?: boolean;
   /** Like `fresh`, but a run made at or after this time is reused: a job retried after a timeout finds the run it paid for. */
   reuseAfter?: Date;
+  /** The account the run is for, when the caller knows it: carried on the usage record (R3a Ruling 3). */
+  accountId?: string;
 };
 export type RunResult<O> = { output: O; runId: string; mode: AiMode };
 
@@ -171,6 +173,7 @@ async function completeValidated<O>(
   adapter: AnthropicAdapter,
   base: CompleteRequest,
   schema: z.ZodType<O>,
+  prices: ClaudePrices,
   capCents?: number,
 ): Promise<Attempt> {
   const usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
@@ -180,8 +183,8 @@ async function completeValidated<O>(
     // The caller gave up (time limit): no second, paid try.
     if (attempt > 0 && base.signal?.aborted) return { ok: false, errors: `The caller stopped waiting.\n${errors}`, usage };
     if (attempt > 0 && capCents !== undefined) {
-      const next = worstCaseCents(base.model, Math.ceil((base.system.length + user.length) / 4), base.maxTokens);
-      if (costCents(base.model, usage) + next > capCents) return { ok: false, errors: `${SECOND_TRY_OVER_CAP}\n${errors}`, usage };
+      const next = prices.worstCase(Math.ceil((base.system.length + user.length) / 4), base.maxTokens);
+      if (prices.cost(usage) + next > capCents) return { ok: false, errors: `${SECOND_TRY_OVER_CAP}\n${errors}`, usage };
     }
     const r = await adapter.complete({ ...base, user });
     usage.inputTokens += r.inputTokens;
@@ -250,12 +253,14 @@ export async function runTask<I, O>(
     const hit = await reusable(tentative);
     if (hit) return reuse(hit);
   }
+  // Read before the call: a timed-out job's transaction is gone when a late answer is priced.
+  const prices = tentative === 'none' ? undefined : await claudePrices(ctx, model);
 
   // 2. A call that could cost more than the limit is refused before it is made.
   let capRefused = false;
   const noRules = !task.rules || opts.allowRules === false;
-  if (tentative === 'live' && costCap !== undefined) {
-    const worst = worstCaseCents(model, Math.ceil((task.system.length + user.length) / 4), task.maxTokens);
+  if (tentative === 'live' && prices && costCap !== undefined) {
+    const worst = prices.worstCase(Math.ceil((task.system.length + user.length) / 4), task.maxTokens);
     if (worst > costCap) {
       capRefused = true;
       tentative = 'none';
@@ -272,20 +277,21 @@ export async function runTask<I, O>(
   }
 
   // 3. Mock or live, through the gateway.
-  if (tentative !== 'none') {
+  if (tentative !== 'none' && prices) {
     const mode = tentative;
     const started = performance.now();
     let entered = false;
     const callOpts = {
       module: 'ai-tasks',
       unit: 'tokens',
+      ...(opts.accountId ? { accountId: opts.accountId } : {}),
       requestSummary: { task: task.name, promptVersion: task.promptVersion, model },
       // Held against Claude's monthly cost limit before the call; mock calls hold it too, so the limit works locally.
-      reserveCents: worstCaseCents(model, Math.ceil((task.system.length + user.length) / 4), task.maxTokens),
+      reserveCents: prices.worstCase(Math.ceil((task.system.length + user.length) / 4), task.maxTokens),
       // Both attempts' tokens are counted. Cost is only logged for live calls.
       measure: (a: Attempt) => ({
         units: a.usage.inputTokens + a.usage.outputTokens + a.usage.cacheReadTokens,
-        costCents: mode === 'live' ? costCents(model, a.usage) : 0,
+        costCents: mode === 'live' ? prices.cost(a.usage) : 0,
       }),
     };
     try {
@@ -309,6 +315,7 @@ export async function runTask<I, O>(
               ...(mockOutput !== undefined ? { mockOutput } : {}),
             },
             task.output,
+            prices,
             mode === 'live' ? costCap : undefined,
           );
           return a;
@@ -316,7 +323,7 @@ export async function runTask<I, O>(
         callOpts,
       );
       const durationMs = Math.round(performance.now() - started);
-      const cost = mode === 'live' ? costCents(model, attempt.usage) : 0;
+      const cost = mode === 'live' ? prices.cost(attempt.usage) : 0;
       if (attempt.ok) {
         const runId = await record(ctx, task, hash, opts.subject, {
           mode,

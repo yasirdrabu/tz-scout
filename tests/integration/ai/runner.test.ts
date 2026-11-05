@@ -18,9 +18,9 @@ import { AI_LABEL, defineTask, getRun, listRuns, runTask, runTotalsThisMonth } f
 import type { AnthropicAdapter } from '@/modules/ai-tasks';
 import { anthropicMock, registerAnthropicAdapter } from '@/modules/ai-tasks/adapters/anthropic/mock';
 import { aiRun } from '@/modules/ai-tasks/db/schema';
-import { costCents } from '@/modules/ai-tasks/pricing';
+import { claudePrices } from '@/modules/ai-tasks/pricing';
 import { canonicalJson } from '@/modules/ai-tasks/runner';
-import { registerAdapter, saveCredential, setCapLimit, setDisabled, setMode, testConnection } from '@/modules/integrations';
+import { registerAdapter, saveCredential, setCapLimit, setDisabled, setMode, setRates, testConnection } from '@/modules/integrations';
 import { callLog, connection, usagePeriod } from '@/modules/integrations/db/schema';
 import { periodBounds } from '@/modules/integrations/domain/caps';
 import { adminDb } from '@/platform/db/client';
@@ -81,6 +81,15 @@ async function liveWithoutKey(t: Tenant) {
 
 const runsOf = (tenantId: string) =>
   adminDb.select().from(aiRun).where(eq(aiRun.tenantId, tenantId)).orderBy(aiRun.createdAt, aiRun.id);
+const callsOf = (tenantId: string) =>
+  adminDb.select().from(callLog).where(sql`${callLog.tenantId} = ${tenantId} and ${callLog.operation} like 'messages.%'`).orderBy(callLog.at);
+const usageEventsOf = async (tenantId: string) =>
+  (
+    await adminDb
+      .select({ payload: outbox.payload })
+      .from(outbox)
+      .where(sql`${outbox.tenantId} = ${tenantId} and ${outbox.payload}->>'type' = 'integrations.usage.recorded'`)
+  ).map((r) => r.payload as { data: Record<string, unknown> });
 const eventsOf = (tenantId: string) =>
   adminDb
     .select()
@@ -108,6 +117,10 @@ describe('runTask', () => {
     const ev = await eventsOf(t.tenantId);
     expect(ev).toHaveLength(1);
     expect((ev[0]!.payload as { data: { runId: string } }).data.runId).toBe(r.runId);
+    // Sample calls cost nothing and record no usage (R3a Review Focus 4).
+    const [call] = await callsOf(t.tenantId);
+    expect(call!.costCents).toBe(0);
+    expect(await usageEventsOf(t.tenantId)).toHaveLength(0);
   });
 
   it('returns a schema-valid minimal object from the mock when the task has no sample', async () => {
@@ -119,14 +132,46 @@ describe('runTask', () => {
 
   it('runs live with a key and records tokens and cost (AI-E1-S1-AC1)', async () => {
     const t = await freshTenant();
-    const complete = fakeLive([{ echoed: 'hi' }]);
+    const complete = fakeLive([{ echoed: 'hi' }], { inputTokens: 100_000, outputTokens: 20_000, cacheReadTokens: 0 });
     await goLive(t);
     const r = await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject }));
     expect(r).toMatchObject({ mode: 'live', output: { echoed: 'hi' } });
     expect(complete).toHaveBeenCalledTimes(1);
     const [row] = await runsOf(t.tenantId);
-    expect(row).toMatchObject({ mode: 'live', model: 'claude-haiku-5-5', inputTokens: 120, outputTokens: 30 });
-    expect(row!.costCents).toBeGreaterThan(0);
+    expect(row).toMatchObject({ mode: 'live', model: 'claude-haiku-5-5', inputTokens: 100_000, outputTokens: 20_000 });
+    // Haiku's list prices: $1 per million input tokens and $5 per million output.
+    expect(row!.costCents).toBe(20);
+  });
+
+  it('prices a live run from the saved rates and publishes one usage event (R3a Rulings 2 and 3)', async () => {
+    const t = await freshTenant();
+    fakeLive([{ echoed: 'hi' }], { inputTokens: 100_000, outputTokens: 20_000, cacheReadTokens: 10_000 });
+    await goLive(t);
+    await t.run((ctx) => setRates(ctx, 'anthropic', [{ item: 'claude-haiku-5-5:output', centsPerUnit: 0.001 }]));
+    let correlationId = '';
+    await t.run((ctx) => {
+      correlationId = ctx.correlationId;
+      return runTask(ctx, echo, { text: 'hi' }, { subject, accountId: 'acc_1' });
+    });
+    // 100,000 input tokens at 0.0001 cents, 10,000 cache reads at a tenth of that, 20,000 output at 0.001: 30.1 cents.
+    const [row] = await runsOf(t.tenantId);
+    expect(row!.costCents).toBe(30);
+    const [call] = await callsOf(t.tenantId);
+    expect(call!.costCents).toBe(30);
+    const events = await usageEventsOf(t.tenantId);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.data).toEqual({
+      callId: call!.id,
+      provider: 'anthropic',
+      operation: 'messages.echo_test',
+      module: 'ai-tasks',
+      units: 130_000,
+      unit: 'tokens',
+      costCents: 30,
+      accountId: 'acc_1',
+      correlationId,
+      occurredAt: expect.any(String),
+    });
   });
 
   it('retries once with the errors, then stores invalid_output and names the task (AC2)', async () => {
@@ -365,10 +410,16 @@ describe('helpers', () => {
   it('canonical JSON sorts keys at every depth', () => {
     expect(canonicalJson({ b: 1, a: { d: [{ y: 1, x: 2 }], c: undefined } })).toBe('{"a":{"d":[{"x":2,"y":1}]},"b":1}');
   });
-  it('prices round up and unknown models cost nothing', () => {
-    expect(costCents('claude-haiku-5-5', { inputTokens: 1, outputTokens: 0, cacheReadTokens: 0 })).toBe(1);
-    expect(costCents('claude-haiku-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 0 })).toBe(600);
-    expect(costCents('nope', { inputTokens: 9, outputTokens: 9, cacheReadTokens: 0 })).toBe(0);
+  it('prices round half up and unknown models cost nothing', async () => {
+    const t = await freshTenant();
+    const price = (model: string, inputTokens: number, outputTokens: number) =>
+      t.run(async (ctx) => (await claudePrices(ctx, model)).cost({ inputTokens, outputTokens, cacheReadTokens: 0 }));
+    expect(await price('claude-haiku-5-5', 1, 0)).toBe(0);
+    expect(await price('claude-haiku-5-5', 5000, 0)).toBe(1);
+    expect(await price('claude-haiku-5-5', 1_000_000, 1_000_000)).toBe(600);
+    expect(await price('nope', 9_000_000, 9)).toBe(0);
+    // The worst case is held against limits, so it rounds up.
+    expect(await t.run(async (ctx) => (await claudePrices(ctx, 'claude-haiku-5-5')).worstCase(1, 0))).toBe(1);
   });
   it('labels', () => {
     expect(AI_LABEL).toEqual({ live: 'Written by Claude', rules: 'Assembled from rules', mock: 'Sample output' });
@@ -387,14 +438,14 @@ describe('runTask fix round 1', () => {
 
   it('logs units and cost on the call log, counting both attempts', async () => {
     const t = await freshTenant();
-    fakeLive([{ bad: 1 }, { echoed: 'ok' }]);
+    fakeLive([{ bad: 1 }, { echoed: 'ok' }], { inputTokens: 50_000, outputTokens: 10_000, cacheReadTokens: 0 });
     await goLive(t);
     await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject }));
     const [row] = (await adminDb.execute(
       sql`select units, cost_cents, unit from integrations.call_log where tenant_id = ${t.tenantId} and provider = 'anthropic' and operation = 'messages.echo_test'`,
     )) as unknown as { units: number; cost_cents: number; unit: string }[];
-    expect(row).toMatchObject({ units: 300, unit: 'tokens' });
-    expect(row!.cost_cents).toBeGreaterThan(0);
+    expect(row).toMatchObject({ units: 120_000, unit: 'tokens' });
+    expect(row!.cost_cents).toBe(20);
   });
 
   it('gives distinct reasons when there are no rules', async () => {

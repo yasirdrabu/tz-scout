@@ -1,7 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { getAccount, getSummaries, listBuyingRoles, type AccountView, type PersonView } from '@/modules/accounts';
 import { getRun } from '@/modules/ai-tasks';
-import { PROVIDERS, checkCap, connectionStatus, gateway, markConnectionFailing } from '@/modules/integrations';
+import { PROVIDERS, checkCap, connectionStatus, gateway, getRates, markConnectionFailing, priceCents, priceOf } from '@/modules/integrations';
 import { checkArrivalCap, countryCode, ensureVendorSource, findArrivalByRef, normaliseDomain, readSource, submitArrival } from '@/modules/intake';
 import { getOffer } from '@/modules/offers';
 import { tenantSummary } from '@/modules/tenancy';
@@ -14,11 +14,11 @@ import { requestCompleted, requestFailed } from '../contracts/events';
 import type { EnrichmentKind, RequestStatus } from '../contracts/types';
 import { request } from '../db/schema';
 import { classifyError, type ClassifiedError } from '../domain/errors';
-import { DEFAULT_CENTS_PER_CREDIT, MAX_PEOPLE, PEOPLE_PER_ROLE } from '../domain/prices';
+import { MAX_PEOPLE, PEOPLE_PER_ROLE } from '../domain/prices';
 import { readWebsiteInput, websiteFacts } from '../domain/read-website';
 import { nothingFound, searchTitles, type LeadOffer } from '../domain/run';
 import { readWebsite } from '../tasks/read-website';
-import { connectionFacts, fromStoredEstimate } from './requests';
+import { fromStoredEstimate } from './requests';
 
 // The run of an approved request (Rulings 8 and 9). State the job must keep when it throws (the wait for a limit,
 // `running`, a retry's error) is committed in its own transaction; the end state is written in the job's transaction,
@@ -113,13 +113,22 @@ const asPerson = (p: PersonView): Person => ({
 /** Runs the kind's provider operations, adding what each finds to `f` as it goes, so an error keeps the rest. */
 async function operate(ctx: ModuleContext, r: Row, domain: string, f: Found): Promise<void> {
   const summary = { requestId: r.id, accountId: r.accountId };
-  /** One gateway call per operation, holding its worst case against the limit and settling what it spent (Pitfall 3). */
+  // Read before the calls: pricing an answer must not need the job's transaction, which a timeout loses.
+  const rates = new Map((await getRates(ctx, r.providerKey)).map((x) => [x.item, x.centsPerUnit]));
+  /**
+   * One gateway call per operation, holding its worst case against the limit and settling what it spent (Pitfall 3).
+   * A live call's credits are priced at the provider's rate (R3a Ruling 2); a sample call costs 0.
+   */
   const call = async <T>(operation: string, worst: number, fn: (a: EnrichmentAdapter) => Promise<Paid<T>>): Promise<T> => {
     const paid = await gateway.call(ctx, r.providerKey, operation, (a) => fn(a as EnrichmentAdapter), {
       module: 'enrichment',
       unit: 'credits',
       units: worst,
-      measure: (p: Paid<T>) => ({ units: p.creditsUsed }),
+      accountId: r.accountId,
+      measure: (p: Paid<T>, { live }) => ({
+        units: p.creditsUsed,
+        costCents: live ? priceOf(rates, [{ item: 'credit', units: p.creditsUsed }]) : 0,
+      }),
       requestSummary: summary,
     });
     f.credits += paid.creditsUsed;
@@ -181,7 +190,7 @@ async function operate(ctx: ModuleContext, r: Row, domain: string, f: Found): Pr
         module: 'enrichment',
         requestSummary: summary,
       });
-      const read = await readWebsite(ctx, readWebsiteInput(domain, pages), { subject: subject(r.id) });
+      const read = await readWebsite(ctx, readWebsiteInput(domain, pages), { subject: subject(r.id), accountId: r.accountId });
       f.readByRules = read.mode !== 'live';
       f.aiCents += (await getRun(ctx, read.runId))?.costCents ?? 0;
       f.facts.push(...websiteFacts(read.output));
@@ -278,10 +287,9 @@ async function roleLabels(ctx: ModuleContext, r: Row): Promise<string[]> {
   return ((r.params as { roles?: string[] }).roles ?? []).map((k) => labels.get(k) ?? k);
 }
 
-/** Credits at the rate the estimate used (Ruling 5), plus Claude's cost for a website read. */
+/** Credits at the provider's rate (R3a Ruling 2), plus Claude's cost for a website read. */
 async function costOf(ctx: ModuleContext, r: Row, f: Found): Promise<number> {
-  const rate = (await connectionFacts(ctx, r.providerKey)).centsPerCredit ?? DEFAULT_CENTS_PER_CREDIT[r.providerKey] ?? 0;
-  return f.credits * rate + f.aiCents;
+  return (await priceCents(ctx, r.providerKey, [{ item: 'credit', units: f.credits }])) + f.aiCents;
 }
 
 /** Submits what was found and writes `completed` or `partial` with the result; publishes `completed`. */

@@ -18,6 +18,8 @@ goes through this module's gateway, so call logging, rate limits and caps live i
 | `call_log` | `id`, `tenant_id`, `connection_id`, `provider`, `operation` (e.g. `hubspot.company.upsert`), `module`, `principal_id` (user, key or system), `api_key_id`, `correlation_id`, `request_summary` (json, secrets and personal data redacted), `status_code`, `outcome` (ok, error, rate_limited, blocked_by_cap), `duration_ms`, `units` (credits, tokens, records), `cost_cents`, `error_message`, `at` |
 | `usage_cap` | `tenant_id`, `provider_key`, `unit` (calls, credits, cost_cents), `period` (day, month), `limit`, `overage_period_start` (date, null), `updated_by`, `updated_at`. One per provider (R2b-1, usage-caps.md Ruling 2) |
 | `usage_period` | `tenant_id`, `provider_key`, `period_start`, `used`, `reserved`, `warned`, `blocked`. The row `reserve` locks |
+| `provider_rate` | `tenant_id`, `provider`, `item` (`{model}:input`, `{model}:output` per token; `credit`), `cents_per_unit` (numeric 14,6), `updated_by`, `updated_at`. A missing row reads the default from code (R3a, usage-caps.md "Rates and usage") |
+| `paid_pause` | `tenant_id`, `category`, `month` (YYYY-MM), `paused`. Set from `analytics.budget.level_changed` (R3a) |
 
 Call log rows are kept 180 days, then summarised into daily usage rows.
 
@@ -39,9 +41,14 @@ Call log rows are kept 180 days, then summarised into daily usage rows.
 
 ## Public interface (for other modules)
 
-- `gateway.call(ctx, provider, operation, fn, { units?, costCents?, apiKeyId? })`: checks the
+- `gateway.call(ctx, provider, operation, fn, { units?, costCents?, apiKeyId?, accountId?, measure? })`: checks the
   connection is live and not blocked, checks caps (reserving the expected units), runs `fn` with a
-  decrypted client, logs the call, records actual units and cost, publishes threshold events.
+  decrypted client, logs the call, records actual units and cost, publishes threshold events and, for a
+  live call that cost money, `integrations.usage.recorded`. `measure(result, { live })` is told whether the
+  live adapter answered.
+- `priceCents(ctx, provider, [{ item, units }])` prices usage at the tenant's rates in whole cents (half up);
+  `getRates` and `setRates` read and save the rates. `COST_CATEGORIES`, `CATEGORY_OF_PROVIDER` and `PAUSABLE`
+  are in `contracts/costs`.
 - `adapterFor(ctx, provider) → Adapter` returns the mock or live implementation for this tenant.
 - `connectionStatus(ctx, provider) → { mode, status, lastError }`.
 - `checkCap(ctx, providerKey, amount) → { status: 'ok'|'warn'|'blocked', used, limit|null, resetsAt|null }`
@@ -55,7 +62,7 @@ Call log rows are kept 180 days, then summarised into daily usage rows.
 | `integrations.connection.changed` | `connectionId`, `provider`, `mode`, `status`, `changedBy` |
 | `integrations.connection.tested` | `connectionId`, `provider`, `ok`, `message`, `durationMs` |
 | `integrations.usage.threshold_reached` | `providerKey`, `unit`, `period`, `periodStart`, `level` (warn, blocked), `used`, `limit`, `resetsAt` (once per level per period) |
-| `integrations.usage.recorded` | `provider`, `operation`, `module`, `units`, `unit`, `costCents`, `apiKeyId?`, `sourceId?`, `correlationId` (emitted for every call with a cost; ANL builds automatic cost lines from it) |
+| `integrations.usage.recorded` | `callId`, `provider`, `operation`, `module`, `units`, `unit`, `costCents`, `accountId` (or null), `correlationId`, `occurredAt` (R3a: a successful live call with `costCents` above 0, from the call log's transaction; sample and mock calls never publish it; ANL builds automatic cost lines from it) |
 
 Consumes `tenancy.api_key.created` (create default caps for the key) and `tenancy.api_key.revoked`
 (close its counters). Handles `jobs.history.republish` by re-publishing `integrations.usage.recorded`
@@ -67,6 +74,7 @@ from the call log with `replay: true` (events-and-async.md).
 |---|---|
 | `GET /api/v1/integrations` | `integrations:manage` |
 | `GET /api/v1/integrations/{provider}/calls?from&to&outcome&apiKeyId` | `integrations:manage` |
+| `GET /api/v1/integrations/{provider}/rates`, `PUT` `{ rates: [{ item, cents_per_unit }] }` | `integrations:manage` (PUT people only) |
 | `GET /api/v1/usage?period=month` | `integrations:manage` or `keys:manage` |
 
 Credentials are set only in the web app, never through the API.

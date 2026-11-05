@@ -6,7 +6,7 @@ export type EstimateInput = {
   kind: EnrichmentKind;
   roles?: readonly string[];
   personIds?: readonly string[];
-  /** From the connection's settings; else the provider's default. */
+  /** The provider's rate (R3a Ruling 1); else its default. */
   centsPerCredit?: number;
   /** Most a website read's Claude call could cost. */
   aiWorstCents?: number;
@@ -31,7 +31,7 @@ function credits(i: EstimateInput): number {
 export function estimate(i: EstimateInput): Estimate {
   if (i.kind === 'website_read') return { credits: 0, costCents: i.aiWorstCents ?? 0 };
   const n = credits(i);
-  return { credits: n, costCents: n * (i.centsPerCredit ?? DEFAULT_CENTS_PER_CREDIT[i.provider] ?? 0) };
+  return { credits: n, costCents: Math.round(n * (i.centsPerCredit ?? DEFAULT_CENTS_PER_CREDIT[i.provider] ?? 0)) };
 }
 
 // Cents shown to the cent: estimates are small (offers' `money` rounds to whole units).
