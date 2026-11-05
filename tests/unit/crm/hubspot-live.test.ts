@@ -300,6 +300,7 @@ describe('hubspotLive activities, deals and leads', () => {
       ]),
       hit('calls', [obj('c1', { hs_timestamp: '2026-03-02T10:00:00Z', hubspot_owner_id: '7001' })]),
       hit('meetings', [obj('m1', { hs_timestamp: '2026-03-03T10:00:00Z', hubspot_owner_id: '7002' })]),
+      on('POST', '/crm/v4/associations/', { body: { results: [] } }),
     );
     const out = await adapter(f).listActivities({ companyExternalId: '11', since: '2026-03-01T00:00:00Z' });
     expect(out.map((a) => [a.externalId, a.kind, a.actorOwnerExternalId])).toEqual([
@@ -417,5 +418,99 @@ describe('hubspotLive webhooks', () => {
       { kind: 'activity', externalIds: ['77'] },
     ]);
     expect(await adapter(fake()).parseWebhook({ rawBody: 'not json' })).toEqual([]);
+  });
+});
+
+describe('hubspotLive activity details', () => {
+  const search = (type: string, results: unknown[]) => on('POST', `/crm/v3/objects/${type}/search`, { body: { results } });
+  const assoc = (type: string, links: Record<string, string[]>) =>
+    on('POST', `/crm/v4/associations/${type}/contacts/batch/read`, {
+      body: { results: Object.entries(links).map(([id, to]) => ({ from: { id }, to: to.map((t) => ({ toObjectId: Number(t) })) })) },
+    });
+  const noAssoc = on('POST', '/crm/v4/associations/', { body: { results: [] } });
+  const contacts = (...cs: [string, Record<string, string | null>][]) => on('POST', '/crm/v3/objects/contacts/batch/read', { body: { results: cs.map(([id, p]) => obj(id, p)) } });
+  const since = '2026-03-01T00:00:00Z';
+  const meeting = (id: string, outcome: string | null) =>
+    obj(id, { hs_timestamp: '2026-03-03T10:00:00Z', hubspot_owner_id: '7002', hs_meeting_start_time: '2026-03-03T10:00:00Z', hs_meeting_end_time: '2026-03-03T10:30:00Z', hs_meeting_outcome: outcome, hs_meeting_title: 'Intro' });
+
+  it('maps every hs_meeting_outcome', async () => {
+    const outcomes: [string | null, string][] = [
+      ['COMPLETED', 'held'],
+      ['SCHEDULED', 'scheduled'],
+      ['RESCHEDULED', 'scheduled'],
+      ['NO_SHOW', 'no_show'],
+      ['CANCELED', 'cancelled'],
+      [null, 'scheduled'],
+    ];
+    const f = fake(search('meetings', outcomes.map(([o], i) => meeting(`m${i}`, o))), search('emails', []), search('calls', []), noAssoc);
+    const out = await adapter(f).listActivities({ companyExternalId: '11', since });
+    expect(out.map((a) => a.status)).toEqual(outcomes.map(([, s]) => s));
+    expect(out[0]).toMatchObject({ subject: 'Intro', startAt: '2026-03-03T10:00:00.000Z', endAt: '2026-03-03T10:30:00.000Z' });
+  });
+
+  it('reads contact names through the associations', async () => {
+    const f = fake(
+      search('emails', [obj('e1', { hs_timestamp: '2026-03-01T09:00:00Z', hs_email_direction: 'EMAIL' })]),
+      search('calls', []),
+      search('meetings', []),
+      assoc('emails', { e1: ['501', '502'] }),
+      contacts(['501', { firstname: 'Pat', lastname: 'Lee' }], ['502', { firstname: null, lastname: null }]),
+    );
+    const [a] = await adapter(f).listActivities({ companyExternalId: '11', since });
+    expect(a!.contacts).toEqual([
+      { externalId: '501', name: 'Pat Lee' },
+      { externalId: '502', name: null },
+    ]);
+  });
+
+  it('email subject and meeting title land in subject', async () => {
+    const f = fake(
+      search('emails', [obj('e1', { hs_timestamp: '2026-03-01T09:00:00Z', hs_email_direction: 'EMAIL', hs_email_subject: 'Hello' }), obj('e2', { hs_timestamp: '2026-03-01T09:30:00Z', hs_email_subject: '' })]),
+      search('calls', []),
+      search('meetings', [meeting('m1', 'COMPLETED')]),
+      noAssoc,
+    );
+    const out = await adapter(f).listActivities({ companyExternalId: '11', since });
+    expect(out.map((a) => [a.externalId, a.subject])).toEqual([['e1', 'Hello'], ['e2', null], ['m1', 'Intro']]);
+    expect(out.find((a) => a.externalId === 'e1')).toMatchObject({ startAt: null, endAt: null, status: null });
+  });
+
+  it('meetingsFrom adds a second meeting search and de-duplicates by id', async () => {
+    let n = 0;
+    const f = fake(
+      search('emails', []),
+      search('calls', []),
+      (r) => {
+        if (r.path !== '/crm/v3/objects/meetings/search') return undefined;
+        n += 1;
+        return { body: { results: n === 1 ? [meeting('m1', 'SCHEDULED')] : [meeting('m1', 'CANCELED'), meeting('m2', 'COMPLETED')] } };
+      },
+      noAssoc,
+    );
+    const from = '2026-02-01T00:00:00Z';
+    const out = await adapter(f).listActivities({ companyExternalId: '11', since, meetingsFrom: from });
+    const searches = f.calls.filter((c) => c.path === '/crm/v3/objects/meetings/search');
+    expect(searches).toHaveLength(2);
+    expect(searches[1]!.body!.filterGroups[0].filters).toContainEqual({ propertyName: 'hs_meeting_start_time', operator: 'GTE', value: String(Date.parse(from)) });
+    expect(out.map((a) => [a.externalId, a.status])).toEqual([['m1', 'scheduled'], ['m2', 'held']]);
+    // Without meetingsFrom there is one search.
+    const g = fake(search('emails', []), search('calls', []), search('meetings', []));
+    await adapter(g).listActivities({ companyExternalId: '11', since });
+    expect(g.calls.filter((c) => c.path === '/crm/v3/objects/meetings/search')).toHaveLength(1);
+  });
+
+  it('no body property is requested', async () => {
+    const f = fake(
+      search('emails', [obj('e1', { hs_timestamp: '2026-03-01T09:00:00Z' })]),
+      search('calls', [obj('c1', { hs_timestamp: '2026-03-01T09:00:00Z' })]),
+      search('meetings', [meeting('m1', null)]),
+      assoc('emails', { e1: ['501'] }),
+      contacts(['501', { firstname: 'Pat' }]),
+      noAssoc,
+    );
+    await adapter(f).listActivities({ companyExternalId: '11', since, meetingsFrom: since });
+    const asked = f.calls.flatMap((c) => (Array.isArray(c.body?.properties) ? (c.body!.properties as string[]) : []));
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.filter((p) => /body|text|html|preview/i.test(p))).toEqual([]);
   });
 });
