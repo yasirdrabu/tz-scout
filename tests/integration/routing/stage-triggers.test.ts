@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { activityObserved } from '@/modules/crm/contracts/events';
 import { planNoReply } from '@/modules/playbooks/contracts/events';
 import { accept, assign, stageChanged } from '@/modules/routing';
+import { onPlanNoReply } from '@/modules/routing/services/crm-events';
 import { accountReview, pipelineStage, stageChange } from '@/modules/routing/db/schema';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -97,16 +98,37 @@ describe('a playbook ending with no reply moves the account to the exit that own
     return a;
   };
 
-  it('an accepted account goes to Back to nurture, once, however often it is told', async () => {
+  it('an accepted account goes to Back to nurture', async () => {
     const d = await routingTenant();
     const a = await accepted(d, await member(d, 'seller'));
     const before = (await movesIn(d, a)).length;
     await noReply(d, a);
-    await noReply(d, a);
+    expect(await stageIn(d, a)).toBe('back_to_nurture');
+    expect(await movesIn(d, a)).toHaveLength(before + 1);
+  });
+
+  it('the same event delivered twice moves the account once', async () => {
+    const d = await routingTenant();
+    const a = await accepted(d, await member(d, 'seller'));
+    const before = (await movesIn(d, a)).length;
+    const at = new Date().toISOString();
+    const e = { id: newId('evt'), type: planNoReply.type, schemaVersion: 1, tenantId: d.tenantId, occurredAt: at, actor: { kind: 'system' as const, id: 'test' }, correlationId: newId('cor'), data: { planId: newId('pln'), accountId: a, assignmentId: newId('asg'), at } };
+    await d.run((ctx) => onPlanNoReply(e, ctx));
+    await d.run((ctx) => onPlanNoReply(e, ctx));
     expect(await stageIn(d, a)).toBe('back_to_nurture');
     const rows = await movesIn(d, a);
     expect(rows).toHaveLength(before + 1);
-    expect(rows.filter((r) => r.toStage === 'back_to_nurture')).toHaveLength(1);
+    expect(rows.filter((r) => r.causeEventId === e.id)).toHaveLength(1);
+  });
+
+  it('an account already in the exit stays put when another plan ends with no reply', async () => {
+    const d = await routingTenant();
+    const a = await accepted(d, await member(d, 'seller'));
+    await noReply(d, a);
+    const after = (await movesIn(d, a)).length;
+    await noReply(d, a);
+    expect(await stageIn(d, a)).toBe('back_to_nurture');
+    expect(await movesIn(d, a)).toHaveLength(after);
   });
 
   it('an Engaged account stays where it is', async () => {

@@ -66,7 +66,6 @@ export const routingPlanNoReply = defineConsumer({
   handle: onPlanNoReply,
 });
 
-
 /** The handoff events set the review's handoff state; the later `at` wins. */
 export const routingCrmHandoffCompleted = defineConsumer({ name: 'routing.crm_handoff.completed', event: handoffCompleted, orderedBy: (e) => e.data.accountId, handle: onHandoffCompleted });
 export const routingCrmHandoffFailed = defineConsumer({ name: 'routing.crm_handoff.failed', event: handoffFailed, orderedBy: (e) => e.data.accountId, handle: onHandoffFailed });

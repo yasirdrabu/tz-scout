@@ -129,10 +129,9 @@ describe('movement rules', () => {
     expect(moveFor('assigned', sig('reply_or_meeting'), stages)).toBe('engaged');
   });
   it('exits are entered from any flow stage but the won stage', () => {
-    for (const from of ['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity']) {
-      expect(moveFor(from, sig('deal_closed_lost'), DEFAULT_STAGES)).toBe('lost');
-      if (!['engaged', 'opportunity'].includes(from)) expect(moveFor(from, sig('playbook_no_reply'), DEFAULT_STAGES)).toBe('back_to_nurture');
-    }
+    for (const from of ['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity']) expect(moveFor(from, sig('deal_closed_lost'), DEFAULT_STAGES)).toBe('lost');
+    // A playbook ending with no reply stops short of an account that has engaged.
+    for (const from of ['arrived', 'reviewed', 'assigned']) expect(moveFor(from, sig('playbook_no_reply'), DEFAULT_STAGES)).toBe('back_to_nurture');
     expect(moveFor('won', sig('deal_closed_lost'), DEFAULT_STAGES)).toBeNull();
     expect(moveFor('won', sig('reviewer_rejects'), DEFAULT_STAGES)).toBeNull();
   });
