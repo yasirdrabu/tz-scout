@@ -13,7 +13,7 @@ import { POST as postArrival } from '@/http/routes/v1/arrivals/route';
 import { GET as getBuyingRoles } from '@/http/routes/v1/buying-roles/route';
 import { listPeople, upsertFromArrival } from '@/modules/accounts';
 import { buyingRole } from '@/modules/accounts/db/schema';
-import { registerHandoffPackageProvider, seedMockCrm, syncAccount, syncOwners } from '@/modules/crm';
+import { handoffPackageProvider, registerHandoffPackageProvider, seedMockCrm, syncAccount, syncOwners } from '@/modules/crm';
 import { activity, companyCheck, followThrough, handoff, link } from '@/modules/crm/db/schema';
 import { mockAddActivity, setMockFailure } from '@/modules/crm/fixtures';
 import { arrival } from '@/modules/intake/db/schema';
@@ -353,6 +353,7 @@ describe('feed rows say who did what (R2d Ruling 8)', () => {
   let a: string;
   let h: typeof handoff.$inferSelect;
   const startedAt = '2026-10-30T10:00:00.000Z';
+  let before: ReturnType<typeof handoffPackageProvider> | null = null;
 
   beforeAll(async () => {
     a = await w.sent({ name: 'Who Co', industry: 'Logistics' });
@@ -378,12 +379,14 @@ describe('feed rows say who did what (R2d Ruling 8)', () => {
       row(1, { kind: 'reply', contacts: [pat], subject: 'Re: Pilot scope' }),
       row(2, { kind: 'meeting', status: 'scheduled', startAt: new Date('2099-11-18T15:00:00Z'), endAt: new Date('2099-11-18T16:00:00Z'), contacts: [pat] }),
     ]);
+    before = handoffPackageProvider();
     registerHandoffPackageProvider({
       package: async () => null,
       planTasks: async () => ({ planId: 'apl_who', playbookName: 'Logistics intro', startedAt, otherPlans: [] }) as never,
     });
   });
-  afterAll(() => registerHandoffPackageProvider(null));
+  // Put back the provider compose registered, not the default.
+  afterAll(() => registerHandoffPackageProvider(before));
 
   it('names the seller on their email, the contact on a reply, and Scout on its own rows', async () => {
     const body = await json(w.as(leader, getActivity, `accounts/${a}/activity`));
