@@ -492,11 +492,25 @@ describe('hubspotLive activity details', () => {
     const searches = f.calls.filter((c) => c.path === '/crm/v3/objects/meetings/search');
     expect(searches).toHaveLength(2);
     expect(searches[1]!.body!.filterGroups[0].filters).toContainEqual({ propertyName: 'hs_meeting_start_time', operator: 'GTE', value: String(Date.parse(from)) });
-    expect(out.map((a) => [a.externalId, a.status])).toEqual([['m1', 'scheduled'], ['m2', 'held']]);
+    expect(out.map((a) => [a.externalId, a.status])).toEqual([['m1', 'cancelled'], ['m2', 'held']]);
     // Without meetingsFrom there is one search.
     const g = fake(search('emails', []), search('calls', []), search('meetings', []));
     await adapter(g).listActivities({ companyExternalId: '11', since });
     expect(g.calls.filter((c) => c.path === '/crm/v3/objects/meetings/search')).toHaveLength(1);
+  });
+
+  it('a 207 from the batch associations read keeps the results that are present', async () => {
+    const f = fake(
+      search('emails', [obj('e1', { hs_timestamp: '2026-03-01T09:00:00Z' }), obj('e2', { hs_timestamp: '2026-03-01T09:30:00Z' })]),
+      search('calls', []),
+      search('meetings', []),
+      on('POST', '/crm/v4/associations/emails/contacts/batch/read', { status: 207, body: { status: 'COMPLETE', results: [{ from: { id: 'e1' }, to: [{ toObjectId: 501 }] }], errors: [{ status: 'error', message: 'e2 failed' }] } }),
+      contacts(['501', { firstname: 'Pat', lastname: 'Lee' }]),
+    );
+    const out = await adapter(f).listActivities({ companyExternalId: '11', since });
+    expect(out.map((a) => [a.externalId, a.contacts.map((c) => c.name)])).toEqual([['e1', ['Pat Lee']], ['e2', []]]);
+    const none = fake(search('emails', [obj('e1', { hs_timestamp: '2026-03-01T09:00:00Z' })]), search('calls', []), search('meetings', []), on('POST', '/crm/v4/associations/', { status: 207, body: { errors: [{ message: 'all failed' }] } }));
+    expect((await adapter(none).listActivities({ companyExternalId: '11', since }))[0]!.contacts).toEqual([]);
   });
 
   it('no body property is requested', async () => {

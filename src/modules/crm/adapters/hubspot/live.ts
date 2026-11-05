@@ -54,6 +54,7 @@ const companyAssocSchema = objSchema.extend({
   associations: z.record(z.string(), z.object({ results: z.array(z.object({ id: z.coerce.string() })) })).optional(),
 });
 const dealAssocSchema = z.object({ results: z.array(z.object({ from: z.object({ id: z.coerce.string() }), to: z.array(z.object({ toObjectId: z.coerce.string() })) })) });
+const partialAssocSchema = z.object({ results: dealAssocSchema.shape.results.default([]) });
 const accountSchema = z.object({ portalId: z.coerce.string(), companyName: z.string().optional() });
 const tokenInfoSchema = z.object({ scopes: z.array(z.string()), hubId: z.coerce.string().optional() });
 
@@ -310,7 +311,8 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
   async function contactsOf(object: string, ids: string[]): Promise<Map<string, ActivityContact[]>> {
     const listed = new Map<string, string[]>();
     for (let i = 0; i < ids.length; i += 100) {
-      const r = await call(dealAssocSchema, 'POST', `/crm/v4/associations/${object}/contacts/batch/read`, { inputs: ids.slice(i, i + 100).map((id) => ({ id })) }, true);
+      // A 207 (some inputs failed) is a success here: the results present are used, the rest read as no contacts.
+      const r = await call(partialAssocSchema, 'POST', `/crm/v4/associations/${object}/contacts/batch/read`, { inputs: ids.slice(i, i + 100).map((id) => ({ id })) }, true);
       for (const x of r.results) listed.set(x.from.id, [...new Set(x.to.map((t) => t.toObjectId))]);
     }
     const contactIds = [...new Set([...listed.values()].flat())];
@@ -341,12 +343,13 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
       { propertyName: 'hs_timestamp', direction: 'ASCENDING' },
     ]);
     if (object === 'meetings' && meetingsFrom) {
-      // Meetings starting from `meetingsFrom` are read again so a moved or cancelled one updates; merged by id.
-      const seen = new Set(rows.map((r) => r.id));
+      // Meetings starting from `meetingsFrom` are read again so a moved or cancelled one updates; merged by id; on a duplicate the dedicated meeting read wins.
+      const wins = new Set<string>();
       const again = await searchAll(object, [associated, { propertyName: 'hs_meeting_start_time', operator: 'GTE', value: toMs(meetingsFrom) }], properties, 500, [
         { propertyName: 'hs_meeting_start_time', direction: 'ASCENDING' },
       ]);
-      rows.push(...again.filter((r) => !seen.has(r.id)));
+      for (const r of again) wins.add(r.id);
+      rows.splice(0, rows.length, ...rows.filter((r) => !wins.has(r.id)), ...again);
     }
     const contacts = rows.length ? await contactsOf(object, rows.map((r) => r.id)) : new Map<string, ActivityContact[]>();
     return rows.flatMap((r) => {
