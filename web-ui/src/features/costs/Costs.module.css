@@ -152,17 +152,28 @@
 
 .chartWrap {
   position: relative;
+  height: 200px;
+  padding-top: 8px;
 }
 
 .chart {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  align-items: end;
   gap: 14px;
-  height: 200px;
+  height: 100%;
   margin: 0;
-  padding: 20px 0 8px;
+  padding: 0;
   list-style: none;
+}
+
+/* The bar area between the amount row and the month row: bars and the budget line scale to its height. */
+.plot {
+  position: absolute;
+  top: 26px;
+  right: 0;
+  bottom: 18px;
+  left: 0;
+  pointer-events: none;
 }
 
 .budgetLine {
@@ -171,15 +182,12 @@
   left: 0;
   border-top: 2px dashed var(--text);
   opacity: 0.55;
-  pointer-events: none;
 }
 
 .col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
+  display: grid;
+  grid-template-rows: 18px minmax(0, 1fr) 18px;
+  justify-items: center;
   height: 100%;
 }
 
@@ -190,6 +198,7 @@
 }
 
 .bar {
+  align-self: end;
   width: 100%;
   max-width: 44px;
   border-radius: 6px 6px 2px 2px;

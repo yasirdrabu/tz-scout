@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { meQuery } from '../../api/me';
+import { centsToInput, parseMoney } from '../../lib/money-input';
 import { useFormat } from '../../lib/useFormat';
 import { Button } from '../../ui/Button';
 import { Card } from '../../ui/Card';
@@ -20,13 +21,6 @@ const NEEDS_REASON = "Say why you're voiding this cost.";
 
 /** Today as YYYY-MM-DD in the workspace's timezone. */
 const today = (timeZone: string | undefined) => new Intl.DateTimeFormat('en-CA', { ...(timeZone ? { timeZone } : {}) }).format(new Date());
-
-/** Typed currency units ("12.50", "$1,200") as cents; null when it is not a number above zero. */
-function toCents(text: string): number | null {
-  const n = Number(text.replace(/[$,\s]/g, ''));
-  const cents = Math.round(n * 100);
-  return Number.isFinite(n) && cents > 0 ? cents : null;
-}
 
 /** "Cost lines": every cost newest first, with Add cost, Edit and Void for `costs:write`. */
 export function CostLines({ tenant, canWrite }: Props) {
@@ -128,16 +122,19 @@ type DialogProps = { tenant: string; onClose: () => void; onDone: () => Promise<
 /** Add cost / Edit cost: date, category, amount and a note. */
 function LineDialog({ tenant, line, onClose, onDone }: DialogProps & { line: CostLine | null }) {
   const me = useQuery(meQuery(tenant));
+  const { currency } = useFormat();
   const { run, busy } = useRun();
   const [date, setDate] = useState(line?.occurred_on ?? today(me.data?.tenant?.timezone));
   const [category, setCategory] = useState<CostCategory>(line?.category ?? 'partner_fees');
-  const [amount, setAmount] = useState(line ? String(line.amount_cents / 100) : '');
+  const [amount, setAmount] = useState(line ? centsToInput(line.amount_cents, currency) : '');
   const [note, setNote] = useState(line?.note ?? '');
   const [error, setError] = useState<string | null>(null);
 
   async function submit() {
-    const cents = toCents(amount);
-    if (cents === null) return setError(NEEDS_AMOUNT);
+    const parsed = parseMoney(amount, currency);
+    if ('error' in parsed) return setError(parsed.error);
+    const cents = parsed.cents;
+    if (cents <= 0) return setError(NEEDS_AMOUNT);
     setError(null);
     const body = { occurred_on: date, category, amount_cents: cents, note: note.trim() || null };
     const ok = await run(async () => {

@@ -34,6 +34,14 @@ export function Prices({ serviceKey, tenant }: Props) {
   const rates = useQuery(ratesQuery(tenant, serviceKey));
   const [typed, setTyped] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  if (rates.isError) {
+    return (
+      <section className={styles.section} aria-label="Prices">
+        <h3 className={styles.sectionTitle}>Prices</h3>
+        <p className={styles.note}>{"Couldn't load prices. Try again."}</p>
+      </section>
+    );
+  }
   if (!rates.data || rates.data.length === 0) return null;
 
   const boxes = boxesOf(rates.data);
@@ -71,7 +79,7 @@ export function Prices({ serviceKey, tenant }: Props) {
       <h3 className={styles.sectionTitle}>Prices</h3>
       <form className={styles.section} onSubmit={(e) => void save(e)} noValidate>
         {models.map((m) => (
-          <fieldset key={m} aria-label={m} className={styles.section} style={{ border: 0, margin: 0, padding: 0 }}>
+          <fieldset key={m} aria-label={m} className={styles.fieldset}>
             {boxes.filter((b) => b.group === m).map(field)}
           </fieldset>
         ))}

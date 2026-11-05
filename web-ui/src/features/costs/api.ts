@@ -112,6 +112,9 @@ export const monthName = (month: string, short = false) => {
   return short ? name.slice(0, 3) : name;
 };
 
+/** Whole percent, rounded down, so 99.9% reads 99%. */
+export const percentOf = (part: number, whole: number) => Math.floor((part * 100) / whole);
+
 /** The budget banners (Ruling 12), paused first. */
 export function bannerLines(s: CostsSummary): { key: string; text: string; paused: boolean }[] {
   const month = monthName(s.month);
@@ -123,7 +126,7 @@ export function bannerLines(s: CostsSummary): { key: string; text: string; pause
       text:
         c.level === 'paused'
           ? `${c.label} is paused: it is over 110% of its ${month} budget. Raise the budget to resume.`
-          : `${c.label} has used ${Math.floor((c.spend_month_cents * 100) / c.budget_cents!)}% of its ${month} budget.`,
+          : `${c.label} has used ${percentOf(c.spend_month_cents, c.budget_cents!)}% of its ${month} budget.`,
     }))
     .sort((a, b) => Number(b.paused) - Number(a.paused));
 }

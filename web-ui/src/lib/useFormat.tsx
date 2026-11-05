@@ -22,6 +22,7 @@ export function useFormat() {
   const { currency, timeZone } = useContext(FormatContext);
   return useMemo(
     () => ({
+      currency,
       money: (minor: number) => formatMoney(minor, currency),
       moneyFixed: (minor: number) => formatMoney(minor, currency, true),
       date: (when: string | number | Date) => formatDate(when, timeZone),

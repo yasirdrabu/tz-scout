@@ -12,9 +12,9 @@ export function BudgetBanners({ tenant }: { tenant: string }) {
   const lines = bannerLines(summary.data);
   if (lines.length === 0) return null;
   return (
-    <ul className={styles.banners} aria-label="Budget alerts">
+    <ul className={styles.banners} aria-label="Budget alerts" role={lines.some((l) => l.paused) ? 'alert' : 'status'}>
       {lines.map((l) => (
-        <li key={l.key} className={l.paused ? styles.bannerPaused : styles.bannerAlert} role={l.paused ? 'alert' : 'status'}>
+        <li key={l.key} className={l.paused ? styles.bannerPaused : styles.bannerAlert}>
           {l.text}
         </li>
       ))}

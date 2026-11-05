@@ -449,6 +449,13 @@ describe('Prices (R3a)', () => {
     expect(seen[0]!.body).toEqual({ rates: [{ item: 'credit', cents_per_unit: 2.5 }] });
   });
 
+  it('says so when the prices do not load', async () => {
+    serve();
+    server.use(http.get('/api/v1/integrations/apollo/rates', () => problem(500, 'Down')));
+    const drawer = await openService('Manage Apollo');
+    expect(await within(drawer).findByText("Couldn't load prices. Try again.")).toBeInTheDocument();
+  });
+
   it('has no Prices section for a service with no money', async () => {
     serve();
     const drawer = await openService('Manage HubSpot');

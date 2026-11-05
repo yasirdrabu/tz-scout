@@ -76,11 +76,44 @@ describe('Monthly budgets', () => {
     const card = await screen.findByRole('region', { name: 'Monthly budgets' });
     const row = (name: string) => within(card).getByText(name).closest('li')!;
     expect(row('Partner fees')).toHaveTextContent('$100 of $1,000');
-    expect(row('Partner fees')).toHaveTextContent('$900.00 left');
+    expect(row('Partner fees')).toHaveTextContent('$900 left');
     expect(row('Data vendors')).toHaveTextContent('$920 of $1,000');
     expect(row('Data vendors')).toHaveTextContent('92% used');
     expect(row('AI usage')).toHaveTextContent('Over by $200.00');
     expect(row('Lists and events')).toHaveTextContent('No budget');
+    expect(row('Lists and events')).not.toHaveTextContent('of $0');
+  });
+
+  it('rounds the percent down, so 99.9% reads 99% used', async () => {
+    const near = summary({ categories: [category({ key: 'ai_usage', label: 'AI usage', spend_month_cents: 99_900, budget_cents: 100_000, level: 'alert', pausable: true })] });
+    serveCosts({ summary: near });
+    await open();
+    const card = await screen.findByRole('region', { name: 'Monthly budgets' });
+    expect(within(card).getByText('AI usage').closest('li')).toHaveTextContent('99% used');
+    expect(await screen.findByText('AI usage has used 99% of its November budget.')).toBeInTheDocument();
+  });
+
+  it('pre-fills a budget with cents and saves it back unchanged', async () => {
+    const cents = summary({ categories: [category({ key: 'ai_usage', label: 'AI usage', spend_month_cents: 0, budget_cents: 1250, pausable: true })] });
+    const seen = serveCosts({ summary: cents });
+    await open();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit budgets' }));
+    expect(screen.getByLabelText('AI usage budget')).toHaveValue('12.50');
+    await userEvent.click(screen.getByRole('button', { name: 'Save budgets' }));
+    await screen.findByText('Budgets saved. Monthly total $12.50.');
+    expect(seen.find((s) => s.method === 'PUT')!.body).toEqual({ month: '2026-11', budgets: [{ category: 'ai_usage', amount_cents: 1250 }] });
+  });
+
+  it('refuses a budget that is not an amount', async () => {
+    const seen = serveCosts();
+    await open();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit budgets' }));
+    const ai = screen.getByLabelText('AI usage budget');
+    await userEvent.clear(ai);
+    await userEvent.type(ai, '1e3');
+    await userEvent.click(screen.getByRole('button', { name: 'Save budgets' }));
+    expect(await screen.findByText('AI usage: Enter a number.')).toBeInTheDocument();
+    expect(seen).toHaveLength(0);
   });
 
   it('shows Edit budgets only with budgets:write', async () => {
@@ -148,6 +181,12 @@ describe('Budget banners', () => {
     expect(screen.getByText('AI usage is paused: it is over 110% of its November budget. Raise the budget to resume.')).toBeInTheDocument();
   });
 
+  it('puts the live region on the list', async () => {
+    serveCosts({ summary: alerts });
+    await open();
+    expect(await screen.findByRole('alert', { name: 'Budget alerts' })).toBeInstanceOf(HTMLUListElement);
+  });
+
   it('shows nothing when every category is ok', async () => {
     serveCosts();
     await open();
@@ -209,12 +248,13 @@ describe('Cost lines', () => {
     expect(seen).toHaveLength(0);
 
     await userEvent.clear(within(dialog).getByLabelText('Amount'));
-    await userEvent.type(within(dialog).getByLabelText('Amount'), '12.5');
+    await userEvent.type(within(dialog).getByLabelText('Amount'), '12.50');
     await userEvent.selectOptions(within(dialog).getByLabelText('Category'), 'ai_usage');
     await userEvent.type(within(dialog).getByLabelText('Note'), 'Offsite');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add cost' }));
     await screen.findByText('Cost added.');
     expect(seen[0]!.body).toMatchObject({ category: 'ai_usage', amount_cents: 1250, note: 'Offsite' });
+    expect(seen).toHaveLength(1);
     expect(seen[0]!.body).toHaveProperty('occurred_on', expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
   });
 
@@ -225,7 +265,7 @@ describe('Cost lines', () => {
     await userEvent.click(within(row).getByRole('button', { name: 'Edit' }));
     const dialog = await screen.findByRole('dialog', { name: 'Edit cost' });
     const amount = within(dialog).getByLabelText('Amount');
-    expect(amount).toHaveValue('125');
+    expect(amount).toHaveValue('125.00');
     await userEvent.clear(amount);
     await userEvent.type(amount, '90');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save cost' }));

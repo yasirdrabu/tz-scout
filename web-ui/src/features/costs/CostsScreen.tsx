@@ -7,7 +7,7 @@ import page from '../../routes/Page.module.css';
 import { Card } from '../../ui/Card';
 import { EmptyState } from '../../ui/EmptyState';
 import { LoadFailed, LoadingRows } from '../settings/shared';
-import { monthName, summaryQuery, type CostsSummary } from './api';
+import { monthName, percentOf, summaryQuery, type CostsSummary } from './api';
 import { BudgetBanners } from './BudgetBanners';
 import { Budgets } from './Budgets';
 import { CostLines } from './CostLines';
@@ -29,6 +29,8 @@ export function CostsScreen() {
       </div>
       {me.isPending ? (
         <LoadingRows>Loading costs</LoadingRows>
+      ) : me.isError ? (
+        <LoadFailed title="Costs didn't load" error={me.error} onRetry={() => void me.refetch()} />
       ) : !canRead ? (
         <EmptyState title="You can't see costs" icon={<Coins />}>
           Ask an owner or leader for the See costs permission.
@@ -46,8 +48,8 @@ export function CostsScreen() {
 
 function Body({ tenant, summary: s, canWriteBudgets, canWriteCosts }: { tenant: string; summary: CostsSummary; canWriteBudgets: boolean; canWriteCosts: boolean }) {
   const f = useFormat();
-  const used = s.budget_month_cents > 0 ? Math.round((s.spend_month_cents * 100) / s.budget_month_cents) : null;
-  const share = (cents: number) => (s.spend_90d_cents > 0 ? Math.round((cents * 100) / s.spend_90d_cents) : 0);
+  const used = s.budget_month_cents > 0 ? percentOf(s.spend_month_cents, s.budget_month_cents) : null;
+  const share = (cents: number) => (s.spend_90d_cents > 0 ? percentOf(cents, s.spend_90d_cents) : 0);
   const top = Math.max(...s.months.map((m) => Math.max(m.spend_cents, m.budget_cents)), 1) * 1.1;
   const budgetNow = s.months.at(-1)?.budget_cents ?? s.budget_month_cents;
   return (
@@ -86,7 +88,9 @@ function Body({ tenant, summary: s, canWriteBudgets, canWriteCosts }: { tenant: 
           }
         >
           <div className={styles.chartWrap}>
-            {budgetNow > 0 && <div className={styles.budgetLine} style={{ bottom: `${30 + (budgetNow / top) * 148}px` }} aria-hidden="true" />}
+            <div className={styles.plot} aria-hidden="true">
+              {budgetNow > 0 && <div className={styles.budgetLine} style={{ bottom: `${(budgetNow / top) * 100}%` }} />}
+            </div>
             <ul className={styles.chart}>
               {s.months.map((m, i) => {
                 const ratio = m.budget_cents > 0 ? m.spend_cents / m.budget_cents : 0;
@@ -94,7 +98,7 @@ function Body({ tenant, summary: s, canWriteBudgets, canWriteCosts }: { tenant: 
                 return (
                   <li key={m.month} className={styles.col}>
                     <span className={styles.colAmount}>{f.money(m.spend_cents)}</span>
-                    <div className={`${styles.bar} ${tone}`.trim()} style={{ height: `${(m.spend_cents / top) * 148}px` }} />
+                    <div className={`${styles.bar} ${tone}`.trim()} style={{ height: `${(m.spend_cents / top) * 100}%` }} />
                     <span className={styles.colLabel}>{monthName(m.month, true)}</span>
                   </li>
                 );
