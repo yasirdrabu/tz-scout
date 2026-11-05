@@ -29,7 +29,10 @@ test('the tiles, the feed and the committee show the meetings and replies HubSpo
   test.setTimeout(240_000);
   const stamp = Date.now();
   const name = `E2E Engagement ${stamp}`;
-  await signInAs(await (await browser.newContext()).newPage(), AE);
+  // The AE signs in once in a browser of their own; that page is not used again.
+  const aeContext = await browser.newContext();
+  await signInAs(await aeContext.newPage(), AE);
+  await aeContext.close();
   await signInAs(page, LEADER);
   await sendAccount(page, name);
 
