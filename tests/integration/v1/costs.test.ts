@@ -2,7 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as listRoute, POST as addRoute } from '@/http/routes/v1/costs/lines/route';
 import { PATCH as editRoute, POST as actionRoute } from '@/http/routes/v1/costs/lines/[id]/route';
 import { addManualLine, recordLine } from '@/modules/analytics';
-import { addMember, setPrincipalCacheTtl, type Role } from '@/modules/tenancy';
+import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl, type Role } from '@/modules/tenancy';
 import { newId } from '@/platform/ids';
 import { inTenant, seedUser } from '../tenancy/helpers';
 import { signedIn, tenantOwnedBy, v1Req, type Person, type ReqOpts } from './session-helpers';
@@ -46,6 +46,15 @@ describe('access', () => {
     expect(res.status).toBe(201);
     expect(await res.json()).toMatchObject({ origin: 'manual', category: 'partner_fees', amount_cents: 12_500, occurred_on: '2026-11-02', note: 'Referral fee', created_by: people.operator!.id });
     expect((await listRoute(as('viewer', '/costs/lines'))).status).toBe(403);
+  });
+
+  it('an API key with costs:write can neither add nor edit a line', async () => {
+    const line = await run((ctx) => addManualLine(ctx, { occurredOn: '2026-11-02', category: 'partner_fees', amountCents: 100, note: null }));
+    const { secret } = await run((ctx) => createApiKey(ctx, { name: 'k', environment: 'live', scopes: ['costs:write', 'costs:read'] }, SYSTEM_GRANTOR));
+    const key = (path: string, method: string, body: unknown) =>
+      new Request(`http://localhost:4240/api/v1${path}`, { method, headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await addRoute(key('/costs/lines', 'POST', manual()))).status).toBe(403);
+    expect((await editRoute(key(`/costs/lines/${line.id}`, 'PATCH', { amount_cents: 1 }))).status).toBe(403);
   });
 });
 

@@ -64,6 +64,14 @@ describe('usage lines', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.category).toBe('ai_usage');
   });
+
+  it('a usage event from a provider with no category fails, so it is dead-lettered rather than lost', async () => {
+    const e = await run((ctx) => publish(ctx, usageRecorded, usage({ provider: 'mystery' })));
+    const [row] = await adminDb.select().from(outbox).where(eq(outbox.id, e.id));
+    await adminDb.update(outbox).set({ sentAt: new Date() }).where(eq(outbox.id, e.id));
+    await expect(run((ctx) => analyticsUsageLines.handle(row!.payload as Envelope<never>, ctx))).rejects.toThrow(/mystery/);
+    expect(await linesOf(e.id)).toHaveLength(0);
+  });
 });
 
 describe('manual lines', () => {
@@ -78,6 +86,16 @@ describe('manual lines', () => {
     expect(old!.voidedAt).not.toBeNull();
     // A voided line can't be edited again.
     await expect(run((ctx) => editManualLine(ctx, added.id, { amountCents: 1 }))).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('an edit that changes nothing returns the line as it is, without voiding it', async () => {
+    const added = await run((ctx) => addManualLine(ctx, { occurredOn: '2026-11-03', category: 'partner_fees', amountCents: 700, note: 'Same' }));
+    const same = await run((ctx) => editManualLine(ctx, added.id, {}));
+    expect(same).toEqual(added);
+    const again = await run((ctx) => editManualLine(ctx, added.id, { amountCents: 700, note: 'Same', occurredOn: '2026-11-03', category: 'partner_fees' }));
+    expect(again).toEqual(added);
+    const [row] = await adminDb.select().from(costLine).where(eq(costLine.id, added.id));
+    expect(row!.voidedAt).toBeNull();
   });
 
   it('editing a usage line is refused', async () => {

@@ -1,7 +1,6 @@
 import { CATEGORY_OF_PROVIDER } from '@/modules/integrations/contracts/costs';
 import { usageRecorded } from '@/modules/integrations/contracts/events';
 import { tenantTimezone } from '@/modules/tenancy';
-import { log } from '@/platform/log';
 import { defineConsumer, type ConsumerDef } from '@/platform/runtime/consumers';
 import { recordLine } from './services/lines';
 
@@ -14,10 +13,8 @@ export const analyticsUsageLines = defineConsumer({
   event: usageRecorded,
   handle: async (e, ctx) => {
     const category = CATEGORY_OF_PROVIDER[e.data.provider];
-    if (!category) {
-      log.warn({ tenantId: ctx.tenantId, provider: e.data.provider, eventId: e.id }, 'analytics: usage from a provider with no cost category, no line');
-      return;
-    }
+    // A paid provider missing from the map would lose its money silently: fail, so the event is dead-lettered.
+    if (!category) throw new Error(`Usage from provider "${e.data.provider}" has no cost category`);
     await recordLine(ctx, {
       originEventId: e.id,
       occurredOn: dayIn(e.data.occurredAt, await tenantTimezone(ctx)),

@@ -64,6 +64,13 @@
       "when": 1793598601936,
       "tag": "0008_workspace_failure",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793887174898,
+      "tag": "0009_cost_permissions",
+      "breakpoints": true
     }
   ]
 }

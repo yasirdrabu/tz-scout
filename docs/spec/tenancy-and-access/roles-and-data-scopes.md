@@ -39,8 +39,10 @@ they are the same strings.
 | `campaigns:manage` | Message tests, ad funnel model, booking settings |
 | `searches:manage` | Create, edit and schedule saved searches with a provider (creating one approves its spend) |
 | `warm_intro:declare` | Declare a warm intro on a submitted account (unconfirmed unless the principal is a person source) |
-| `analytics:read` | See funnel, costs, scorecard |
-| `costs:write` | Add and edit manual cost lines |
+| `analytics:read` | See funnel and scorecard (costs need `costs:read`) |
+| `costs:read` | See the Costs page: spend, budgets and cost lines (R3a) |
+| `costs:write` | Add, edit and void manual cost lines; void any line |
+| `budgets:write` | Set the monthly budgets per cost category (R3a) |
 | `integrations:manage` | Connections, credentials, caps |
 | `members:read` | See members |
 | `members:manage` | Add, remove, change members |
@@ -71,7 +73,9 @@ they are the same strings.
 | campaigns:read | yes | yes | yes | yes | no |
 | searches:manage | yes | yes | no | yes | no |
 | warm_intro:declare | yes | yes | yes | yes | no |
-| analytics:read, costs:write | yes | yes | read | yes | read |
+| analytics:read | yes | yes | yes | yes | yes |
+| costs:read, costs:write | yes | yes | no | yes | no |
+| budgets:write | yes | yes | no | no | no |
 | status:read | yes | yes | yes | yes | yes |
 | integrations, members, keys, webhooks, settings, audit | yes | members:read | no | no | no |
 
@@ -88,7 +92,9 @@ The Viewer role (web-ui Decision 17) sees the pipeline and the scorecard and cha
   permission list). A role with no row uses the default above, so a new workspace needs no seed and a
   later change to the defaults reaches every workspace that never edited that role. A workspace with a
   customised Operator role keeps its saved list, so it does not gain `playbooks:write` until the role is
-  restored to the defaults or edited (R2c-2).
+  restored to the defaults or edited (R2c-2). R3a's new `costs:read` and `budgets:write` are the exception:
+  a tenancy migration (`0009_cost_permissions`) adds them to saved Leader and Operator lists (`budgets:write` to
+  Leader only) where missing, since no saved list could have unticked a permission that did not exist yet.
 - `GET /api/v1/roles` (`members:read`) returns per role its current `permissions`, its
   `default_permissions`, `customised` and `locked` (true for Owner), and the permission list with labels
   and groups. `PUT /api/v1/roles/{role}` (`members:manage`, people only) replaces one role's list.

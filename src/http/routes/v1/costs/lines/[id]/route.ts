@@ -10,8 +10,8 @@ function idOf(req: Request, action: boolean): string {
   return id;
 }
 
-/** `PATCH /costs/lines/{id}`: manual lines only. The old line is voided "Edited" and the new one returned. */
-export const PATCH = v1Route({ permission: 'costs:write' }, async (req, _principal, ctx) => {
+/** `PATCH /costs/lines/{id}`: manual lines only, people only. The old line is voided "Edited" and the new one returned. */
+export const PATCH = v1Route({ permission: 'costs:write', peopleOnly: true }, async (req, _principal, ctx) => {
   const id = idOf(req, false);
   return editManualLine(ctx, id, await parseBody<Partial<ManualLineInput>>(req, editLineBody));
 });

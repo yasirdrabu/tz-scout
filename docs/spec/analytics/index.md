@@ -92,7 +92,7 @@ Built in R3a (the cost ledger), in place of `GET /costs` and `POST /costs` above
 |---|---|---|
 | `GET /api/v1/costs/lines?category&from&to&include_voided&cursor` | `costs:read` | Cost lines, 50 a page, newest first (`occurred_on`, then when added); voided lines only with `include_voided=true` |
 | `POST /api/v1/costs/lines` | `costs:write`, people only | Add a manual line `{ occurred_on, category, amount_cents, note }`; the amount must be above zero ("Enter an amount above zero."), the note up to 500 characters |
-| `PATCH /api/v1/costs/lines/{id}` | `costs:write` | Manual lines only (others get 409 "Only costs added by hand can be edited."): voids the line "Edited" and returns the new line with `replaces_id` |
+| `PATCH /api/v1/costs/lines/{id}` | `costs:write`, people only | Manual lines only (others get 409 "Only costs added by hand can be edited."): voids the line "Edited" and returns the new line with `replaces_id`; an edit that changes nothing returns the line as it is |
 | `POST /api/v1/costs/lines/{id}:void` | `costs:write` | Void any line with `{ reason }` (required) |
 
 Proposed additions (to be added to `public-api/index.md` before R3; not yet in the fixed list):

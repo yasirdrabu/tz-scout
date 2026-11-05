@@ -157,6 +157,8 @@ export async function editManualLine(ctx: ModuleContext, id: string, patch: Part
     amountCents: patch.amountCents ?? old.amountCents,
     note: patch.note !== undefined ? patch.note : old.note,
   });
+  // Nothing changed: the line stays as it is.
+  if (next.occurredOn === old.occurredOn && next.category === old.category && next.amountCents === old.amountCents && next.note === old.note) return view(old);
   await markVoided(ctx, id, EDITED);
   const row = await insertManual(ctx, next, id);
   await afterLinesChanged(ctx, old.category as CostCategory, old.occurredOn);
