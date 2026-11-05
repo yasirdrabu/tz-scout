@@ -1,18 +1,15 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, notInArray } from 'drizzle-orm';
 import type { z } from 'zod';
 import { resolveAccountId } from '@/modules/accounts';
 import type { activityObserved } from '@/modules/crm/contracts/events';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
-import { planNoReply, stepCompleted } from '../contracts/events';
+import { stepCompleted } from '../contracts/events';
 import { accountPlan, planStep } from '../db/schema';
-import { publishChanged, recordChange, snapshot, stopPlan, type Plan } from './plans';
+import { checkNoReply, CLOSED, OPEN_STEP, publishChanged, recordChange, snapshot, stopPlan, type Plan } from './plans';
 
 type Observed = z.output<typeof activityObserved.data>;
-
-const OPEN_PLAN = ['active', 'paused'];
-const OPEN_STEP = ['todo', 'in_progress'];
 
 /** Rulings 13: what a reply or meeting stops, by the plan's rule. */
 const STOPS: Record<string, readonly string[]> = { reply_or_meeting: ['reply', 'meeting'], meeting: ['meeting'], never: [] };
@@ -30,7 +27,7 @@ export async function onCrmActivity(e: { data: Observed; occurredAt: string }, c
   const [plan] = await ctx.tx
     .select()
     .from(accountPlan)
-    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, accountId), inArray(accountPlan.status, OPEN_PLAN)))
+    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, accountId), notInArray(accountPlan.status, CLOSED)))
     .for('update');
   if (!plan) return;
   const at = new Date(e.data.occurredAt);
@@ -40,7 +37,7 @@ export async function onCrmActivity(e: { data: Observed; occurredAt: string }, c
     return;
   }
   if (at < plan.acceptedAt) return;
-  if (!plan.engagedAt) await ctx.tx.update(accountPlan).set({ engagedAt: new Date(), updatedAt: new Date() }).where(eq(accountPlan.id, plan.id));
+  if (!plan.engagedAt) await ctx.tx.update(accountPlan).set({ engagedAt: at, updatedAt: new Date() }).where(eq(accountPlan.id, plan.id));
   if (STOPS[plan.stopWhen]?.includes(kind)) await stopPlan(ctx, plan.id, REASON[kind]!);
 }
 
@@ -64,18 +61,4 @@ async function stepDoneInCrm(ctx: ModuleContext, plan: Plan, stepId: string, at:
   );
   await audit(ctx, { action: 'playbooks.plan_step.updated', subject: { type: 'account_plan', id: plan.id }, after: { stepId, changed: ['step_status'] } });
   await checkNoReply(ctx, plan.id);
-}
-
-/**
- * Ruling 15: when the last open step of an active plan closes and nobody replied or booked since accept, publishes
- * `playbooks.plan.no_reply` once. The plan's status does not change. Called inside the transaction that closed the step.
- */
-export async function checkNoReply(ctx: ModuleContext, planId: string): Promise<void> {
-  const [plan] = await ctx.tx.select().from(accountPlan).where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.id, planId))).for('update');
-  if (!plan || plan.status !== 'active' || plan.engagedAt || plan.noReplyAt) return;
-  const steps = await ctx.tx.select({ status: planStep.status }).from(planStep).where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, planId)));
-  if (steps.length === 0 || steps.some((s) => OPEN_STEP.includes(s.status))) return;
-  const now = new Date();
-  await ctx.tx.update(accountPlan).set({ noReplyAt: now }).where(eq(accountPlan.id, planId));
-  await publish(ctx, planNoReply, { planId, accountId: plan.accountId, assignmentId: plan.assignmentId, at: now.toISOString() }, { type: 'account', id: plan.accountId });
 }

@@ -6,11 +6,10 @@ import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
-import { planChanged, stepCompleted } from '../contracts/events';
+import { planChanged, planNoReply, stepCompleted } from '../contracts/events';
 import { accountPlan, planChange, planStep, playbookTemplate } from '../db/schema';
 import { dueFlags, pickNextStep } from '../domain/next-step';
 import { dueDateFor, insertOrder, linkedPeople, localDate, missingRoles, type PlanPerson, type StepChannel } from '../domain/plan';
-import { checkNoReply } from './crm-activity';
 
 export const PLAN_ENDED = 'This plan has ended.';
 export const FINISH_STEPS = 'Finish or skip every step first.';
@@ -39,8 +38,8 @@ type StepSnapshot =
     }
   | { id: string; removed: true };
 
-const OPEN_STEP = ['todo', 'in_progress'];
-const CLOSED = ['completed', 'stopped', 'abandoned'];
+export const OPEN_STEP = ['todo', 'in_progress'];
+export const CLOSED = ['completed', 'stopped', 'abandoned'];
 
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That plan was not found.' });
 const ended = () => new ScoutError({ slug: 'plan-ended', status: 409, title: PLAN_ENDED });
@@ -89,6 +88,20 @@ export async function publishChanged(
     },
     { type: 'account', id: plan.accountId },
   );
+}
+
+/**
+ * Ruling 15: when the last open step of an active plan closes and nobody replied or booked since accept, publishes
+ * `playbooks.plan.no_reply` once. The plan's status does not change. Called inside the transaction that closed the step.
+ */
+export async function checkNoReply(ctx: ModuleContext, planId: string): Promise<void> {
+  const [plan] = await ctx.tx.select().from(accountPlan).where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.id, planId))).for('update');
+  if (!plan || plan.status !== 'active' || plan.engagedAt || plan.noReplyAt) return;
+  const steps = await ctx.tx.select({ status: planStep.status }).from(planStep).where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, planId)));
+  if (steps.length === 0 || steps.some((s) => OPEN_STEP.includes(s.status))) return;
+  const now = new Date();
+  await ctx.tx.update(accountPlan).set({ noReplyAt: now, updatedAt: now }).where(eq(accountPlan.id, planId));
+  await publish(ctx, planNoReply, { planId, accountId: plan.accountId, assignmentId: plan.assignmentId, at: now.toISOString() }, { type: 'account', id: plan.accountId });
 }
 
 /** A plan by id with its row locked. A plan on an account the caller cannot see is a 404. */
@@ -484,7 +497,10 @@ export async function resumePlan(ctx: ModuleContext, planId: string): Promise<Pl
   const plan = await loadPlan(ctx, planId);
   if (CLOSED.includes(plan.status)) throw ended();
   if (plan.status === 'active') return view(ctx, plan);
-  return view(ctx, await move(ctx, plan, 'active', null, 'resumed', { reason: 'by_hand' }, ['status']));
+  const resumed = await move(ctx, plan, 'active', null, 'resumed', { reason: 'by_hand' }, ['status']);
+  // Steps may have all closed while it was paused.
+  await checkNoReply(ctx, planId);
+  return view(ctx, resumed);
 }
 
 /** Completes a plan once every step is done or skipped (409 otherwise). */

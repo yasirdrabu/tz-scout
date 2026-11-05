@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { editPerson, upsertFromArrival } from '@/modules/accounts';
 import { activityObserved } from '@/modules/crm/contracts/events';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
-import { createTemplate, removeStep, resumePlan, pausePlan, updateStep } from '@/modules/playbooks';
+import { abandonPlan, completePlan, createTemplate, removeStep, resumePlan, pausePlan, updateStep } from '@/modules/playbooks';
 import { accountPlan, planChange, planStep } from '@/modules/playbooks/db/schema';
 import { assign, accept } from '@/modules/routing';
 import { adminDb, closeDbs } from '@/platform/db/client';
@@ -133,6 +133,13 @@ describe('the stop rule', () => {
     expect(await plan(planId)).toMatchObject({ status: 'active', engagedAt: null });
   });
 
+  it('engaged_at is the time of the reply, not of delivery', async () => {
+    const { accountId, planId } = await account(never);
+    const at = new Date(Date.now() + 5000);
+    await observe(accountId, 'reply', { occurredAt: at });
+    expect((await plan(planId)).engagedAt!.toISOString()).toBe(at.toISOString());
+  });
+
   it('an email or call does not stop or engage the plan', async () => {
     const { accountId, planId } = await account();
     await observe(accountId, 'email');
@@ -212,11 +219,24 @@ describe('no reply', () => {
     expect(await events('playbooks.plan.no_reply', accountId)).toHaveLength(0);
   });
 
-  it('none on stop or abandon', async () => {
-    const a = await account();
-    await observe(a.accountId, 'reply');
-    expect(await events('playbooks.plan.no_reply', a.accountId)).toHaveLength(0);
-    expect((await plan(a.planId)).noReplyAt).toBeNull();
+  it('none on a stop, an abandon (even when HubSpot reports a task after) or a complete', async () => {
+    const stopped = await account();
+    await observe(stopped.accountId, 'reply');
+    expect(await events('playbooks.plan.no_reply', stopped.accountId)).toHaveLength(0);
+    expect((await plan(stopped.planId)).noReplyAt).toBeNull();
+
+    const abandoned = await account();
+    await asSeller((ctx) => abandonPlan(ctx, abandoned.planId, 'Wrong fit'));
+    await observe(abandoned.accountId, 'task_done', { stepId: abandoned.stepIds[0]! });
+    expect(await events('playbooks.plan.no_reply', abandoned.accountId)).toHaveLength(0);
+    expect((await plan(abandoned.planId)).noReplyAt).toBeNull();
+
+    // Completing needs every step closed, which already fired once; the complete adds none.
+    const completed = await account();
+    await tick(completed.planId, completed.stepIds);
+    expect(await events('playbooks.plan.no_reply', completed.accountId)).toHaveLength(1);
+    await asSeller((ctx) => completePlan(ctx, completed.planId));
+    expect(await events('playbooks.plan.no_reply', completed.accountId)).toHaveLength(1);
   });
 
   it('none while the plan is paused', async () => {
@@ -224,7 +244,21 @@ describe('no reply', () => {
     await asSeller((ctx) => pausePlan(ctx, planId));
     await tick(planId, stepIds);
     expect(await events('playbooks.plan.no_reply', accountId)).toHaveLength(0);
+    // It fires on resume, once.
     await asSeller((ctx) => resumePlan(ctx, planId));
+    expect(await events('playbooks.plan.no_reply', accountId)).toHaveLength(1);
+    await asSeller((ctx) => pausePlan(ctx, planId));
+    await asSeller((ctx) => resumePlan(ctx, planId));
+    expect(await events('playbooks.plan.no_reply', accountId)).toHaveLength(1);
+  });
+
+  it('a plan engaged while paused does not fire on resume', async () => {
+    const { accountId, planId, stepIds } = await account(never);
+    await asSeller((ctx) => pausePlan(ctx, planId));
+    await tick(planId, stepIds);
+    await observe(accountId, 'reply');
+    await asSeller((ctx) => resumePlan(ctx, planId));
+    expect(await events('playbooks.plan.no_reply', accountId)).toHaveLength(0);
   });
 
   it('removing the last open step fires no_reply', async () => {
