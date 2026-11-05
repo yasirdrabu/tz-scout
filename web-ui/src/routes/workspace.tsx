@@ -177,5 +177,5 @@ export const funnelRoute = createRoute({
 export const costsRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'costs',
-  component: () => <Placeholder screen={SCREENS.costs} />,
+  component: lazyRouteComponent(() => import('../features/costs/CostsScreen'), 'CostsScreen'),
 });

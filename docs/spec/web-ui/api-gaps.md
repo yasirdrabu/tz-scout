@@ -1093,7 +1093,9 @@ that spec: `POST /api/v1/costs/{id}:void`, `GET /api/v1/analytics/sources/{id}/p
 | 18 | Tiles spend, cost per account sent, cost per won, return on spend | READY (spend, R3a); LATER (R3b) | `GET /api/v1/costs/summary` (`costs:read`): `spend_month_cents`, `budget_month_cents`, `spend_90d_cents` | Cost per account sent, cost per won and return on spend are R3b. Return from offer price vs actual `won_amount_cents`: Decision 26. |
 | 18 | "Where the money goes" by category | READY (R3a) | `GET /api/v1/costs/summary` `categories[]` | The five R3a categories, each with `spend_90d_cents`, `spend_month_cents`, `budget_cents`, `level` and `pausable`. Decision 26. |
 | 18 | Monthly spend vs budget; budgets used, left, over; edit and save | READY (R3a) | `GET /api/v1/costs/summary` `months[]`; `GET/PUT /api/v1/costs/budgets` (read `costs:read`, write `budgets:write`) | Six months, each against the summed category budgets. A past month is a 409 "Past months can't be changed." The 110% pause in integrations is R3a Task 4. Decision 26. |
-| 18 | Cost by source table | LATER (R3) | `GET /api/v1/costs?group_by=source` | One grouped response, no browser math (C8). |
+| 18 | Cost lines: add, edit, void, show voided | READY (R3a) | `GET/POST /api/v1/costs/lines`, `PATCH /api/v1/costs/lines/{id}`, `POST /api/v1/costs/lines/{id}:void` (read `costs:read`, write `costs:write`) | 50 a page, newest first, `include_voided`. Edit is for manual lines only (409). |
+| 21b | Prices per provider | READY (R3a) | `GET/PUT /api/v1/integrations/{provider}/rates` (`integrations:manage`) | `{ data: [{ item, cents_per_unit, is_default }] }`; a rate below 0 is a 400. Claude is per token, Apollo and Vibe per credit. |
+| 18 | Cost by source table | LATER (R3b) | `GET /api/v1/costs?group_by=source` | One grouped response, no browser math (C8). |
 
 ### Proposed changes
 
@@ -1102,7 +1104,7 @@ that spec: `POST /api/v1/costs/{id}:void`, `GET /api/v1/analytics/sources/{id}/p
 3. Costs: `group_by` and return on spend (R3b). The category map, `GET/PUT /api/v1/costs/budgets`, the
    summary and the alert and pause levels are built in R3a (Decision 26).
 4. Scorecard and `GET /api/v1/analytics/metrics/{key}` for the drawer.
-5. Permission names: use `analytics:read` and `costs:write` (Spec corrections).
+5. Permission names: `costs:read`, `budgets:write` and `costs:write` (Spec corrections).
 
 ### Release
 
@@ -1113,10 +1115,7 @@ All R3 (scorecard R4 apart from account rows). Overview stage counts ship in R1 
 Facts in `index.md` and `screens.md` that are wrong given the backend and should change whatever the
 decisions above say.
 
-1. **Shell table, Results.** `costs:read` does not exist. Fix: Costs shown with `analytics:read`; §18
-   "Who" `analytics:read`, budgets `costs:write` (held by owner, leader, operator) or owner only per
-   Decision 26. Drop "`analytics:read` and `costs:read` are proposed": `analytics:read` exists and every
-   role holds it (`COMMON`), so sellers see Overview, data-limited. **Applied.**
+1. **Shell table, Results.** R3a adds `costs:read` (owner, leader, operator) and `budgets:write` (owner, leader). Costs is shown with `costs:read`, so sellers and viewers do not see it; Overview keeps `analytics:read`. §18 "Who" `costs:read`, budgets `budgets:write`, cost lines `costs:write`. **Applied in R3a.**
 2. **§21d, §21e "Who" `review:configure`.** Does not exist. Fix: `settings:manage` (owner only by default). **Applied.**
 3. **§21c "Who" `integrations:manage`.** API keys are `keys:manage` (owner only). Fix the §21c tag, and
    say §12 and §11 key actions run under `sources:manage` for that source's keys (Decision 14). **Applied.**
@@ -1244,7 +1243,7 @@ user can overturn them.
 10. **Login history location.** (Call) IP and "New IP" in R1; a geo-IP lookup can come later.
 11. **Stage targets.** (Call) The target field ships with the pipeline stages plan, since the mockup
     edits it there; the pace and progress that use it come with R3 analytics.
-12. **Budget permission.** (Call) `costs:write`, as screens.md says.
+12. **Budget permission.** (Call) `budgets:write` (owner, leader), with `costs:read` to see Costs and `costs:write` for cost lines. Built in R3a.
 13. **Tenant owners' AI runs.** (Call) Settings > AI runs (`settings:manage`, screens.md §21h) shows
     the workspace's runs from `GET /api/v1/ai-runs` and `/api/v1/ai-runs/{id}`; the admin list stays cross-tenant.
 

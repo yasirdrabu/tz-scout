@@ -10,6 +10,7 @@ import { disconnect, integrationsQuery, setDisabled, type Integration, type Test
 import { CallsList } from './CallsList';
 import { CredentialSection } from './CredentialSection';
 import { ModeSwitch } from './ModeSwitch';
+import { Prices } from './Prices';
 import { TestSection } from './TestSection';
 import { UsageLimit } from './UsageLimit';
 
@@ -71,6 +72,7 @@ export function ManagePanel({ service, tenant, onClose }: Props) {
         <Tile label="Response average" value={service.avg_ms === null ? 'No calls' : `${f.number(service.avg_ms)} ms`} />
       </div>
       <UsageLimit key={service.key} service={service} tenant={tenant} onChanged={refresh} />
+      <Prices key={`prices-${service.key}`} serviceKey={service.key} tenant={tenant} />
       <CallsList tenant={tenant} serviceKey={service.key} />
       <ConfirmDialog
         open={confirm}

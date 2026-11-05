@@ -25,8 +25,12 @@ describe('nav', () => {
       'Offers and practices',
       'Playbooks',
       'Funnel by source',
-      'Costs',
     ]);
+  });
+
+  it('shows Costs only to people who can see costs', () => {
+    expect(labels(meWith(['analytics:read']))).not.toContain('Costs');
+    expect(labels(meWith(['costs:read']))).toEqual(['Costs']);
   });
 
   it('shows Enrichment to anyone who can request or approve it', () => {

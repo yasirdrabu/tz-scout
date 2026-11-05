@@ -4,6 +4,7 @@ import { delay, http, HttpResponse } from 'msw';
 import { exactly, problem } from '../../../test/http';
 import { renderApp, serveMe } from '../../../test/renderApp';
 import { server } from '../../../test/server';
+import { category, CLAUDE_RATES, APOLLO_RATES, serveCosts, serveRates, summary } from '../../costs/testing';
 import type { Call, Cap, Integration } from './api';
 
 const service = (s: Partial<Integration> & Pick<Integration, 'key' | 'name'>): Integration => ({
@@ -44,10 +45,11 @@ const CALLS: Call[] = [
   { id: 'c2', at: '2026-10-31T09:40:00Z', operation: 'hubspot.companies.search', outcome: 'rate_limited', status_code: 429, duration_ms: 90, error_message: 'Too many calls' },
 ];
 
-function serve(rows: Integration[] = [HUBSPOT, APOLLO, GOVSPEND]) {
-  serveMe({ taazaa: { scopes: ['integrations:manage'] } });
+function serve(rows: Integration[] = [HUBSPOT, APOLLO, GOVSPEND], scopes = ['integrations:manage']) {
+  serveMe({ taazaa: { scopes } });
   server.use(
     http.get('/api/v1/integrations', () => HttpResponse.json({ data: rows })),
+    http.get('/api/v1/integrations/:key/rates', () => HttpResponse.json({ data: [] })),
     http.get('/api/v1/integrations/:key/calls', ({ request }) => {
       const errorsOnly = new URL(request.url).searchParams.get('errors_only') === 'true';
       return HttpResponse.json({ data: errorsOnly ? CALLS.filter((c) => c.outcome !== 'ok') : CALLS });
@@ -401,5 +403,79 @@ describe('usage limits', () => {
     await userEvent.click(within(drawer).getByRole('button', { name: 'Allow until Nov 3' }));
     expect(await screen.findByText('HubSpot can go over its limit until Nov 3.')).toBeInTheDocument();
     expect(posted).toBe(1);
+  });
+});
+
+describe('Prices (R3a)', () => {
+  const CLAUDE = { ...APOLLO, key: 'anthropic', name: 'Claude', status: 'connected' as const };
+
+  it('shows each Claude model with its input and output price per million tokens, and saves them', async () => {
+    serve([CLAUDE]);
+    const seen = serveRates('anthropic', CLAUDE_RATES);
+    const drawer = await openService('Manage Claude');
+    const prices = await within(drawer).findByRole('region', { name: 'Prices' });
+    const model = within(prices).getByRole('group', { name: 'claude-sonnet-5-5' });
+    const input = within(model).getByLabelText('Input, $ per million tokens');
+    expect(input).toHaveValue('3');
+    expect(within(model).getByLabelText('Output, $ per million tokens')).toHaveValue('15');
+    await userEvent.clear(input);
+    await userEvent.type(input, '4');
+    await userEvent.click(within(prices).getByRole('button', { name: 'Save prices' }));
+    expect(await screen.findByText('Prices saved.')).toBeInTheDocument();
+    expect(seen[0]!.body).toEqual({
+      rates: [
+        { item: 'claude-sonnet-5-5:input', cents_per_unit: 0.0004 },
+        { item: 'claude-sonnet-5-5:output', cents_per_unit: 0.0015 },
+      ],
+    });
+  });
+
+  it('shows Cents per credit for Apollo and refuses a negative price', async () => {
+    serve();
+    const seen = serveRates('apollo', APOLLO_RATES);
+    const drawer = await openService('Manage Apollo');
+    const prices = await within(drawer).findByRole('region', { name: 'Prices' });
+    const credit = within(prices).getByLabelText('Cents per credit');
+    expect(credit).toHaveValue('2');
+    await userEvent.clear(credit);
+    await userEvent.type(credit, '-1');
+    await userEvent.click(within(prices).getByRole('button', { name: 'Save prices' }));
+    expect(credit).toHaveAccessibleDescription("A rate can't be negative.");
+    expect(seen).toHaveLength(0);
+    await userEvent.clear(credit);
+    await userEvent.type(credit, '2.5');
+    await userEvent.click(within(prices).getByRole('button', { name: 'Save prices' }));
+    expect(await screen.findByText('Prices saved.')).toBeInTheDocument();
+    expect(seen[0]!.body).toEqual({ rates: [{ item: 'credit', cents_per_unit: 2.5 }] });
+  });
+
+  it('has no Prices section for a service with no money', async () => {
+    serve();
+    const drawer = await openService('Manage HubSpot');
+    await within(drawer).findByRole('region', { name: 'Usage limit' });
+    expect(within(drawer).queryByRole('region', { name: 'Prices' })).toBeNull();
+  });
+});
+
+describe('Budget banners on Integrations (R3a)', () => {
+  const paused = summary({
+    categories: [category({ key: 'ai_usage', label: 'AI usage', spend_month_cents: 120_000, budget_cents: 100_000, level: 'paused', pausable: true })],
+  });
+
+  it('shows the pause to people who can see costs', async () => {
+    serveCosts({ scopes: ['integrations:manage', 'costs:read'], summary: paused });
+    server.use(
+      http.get('/api/v1/integrations', () => HttpResponse.json({ data: [HUBSPOT] })),
+      http.get('/api/v1/integrations/:key/rates', () => HttpResponse.json({ data: [] })),
+    );
+    renderApp('/t/taazaa/settings/integrations');
+    expect(await screen.findByText('AI usage is paused: it is over 110% of its November budget. Raise the budget to resume.')).toBeInTheDocument();
+  });
+
+  it('shows nothing without costs:read', async () => {
+    serve([HUBSPOT]);
+    renderApp('/t/taazaa/settings/integrations');
+    await screen.findByRole('heading', { name: '1 of 1 services working' });
+    expect(screen.queryByRole('list', { name: 'Budget alerts' })).toBeNull();
   });
 });

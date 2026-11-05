@@ -69,7 +69,7 @@ export const NAV: NavGroup[] = [
     group: 'Results',
     items: [
       { label: 'Funnel by source', kind: 'tenant', to: '/t/$tenant/funnel', rule: { all: ['analytics:read'] } },
-      { label: 'Costs', kind: 'tenant', to: '/t/$tenant/costs', rule: { all: ['analytics:read'] } },
+      { label: 'Costs', kind: 'tenant', to: '/t/$tenant/costs', rule: { all: ['costs:read'] } },
     ],
   },
   {
