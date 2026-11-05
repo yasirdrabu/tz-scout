@@ -19,11 +19,11 @@
 
 ## Rulings (controller, 2026-11-05)
 
-1. **Next meeting.** The earliest meeting with start after now and status not cancelled or no-show. Note "Next: {Mon D} with {who}". `who` is the meeting title when there is one, else the first attendee's name, plus " +{n}" for more. No upcoming meeting: "No meeting booked".
+1. **Next meeting.** The earliest meeting with start after now and status not cancelled or no-show. Note "Next: {Mon D} with {who}". `who` is the meeting title when there is one, else the first attendee with a name, plus " +{n}" for the other attendees. With no title and no named attendee the API sends `with: null` and the note reads "Next: {Mon D}". No upcoming meeting: "No meeting booked".
 2. **Held** = status `held`, or status `scheduled` with an end (else start) before now. HubSpot `hs_meeting_outcome` maps: COMPLETED → `held`, SCHEDULED or RESCHEDULED → `scheduled`, NO_SHOW → `no_show`, CANCELED → `cancelled`, and missing → `scheduled`.
 3. **Adapter activity shape** (both adapters, contract tests): `{ externalId, kind, occurredAt, actorOwnerExternalId, contacts: { externalId: string; name: string | null }[], subject: string | null, startAt: string | null, endAt: string | null, status: 'scheduled' | 'held' | 'no_show' | 'cancelled' | null }`. `subject` is the email subject or the meeting title; `startAt`, `endAt` and `status` apply only to meetings. No body fields exist anywhere.
 4. **Storage.** `crm.activity` gains `contacts jsonb not null default '[]'`, `actor_owner_external_id`, `subject`, `start_at`, `end_at`, `status`. The migration is generated.
-5. **Since fix.** The poll's `since` is capped at now. Each sync also re-reads meetings with start from 30 days ago onward (`listActivities` takes `meetingsFrom`). A meeting already stored updates its subject, contacts, start, end and status in place. It never publishes `crm.activity.observed` again, so routing and the stop rule fire once, on first sight.
+5. **Since fix.** The poll's `since` is the latest non-meeting activity (email, reply or call) at or before now, else the handoff; meetings never move it. Each sync also re-reads meetings with start from 30 days ago onward (`listActivities` takes `meetingsFrom`). A meeting already stored updates its subject, contacts, start, end and status in place, written only when one of them changed. It never publishes `crm.activity.observed` again, so routing and the stop rule fire once, on first sight.
 6. **Engagement per person.** It covers committee people with a CRM person link (`crm.link` person). A person's state comes from activity since the latest completed handoff:
    1. "Met {date}": the latest held meeting listing their contact.
    2. "Replied {date}": the latest reply from their contact.
@@ -31,7 +31,7 @@
    4. "Not contacted": anything else, including people with no contact link.
 7. **API.** Two parts:
    - `GET /accounts/{id}/handoffs` → `follow_through` gains `meetings_held` (int) and `next_meeting` (`{ at, with }` or null).
-   - New `GET /accounts/{id}/engagement` (`accounts:read`, visibility like `/activity`) → `{ people: [{ person_id, state: 'met' | 'replied' | 'emailed' | 'not_contacted', at: string | null }], engaged: number, total: number, gap_role: string | null }`. `total` is the committee people count, `engaged` counts met or replied, and `gap_role` is the label of the first uncovered required role from accounts' committee coverage. The tile note reads "No {gap_role} contact yet".
+   - New `GET /accounts/{id}/engagement` (`accounts:read`, visibility like `/activity`) → `{ people: [{ person_id, state: 'met' | 'replied' | 'emailed' | 'not_contacted', at: string | null }], engaged: number, total: number, gap_role: string | null }`. `total` is the count of all people on the account (the committee rail), with or without a role, `engaged` counts met or replied, and `gap_role` is the label of the first uncovered required role from accounts' committee coverage. The tile note reads "No {gap_role} contact yet".
 8. **Feed rows.** `ActivityEntry` gains `who: string | null` and `actor: 'person' | 'contact' | 'scout'`, and `summary` becomes the "what". Copy (exact):
    - **Email:** who = the actor owner's member name. What = "Sent \"{subject}\" to {names}", or "Sent an email to {names}" with no subject.
    - **Reply:** who = the first contact's name. What = "Replied: \"{subject}\"", or "Replied" with no subject.

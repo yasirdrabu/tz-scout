@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lte, max, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte, max, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds } from '@/modules/accounts';
 import { checkCap, gateway } from '@/modules/integrations';
 import { userForCrmOwner } from '@/modules/tenancy';
@@ -67,6 +67,14 @@ const detailsOf = (a: Activity): ActivityDetails => ({
   status: a.status,
 });
 
+const time = (d: Date | null | undefined) => d?.getTime() ?? null;
+const sameDetails = (x: ActivityDetails, y: ActivityDetails) =>
+  x.subject === y.subject &&
+  x.status === y.status &&
+  time(x.startAt) === time(y.startAt) &&
+  time(x.endAt) === time(y.endAt) &&
+  JSON.stringify(x.contacts?.map((c) => [c.externalId, c.name])) === JSON.stringify(y.contacts?.map((c) => [c.externalId, c.name]));
+
 async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternalId: string, now: Date): Promise<void> {
   const call = <T>(op: string, fn: (a: CrmAdapter) => Promise<T>) => gateway.call(ctx, h.system, op, (a) => fn(a as CrmAdapter), { module: 'crm' });
   const fixed = await ctx.tx
@@ -90,11 +98,12 @@ async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternal
   const taskIds = [...new Set([...fixed.filter((r) => r.type === 'task').map((r) => r.externalId), ...planLinks.map((l) => l.externalTaskId)])];
 
   // Nothing before the handoff, and nothing already seen, is new. A task_done is stamped when we saw it, so it does not move this.
-  // Capped at now (R2d Ruling 5): a booked meeting stored at its future start must not hide the emails before it.
+  // Nor does a meeting (R2d Ruling 5): one stored at its booked start must not hide the emails before it; meetings are read
+  // again through `meetingsFrom` instead.
   const [seen] = await ctx.tx
     .select({ at: max(activity.occurredAt) })
     .from(activity)
-    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, h.accountId), ne(activity.kind, 'task_done'), lte(activity.occurredAt, now)));
+    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, h.accountId), inArray(activity.kind, ['email', 'reply', 'call']), lte(activity.occurredAt, now)));
   const since = seen?.at && h.completedAt && seen.at > h.completedAt ? seen.at : (h.completedAt ?? now);
 
   const ft = await call('readFollowThrough', (a) => a.readFollowThrough({ companyExternalId, taskExternalIds: taskIds }));
@@ -159,13 +168,21 @@ async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternal
   for (const a of found) {
     const details = detailsOf(a);
     // A meeting already stored takes its new title, contacts, times and status, and is never observed again (R2d Ruling 5).
+    // It is written only when one of them changed.
     if (a.kind === 'meeting') {
-      const updated = await ctx.tx
-        .update(activity)
-        .set(details)
-        .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.system, h.system), eq(activity.externalId, a.externalId)))
-        .returning({ id: activity.id });
-      if (updated.length) continue;
+      const [stored] = await ctx.tx
+        .select({ subject: activity.subject, contacts: activity.contacts, startAt: activity.startAt, endAt: activity.endAt, status: activity.status })
+        .from(activity)
+        .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.system, h.system), eq(activity.externalId, a.externalId)));
+      if (stored) {
+        if (!sameDetails(stored, details)) {
+          await ctx.tx
+            .update(activity)
+            .set(details)
+            .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.system, h.system), eq(activity.externalId, a.externalId)));
+        }
+        continue;
+      }
     }
     const occurredAt = new Date(a.occurredAt);
     // A meeting read again for its start can be from before the handoff: that is not new.

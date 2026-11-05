@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { upsertFromArrival } from '@/modules/accounts';
@@ -97,6 +97,17 @@ describe('meetings held and the next meeting (R2d Rulings 1, 2, 5)', () => {
     expect((await rows(a)).find((r) => r.externalId === email)).toMatchObject({ kind: 'email', subject: 'The outline' });
   });
 
+  it('a booked meeting whose start passes with no sync in between does not hide the emails before it', async () => {
+    const a = await handedOff();
+    const done = (await handoffOf(a)).completedAt!;
+    const co = (await handoffOf(a)).companyExternalId!;
+    await meeting(co, new Date(done.getTime() + 5 * HOUR), { subject: 'Scoping call' });
+    await sync(a, new Date(done.getTime() + HOUR));
+    const email = await t.run((ctx) => mockAddActivity(ctx, { companyExternalId: co, kind: 'email', occurredAt: new Date(done.getTime() + 3 * HOUR) }));
+    await sync(a, new Date(done.getTime() + 6 * HOUR));
+    expect((await rows(a)).find((r) => r.externalId === email)).toMatchObject({ kind: 'email' });
+  });
+
   it('a cancelled meeting updates in place', async () => {
     const a = await handedOff();
     const co = (await handoffOf(a)).companyExternalId!;
@@ -113,6 +124,11 @@ describe('meetings held and the next meeting (R2d Rulings 1, 2, 5)', () => {
     expect(mine).toHaveLength(1);
     expect(mine[0]).toMatchObject({ status: 'cancelled', startAt: moved });
     expect((await observed(a)).filter((e) => e.externalId === ext)).toHaveLength(1);
+    // Read again unchanged: the row is not written (its row version stays).
+    const version = () => t.run(async (ctx) => (await ctx.tx.select({ v: sql<string>`xmin::text` }).from(activity).where(eq(activity.externalId, ext)))[0]!.v);
+    const before = await version();
+    await sync(a);
+    expect(await version()).toBe(before);
   });
 
   it('a meeting already past the poll updates too: meetings from 30 days back are read again', async () => {

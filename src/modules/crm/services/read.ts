@@ -38,7 +38,7 @@ export type HandoffsView = {
     stage: string | null;
     checkedAt: Date | null;
     meetingsHeld: number;
-    nextMeeting: { at: string; with: string } | null;
+    nextMeeting: { at: string; with: string | null } | null;
   } | null;
   deals: { id: string; name: string; stage: string | null; status: string; amountCents: number | null; currency: string | null; openedAt: Date | null; closedAt: Date | null }[];
   /** Two companies are linked: a person has to say which one is right. */

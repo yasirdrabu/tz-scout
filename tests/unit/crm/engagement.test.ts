@@ -66,6 +66,12 @@ describe('nextMeeting (Ruling 1)', () => {
     expect(nextMeeting([act({ status: 'scheduled', startAt: day(15), contacts: [ct('c1', 'Pat Lee')] })], now)?.with).toBe('Pat Lee');
   });
 
+  it('takes the first attendee with a name, and is with null when none has one', () => {
+    expect(nextMeeting([act({ status: 'scheduled', startAt: day(15), contacts: [ct('c1'), ct('c2', 'Ben Ray')] })], now)?.with).toBe('Ben Ray +1');
+    expect(nextMeeting([act({ status: 'scheduled', startAt: day(15), contacts: [ct('c1'), ct('c2')] })], now)).toEqual({ at: day(15).toISOString(), with: null });
+    expect(nextMeeting([act({ status: 'scheduled', startAt: day(15) })], now)?.with).toBeNull();
+  });
+
   it('is null when no meeting is coming up', () => {
     expect(nextMeeting([act({ status: 'held', startAt: day(5) }), act({ kind: 'email', occurredAt: day(20) })], now)).toBeNull();
     expect(nextMeeting([], now)).toBeNull();

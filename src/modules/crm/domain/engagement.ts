@@ -25,15 +25,16 @@ export function meetingHeld(a: EngagementActivity, now: Date): boolean {
 
 /**
  * R2d Ruling 1: the earliest meeting that starts after now and is not cancelled or a no-show. `with` is its title, else
- * the first attendee's name plus " +{n}" for the others; null when none is coming up.
+ * the first attendee with a name plus " +{n}" for the other attendees, else null. Null when none is coming up.
  */
-export function nextMeeting(rows: EngagementActivity[], now: Date): { at: string; with: string } | null {
+export function nextMeeting(rows: EngagementActivity[], now: Date): { at: string; with: string | null } | null {
   const next = rows
     .filter((a) => a.kind === 'meeting' && a.status !== 'cancelled' && a.status !== 'no_show' && startOf(a).getTime() > now.getTime())
     .sort((x, y) => startOf(x).getTime() - startOf(y).getTime() || x.externalId.localeCompare(y.externalId))[0];
   if (!next) return null;
-  const [first, ...others] = next.contacts;
-  const who = next.subject || `${first?.name ?? 'Someone'}${others.length ? ` +${others.length}` : ''}`;
+  const named = next.contacts.find((c) => c.name)?.name;
+  const others = next.contacts.length - 1;
+  const who = next.subject || (named ? `${named}${others ? ` +${others}` : ''}` : null);
   return { at: startOf(next).toISOString(), with: who };
 }
 

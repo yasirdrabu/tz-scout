@@ -388,10 +388,12 @@ describe('GET /accounts/{id}/engagement (R2d Ruling 7)', () => {
     const contact = (first: string) => links.find((l) => l.scoutId === id(first))!.externalId;
     await adminDb.delete(link).where(and(eq(link.tenantId, w.tenantId), eq(link.scoutType, 'person'), eq(link.scoutId, id('Dee'))));
     const now = new Date();
+    const next = new Date(now.getTime() + 5 * 86_400_000);
     await w.run(async (ctx) => {
       await mockAddActivity(ctx, { companyExternalId: co, kind: 'email', contactExternalIds: [contact('Ana'), contact('Ben'), contact('Cy')] });
       await mockAddActivity(ctx, { companyExternalId: co, kind: 'meeting', occurredAt: now, startAt: now, endAt: now, status: 'held', contactExternalIds: [contact('Ana')] });
       await mockAddActivity(ctx, { companyExternalId: co, kind: 'reply', contactExternalIds: [contact('Ben')] });
+      await mockAddActivity(ctx, { companyExternalId: co, kind: 'meeting', occurredAt: next, startAt: next, endAt: next, status: 'scheduled', subject: 'Scoping call' });
     });
     await w.run((ctx) => syncAccount(ctx, a, new Date()));
     const body = await json(w.as(leader, getEngagement, `accounts/${a}/engagement`));
@@ -402,7 +404,7 @@ describe('GET /accounts/{id}/engagement (R2d Ruling 7)', () => {
     expect(state('Dee')).toEqual({ person_id: id('Dee'), state: 'not_contacted', at: null });
     expect(body).toMatchObject({ engaged: 2, total: 4, gap_role: 'Commercial buyer' });
     const handoffs = await json(w.as(leader, getHandoffs, `accounts/${a}/handoffs`));
-    expect(handoffs.follow_through).toMatchObject({ meetings_held: 1, next_meeting: null });
+    expect(handoffs.follow_through).toMatchObject({ meetings_held: 1, next_meeting: { at: next.toISOString(), with: 'Scoping call' } });
   });
 
   it('engagement is 404 for an account the caller cannot see', async () => {

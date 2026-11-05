@@ -26,15 +26,17 @@ record; Scout reads, never writes, deal state.
 - **What is stored (R2d):** each `crm.activity` row keeps the CRM contacts on it (id and name), the
   acting CRM owner, the email subject or meeting title, and for meetings the start, end and status
   (`scheduled`, `held`, `no_show`, `cancelled`). Never an email or reply body.
-- **Where a sync starts (R2d):** from the latest activity already seen that is not in the future, else
-  the handoff. A booked meeting stored at its future start never hides the emails before it.
+- **Where a sync starts (R2d):** from the latest email, reply or call already seen at or before now, else
+  the handoff. Meetings never move it, so a booked meeting never hides the emails before it.
 - **Meetings change (R2d):** each sync also reads again the meetings that start from 30 days ago onward.
-  A meeting already stored takes its new title, contacts, start, end and status in place and publishes
+  A meeting already stored takes its new title, contacts, start, end and status in place (written only
+  when one changed) and publishes
   nothing, so routing's `meeting_booked` and the playbook stop rule fire once, when the meeting is first
   seen (booked). A meeting read again that is from before the handoff is not new.
 - **Meetings held and next meeting (R2d):** a meeting is held when its status is `held`, or `scheduled`
   with its end (else start) before now. The next meeting is the earliest one starting after now that is
-  not cancelled or a no-show; it is shown "with" its title, else its first attendee's name plus " +{n}".
+  not cancelled or a no-show; it is shown "with" its title, else its first named attendee plus " +{n}"
+  for the other attendees, else with no one.
 - **Engagement per person (R2d):** for each person on the account, from the activity of the latest
   completed handoff and the person's CRM contact link: "met" (the latest held meeting listing their
   contact), else "replied" (the latest reply from it), else "emailed" (an email or call listing it),
