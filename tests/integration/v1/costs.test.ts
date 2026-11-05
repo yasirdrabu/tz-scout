@@ -145,6 +145,16 @@ describe('budgets and summary', () => {
     expect(seller.map((r) => r.status)).toEqual([403, 403, 403]);
   });
 
+  it('an API key with budgets:write cannot save budgets (people only)', async () => {
+    const { secret } = await run((ctx) => createApiKey(ctx, { name: 'b', environment: 'live', scopes: ['budgets:write', 'costs:read'] }, SYSTEM_GRANTOR));
+    const req = new Request('http://localhost:4240/api/v1/costs/budgets', {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ month: '2099-01', budgets: [{ category: 'ai_usage', amount_cents: 1 }] }),
+    });
+    expect((await saveBudgetsRoute(req)).status).toBe(403);
+  });
+
   it('a past month gets 409 "Past months can\'t be changed."; a bad month or amount gets 400', async () => {
     const res = await save('owner', '2000-01');
     expect(res.status).toBe(409);

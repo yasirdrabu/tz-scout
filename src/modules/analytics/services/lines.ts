@@ -164,8 +164,10 @@ export async function editManualLine(ctx: ModuleContext, id: string, patch: Part
   if (next.occurredOn === old.occurredOn && next.category === old.category && next.amountCents === old.amountCents && next.note === old.note) return view(old);
   await markVoided(ctx, id, EDITED);
   const row = await insertManual(ctx, next, id);
-  await afterLinesChanged(ctx, old.category as CostCategory, old.occurredOn);
-  if (row.category !== old.category || row.occurredOn !== old.occurredOn) await afterLinesChanged(ctx, row.category as CostCategory, row.occurredOn);
+  // Both sides, in category order, so two transactions locking the same budget states take them in the same order.
+  const touched = [old, row].sort((a, b) => a.category.localeCompare(b.category));
+  await afterLinesChanged(ctx, touched[0]!.category as CostCategory, touched[0]!.occurredOn);
+  if (row.category !== old.category || row.occurredOn !== old.occurredOn) await afterLinesChanged(ctx, touched[1]!.category as CostCategory, touched[1]!.occurredOn);
   return view(row);
 }
 

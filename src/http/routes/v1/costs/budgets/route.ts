@@ -13,8 +13,8 @@ const saveBody = z.strictObject({
 /** Each category's budget for `?month=` (YYYY-MM, the current tenant month by default), carried forward. */
 export const GET = v1Route({ permission: 'costs:read' }, async (req, _principal, ctx) => getBudgets(ctx, new URL(req.url).searchParams.get('month') || undefined));
 
-/** `{ month, budgets: [{ category, amount_cents }] }`: the current or a future month; a past month is a 409. */
-export const PUT = v1Route({ permission: 'budgets:write' }, async (req, _principal, ctx) => {
+/** `{ month, budgets: [{ category, amount_cents }] }` (people only): the current or a future month; a past month is a 409. */
+export const PUT = v1Route({ permission: 'budgets:write', peopleOnly: true }, async (req, _principal, ctx) => {
   const { month, budgets } = await parseBody<{ month: string; budgets: { category: string; amount_cents: number }[] }>(req, saveBody);
   return saveBudgets(
     ctx,

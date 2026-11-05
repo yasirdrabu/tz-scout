@@ -1,6 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { addManualLine, getBudgets, saveBudgets, summary, voidLine } from '@/modules/analytics';
+import { addManualLine, editManualLine, getBudgets, saveBudgets, summary, voidLine } from '@/modules/analytics';
 import { budgetState } from '@/modules/analytics/db/schema';
 import type { CostCategory } from '@/modules/integrations/contracts/costs';
 import { createTenant } from '@/modules/tenancy';
@@ -154,6 +154,39 @@ describe('month edge', () => {
     // A late November line no longer moves any level.
     await w.add('ai_usage', 1_000, '2026-11-30');
     expect(await w.levels()).toHaveLength(1);
+  });
+
+  it('November paused, then a December line under 90% leaves December ok, in the levels and the summary; crossing 90% in December alerts December', async () => {
+    const w = await workspace();
+    vi.setSystemTime(new Date('2026-11-30T17:00:00Z'));
+    await w.budget('2026-11', 'data_vendors', 10_000);
+    await w.add('data_vendors', 12_000, '2026-11-30');
+    vi.setSystemTime(new Date('2026-12-01T05:30:00Z')); // 00:30 on 1 December in New York
+    await w.add('data_vendors', 8_900, '2026-12-01');
+    expect((await w.levels()).map((e) => [e.month, e.level])).toEqual([['2026-11', 'paused']]);
+    const s = await w.run((ctx) => summary(ctx, new Date()));
+    expect(s.month).toBe('2026-12');
+    expect(s.categories.find((c) => c.key === 'data_vendors')).toMatchObject({ spendMonthCents: 8_900, budgetCents: 10_000, level: 'ok' });
+    await w.add('data_vendors', 200, '2026-12-01');
+    expect((await w.levels()).map((e) => [e.month, e.level, e.spentCents])).toEqual([
+      ['2026-11', 'paused', 12_000],
+      ['2026-12', 'alert', 9_100],
+    ]);
+  });
+});
+
+describe('edits', () => {
+  it('moving a manual line to another category recomputes both', async () => {
+    const w = await workspace();
+    await w.budget('2026-11', 'lists_events', 10_000);
+    await w.budget('2026-11', 'partner_fees', 10_000);
+    const line = await w.add('lists_events', 9_500);
+    await w.run((ctx) => editManualLine(ctx, line.id, { category: 'partner_fees' }));
+    expect((await w.levels()).map((e) => [e.category, e.level, e.spentCents])).toEqual([
+      ['lists_events', 'alert', 9_500],
+      ['lists_events', 'ok', 0],
+      ['partner_fees', 'alert', 9_500],
+    ]);
   });
 });
 

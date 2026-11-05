@@ -68,7 +68,8 @@ export async function saveBudgets(ctx: ModuleContext, month: string, budgets: { 
       .onConflictDoUpdate({ target: [costBudget.tenantId, costBudget.category, costBudget.month], set: { amountCents: sql`excluded.amount_cents` } });
   }
   // A future month's row can't change this month's budget: only an earlier row carries forward.
-  if (month === current) for (const c of byCategory.keys()) await recomputeLevel(ctx, c, current);
+  // Sorted, so two transactions locking several state rows take them in the same order.
+  if (month === current) for (const c of [...byCategory.keys()].sort()) await recomputeLevel(ctx, c, current);
   return getBudgets(ctx, month);
 }
 
@@ -111,7 +112,6 @@ export async function summary(ctx: ModuleContext, now: Date = new Date()): Promi
   const today = dayOf(now, tz);
   const since90 = addDays(today, -89);
   const months = monthsBack(month, 6);
-  const from = `${months[0]}-01` < since90 ? `${months[0]}-01` : since90;
   const rows = await ctx.tx
     .select({
       category: costLine.category,
@@ -120,7 +120,8 @@ export async function summary(ctx: ModuleContext, now: Date = new Date()): Promi
       cents90: sql<number>`coalesce(sum(${costLine.amountCents}) filter (where ${costLine.occurredOn} >= ${since90} and ${costLine.occurredOn} <= ${today}), 0)::bigint`.mapWith(Number),
     })
     .from(costLine)
-    .where(spendWhere(ctx, from, `${addMonths(month, 1)}-01`))
+    // Six months back always starts before the 90 days do.
+    .where(spendWhere(ctx, `${months[0]}-01`, `${addMonths(month, 1)}-01`))
     .groupBy(costLine.category, sql`2`);
   const budgets = await budgetRows(ctx);
   const sum = (pick: (r: (typeof rows)[number]) => boolean, f: 'cents' | 'cents90') => rows.filter(pick).reduce((s, r) => s + r[f], 0);
