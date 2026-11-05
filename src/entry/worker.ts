@@ -16,7 +16,7 @@ import { crmConsumers, crmJobHandlers } from '@/modules/crm';
 import { analyticsConsumers } from '@/modules/analytics';
 import { enrichmentJobHandlers } from '@/modules/enrichment';
 import { playbooksConsumers, playbooksJobHandlers } from '@/modules/playbooks';
-import { credentialsCleanupHandler } from '@/modules/integrations';
+import { credentialsCleanupHandler, integrationsConsumers } from '@/modules/integrations';
 import { autoAcceptHandler, routingConsumers } from '@/modules/routing';
 import { ageingHandler, rescoreAccountsHandler, rescorePageHandler, scoringConsumers } from '@/modules/scoring';
 import { memberActivatedAuditHandler, registerWorkspaceSeeder, workspaceProvisionHandler } from '@/modules/tenancy';
@@ -27,7 +27,7 @@ import type { JobHandlerDef } from '@/platform/runtime/jobs';
 import { deliverOnce, startWorker } from '@/platform/runtime/worker';
 
 /** Every consumer in the app. Modules add theirs here as they land. */
-export const consumers: ConsumerDef[] = [accountsTenantDefaults, accountsSummaryOnReviewChanged, accountsSummaryOnScored, ...accountsCrmStatusConsumers, intakeTenantDefaults, intakeAccountMerged, intakeStatusFeedback, intakeConflictFeedback, intakeSellerDeclineFeedback, intakeLeadQualified, ...scoringConsumers, ...routingConsumers, ...crmConsumers, ...playbooksConsumers, ...analyticsConsumers];
+export const consumers: ConsumerDef[] = [accountsTenantDefaults, accountsSummaryOnReviewChanged, accountsSummaryOnScored, ...accountsCrmStatusConsumers, intakeTenantDefaults, intakeAccountMerged, intakeStatusFeedback, intakeConflictFeedback, intakeSellerDeclineFeedback, intakeLeadQualified, ...scoringConsumers, ...routingConsumers, ...crmConsumers, ...playbooksConsumers, ...analyticsConsumers, ...integrationsConsumers];
 
 /** Every job handler in the app. */
 export const jobs: JobHandlerDef[] = [pingHandler, memberActivatedAuditHandler, workspaceProvisionHandler, credentialsCleanupHandler, exclusionsRecheckHandler, conflictExplainHandler, resolveHandler, waitingExpireHandler, importRunHandler, qualifiedLeadsPollHandler, rescoreAccountsHandler, rescorePageHandler, ageingHandler, autoAcceptHandler, ...crmJobHandlers, ...playbooksJobHandlers, ...enrichmentJobHandlers];

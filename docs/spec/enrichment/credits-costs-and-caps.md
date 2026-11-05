@@ -68,6 +68,12 @@ Claude's calls, 2026-11-03 (the numbering is the plan's; the other rulings are i
   blocked, the request stays `approved` with `waiting_reason` "Waiting for budget: {Provider} monthly
   limit reached", committed in its own transaction, and the job waits for the limit (INT-E4-S3-AC2)
   without using up a try.
+- **A paused budget (R3a Ruling 9).** While the provider's cost category is over 110% of its monthly
+  budget, `checkCap` reads blocked with `paused`, and the request waits with "Waiting for budget: {Category}
+  is over its monthly budget" ("Data vendors" for Apollo and Vibe). The same reason is kept when the
+  gateway refuses a call part-way; a request that already found something finishes `partial` with
+  "Stopped: {Category} is over its monthly budget." When the budget is raised the pause clears and the
+  job runs on its next delivery (within 15 minutes).
 - **Every operation is one `gateway.call`** with `{module: 'enrichment', unit: 'credits', units: <worst
   case for this call>, measure: <credits the provider reported>, requestSummary: {requestId,
   accountId}}`, so the limit reserves the worst case and settles what was spent.

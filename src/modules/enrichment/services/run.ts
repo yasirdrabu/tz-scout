@@ -1,7 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { getAccount, getSummaries, listBuyingRoles, type AccountView, type PersonView } from '@/modules/accounts';
 import { getRun } from '@/modules/ai-tasks';
-import { PROVIDERS, checkCap, connectionStatus, gateway, getRates, markConnectionFailing, priceOf } from '@/modules/integrations';
+import { PROVIDERS, budgetPaused, checkCap, connectionStatus, gateway, getRates, markConnectionFailing, priceOf } from '@/modules/integrations';
 import { checkArrivalCap, countryCode, ensureVendorSource, findArrivalByRef, normaliseDomain, readSource, submitArrival } from '@/modules/intake';
 import { getOffer } from '@/modules/offers';
 import { tenantSummary } from '@/modules/tenancy';
@@ -13,7 +13,7 @@ import type { CompanyFacts, EnrichmentAdapter, Paid, Person, Signal, SitePage } 
 import { requestCompleted, requestFailed } from '../contracts/events';
 import type { EnrichmentKind, RequestStatus } from '../contracts/types';
 import { request } from '../db/schema';
-import { classifyError, type ClassifiedError } from '../domain/errors';
+import { budgetWaiting, classifyError, pausedCategoryOf, type ClassifiedError } from '../domain/errors';
 import { MAX_PEOPLE, PEOPLE_PER_ROLE } from '../domain/prices';
 import { readWebsiteInput, websiteFacts } from '../domain/read-website';
 import { nothingFound, searchTitles, type LeadOffer } from '../domain/run';
@@ -400,8 +400,9 @@ export async function runRequest(ctx: ModuleContext, requestId: string): Promise
   // 1. The estimate against the limit. The wait is committed: the throw rolls this transaction back.
   const cap = await checkCap(ctx, r.providerKey, fromStoredEstimate(r.estimate).credits);
   if (cap.status === 'blocked') {
-    await commit(ctx, r.id, { waitingReason: waiting });
-    throw capWait(name, cap.resetsAt);
+    // A budget pause (R3a Ruling 9) waits for the budget to be raised, not for the limit to reset.
+    await commit(ctx, r.id, { waitingReason: cap.paused ? budgetWaiting(cap.paused) : waiting });
+    throw cap.paused ? budgetPaused(cap.paused) : capWait(name, cap.resetsAt);
   }
   const mode = (await connectionStatus(ctx, r.providerKey)).mode === 'live' ? 'live' : 'mock';
   if (!(await commit(ctx, r.id, { status: 'running', startedAt: r.startedAt ?? new Date(), waitingReason: null, connectionMode: mode }))) return;
@@ -425,7 +426,8 @@ export async function runRequest(ctx: ModuleContext, requestId: string): Promise
     if (c.kind === 'cap_reached') {
       if (hasResults(f)) return finish(ctx, r, f, before, c);
       const orgId = f.orgId && f.orgId !== (r.params as Params).org_id ? { params: { ...(r.params as Params), org_id: f.orgId } } : {};
-      await commit(ctx, r.id, { waitingReason: waiting, ...orgId });
+      const paused = pausedCategoryOf(e);
+      await commit(ctx, r.id, { waitingReason: paused ? budgetWaiting(paused) : waiting, ...orgId });
       throw e;
     }
     // Partial means it kept something: out of credits before anything was found is a failure.

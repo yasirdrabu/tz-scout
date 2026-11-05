@@ -124,6 +124,23 @@ Build rulings:
   `ai_usage` "AI usage"), maps `anthropic` to `ai_usage` and `apollo` and `vibe` to `data_vendors`, and
   marks `ai_usage` and `data_vendors` pausable.
 
+## Budget pause (R3a Ruling 9)
+
+- **Flag.** INT consumes `analytics.budget.level_changed` into `integrations.paid_pause(tenant_id, category,
+  month, paused)`: level `paused` sets it, any lower level clears it. Only pausable categories are kept.
+- **Gateway.** Before `reserve`, a call to a provider whose category is paused for the current tenant month
+  (`periodBounds` in the tenant timezone, so a pause from an earlier month never blocks this one) is
+  refused with `budgetPaused(category)`: slug `blocked_by_cap`, 429, `extensions.category`, title "{Category}
+  is over its monthly budget." and detail "{Category} is over its monthly budget. An owner or leader can
+  raise it on the Costs page." The `call_log` row has outcome `blocked_by_cap` and the detail as its error.
+  It applies to live and sample calls alike, so it shows on sample data. Connection tests are not paused.
+  HubSpot and other unpaid providers are never paused.
+- **Pre-check.** `checkCap` returns `blocked` with `paused: {category}` while paused; `isPaused(ctx, provider,
+  now)` answers the same question alone.
+- **Waiting and resuming.** `isCapWait` is true, so the worker puts the job back (Ruling 10) for up to 15
+  minutes (there is no `resets_at`). Raising the budget or voiding a line drops the level, the flag clears,
+  and the waiting job runs on its next delivery. Calls already running finish.
+
 ## Stories
 
 ### INT-E4-S1 Set caps

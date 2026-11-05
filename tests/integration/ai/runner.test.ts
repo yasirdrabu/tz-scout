@@ -30,7 +30,10 @@ import { outbox } from '@/platform/db/schema';
 import { accountBriefTask } from '@/modules/playbooks/tasks/account-brief';
 import type { BriefInput } from '@/modules/playbooks/domain/brief-io';
 import transitBrief from '../../unit/playbooks/fixtures/briefs/transit-rfp.json';
+import { budgetLevelChanged } from '@/modules/analytics';
 import { cfg } from '../integrations/cfg';
+import { publishTestEvent } from '../helpers/publish';
+import { runOutbox } from '../helpers/run-outbox';
 import { freshTenant, newKey } from '../integrations/helpers';
 
 beforeAll(() => {
@@ -290,6 +293,28 @@ describe('runTask', () => {
       ['mock', 'refused_by_cap'],
       ['rules', 'ok'],
     ]);
+  });
+
+  it('a brief draft falls back to rules while AI usage is paused over its budget (R3a Ruling 9)', async () => {
+    registerAnthropicAdapter();
+    const t = await freshTenant();
+    await publishTestEvent(t.tenantId, budgetLevelChanged, {
+      category: 'ai_usage',
+      month: new Date().toISOString().slice(0, 7),
+      level: 'paused',
+      spentCents: 11_000,
+      budgetCents: 10_000,
+    });
+    await runOutbox(t.tenantId);
+    const r = await t.run((ctx) => runTask(ctx, accountBriefTask, transitBrief as BriefInput, { subject }));
+    expect(r.mode).toBe('rules');
+    expect((await callsOf(t.tenantId)).map((c) => c.outcome)).toEqual(['blocked_by_cap']);
+    const runs = await runsOf(t.tenantId);
+    expect(runs.map((x) => [x.mode, x.status])).toEqual([
+      ['mock', 'refused_by_cap'],
+      ['rules', 'ok'],
+    ]);
+    expect(runs[0]!.error).toBe('AI usage is over its monthly budget.');
   });
 
   it('with no rules, Claude at its monthly limit rethrows blocked_by_cap and keeps the refused run', async () => {

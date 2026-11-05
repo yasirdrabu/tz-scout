@@ -26,6 +26,8 @@ Call log rows are kept 180 days, then summarised into daily usage rows.
 ## Depends on
 
 - TEN for principals and API key caps.
+- ANL contracts only: INT consumes `analytics.budget.level_changed` (from `@/modules/analytics/contracts/events`)
+  for the budget pause (R3a Ruling 9). Never ANL services.
 - Nothing else. Other modules depend on INT.
 
 ## Epics

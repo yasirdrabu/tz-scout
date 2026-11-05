@@ -43,8 +43,10 @@ export {
 export {
   LIMIT_INVALID,
   allowOverage,
+  budgetPaused,
   checkCap,
   isCapWait,
+  isPaused,
   listCaps,
   reserve,
   setCapLimit,
@@ -59,3 +61,4 @@ export { credentialsCleanupHandler, credentialsCleanupJob } from './jobs';
 export { getRates, priceCents, setRates } from './services/rates';
 export { defaultRates, priceOf } from './domain/rates';
 export { usageRecorded } from './contracts/events';
+export { integrationsBudgetPause, integrationsConsumers } from './consumers';

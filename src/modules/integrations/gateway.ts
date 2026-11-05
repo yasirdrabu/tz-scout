@@ -10,7 +10,8 @@ import { registerInboundRoute } from '@/modules/tenancy';
 import { usageRecorded } from './contracts/events';
 import { callLog, connection, credential } from './db/schema';
 import { adapterFactories, isKnownProvider, needsCredential, providerName, type Adapter } from './providers';
-import { capUnit, LOCK_TIMEOUT, recordUsage, reserve, settle, type Reservation } from './services/caps';
+import { CATEGORY_OF_PROVIDER } from './contracts/costs';
+import { budgetPaused, capUnit, isPaused, LOCK_TIMEOUT, recordUsage, reserve, settle, type Reservation } from './services/caps';
 import type { CapUnit } from './domain/caps';
 import { credentialAad, openValue } from './services/vault';
 
@@ -231,6 +232,33 @@ export async function runCall<T>(
     requestSummary: opts.requestSummary === undefined ? null : redactSummary(opts.requestSummary),
   };
 
+  // Ruling 8: a refusal is logged, and no outside call is made.
+  const logRefusal = async (errorMessage: string) => {
+    try {
+      await withTenant(ctx.tenantId, async (tx) => {
+        await tx.execute(sql`select set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`);
+        await tx.insert(callLog).values({
+          ...logBase,
+          id: newId('call'),
+          statusCode: null,
+          outcome: 'blocked_by_cap',
+          durationMs: 0,
+          errorMessage,
+        });
+      });
+    } catch (bookkeeping) {
+      log.error({ err: bookkeeping, tenantId: ctx.tenantId, provider, operation }, 'integrations: could not write call log');
+    }
+  };
+
+  // R3a Ruling 9: a paid provider whose category is over its budget this tenant month waits, live or sample.
+  // A connection test is not work that waits, so an owner can still check a key while paused.
+  if (mode === 'normal' && (await isPaused(ctx, provider))) {
+    const e = budgetPaused(CATEGORY_OF_PROVIDER[provider]!);
+    await logRefusal(e.detail!);
+    throw e;
+  }
+
   // Ruling 6: hold the call's share of the provider's limit before it is made. A call with no
   // up-front amount in the limit's unit is neither held nor refused; what it spends is counted after.
   const unit = await capUnit(ctx, provider);
@@ -240,24 +268,7 @@ export async function runCall<T>(
     try {
       reservation = await reserve(ctx, provider, estimate);
     } catch (e) {
-      if (e instanceof ScoutError && e.slug === 'blocked_by_cap') {
-        // Ruling 8: the refusal is logged, and no outside call is made.
-        try {
-          await withTenant(ctx.tenantId, async (tx) => {
-            await tx.execute(sql`select set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`);
-            await tx.insert(callLog).values({
-              ...logBase,
-              id: newId('call'),
-              statusCode: null,
-              outcome: 'blocked_by_cap',
-              durationMs: 0,
-              errorMessage: e.message,
-            });
-          });
-        } catch (bookkeeping) {
-          log.error({ err: bookkeeping, tenantId: ctx.tenantId, provider, operation }, 'integrations: could not write call log');
-        }
-      }
+      if (e instanceof ScoutError && e.slug === 'blocked_by_cap') await logRefusal(e.message);
       throw e;
     }
   }

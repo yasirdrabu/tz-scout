@@ -1,5 +1,5 @@
 // The run job (Rulings 8 and 9): approved requests carried out against the sample adapters, driven with runOutbox.
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 // A master key, so the live test can save an Apollo key.
@@ -40,6 +40,11 @@ import type { Principal } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { enqueueJob } from '@/platform/events/outbox';
+import { addManualLine, saveBudgets } from '@/modules/analytics';
+import { integrationsBudgetPause } from '@/modules/integrations';
+import { outbox } from '@/platform/db/schema';
+import { EnvelopeSchema, type Envelope } from '@/platform/events/envelope';
+import { deliverOnce } from '@/platform/runtime/worker';
 import { runOutbox } from '../helpers/run-outbox';
 import { cfg } from '../integrations/cfg';
 import { newKey } from '../integrations/helpers';
@@ -561,6 +566,46 @@ describe('usage limits and redelivery', () => {
     await runOutbox(t2.tenantId);
     expect(await arrivalsOf(t2, id)).toHaveLength(1);
     expect(await messagesFor(t2, 'enrichment.request.completed', id)).toHaveLength(1);
+  });
+});
+
+describe('a paused budget (R3a Ruling 9)', () => {
+  const month = () => new Date().toISOString().slice(0, 7);
+  /**
+   * Delivers the tenant's unsent budget level events to the integrations consumer only. The waiting run job sits
+   * ahead of them in the outbox, and runOutbox stops at its refusal; the worker delivers them independently.
+   */
+  const deliverLevels = async (tenant: Tenant) => {
+    const rows = await adminDb
+      .select()
+      .from(outbox)
+      .where(and(eq(outbox.tenantId, tenant.tenantId), isNull(outbox.sentAt), sql`${outbox.payload}->>'type' = 'analytics.budget.level_changed'`));
+    for (const row of rows) {
+      await deliverOnce(integrationsBudgetPause, EnvelopeSchema.parse(row.payload) as Envelope<never>);
+      await adminDb.update(outbox).set({ sentAt: new Date() }).where(eq(outbox.id, row.id));
+    }
+  };
+
+  it('waits with the budget reason and makes no call; raising the budget resumes it on the next try (Review Focus 2)', async () => {
+    const { t: t5, owner: owner5, agentId } = await enrichmentTenant();
+    await as(t5, owner5, (ctx) => saveBudgets(ctx, month(), [{ category: 'data_vendors', amountCents: 1_000 }]));
+    await as(t5, owner5, (ctx) => addManualLine(ctx, { occurredOn: new Date().toISOString().slice(0, 10), category: 'data_vendors', amountCents: 1_200, note: null }));
+    await runOutbox(t5.tenantId);
+
+    const { accountId } = await accountFrom(t5, agentId);
+    const id = await approved(t5, owner5, accountId, technical);
+    await expect(runOutbox(t5.tenantId)).rejects.toMatchObject({ slug: 'blocked_by_cap' });
+    const reason = 'Waiting for budget: Data vendors is over its monthly budget';
+    expect(await rowOf(t5, id)).toMatchObject({ status: 'approved', waitingReason: reason });
+    expect((await viewOf(t5, id))!.statusText).toBe(reason);
+    const calls = await adminDb.select().from(callLog).where(and(eq(callLog.tenantId, t5.tenantId), eq(callLog.provider, 'apollo')));
+    expect(calls).toHaveLength(0);
+
+    // The level drops back to ok, the flag clears, and the waiting job runs on its next delivery.
+    await as(t5, owner5, (ctx) => saveBudgets(ctx, month(), [{ category: 'data_vendors', amountCents: 100_000 }]));
+    await deliverLevels(t5);
+    await runOutbox(t5.tenantId);
+    expect(await rowOf(t5, id)).toMatchObject({ status: 'completed', waitingReason: null });
   });
 });
 
