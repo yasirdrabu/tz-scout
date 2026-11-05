@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Adapter } from '@/modules/integrations';
-import { activityKindSchema, dealStatusSchema } from './types';
+import { activitySchema, dealStatusSchema } from './types';
 
 // CRM-E1: one contract for every CRM connector. Dates are ISO strings, money is integer cents.
 // A connector never decides ownership; the handoff service passes the result in.
@@ -127,16 +127,9 @@ export const readFollowThroughOutput = z.object({
   lastActivityAt: iso.nullable(),
 });
 
-export const listActivitiesInput = z.object({ companyExternalId: id, since: iso });
-export const listActivitiesOutput = z.array(
-  z.object({
-    externalId: id,
-    kind: activityKindSchema,
-    occurredAt: iso,
-    /** The CRM owner who did it (CRM-E5-S2-AC3), so Scout can name the user. */
-    actorOwnerExternalId: id.nullable(),
-  }),
-);
+/** `meetingsFrom` also returns meetings that start at or after it, whatever `since` says, so moves and cancels are seen. */
+export const listActivitiesInput = z.object({ companyExternalId: id, since: iso, meetingsFrom: iso.optional() });
+export const listActivitiesOutput = z.array(activitySchema);
 
 export const listDealsInput = z.union([z.object({ companyExternalId: id }), z.object({ changedSince: iso })]);
 export const listDealsOutput = z.array(dealSchema.extend({ companyExternalId: id.nullable() }));

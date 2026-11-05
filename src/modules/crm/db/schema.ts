@@ -408,6 +408,11 @@ export const mockActivity = crm.table(
     kind: text('kind').notNull(),
     occurredAt: at('occurred_at').notNull(),
     actorOwnerExternalId: text('actor_owner_external_id'),
+    contactExternalIds: text('contact_external_ids').array().notNull().default(sql`'{}'`),
+    subject: text('subject'),
+    startAt: at('start_at'),
+    endAt: at('end_at'),
+    status: text('status'),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.externalId] })],
 );

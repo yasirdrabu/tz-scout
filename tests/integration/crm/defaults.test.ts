@@ -189,7 +189,7 @@ const SAMPLES: Record<keyof typeof crmOperations, { input: unknown; dropIn: stri
   listActivities: {
     input: { companyExternalId: 'mock-co-1', since: '2026-10-01T00:00:00.000Z' },
     dropIn: 'since',
-    output: [{ externalId: 'mock-act-1', kind: 'reply', occurredAt: '2026-10-02T00:00:00.000Z', actorOwnerExternalId: null }],
+    output: [{ externalId: 'mock-act-1', kind: 'reply', occurredAt: '2026-10-02T00:00:00.000Z', actorOwnerExternalId: null, contacts: [], subject: null, startAt: null, endAt: null, status: null }],
     dropOut: '0.actorOwnerExternalId',
   },
   listDeals: { input: { changedSince: '2026-10-01T00:00:00.000Z' }, dropIn: null, output: [deal], dropOut: '0.status' },

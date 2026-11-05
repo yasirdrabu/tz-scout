@@ -312,7 +312,20 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
       const occurredAt = toIso(r.properties.hs_timestamp);
       if (!occurredAt) return [];
       const kind = object === 'emails' ? (r.properties.hs_email_direction === 'INCOMING_EMAIL' ? 'reply' : 'email') : object === 'calls' ? 'call' : 'meeting';
-      return [{ externalId: r.id, kind: kind as 'email' | 'reply' | 'call' | 'meeting', occurredAt, actorOwnerExternalId: text(r.properties.hubspot_owner_id) }];
+      // Contacts, subject and meeting times are read in R2d Task 2; until then they are empty.
+      return [
+        {
+          externalId: r.id,
+          kind: kind as 'email' | 'reply' | 'call' | 'meeting',
+          occurredAt,
+          actorOwnerExternalId: text(r.properties.hubspot_owner_id),
+          contacts: [],
+          subject: null,
+          startAt: null,
+          endAt: null,
+          status: null,
+        },
+      ];
     });
   }
 

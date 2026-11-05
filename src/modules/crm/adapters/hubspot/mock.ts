@@ -1,9 +1,10 @@
-import { and, asc, eq, gte, like, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, like, or, sql } from 'drizzle-orm';
 import type { PgColumn } from 'drizzle-orm/pg-core';
 import { RateLimitedError } from '@/modules/integrations';
 import type { ModuleContext } from '@/platform/context';
 import { withTenant, type Tx } from '@/platform/db/tenant';
 import { DEALS_PAGE_LIMIT, webhookEventSchema, type CrmAdapter, type CrmDeal } from '../../contracts/adapter';
+import type { MeetingStatus } from '../../contracts/types';
 import { mockActivity, mockCompany, mockDeal, mockFailure, mockNote, mockOwner, mockPerson, mockProperty, mockTask } from '../../db/schema';
 import { noteFingerprint } from '../../domain/fingerprint';
 
@@ -336,18 +337,31 @@ ${note}` : note) : task.body;
         };
       }),
 
-    listActivities: ({ companyExternalId, since }) =>
+    listActivities: ({ companyExternalId, since, meetingsFrom }) =>
       run('listActivities', async (tx) => {
+        const sinceOk = gte(mockActivity.occurredAt, new Date(since));
+        // A meeting that starts at or after `meetingsFrom` comes back whatever `since` is, so a move or cancel is seen.
+        const meetingOk = meetingsFrom
+          ? and(eq(mockActivity.kind, 'meeting'), sql`coalesce(${mockActivity.startAt}, ${mockActivity.occurredAt}) >= ${meetingsFrom}::timestamptz`)
+          : undefined;
         const rows = await tx
           .select()
           .from(mockActivity)
-          .where(and(eq(mockActivity.tenantId, tenantId), eq(mockActivity.companyExternalId, companyExternalId), gte(mockActivity.occurredAt, new Date(since))))
+          .where(and(eq(mockActivity.tenantId, tenantId), eq(mockActivity.companyExternalId, companyExternalId), meetingOk ? or(sinceOk, meetingOk) : sinceOk))
           .orderBy(asc(mockActivity.occurredAt), asc(mockActivity.externalId));
+        const ids = [...new Set(rows.flatMap((a) => a.contactExternalIds))];
+        const people = ids.length ? await tx.select().from(mockPerson).where(and(eq(mockPerson.tenantId, tenantId), inArray(mockPerson.externalId, ids))) : [];
+        const nameOf = new Map(people.map((p) => [p.externalId, p.name]));
         return rows.map((a) => ({
           externalId: a.externalId,
           kind: a.kind as 'email' | 'reply' | 'call' | 'meeting' | 'task_done',
           occurredAt: a.occurredAt.toISOString(),
           actorOwnerExternalId: a.actorOwnerExternalId,
+          contacts: a.contactExternalIds.map((externalId) => ({ externalId, name: nameOf.get(externalId) ?? null })),
+          subject: a.subject,
+          startAt: iso(a.startAt),
+          endAt: iso(a.endAt),
+          status: a.status as MeetingStatus | null,
         }));
       }),
 
