@@ -18,10 +18,12 @@ epic keeps its rules and makes it event driven, retried and visible.
    CRM never calls Scoring, Offers or Playbooks directly.
 3. Ownership decision (CRM-E3-S2). If it stops, status `needs_decision` and
    `crm.handoff.needs_decision` is published.
-4. Upsert company, then people (at most 10, primary buyer first), note, first-touch task, follow-up
-   tasks, plan step tasks. Each write records a `crm.link`.
+4. Upsert company, then people (at most 10, primary buyer first), note, first-touch task and follow-up
+   tasks. Each write records a `crm.link`. When the account has a plan for this handoff (its latest plan
+   is active or paused, or belongs to this assignment), no first-touch or follow-up tasks are created.
 5. Read the follow-through baseline (counts already on the company).
-6. Mark `completed`, publish `crm.handoff.completed`, add to the handoff batch (CRM-E4).
+6. Mark `completed`, publish `crm.handoff.completed`, add to the handoff batch (CRM-E4), and queue
+   `crm.plan.sync` for the account, which makes the plan step tasks (CRM-E3-S4-AC3).
 
 Target: p95 under 10 seconds from `routing.assignment.created` to `crm.handoff.completed` for an
 account with up to 10 people, when the CRM responds normally.
@@ -93,9 +95,12 @@ As a rep, I want dated tasks in my CRM, so that I know what to do when.
 - CRM-E3-S4-AC1 A first-touch task due on the handoff day carries the opener and the primary buyer.
 - CRM-E3-S4-AC2 Follow-up tasks are created for days 3, 7 and 14 (tenant setting), each with the email
   subject and body from the account's follow-up sequence.
-- CRM-E3-S4-AC3 Each account plan step owned by the seller becomes a task with the step's due date; a
-  step completed in Scout closes its task; a task completed in the CRM marks the step done
-  (via CRM-E5).
+- CRM-E3-S4-AC3 Every account plan step with `crm_task` becomes a task, whatever its owner role, due at
+  17:00 tenant time on the step's due date, owned by the step owner's CRM owner (else the plan seller's).
+  On accept, the handoff's open first-touch and follow-up tasks are closed with "Replaced by the
+  {playbook} playbook."; done ones are left alone, and without a plan they stay as they are. A step done,
+  skipped or removed in Scout, and a plan stopped, completed or abandoned, closes its tasks with a note;
+  pausing the plan leaves them open. A task completed in the CRM marks the step done (via CRM-E5).
 - CRM-E3-S4-AC4 Re-pushing updates tasks in place. A task already completed in the CRM is not reopened;
   a fresh one is created only if the step was reopened in Scout.
 

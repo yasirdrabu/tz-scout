@@ -6,7 +6,9 @@ import {
   TOKEN_REFUSED,
   UNREADABLE_ANSWER,
   classifyPushError,
+  crmNotFound,
 } from '@/modules/crm/domain/push-errors';
+import { HubSpotError } from '@/modules/crm/adapters/hubspot/live';
 import { RateLimitedError } from '@/modules/integrations/gateway';
 import { ScoutError } from '@/platform/errors';
 
@@ -66,5 +68,18 @@ describe('classifyPushError (Ruling 4)', () => {
   it('anything else is not retried and is flagged as unexpected', () => {
     expect(classifyPushError(new Error('undefined is not a function'))).toEqual({ retryable: false, reason: SOMETHING_WRONG, unexpected: true });
     expect(classifyPushError('a string')).toEqual({ retryable: false, reason: SOMETHING_WRONG, unexpected: true });
+  });
+});
+
+describe('crmNotFound', () => {
+  it("is the CRM's 404, from HubSpot or the mock", () => {
+    expect(crmNotFound(new HubSpotError(404, 'Not found'))).toBe(true);
+    expect(crmNotFound(withProps('HubSpot task 1 was not found (sample data).', { status: 404 }))).toBe(true);
+  });
+
+  it('is not a Scout error with status 404, another status, or a plain object', () => {
+    expect(crmNotFound(new ScoutError({ slug: 'unknown-provider', status: 404, title: 'Unknown integration' }))).toBe(false);
+    expect(crmNotFound(new HubSpotError(403, 'Forbidden'))).toBe(false);
+    expect(crmNotFound({ status: 404 })).toBe(false);
   });
 });

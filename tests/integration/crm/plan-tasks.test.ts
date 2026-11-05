@@ -2,17 +2,19 @@ import { and, asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { editPerson, upsertFromArrival } from '@/modules/accounts';
-import { seedMockCrm, syncOwners, syncPlanTasks } from '@/modules/crm';
+import { activityObserved, push, seedMockCrm, syncAccount, syncOwners, syncPlanTasks } from '@/modules/crm';
 import { handoff, link, mockTask, taskLink } from '@/modules/crm/db/schema';
 import { dueAtOn } from '@/modules/crm/domain/tasks';
-import { mockCompleteTask } from '@/modules/crm/fixtures';
+import { mockAddActivity, mockCompleteTask } from '@/modules/crm/fixtures';
 import { callLog } from '@/modules/integrations/db/schema';
 import { abandonPlan, addStep, completePlan, createTemplate, removeStep, stopPlan, updateStep } from '@/modules/playbooks';
 import { accountPlan, planStep } from '@/modules/playbooks/db/schema';
 import { accept, assign, withdraw } from '@/modules/routing';
+import { accountReview } from '@/modules/routing/db/schema';
 import { tenantSummary, tenantTimezone } from '@/modules/tenancy';
 import { config } from '@/platform/config';
 import { adminDb, closeDbs } from '@/platform/db/client';
+import { outbox } from '@/platform/db/schema';
 import { runOutbox } from '../helpers/run-outbox';
 import { arrival, runPlaybooks } from '../playbooks/helpers';
 import { asPerson, domain, member, resolved, routingTenant, type Tenant } from '../routing/helpers';
@@ -352,5 +354,123 @@ describe('plan tasks, edge cases', () => {
     await t.run((ctx) => syncPlanTasks(ctx, made.accountId));
     for (const l of fixed) expect((await mockTaskById(l.externalId)).body!.endsWith(`\n\nReplaced by the ${PLAYBOOK} playbook.`)).toBe(true);
     expect(await linksOf(plan.id)).toEqual([]);
+  });
+});
+
+const companyTasks = async (company: string) => adminDb.select().from(mockTask).where(and(eq(mockTask.tenantId, t.tenantId), eq(mockTask.companyExternalId, company)));
+const sync = async (accountId: string) => {
+  await t.run((ctx) => syncAccount(ctx, accountId, new Date()));
+  await runOutbox(t.tenantId);
+};
+const taskDone = async (taskExternalId: string) =>
+  (await adminDb.select().from(outbox).where(eq(outbox.tenantId, t.tenantId)))
+    .map((r) => r.payload as { type: string; data: { kind?: string; taskExternalId?: string } })
+    .filter((e) => e.type === activityObserved.type && e.data.kind === 'task_done' && e.data.taskExternalId === taskExternalId);
+const stageOf = async (accountId: string) => (await t.run((ctx) => ctx.tx.select().from(accountReview).where(eq(accountReview.accountId, accountId))))[0]!.stage;
+
+describe('the handoff with plan tasks (CRM-E3-S4, CRM-E5-S2-AC2)', () => {
+  it('plan first, push later: no fixed tasks, the plan tasks appear once the push completes', async () => {
+    const d = domain();
+    const a = arrival({ account: { name: 'Late Push Co', domain: d }, people: [{ firstName: 'Ana', lastName: 'Act', email: `ana@${d}` }] });
+    const { accountId } = await t.run((ctx) => upsertFromArrival(ctx, a));
+    await resolved(t, accountId, { arrivalId: a.arrivalId, resolution: 'created' });
+    const made = await asPerson(t, (ctx) => assign(ctx, accountId, { sellerUserId: seller, templateId }), { userId: leader });
+    // Accepted before the push job ran.
+    await asPerson(t, (ctx) => accept(ctx, made.id), { userId: seller, dataLimit: { kind: 'own_accounts' } });
+    await runOutbox(t.tenantId);
+
+    expect((await handoffsOf(accountId))[0]!.status).toBe('completed');
+    expect(await fixedLinks(made.id)).toEqual([]);
+    const plan = await planOf(accountId);
+    const links = await linksOf(plan.id);
+    expect(links.filter((l) => l.status === 'open')).toHaveLength(3);
+    const tasks = await companyTasks(await companyOf(accountId));
+    expect(tasks.map((x) => x.externalId).sort()).toEqual(links.map((l) => l.externalTaskId).sort());
+  });
+
+  it('a push with no plan still creates the fixed tasks', async () => {
+    const made = await handedOff();
+    const fixed = await fixedLinks(made.assignmentId);
+    expect(fixed).toHaveLength(4);
+    for (const l of fixed) expect((await mockTaskById(l.externalId)).status).toBe('open');
+  });
+
+  it('re-push after the plan ended creates no fixed tasks', async () => {
+    const { accountId, planId, stepIds } = await planned();
+    await asSeller(async (ctx) => {
+      for (const s of stepIds) await updateStep(ctx, planId, s, { status: 'skipped' });
+      await completePlan(ctx, planId);
+    });
+    await runOutbox(t.tenantId);
+    const company = await companyOf(accountId);
+    const shape = async () => (await companyTasks(company)).map((x) => ({ id: x.externalId, body: x.body, status: x.status })).sort((x, y) => x.id.localeCompare(y.id));
+    const before = await shape();
+    const upserts = await calls(['upsertTask']);
+
+    const { handoffId } = await asPerson(t, (ctx) => push(ctx, accountId), { userId: leader });
+    await runOutbox(t.tenantId);
+    const again = (await handoffsOf(accountId)).find((h) => h.id === handoffId)!;
+    expect(again).toMatchObject({ isRepush: true, status: 'completed' });
+    expect(await calls(['upsertTask'])).toBe(upserts);
+    expect(await shape()).toEqual(before);
+  });
+
+  it('a task done in HubSpot marks the step done', async () => {
+    const { accountId, planId, stepIds } = await planned();
+    const l = (await linkOf(stepIds[1]!))!;
+    await t.run((ctx) => mockCompleteTask(ctx, l.externalTaskId));
+    const closes = await calls(['closeTask']);
+    await sync(accountId);
+
+    expect((await stepsOf(planId))[1]!).toMatchObject({ status: 'done', doneBy: null });
+    expect((await linkOf(stepIds[1]!))!.status).toBe('done');
+    expect(await taskDone(l.externalTaskId)).toHaveLength(1);
+    expect(await calls(['closeTask'])).toBe(closes);
+    // Seen once: the next poll reports nothing new.
+    await sync(accountId);
+    expect(await taskDone(l.externalTaskId)).toHaveLength(1);
+  });
+
+  it('a task Scout closed is not reported done', async () => {
+    const { accountId, planId, stepIds } = await planned();
+    await setStep(planId, stepIds[1]!, { status: 'skipped' });
+    const closed = (await linkOf(stepIds[1]!))!;
+    expect(closed.status).toBe('closed');
+    expect((await mockTaskById(closed.externalTaskId)).status).toBe('completed');
+    // Another one done in HubSpot in the same poll is reported.
+    const other = (await linkOf(stepIds[0]!))!;
+    await t.run((ctx) => mockCompleteTask(ctx, other.externalTaskId));
+    await sync(accountId);
+
+    expect(await taskDone(closed.externalTaskId)).toEqual([]);
+    expect(await taskDone(other.externalTaskId)).toHaveLength(1);
+    const rows = await stepsOf(planId);
+    expect(rows[1]!.status).toBe('skipped');
+    expect(rows[0]!.status).toBe('done');
+    expect((await linkOf(stepIds[1]!))!.status).toBe('closed');
+  });
+
+  it('full chain: a reply after accept stops the plan, closes every task and moves the account to Engaged', async () => {
+    const { accountId, planId, stepIds } = await planned();
+    expect(await stageOf(accountId)).not.toBe('engaged');
+    const company = await companyOf(accountId);
+    await t.run((ctx) => mockAddActivity(ctx, { companyExternalId: company, kind: 'reply' }));
+    await sync(accountId);
+
+    expect(await planOf(accountId)).toMatchObject({ id: planId, status: 'stopped', statusReason: 'They replied' });
+    for (const s of stepIds.slice(0, 3)) {
+      const task = await taskOf(s);
+      expect(task.status).toBe('completed');
+      expect(task.body!.endsWith(`\n\nThe ${PLAYBOOK} playbook stopped: They replied.`)).toBe(true);
+      expect((await linkOf(s))!.status).toBe('closed');
+    }
+    expect(await stageOf(accountId)).toBe('engaged');
+  });
+
+  it('full chain, no reply: every step ticked done moves the account to Back to nurture', async () => {
+    const { accountId, planId, stepIds } = await planned();
+    for (const s of stepIds) await setStep(planId, s, { status: 'done' });
+    expect((await planOf(accountId)).noReplyAt).not.toBeNull();
+    expect(await stageOf(accountId)).toBe('back_to_nurture');
   });
 });

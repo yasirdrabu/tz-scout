@@ -10,6 +10,7 @@ import type { CrmAdapter } from '../contracts/adapter';
 import { handoffPackageProvider } from '../contracts/ports';
 import type { PlanTasks } from '../contracts/types';
 import { link, taskLink } from '../db/schema';
+import { crmNotFound } from '../domain/push-errors';
 import { dueAtOn, planTaskSpec } from '../domain/tasks';
 import { latestCompleted } from './follow-through';
 import { lockAccount } from './handoff';
@@ -33,9 +34,6 @@ function planNote(plan: PlanState): string {
   if (plan.status === 'abandoned') return `The ${plan.playbookName} playbook was abandoned.`;
   return takenOut(plan.playbookName);
 }
-
-/** The CRM answered that the task is not there (deleted in HubSpot): both adapters say so with status 404. */
-const notFound = (e: unknown) => typeof e === 'object' && e !== null && (e as { status?: unknown }).status === 404;
 
 /** Ruling 11: what Scout wrote, so an unchanged task makes no CRM call. */
 const fingerprintOf = (t: { subject: string; body: string; owner: string | null; person: string | null; dueAt: string }) =>
@@ -88,7 +86,7 @@ export async function syncPlanTasks(ctx: ModuleContext, accountId: string): Prom
     try {
       await call('closeTask', (a) => a.closeTask({ externalId: l.externalTaskId, note }));
     } catch (e) {
-      if (!notFound(e)) throw e;
+      if (!crmNotFound(e)) throw e;
     }
     await saveLink(ctx, { ...l, status: 'closed' });
   };

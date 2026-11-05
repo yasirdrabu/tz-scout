@@ -69,6 +69,13 @@ async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternal
         ),
       )
   ).map((r) => r.externalId);
+  // The account's plan tasks too (R2c-3b): one Scout closed is not reported done (Ruling 14).
+  const planLinks = await ctx.tx
+    .select({ stepId: taskLink.stepId, externalTaskId: taskLink.externalTaskId, status: taskLink.status })
+    .from(taskLink)
+    .where(and(eq(taskLink.tenantId, ctx.tenantId), eq(taskLink.accountId, h.accountId), eq(taskLink.system, h.system)));
+  const planLinkOf = new Map(planLinks.map((l) => [l.externalTaskId, l]));
+  taskIds.push(...planLinks.map((l) => l.externalTaskId).filter((id) => !taskIds.includes(id)));
 
   // Nothing before the handoff, and nothing already seen, is new. A task_done is stamped when we saw it, so it does not move this.
   const [seen] = await ctx.tx
@@ -126,8 +133,19 @@ async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternal
   };
 
   for (const a of found) await observe({ externalId: a.externalId, kind: a.kind, occurredAt: new Date(a.occurredAt), owner: a.actorOwnerExternalId });
-  // The CRM does not say when a task was completed or by whom: it is stamped now, with no actor.
-  for (const t of turnedDone) await observe({ externalId: t.externalId, kind: 'task_done', occurredAt: now, owner: null, taskExternalId: t.externalId });
+  // The CRM does not say when a task was completed or by whom: it is stamped now, with no actor. A plan task Scout
+  // closed is only kept in the stored list; an open one is marked done first, so the plan sync never closes it.
+  for (const t of turnedDone) {
+    const l = planLinkOf.get(t.externalId);
+    if (l?.status === 'closed') continue;
+    if (l?.status === 'open') {
+      await ctx.tx
+        .update(taskLink)
+        .set({ status: 'done' })
+        .where(and(eq(taskLink.tenantId, ctx.tenantId), eq(taskLink.system, h.system), eq(taskLink.stepId, l.stepId)));
+    }
+    await observe({ externalId: t.externalId, kind: 'task_done', occurredAt: now, owner: null, taskExternalId: t.externalId });
+  }
 
   await ctx.tx
     .update(followThroughTable)

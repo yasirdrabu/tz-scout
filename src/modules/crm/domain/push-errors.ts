@@ -32,6 +32,9 @@ type Shape = { name?: unknown; message?: unknown; status?: unknown; code?: unkno
 const transientSqlState = (code: string) => /^(40|08)/.test(code) || ['57P01', '55P03', '57014'].includes(code);
 const isSqlState = (code: unknown): code is string => typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code);
 
+/** The CRM answered that the record is not there: HubSpot's 404 or the mock's, as the gateway rethrows them. A Scout error with status 404 (an unknown provider) is not one. */
+export const crmNotFound = (e: unknown): boolean => e instanceof Error && !(e instanceof ScoutError) && (e as { status?: unknown }).status === 404;
+
 export function classifyPushError(e: unknown): PushFailure {
   const retry: PushFailure = { retryable: true, reason: RETRIES_FAILED };
   if (isCapWait(e)) return { retryable: true, wait: true, reason: e.message.slice(0, REASON_LIMIT) };

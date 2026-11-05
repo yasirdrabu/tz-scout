@@ -13,7 +13,7 @@ import { newId } from '@/platform/ids';
 import { log } from '@/platform/log';
 import type { CrmAdapter } from '../contracts/adapter';
 import { handoffCancelled, handoffCompleted, handoffFailed, handoffNeedsDecision } from '../contracts/events';
-import { handoffPushJob, PUSH_MAX_ATTEMPTS } from '../contracts/jobs';
+import { handoffPushJob, planSyncJob, PUSH_MAX_ATTEMPTS } from '../contracts/jobs';
 import { handoffPackageProvider } from '../contracts/ports';
 import { DEFAULT_FOLLOW_UP_DAYS } from '../contracts/types';
 import { crmSetting, fieldMapping, followThrough, handoff } from '../db/schema';
@@ -305,7 +305,10 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
   );
   await recordLink(ctx, { scoutType: 'note', scoutId: account.id, system, externalId: note.externalId, fingerprint: note.fingerprint });
 
-  // First touch and follow-ups, keyed by assignment so a re-push updates them in place (Ruling 3).
+  // First touch and follow-ups, keyed by assignment so a re-push updates them in place (Ruling 3). None when the
+  // account has a plan for this handoff (R2c-3b Ruling 10): the plan sync queued below makes its tasks instead.
+  const plan = await handoffPackageProvider().planTasks?.(ctx, account.id);
+  const planned = !!plan && (plan.status === 'active' || plan.status === 'paused' || plan.assignmentId === h.assignmentId);
   const [setting] = await ctx.tx.select({ days: crmSetting.followUpDays }).from(crmSetting).where(eq(crmSetting.tenantId, ctx.tenantId));
   const primary = account.people.find((p) => p.isPrimary && personName(p));
   const best = pkg?.properties.best_offer;
@@ -318,10 +321,12 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
     timezone: await tenantTimezone(ctx),
     pkg,
   });
-  const keyed = [
-    { key: `${h.assignmentId}:first_touch`, spec: tasks.firstTouch },
-    ...tasks.followUps.map((f) => ({ key: `${h.assignmentId}:follow_up:${f.day}`, spec: f })),
-  ];
+  const keyed = planned
+    ? []
+    : [
+        { key: `${h.assignmentId}:first_touch`, spec: tasks.firstTouch },
+        ...tasks.followUps.map((f) => ({ key: `${h.assignmentId}:follow_up:${f.day}`, spec: f })),
+      ];
   const taskIds: string[] = [];
   for (const { key, spec } of keyed) {
     const linked = links.tasks.find((l) => l.scoutId === key && l.system === system);
@@ -349,6 +354,8 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
     { status: 'completed', completedAt: now, ownerExternalId: company.ownerExternalId, companyExternalId: company.externalId, takenFromOwner: takenFrom, lastError: null },
     async (c) => {
       await storeBaseline(c, h.id, ft);
+      // A plan sync that ran before this handoff completed did nothing (Ruling 12).
+      await enqueueJob(c, planSyncJob, { accountId: h.accountId });
       await publish(
         c,
         handoffCompleted,
