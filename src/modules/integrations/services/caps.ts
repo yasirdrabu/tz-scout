@@ -5,7 +5,7 @@ import type { ModuleContext } from '@/platform/context';
 import { withTenant, type Tx } from '@/platform/db/tenant';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
-import { CATEGORY_OF_PROVIDER, COST_CATEGORIES, PAUSABLE, type CostCategory } from '../contracts/costs';
+import { CATEGORY_OF_PROVIDER, PAUSABLE, categoryLabel, type CostCategory } from '../contracts/costs';
 import { usageThresholdReached } from '../contracts/events';
 import { paidPause, usageCap, usagePeriod } from '../db/schema';
 import { DEFAULT_CAPS, levelOf, periodBounds, type CapLevel, type CapPeriod, type CapUnit } from '../domain/caps';
@@ -61,7 +61,7 @@ export const isCapWait = (e: unknown): e is ScoutError => e instanceof ScoutErro
  * slug, so `isCapWait` is true and the worker puts the job back; the flag clears when the budget is raised.
  */
 export function budgetPaused(category: CostCategory): ScoutError {
-  const label = COST_CATEGORIES.find((c) => c.key === category)!.label;
+  const label = categoryLabel(category);
   return new ScoutError({
     slug: 'blocked_by_cap',
     status: 429,

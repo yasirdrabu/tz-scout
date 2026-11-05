@@ -78,6 +78,8 @@ export const budgetState = analytics.table(
     category: text('category').notNull(),
     month: text('month').notNull(),
     level: text('level').notNull(), // ok | alert | over | paused
+    /** Counts level changes, so a consumer can drop an older `level_changed` delivered late. */
+    seq: bigint('seq', { mode: 'number' }).notNull().default(0),
     updatedAt: at('updated_at').notNull().defaultNow(),
   },
   (t) => [

@@ -10,6 +10,9 @@ export const COST_CATEGORIES = [
 
 export type CostCategory = (typeof COST_CATEGORIES)[number]['key'];
 
+/** A category's label, e.g. "AI usage". */
+export const categoryLabel = (category: CostCategory): string => COST_CATEGORIES.find((c) => c.key === category)!.label;
+
 /** The category a paid provider's usage lands in. */
 export const CATEGORY_OF_PROVIDER: Readonly<Record<string, CostCategory>> = {
   anthropic: 'ai_usage',

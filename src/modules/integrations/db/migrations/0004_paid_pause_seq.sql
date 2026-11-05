@@ -1,0 +1,1 @@
+ALTER TABLE "integrations"."paid_pause" ADD COLUMN "seq" bigint DEFAULT 0 NOT NULL;

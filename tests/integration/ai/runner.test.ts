@@ -31,6 +31,7 @@ import { accountBriefTask } from '@/modules/playbooks/tasks/account-brief';
 import type { BriefInput } from '@/modules/playbooks/domain/brief-io';
 import transitBrief from '../../unit/playbooks/fixtures/briefs/transit-rfp.json';
 import { budgetLevelChanged } from '@/modules/analytics';
+import { tenantTimezone } from '@/modules/tenancy';
 import { cfg } from '../integrations/cfg';
 import { publishTestEvent } from '../helpers/publish';
 import { runOutbox } from '../helpers/run-outbox';
@@ -298,13 +299,10 @@ describe('runTask', () => {
   it('a brief draft falls back to rules while AI usage is paused over its budget (R3a Ruling 9)', async () => {
     registerAnthropicAdapter();
     const t = await freshTenant();
-    await publishTestEvent(t.tenantId, budgetLevelChanged, {
-      category: 'ai_usage',
-      month: new Date().toISOString().slice(0, 7),
-      level: 'paused',
-      spentCents: 11_000,
-      budgetCents: 10_000,
-    });
+    // The current month in the tenant's timezone, as the gateway reads it.
+    const timeZone = await t.run((ctx) => tenantTimezone(ctx));
+    const month = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit' }).format(new Date());
+    await publishTestEvent(t.tenantId, budgetLevelChanged, { category: 'ai_usage', month, level: 'paused', spentCents: 11_000, budgetCents: 10_000, seq: 1 });
     await runOutbox(t.tenantId);
     const r = await t.run((ctx) => runTask(ctx, accountBriefTask, transitBrief as BriefInput, { subject }));
     expect(r.mode).toBe('rules');

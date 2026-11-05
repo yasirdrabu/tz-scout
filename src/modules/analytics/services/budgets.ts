@@ -86,7 +86,7 @@ const spendWhere = (ctx: ModuleContext, from: string, to: string) =>
 export async function recomputeLevel(ctx: ModuleContext, category: CostCategory, month: string): Promise<BudgetLevel> {
   await ctx.tx.insert(budgetState).values({ tenantId: ctx.tenantId, category, month, level: 'ok' }).onConflictDoNothing();
   const key = and(eq(budgetState.tenantId, ctx.tenantId), eq(budgetState.category, category), eq(budgetState.month, month));
-  const [state] = await ctx.tx.select({ level: budgetState.level }).from(budgetState).where(key).for('update');
+  const [state] = await ctx.tx.select({ level: budgetState.level, seq: budgetState.seq }).from(budgetState).where(key).for('update');
   const [{ spent } = { spent: 0 }] = await ctx.tx
     .select({ spent: sql<number>`coalesce(sum(${costLine.amountCents}), 0)::bigint`.mapWith(Number) })
     .from(costLine)
@@ -94,8 +94,10 @@ export async function recomputeLevel(ctx: ModuleContext, category: CostCategory,
   const budget = budgetFor(await budgetRows(ctx), category, month);
   const level = levelOf(spent, budget, PAUSABLE.has(category));
   if (level === state!.level) return level;
-  await ctx.tx.update(budgetState).set({ level, updatedAt: new Date() }).where(key);
-  await publish(ctx, budgetLevelChanged, { category, month, level, spentCents: spent, budgetCents: budget }, { type: 'cost_budget', id: category });
+  // Under the row lock, so each change of this category month gets the next seq.
+  const seq = state!.seq + 1;
+  await ctx.tx.update(budgetState).set({ level, seq, updatedAt: new Date() }).where(key);
+  await publish(ctx, budgetLevelChanged, { category, month, level, spentCents: spent, budgetCents: budget, seq }, { type: 'cost_budget', id: category });
   return level;
 }
 

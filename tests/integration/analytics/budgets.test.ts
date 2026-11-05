@@ -46,7 +46,7 @@ describe('levels', () => {
     await w.add('lists_events', 8_000);
     expect(await w.levels()).toEqual([]);
     await w.add('lists_events', 1_000);
-    expect(await w.levels()).toEqual([{ category: 'lists_events', month: '2026-11', level: 'alert', spentCents: 9_000, budgetCents: 10_000 }]);
+    expect(await w.levels()).toEqual([{ category: 'lists_events', month: '2026-11', level: 'alert', spentCents: 9_000, budgetCents: 10_000, seq: 1 }]);
     await w.add('lists_events', 500);
     expect(await w.levels()).toHaveLength(1);
   });
@@ -59,8 +59,8 @@ describe('levels', () => {
     await w.add('partner_fees', 12_000);
     await w.add('partner_fees', 1_000);
     expect(await w.levels()).toEqual([
-      { category: 'ai_usage', month: '2026-11', level: 'paused', spentCents: 11_000, budgetCents: 10_000 },
-      { category: 'partner_fees', month: '2026-11', level: 'over', spentCents: 12_000, budgetCents: 10_000 },
+      { category: 'ai_usage', month: '2026-11', level: 'paused', spentCents: 11_000, budgetCents: 10_000, seq: 1 },
+      { category: 'partner_fees', month: '2026-11', level: 'over', spentCents: 12_000, budgetCents: 10_000, seq: 1 },
     ]);
   });
 
@@ -70,9 +70,9 @@ describe('levels', () => {
     await w.add('data_vendors', 5_000);
     const big = await w.add('data_vendors', 6_000);
     await w.run((ctx) => voidLine(ctx, big.id, 'Booked twice'));
-    expect((await w.levels()).map((e) => [e.level, e.spentCents])).toEqual([
-      ['paused', 11_000],
-      ['ok', 5_000],
+    expect((await w.levels()).map((e) => [e.level, e.spentCents, e.seq])).toEqual([
+      ['paused', 11_000, 1],
+      ['ok', 5_000, 2],
     ]);
   });
 
@@ -83,8 +83,8 @@ describe('levels', () => {
     await w.budget('2026-11', 'data_vendors', 20_000);
     await w.budget('2026-11', 'data_vendors', 20_000);
     expect(await w.levels()).toEqual([
-      { category: 'data_vendors', month: '2026-11', level: 'over', spentCents: 10_500, budgetCents: 10_000 },
-      { category: 'data_vendors', month: '2026-11', level: 'ok', spentCents: 10_500, budgetCents: 20_000 },
+      { category: 'data_vendors', month: '2026-11', level: 'over', spentCents: 10_500, budgetCents: 10_000, seq: 1 },
+      { category: 'data_vendors', month: '2026-11', level: 'ok', spentCents: 10_500, budgetCents: 20_000, seq: 2 },
     ]);
   });
 
@@ -108,7 +108,7 @@ describe('levels', () => {
       }),
       pause(100).then(() => w.add('lists_events', 4_000)),
     ]);
-    expect(await w.levels()).toEqual([{ category: 'lists_events', month: '2026-11', level: 'alert', spentCents: 9_000, budgetCents: 10_000 }]);
+    expect(await w.levels()).toEqual([{ category: 'lists_events', month: '2026-11', level: 'alert', spentCents: 9_000, budgetCents: 10_000, seq: 1 }]);
   });
 });
 

@@ -45,31 +45,57 @@ async function workspace(timezone = 'UTC') {
   const t = await createTenant(admin.actor, { slug: uniqueSlug(), name: 'Pause', currency: 'USD', timezone, ownerEmail: owner.email });
   const run = <T>(fn: (ctx: ModuleContext) => Promise<T>) => inTenant(t.tenantId, owner.actor, fn);
   const call = (provider: string, fn = vi.fn(async () => 'ok')) => run((ctx) => gateway.call(ctx, provider, `${provider}.thing`, fn, { reserveCents: 5 }));
-  const pause = async (category: CostCategory, month: string, level: 'paused' | 'ok' = 'paused') => {
-    await publishTestEvent(t.tenantId, budgetLevelChanged, { category, month, level, spentCents: 11_000, budgetCents: 10_000 });
+  let n = 0;
+  /** Publishes a level event (the next seq unless given) and delivers it. */
+  const pause = async (category: CostCategory, month: string, level: 'paused' | 'ok' = 'paused', seq = ++n) => {
+    await publishTestEvent(t.tenantId, budgetLevelChanged, { category, month, level, spentCents: 11_000, budgetCents: 10_000, seq });
     await runOutbox(t.tenantId);
   };
   const logs = () => adminDb.select().from(callLog).where(eq(callLog.tenantId, t.tenantId)).orderBy(callLog.at);
-  return { tenantId: t.tenantId, run, call, pause, logs };
+  /** The current month and day in the tenant's timezone, as the gateway and analytics read them. */
+  const month = () => new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit' }).format(new Date());
+  const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
+  return { tenantId: t.tenantId, run, call, pause, logs, month, today };
 }
 
-const thisMonth = () => new Date().toISOString().slice(0, 7);
-
 describe('the paid_pause flag', () => {
-  it('follows analytics levels: paused sets it, a lower level clears it, for that month only', async () => {
-    const w = await workspace();
-    await w.run((ctx) => saveBudgets(ctx, thisMonth(), [{ category: 'ai_usage', amountCents: 10_000 }]));
-    await w.run((ctx) => addManualLine(ctx, { occurredOn: new Date().toISOString().slice(0, 10), category: 'ai_usage', amountCents: 11_000, note: null }));
+  it('follows analytics levels: paused sets it, a lower level clears it, for the tenant month', async () => {
+    // 12:00 UTC on 30 November is 02:00 on 1 December in Kiritimati (UTC+14): a UTC month would be wrong.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-30T12:00:00Z'));
+    const w = await workspace('Pacific/Kiritimati');
+    expect(w.month()).toBe('2026-12');
+    await w.run((ctx) => saveBudgets(ctx, w.month(), [{ category: 'ai_usage', amountCents: 10_000 }]));
+    await w.run((ctx) => addManualLine(ctx, { occurredOn: w.today(), category: 'ai_usage', amountCents: 11_000, note: null }));
     await runOutbox(w.tenantId);
     const rows = () => adminDb.select().from(paidPause).where(eq(paidPause.tenantId, w.tenantId));
-    expect(await rows()).toEqual([{ tenantId: w.tenantId, category: 'ai_usage', month: thisMonth(), paused: true }]);
+    expect(await rows()).toEqual([{ tenantId: w.tenantId, category: 'ai_usage', month: '2026-12', paused: true, seq: 1 }]);
     expect(await w.run((ctx) => isPaused(ctx, 'anthropic', new Date()))).toBe(true);
 
     // Raising the budget drops the level, and the flag clears at once.
-    await w.run((ctx) => saveBudgets(ctx, thisMonth(), [{ category: 'ai_usage', amountCents: 50_000 }]));
+    await w.run((ctx) => saveBudgets(ctx, w.month(), [{ category: 'ai_usage', amountCents: 50_000 }]));
     await runOutbox(w.tenantId);
-    expect((await rows()).map((r) => r.paused)).toEqual([false]);
+    expect((await rows()).map((r) => [r.paused, r.seq])).toEqual([[false, 2]]);
     expect(await w.run((ctx) => isPaused(ctx, 'anthropic', new Date()))).toBe(false);
+  });
+
+  it('a late older event is ignored: ok (seq 2) then paused (seq 1) stays unpaused', async () => {
+    const w = await workspace('America/New_York');
+    await w.pause('data_vendors', w.month(), 'ok', 2);
+    await w.pause('data_vendors', w.month(), 'paused', 1);
+    expect(await w.run((ctx) => isPaused(ctx, 'apollo', new Date()))).toBe(false);
+    // A late ok after a newer pause is ignored too.
+    await w.pause('data_vendors', w.month(), 'paused', 4);
+    await w.pause('data_vendors', w.month(), 'ok', 3);
+    expect(await w.run((ctx) => isPaused(ctx, 'apollo', new Date()))).toBe(true);
+  });
+
+  it('in order, each event applies: paused (seq 1) then ok (seq 2)', async () => {
+    const w = await workspace('America/New_York');
+    await w.pause('data_vendors', w.month(), 'paused', 1);
+    expect(await w.run((ctx) => isPaused(ctx, 'apollo', new Date()))).toBe(true);
+    await w.pause('data_vendors', w.month(), 'ok', 2);
+    expect(await w.run((ctx) => isPaused(ctx, 'apollo', new Date()))).toBe(false);
   });
 });
 
@@ -79,7 +105,7 @@ describe('the gateway refuses paused paid calls (Ruling 9)', () => {
     await w.run((ctx) => saveCredential(ctx, 'anthropic', { kind: 'api_key', value: 'sk-ant-test-key-123456' }));
     await w.run((ctx) => testConnection(ctx, 'anthropic'));
     await w.run((ctx) => setMode(ctx, 'anthropic', 'live'));
-    await w.pause('ai_usage', thisMonth());
+    await w.pause('ai_usage', w.month());
 
     const fn = vi.fn(async () => 'never');
     const err = await w.call('anthropic', fn).catch((e: unknown) => e);
@@ -103,7 +129,7 @@ describe('the gateway refuses paused paid calls (Ruling 9)', () => {
 
   it('a sample call to a paused provider is refused too', async () => {
     const w = await workspace();
-    await w.pause('data_vendors', thisMonth());
+    await w.pause('data_vendors', w.month());
     const fn = vi.fn(async () => 'never');
     await expect(w.call('apollo', fn)).rejects.toMatchObject({
       slug: 'blocked_by_cap',
@@ -111,7 +137,7 @@ describe('the gateway refuses paused paid calls (Ruling 9)', () => {
     });
     expect(fn).not.toHaveBeenCalled();
     // Back to ok: the next call goes through.
-    await w.pause('data_vendors', thisMonth(), 'ok');
+    await w.pause('data_vendors', w.month(), 'ok');
     await w.call('apollo', fn);
     expect(fn).toHaveBeenCalledOnce();
   });
@@ -134,7 +160,7 @@ describe('the gateway refuses paused paid calls (Ruling 9)', () => {
 describe('checkCap while paused (Ruling 9 pre-check)', () => {
   it('reports blocked and the paused category; an unpaid provider is unaffected', async () => {
     const w = await workspace();
-    await w.pause('data_vendors', thisMonth());
+    await w.pause('data_vendors', w.month());
     expect(await w.run((ctx) => checkCap(ctx, 'apollo', 1))).toMatchObject({ status: 'blocked', paused: 'data_vendors', limit: 2000 });
     expect(await w.run((ctx) => checkCap(ctx, 'anthropic', 1))).toMatchObject({ status: 'ok' });
     expect(await w.run((ctx) => checkCap(ctx, 'anthropic', 1))).not.toHaveProperty('paused');

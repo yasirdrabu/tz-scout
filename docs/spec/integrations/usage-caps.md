@@ -127,7 +127,9 @@ Build rulings:
 ## Budget pause (R3a Ruling 9)
 
 - **Flag.** INT consumes `analytics.budget.level_changed` into `integrations.paid_pause(tenant_id, category,
-  month, paused)`: level `paused` sets it, any lower level clears it. Only pausable categories are kept.
+  month, paused, seq)`: level `paused` sets it, any lower level clears it. Only pausable categories are kept.
+  The event carries `seq`, the category month's change count from `analytics.budget_state`; an event whose
+  `seq` is not above the stored one (an older event delivered late) is ignored.
 - **Gateway.** Before `reserve`, a call to a provider whose category is paused for the current tenant month
   (`periodBounds` in the tenant timezone, so a pause from an earlier month never blocks this one) is
   refused with `budgetPaused(category)`: slug `blocked_by_cap`, 429, `extensions.category`, title "{Category}
@@ -139,7 +141,7 @@ Build rulings:
   now)` answers the same question alone.
 - **Waiting and resuming.** `isCapWait` is true, so the worker puts the job back (Ruling 10) for up to 15
   minutes (there is no `resets_at`). Raising the budget or voiding a line drops the level, the flag clears,
-  and the waiting job runs on its next delivery. Calls already running finish.
+  and the waiting job runs on its next delivery, after about 15 minutes. Calls already running finish.
 
 ## Stories
 

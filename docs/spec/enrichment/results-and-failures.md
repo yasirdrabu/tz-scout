@@ -78,7 +78,7 @@ Claude's calls, 2026-11-03 (the numbering is the plan's; the other rulings are i
 
   | Kind | Detected by | Handling |
   |---|---|---|
-  | `cap_reached` | the gateway's `blocked_by_cap` | Before any result: the request waits (`waiting_reason`) and the job waits. After some results: submit them, `partial`, "Stopped at the {Provider} monthly limit." |
+  | `cap_reached` | the gateway's `blocked_by_cap` | Before any result: the request waits (`waiting_reason`) and the job waits. After some results: submit them, `partial`, "Stopped at the {Provider} monthly limit." A budget pause (R3a) waits with "Waiting for budget: {Category} is over its monthly budget", or ends `partial` with "Stopped: {Category} is over its monthly budget." |
   | `auth` | status 401 | Fail now. INT `markConnectionFailing` sets the connection `failing` with the message. "{Provider} rejected the key. An owner needs to update it in Integrations." |
   | `out_of_credits` | `/insufficient credits/i` or Apollo's credits error | With results: submit them, `partial`, "{Provider} is out of credits." With nothing found: `failed` with the same message (a partial keeps something) |
   | `rate_limited` | `RateLimitedError` or 429 | Rethrow for the job backoff, "{Provider} asked us to slow down." Every try counts toward the 5 deliveries |

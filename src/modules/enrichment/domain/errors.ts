@@ -1,5 +1,5 @@
 import { isCapWait } from '@/modules/integrations';
-import { COST_CATEGORIES, type CostCategory } from '@/modules/integrations/contracts/costs';
+import { COST_CATEGORIES, categoryLabel, type CostCategory } from '@/modules/integrations/contracts/costs';
 import type { EnrichmentErrorKind } from '../contracts/types';
 
 // What a failed provider call means (Ruling 9). `retry` says the run should rethrow for the job's backoff.
@@ -15,8 +15,6 @@ export function pausedCategoryOf(e: unknown): CostCategory | null {
   const category = e.extensions?.category;
   return COST_CATEGORIES.some((c) => c.key === category) ? (category as CostCategory) : null;
 }
-
-export const categoryLabel = (category: CostCategory): string => COST_CATEGORIES.find((c) => c.key === category)!.label;
 
 /** What a request waiting on a paused budget reads (R3a Ruling 9). */
 export const budgetWaiting = (category: CostCategory): string => `Waiting for budget: ${categoryLabel(category)} is over its monthly budget`;

@@ -132,6 +132,8 @@ export const paidPause = integrations.table(
     category: text('category').notNull(),
     month: text('month').notNull(), // YYYY-MM
     paused: boolean('paused').notNull().default(false),
+    /** The `seq` of the level event that set `paused`: an older event delivered late is ignored. */
+    seq: bigint('seq', { mode: 'number' }).notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.category, t.month] })],
 );

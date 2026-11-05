@@ -36,11 +36,11 @@ import { ensureVendorSource, submitArrival } from '@/modules/intake';
 import { accountSummary, buyingRole } from '@/modules/accounts/db/schema';
 import { arrival, source } from '@/modules/intake/db/schema';
 import { createOffer, createPractice } from '@/modules/offers';
-import type { Principal } from '@/modules/tenancy';
+import { tenantTimezone, type Principal } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { enqueueJob } from '@/platform/events/outbox';
-import { addManualLine, saveBudgets } from '@/modules/analytics';
+import { addManualLine, saveBudgets, voidLine } from '@/modules/analytics';
 import { integrationsBudgetPause } from '@/modules/integrations';
 import { outbox } from '@/platform/db/schema';
 import { EnvelopeSchema, type Envelope } from '@/platform/events/envelope';
@@ -570,7 +570,6 @@ describe('usage limits and redelivery', () => {
 });
 
 describe('a paused budget (R3a Ruling 9)', () => {
-  const month = () => new Date().toISOString().slice(0, 7);
   /**
    * Delivers the tenant's unsent budget level events to the integrations consumer only. The waiting run job sits
    * ahead of them in the outbox, and runOutbox stops at its refusal; the worker delivers them independently.
@@ -586,15 +585,25 @@ describe('a paused budget (R3a Ruling 9)', () => {
     }
   };
 
-  it('waits with the budget reason and makes no call; raising the budget resumes it on the next try (Review Focus 2)', async () => {
+  /** A tenant whose Data vendors spend (one line) is over 110% of its budget, with an Apollo request waiting on it. */
+  async function waitingOnBudget() {
     const { t: t5, owner: owner5, agentId } = await enrichmentTenant();
-    await as(t5, owner5, (ctx) => saveBudgets(ctx, month(), [{ category: 'data_vendors', amountCents: 1_000 }]));
-    await as(t5, owner5, (ctx) => addManualLine(ctx, { occurredOn: new Date().toISOString().slice(0, 10), category: 'data_vendors', amountCents: 1_200, note: null }));
+    // The current month and day in the tenant's timezone, as analytics and the gateway read them.
+    const timeZone = await t5.run((ctx) => tenantTimezone(ctx));
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date());
+    const month = day.slice(0, 7);
+    await as(t5, owner5, (ctx) => saveBudgets(ctx, month, [{ category: 'data_vendors', amountCents: 1_000 }]));
+    const line = await as(t5, owner5, (ctx) => addManualLine(ctx, { occurredOn: day, category: 'data_vendors', amountCents: 1_200, note: null }));
     await runOutbox(t5.tenantId);
 
     const { accountId } = await accountFrom(t5, agentId);
     const id = await approved(t5, owner5, accountId, technical);
     await expect(runOutbox(t5.tenantId)).rejects.toMatchObject({ slug: 'blocked_by_cap' });
+    return { t5, owner5, id, month, lineId: line.id };
+  }
+
+  it('waits with the budget reason and makes no call; raising the budget resumes it on the next try (Review Focus 2)', async () => {
+    const { t5, owner5, id, month } = await waitingOnBudget();
     const reason = 'Waiting for budget: Data vendors is over its monthly budget';
     expect(await rowOf(t5, id)).toMatchObject({ status: 'approved', waitingReason: reason });
     expect((await viewOf(t5, id))!.statusText).toBe(reason);
@@ -602,7 +611,16 @@ describe('a paused budget (R3a Ruling 9)', () => {
     expect(calls).toHaveLength(0);
 
     // The level drops back to ok, the flag clears, and the waiting job runs on its next delivery.
-    await as(t5, owner5, (ctx) => saveBudgets(ctx, month(), [{ category: 'data_vendors', amountCents: 100_000 }]));
+    await as(t5, owner5, (ctx) => saveBudgets(ctx, month, [{ category: 'data_vendors', amountCents: 100_000 }]));
+    await deliverLevels(t5);
+    await runOutbox(t5.tenantId);
+    expect(await rowOf(t5, id)).toMatchObject({ status: 'completed', waitingReason: null });
+  });
+
+  it('voiding the line that took spend over 110% resumes the waiting request on the next try (Review Focus 2)', async () => {
+    const { t5, owner5, id, lineId } = await waitingOnBudget();
+    expect((await rowOf(t5, id)).waitingReason).toBe('Waiting for budget: Data vendors is over its monthly budget');
+    await as(t5, owner5, (ctx) => voidLine(ctx, lineId, 'Booked twice'));
     await deliverLevels(t5);
     await runOutbox(t5.tenantId);
     expect(await rowOf(t5, id)).toMatchObject({ status: 'completed', waitingReason: null });
