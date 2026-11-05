@@ -6,7 +6,7 @@ import type { AccountReview } from '../review/api';
 import { BLUEPRINT } from '../offers/testing';
 import { LEADER, REASONS, SELLERS, STATUSES } from '../review/testing';
 import type { StagesView } from '../settings/stages/api';
-import type { Plan, AccountDetail, AccountScore, Brief, BriefSection, Committee, Conflict, CrmCheck, Fact, Handoffs } from './api';
+import type { Plan, AccountDetail, AccountScore, Brief, BriefSection, Committee, Conflict, CrmCheck, Engagement, Fact, Handoffs } from './api';
 
 // Fixtures in the API's shapes (snake_case), for the account page's tests.
 
@@ -207,9 +207,22 @@ export const CRM_NEW: CrmCheck = { exists: false, owner_name: null, lifecycle: '
 
 export const HANDOFFS: Handoffs = {
   handoffs: [{ id: 'hnd_1', status: 'completed', crm_url: 'https://app.hubspot.com/contacts/1/record/0-2/99', queued_at: '2026-10-26T10:00:00Z', completed_at: '2026-10-27T09:00:00Z' }],
-  follow_through: { counts: { emails: 9, replies: 3 }, checked_at: '2026-10-31T09:58:00Z' },
+  follow_through: {
+    counts: { emails: 9, replies: 3, meetings: 1 },
+    meetings_held: 1,
+    next_meeting: { at: '2026-11-18T15:00:00Z', with: 'Scoping call' },
+    checked_at: '2026-10-31T09:58:00Z',
+  },
   deals: [],
   conflict: false,
+};
+
+/** Jarice met on Nov 4. */
+export const ENGAGEMENT: Engagement = {
+  people: [{ person_id: 'per_jr', state: 'met', at: '2026-11-04T15:00:00Z' }],
+  engaged: 1,
+  total: 1,
+  gap_role: 'Commercial buyer',
 };
 
 /** The queue's second row (Coastline) as a page the tests can step to. */
@@ -314,6 +327,8 @@ export type Served = {
   stages?: StagesView;
   conflicts?: Conflict[];
   committee?: Committee;
+  /** The engagement answer; null answers 500, so the committee shows without dots. */
+  engagement?: Engagement | null;
   /** The account's plan; none answers 404. */
   plan?: Plan | null;
 };
@@ -342,6 +357,7 @@ export function serveAccount(opts: Served = {}) {
     ),
     http.get('/api/v1/accounts/acc_mdc/facts', () => HttpResponse.json({ data: opts.facts ?? FACTS, next_cursor: null })),
     http.get('/api/v1/accounts/acc_mdc/committee', () => HttpResponse.json(opts.committee ?? COMMITTEE)),
+    http.get('/api/v1/accounts/acc_mdc/engagement', () => (opts.engagement === null ? problem(500, 'Scout could not read the engagement.') : HttpResponse.json(opts.engagement ?? ENGAGEMENT))),
     http.get('/api/v1/accounts/acc_mdc/playbook-suggestion', () => HttpResponse.json({ playbook: null, reason: 'none', offer: null, tier: null })),
     http.get('/api/v1/accounts/acc_mdc/brief', () => HttpResponse.json(opts.brief ?? BRIEF)),
     http.get('/api/v1/accounts/acc_mdc/notes', () => HttpResponse.json({ data: [], total: 0 })),

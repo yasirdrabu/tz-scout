@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { hasScope, type Me } from '../../api/me';
+import { cx } from '../../lib/cx';
 import { formatMoney } from '../../lib/format';
 import { useFormat } from '../../lib/useFormat';
 import { Avatar } from '../../ui/Avatar';
@@ -12,9 +13,26 @@ import { useToast } from '../../ui/Toast';
 import { addNote, notesQuery, type AccountReview } from '../review/api';
 import { NOTE_MAX } from '../review/ReasonPicker';
 import { errorText, useRun } from '../settings/shared';
-import { accountQuery, addPerson, buyingRolesQuery, checkCrm, committeeQuery, crmCheckQuery, editPerson, listWithAnd, personName, type AccountDetail, type CrmCheck, type Person } from './api';
+import { accountQuery, addPerson, buyingRolesQuery, checkCrm, committeeQuery, crmCheckQuery, editPerson, engagementQuery, listWithAnd, personName, type AccountDetail, type CrmCheck, type Engagement, type EngagementState, type Person } from './api';
 import { EditPersonDialog } from './EditPersonDialog';
 import styles from './Account.module.css';
+
+const ENGAGEMENT_TONE: Record<EngagementState, 'good' | 'amber' | 'gray'> = { met: 'good', replied: 'good', emailed: 'amber', not_contacted: 'gray' };
+
+/** A dot and the words for one person; one the answer leaves out reads Not contacted. */
+function EngagementLabel({ engagement, personId }: { engagement: Engagement; personId: string }) {
+  const f = useFormat();
+  const e = engagement.people.find((x) => x.person_id === personId);
+  const state = e?.state ?? 'not_contacted';
+  const day = e?.at ? ` ${f.monthDay(e.at)}` : '';
+  const text = { met: `Met${day}`, replied: `Replied${day}`, emailed: 'Emailed, no reply', not_contacted: 'Not contacted' }[state];
+  return (
+    <span className={styles.engagement}>
+      <span data-dot className={cx(styles.dot, styles[`dot_${ENGAGEMENT_TONE[state]}`])} aria-hidden="true" />
+      {text}
+    </span>
+  );
+}
 
 /** §4a 8. Buying committee: people with their role labels and notes; `Add a person` with `people:write`. */
 export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: { tenant: string; me: Me; account: AccountDetail; canAdd?: boolean; onFind: (roles: string[]) => void }) {
@@ -28,6 +46,8 @@ export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: 
   const find = hasScope(me, 'enrichment:request');
   // Loading or failed: the rail is today's, with no coverage.
   const committee = useQuery(committeeQuery(tenant, account.id)).data;
+  // Loading or failed: no dots. Once answered, a person it leaves out reads Not contacted.
+  const engagement = useQuery(engagementQuery(tenant, account.id)).data;
   const required = committee?.roles.filter((r) => r.required) ?? [];
   const gapRows = committee?.roles.filter((r) => r.status === 'gap') ?? [];
   const saveRoles = (p: Person, body: { role_keys?: string[]; confirm_role_keys?: string[] }, done: string) =>
@@ -103,6 +123,7 @@ export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: 
                   </span>
                 )}
               </span>
+              {engagement && <EngagementLabel engagement={engagement} personId={p.id} />}
             </li>
           ))}
         </ul>

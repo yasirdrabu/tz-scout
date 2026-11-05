@@ -12,7 +12,7 @@ import { offerQuery } from '../offers/api';
 import { SellerGuide } from '../offers/SellerGuide';
 import { HandoffChip } from '../review/parts';
 import { errorText } from '../settings/shared';
-import { activityQuery, briefQuery, handoffsQuery, scoreQuery, type Handoffs } from './api';
+import { activityQuery, briefQuery, engagementQuery, handoffsQuery, scoreQuery, type Handoffs } from './api';
 import { BriefCard } from './BriefCard';
 import styles from './Account.module.css';
 import { AccountFacts, WhyNow, type ViewProps } from './ReviewView';
@@ -20,14 +20,27 @@ import { PendingPlan, PlanCard } from './PlanCard';
 import { BuyingCommittee } from './RightRail';
 import { ScoreStrip, ScoreTile } from './ScoreStrip';
 
-/** §4b 1. Outcome tiles in R1: Replies and Opportunity (Meetings held and Buyers engaged are R2). */
-function Outcomes({ handoffs }: { handoffs: Handoffs | undefined }) {
+/** §4b 1. Outcome tiles: Meetings held, Replies, Buyers engaged, Opportunity. */
+function Outcomes({ tenant, id, handoffs }: { tenant: string; id: string; handoffs: Handoffs | undefined }) {
   const f = useFormat();
+  // Loading or failed: the Buyers engaged tile reads Not yet.
+  const engagement = useQuery(engagementQuery(tenant, id)).data;
   const ft = handoffs?.follow_through ?? null;
   const done = handoffs?.handoffs.find((h) => h.status === 'completed');
   const deal = handoffs?.deals.find((d) => d.status === 'open') ?? handoffs?.deals.find((d) => d.status === 'won') ?? null;
   return (
     <section className={cx(styles.tiles, styles.tiles4)} aria-label="Outcomes">
+      <div className={styles.scoreTile}>
+        <span className={styles.label}>Meetings held</span>
+        {ft ? (
+          <>
+            <span className={styles.big}>{f.number(ft.meetings_held)}</span>
+            <span className={styles.note}>{ft.next_meeting ? `Next: ${f.monthDay(ft.next_meeting.at)}${ft.next_meeting.with ? ` with ${ft.next_meeting.with}` : ''}` : 'No meeting booked'}</span>
+          </>
+        ) : (
+          <span className={styles.big}>Not yet</span>
+        )}
+      </div>
       <div className={styles.scoreTile}>
         <span className={styles.label}>Replies</span>
         {ft ? (
@@ -40,6 +53,17 @@ function Outcomes({ handoffs }: { handoffs: Handoffs | undefined }) {
             <span className={styles.big}>Not yet</span>
             <span className={styles.note}>Counts show once the account is in HubSpot and Scout reads its activity.</span>
           </>
+        )}
+      </div>
+      <div className={styles.scoreTile}>
+        <span className={styles.label}>Buyers engaged</span>
+        {engagement ? (
+          <>
+            <span className={styles.big}>{`${f.number(engagement.engaged)} of ${f.number(engagement.total)}`}</span>
+            {engagement.gap_role && <span className={cx(styles.note, styles.amber)}>{`No ${engagement.gap_role} contact yet`}</span>}
+          </>
+        ) : (
+          <span className={styles.big}>Not yet</span>
         )}
       </div>
       <div className={styles.scoreTile}>
@@ -82,7 +106,11 @@ function Activity({ tenant, id }: { tenant: string; id: string }) {
             {rows.map((r) => (
               <li key={r.id}>
                 <span className={styles.when}>{f.date(r.at)}</span>
-                <span>{r.summary}</span>
+                {r.actor === 'scout' ? <span className={styles.scoutAvatar} aria-hidden="true">S</span> : r.who ? <Avatar name={r.who} size="sm" decorative /> : <span className={styles.feedGap} aria-hidden="true" />}
+                <span className={styles.stack}>
+                  {r.who && <strong>{r.who}</strong>}
+                  <span>{r.summary}</span>
+                </span>
               </li>
             ))}
           </ul>
@@ -225,7 +253,7 @@ export function AssignedView(props: ViewProps) {
     <div className={styles.layout}>
       <div className={styles.main}>
         {review.current_assignment?.status === 'pending' ? <PendingPlan assignment={review.current_assignment} /> : <PlanCard tenant={tenant} me={me} accountId={account.id} accepted={review.current_assignment?.status === 'accepted'} onFind={onFind} />}
-        <Outcomes handoffs={handoffs.data} />
+        <Outcomes tenant={tenant} id={account.id} handoffs={handoffs.data} />
         <Activity tenant={tenant} id={account.id} />
         <ReviewRecord {...props} />
       </div>
