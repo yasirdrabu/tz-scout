@@ -268,7 +268,7 @@ step.
    roles, HubSpot task); each save is immediate with toasts "Step added.", "Step saved.", "Step removed.".
    Before the seller accepts, the card reads "{playbook} starts when {AE first name} accepts." ("resumes when" if the account already has a paused or active plan, from `plan_resumes`) or "No
    playbook. {AE first name} works it with no set steps." CRM tasks and the stop rule are R2c-3b.
-3. **HubSpot activity** ("Synced {when}"): dated entries of replies, emails, meetings, opens, and
+3. **HubSpot activity** ("Synced {when}"): dated entries of replies, emails, meetings (opens were removed for R2d), and
    Scout's own actions ("Scout set Ash Patel as company owner, logged the brief and started the
    playbook.").
 4. **Review record** ("Approved by {name} on {date}"): the scores, the brief sections shortened,

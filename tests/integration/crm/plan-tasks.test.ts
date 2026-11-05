@@ -2,7 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { editPerson, upsertFromArrival } from '@/modules/accounts';
-import { activityObserved, push, seedMockCrm, syncAccount, syncOwners, syncPlanTasks } from '@/modules/crm';
+import { activityObserved, listActivity, push, seedMockCrm, syncAccount, syncOwners, syncPlanTasks } from '@/modules/crm';
 import { followThrough as followThroughTable, handoff, link, mockTask, taskLink } from '@/modules/crm/db/schema';
 import { dueAtOn } from '@/modules/crm/domain/tasks';
 import { mockAddActivity, mockCompleteTask } from '@/modules/crm/fixtures';
@@ -101,6 +101,21 @@ const setStep = async (planId: string, stepId: string, patch: Parameters<typeof 
 };
 
 describe('plan tasks follow the account plan (CRM-E3-S4)', () => {
+  it('the feed has a row for the plan start, at the plan creation time', async () => {
+    const { accountId, planId } = await planned('Feed Plan Co');
+    const plan = await planOf(accountId);
+    expect(plan.id).toBe(planId);
+    const { rows } = await asSeller((ctx) => listActivity(ctx, accountId, null));
+    expect(rows.find((r) => r.id === `${planId}:started`)).toEqual({
+      id: `${planId}:started`,
+      kind: 'scout',
+      at: plan.createdAt,
+      who: 'Scout',
+      actor: 'scout',
+      summary: `Started the ${PLAYBOOK} playbook`,
+    });
+  });
+
   it('accept creates a task per crm_task step', async () => {
     const { accountId, personId, planId, stepIds } = await planned('Acme');
     const rows = await stepsOf(planId);

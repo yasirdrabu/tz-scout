@@ -81,6 +81,8 @@ export type PlanTasks = {
   playbookName: string;
   status: 'active' | 'paused' | 'completed' | 'stopped' | 'abandoned';
   statusReason: string | null;
+  /** When the plan was made (its `created_at`), ISO. The feed's "Started the playbook" row (R2d Ruling 9). */
+  startedAt: string;
   sellerUserId: string | null;
   steps: {
     id: string;
@@ -96,5 +98,5 @@ export type PlanTasks = {
     personIds: string[];
   }[];
   /** The account's other plans, for the close note of a task an earlier plan left open. */
-  otherPlans: { planId: string; playbookName: string; status: PlanTasks['status']; statusReason: string | null }[];
+  otherPlans: { planId: string; playbookName: string; status: PlanTasks['status']; statusReason: string | null; startedAt: string }[];
 };

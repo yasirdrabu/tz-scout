@@ -1,10 +1,11 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { getAccount } from '@/modules/accounts';
-import { members } from '@/modules/tenancy';
+import { members, tenantTimezone, userForCrmOwner } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
+import { handoffPackageProvider } from '../contracts/ports';
 import { activity, followThrough, handoff } from '../db/schema';
-import { activityEntry, afterCursor, newestFirst, scoutEntries, type ActivityEntry } from '../domain/activity';
+import { activityEntry, afterCursor, newestFirst, planStartEntry, scoutEntries, type ActivityEntry } from '../domain/activity';
 import { ownerName } from './owners';
 
 export const ACTIVITY_PAGE = 25;
@@ -23,7 +24,7 @@ export function activityCursor(v: Record<string, unknown> | null): ActivityCurso
 /**
  * The account's HubSpot activity and Scout's own actions, newest first (screens.md §4b item 3): up to `limit + 1`
  * rows after the cursor, so the caller can tell there is another page. `syncedAt` is when follow-through was last
- * read for the latest completed handoff. Not found when the caller can't see the account.
+ * read for the latest completed handoff. A meeting sits at its start, else when the CRM logged it. Not found when the caller can't see the account.
  */
 export async function listActivity(
   ctx: ModuleContext,
@@ -35,17 +36,29 @@ export async function listActivity(
   if (!account) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
   const id = account.id;
   // Ids compare byte-wise ("C") in SQL and in JS, so the cursor means the same in both.
+  const sortAt = sql`coalesce(${activity.startAt}, ${activity.occurredAt})`;
   const crm = await ctx.tx
-    .select({ id: activity.id, kind: activity.kind, occurredAt: activity.occurredAt })
+    .select({
+      id: activity.id,
+      system: activity.system,
+      kind: activity.kind,
+      occurredAt: activity.occurredAt,
+      contacts: activity.contacts,
+      actorOwnerExternalId: activity.actorOwnerExternalId,
+      subject: activity.subject,
+      startAt: activity.startAt,
+      endAt: activity.endAt,
+      status: activity.status,
+    })
     .from(activity)
     .where(
       and(
         eq(activity.tenantId, ctx.tenantId),
         eq(activity.accountId, id),
-        cursor ? sql`(${activity.occurredAt} < ${cursor.at}::timestamptz or (${activity.occurredAt} = ${cursor.at}::timestamptz and ${activity.id} collate "C" < ${cursor.id}))` : undefined,
+        cursor ? sql`(${sortAt} < ${cursor.at}::timestamptz or (${sortAt} = ${cursor.at}::timestamptz and ${activity.id} collate "C" < ${cursor.id}))` : undefined,
       ),
     )
-    .orderBy(desc(activity.occurredAt), sql`${activity.id} collate "C" desc`)
+    .orderBy(sql`${sortAt} desc`, sql`${activity.id} collate "C" desc`)
     .limit(limit + 1);
 
   const handoffs = await ctx.tx
@@ -64,7 +77,21 @@ export async function listActivity(
       }),
     );
   }
-  const rows = [...crm.map(activityEntry), ...scout].filter(afterCursor(cursor)).sort(newestFirst).slice(0, limit + 1);
+  const plan = await handoffPackageProvider().planTasks?.(ctx, id);
+  if (plan) scout.push(...[plan, ...plan.otherPlans].map(planStartEntry));
+
+  // The seller's name for each CRM owner behind a row: the member who holds that owner id, else the CRM's own roster name.
+  const whoOf = new Map<string, string | null>();
+  for (const r of crm) {
+    const owner = r.actorOwnerExternalId;
+    if (!owner || whoOf.has(`${r.system}:${owner}`)) continue;
+    const userId = await userForCrmOwner(ctx, r.system, owner);
+    whoOf.set(`${r.system}:${owner}`, people.find((m) => m.userId === userId)?.name ?? (await ownerName(ctx, r.system, owner)));
+  }
+  const now = new Date();
+  const timeZone = await tenantTimezone(ctx);
+  const entries = crm.map((r) => activityEntry(r, { who: r.actorOwnerExternalId ? (whoOf.get(`${r.system}:${r.actorOwnerExternalId}`) ?? null) : null, now, timeZone }));
+  const rows = [...entries, ...scout].filter(afterCursor(cursor)).sort(newestFirst).slice(0, limit + 1);
 
   const completed = handoffs.find((h) => h.status === 'completed');
   const [ft] = completed

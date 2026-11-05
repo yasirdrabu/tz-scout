@@ -248,6 +248,7 @@ export async function planTasks(ctx: ModuleContext, accountId: string): Promise<
     playbookName: nameOf(plan.templateId),
     status: plan.status as PlanTasks['status'],
     statusReason: plan.statusReason,
+    startedAt: plan.createdAt.toISOString(),
     sellerUserId: plan.sellerUserId,
     steps: steps.map((s) => ({
       id: s.id,
@@ -264,7 +265,7 @@ export async function planTasks(ctx: ModuleContext, accountId: string): Promise<
     })),
     otherPlans: rows
       .filter((r) => r.id !== plan.id)
-      .map((r) => ({ planId: r.id, playbookName: nameOf(r.templateId), status: r.status as PlanTasks['status'], statusReason: r.statusReason })),
+      .map((r) => ({ planId: r.id, playbookName: nameOf(r.templateId), status: r.status as PlanTasks['status'], statusReason: r.statusReason, startedAt: r.createdAt.toISOString() })),
   };
 }
 
