@@ -30,7 +30,7 @@ describe('Offer page: playbook by tier (§19)', () => {
     const act = await within(region).findByRole('combobox', { name: 'Act now playbook' });
     expect(act).toHaveValue('plb_rfp');
     expect(within(act).getAllByRole('option').map((o) => o.textContent)).toEqual(['No playbook', 'Public sector RFP', 'Warm intro']);
-    expect(within(region).getByText('3 steps over 14 days')).toBeInTheDocument();
+    expect(within(region).getByText('3 steps over 15 days')).toBeInTheDocument();
     expect(within(region).getByRole('link', { name: 'Open Public sector RFP' })).toHaveAttribute('href', '/t/taazaa/playbooks/plb_rfp');
     expect(within(region).getByRole('combobox', { name: 'Good fit playbook' })).toHaveValue('');
     expect(within(region).getByText('AE works it with no set steps.')).toBeInTheDocument();
@@ -47,7 +47,7 @@ describe('Offer page: playbook by tier (§19)', () => {
     expect(puts(seen)[0]!.url.pathname).toBe('/api/v1/offers/off_mb/playbooks/good_fit');
     expect(puts(seen)[0]!.body).toEqual({ playbook_id: 'plb_warm' });
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Good fit playbook' })).toHaveValue('plb_warm'));
-    expect(screen.getByText('1 step over 0 days')).toBeInTheDocument();
+    expect(screen.getByText('1 step over 1 day')).toBeInTheDocument();
     await user.selectOptions(screen.getByRole('combobox', { name: 'Act now playbook' }), '');
     expect(await screen.findByText('Act now has no playbook now.')).toBeInTheDocument();
     expect(puts(seen)[1]!.body).toEqual({ playbook_id: null });
@@ -71,7 +71,7 @@ describe('Offer page: playbook by tier (§19)', () => {
     expect(await within(region).findByText('Public sector RFP')).toBeInTheDocument();
     expect(within(region).queryByRole('combobox')).toBeNull();
     expect(within(region).queryByRole('link', { name: /^Open/ })).toBeNull();
-    expect(within(region).getByText('3 steps over 14 days')).toBeInTheDocument();
+    expect(within(region).getByText('3 steps over 15 days')).toBeInTheDocument();
     expect(within(region).getAllByText('No playbook')).toHaveLength(2);
     expect(seen.some((r) => r.url.pathname.endsWith('/playbooks') && r.url.pathname === '/api/v1/playbooks')).toBe(false);
   });

@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
-import { filterVisibleAccountIds, resolveAccountId } from '@/modules/accounts';
+import { filterVisibleAccountIds, listBuyingRoles, listPeople, resolveAccountId } from '@/modules/accounts';
 import { memberDirectory, tenantTimezone, userNames } from '@/modules/tenancy';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
@@ -9,7 +9,7 @@ import { newId } from '@/platform/ids';
 import { planChanged, stepCompleted } from '../contracts/events';
 import { accountPlan, planChange, planStep, playbookTemplate } from '../db/schema';
 import { dueFlags, pickNextStep } from '../domain/next-step';
-import { localDate } from '../domain/plan';
+import { dueDateFor, insertOrder, linkedPeople, localDate, missingRoles, type PlanPerson, type StepChannel } from '../domain/plan';
 
 export const PLAN_ENDED = 'This plan has ended.';
 export const FINISH_STEPS = 'Finish or skip every step first.';
@@ -21,7 +21,22 @@ export const MAX_NOTE = 2000;
 export type Plan = typeof accountPlan.$inferSelect;
 export type Step = typeof planStep.$inferSelect;
 type Changed = ('status' | 'steps' | 'owners' | 'account')[];
-type StepSnapshot = { id: string; status: StepStatus; ownerUserId: string | null; dueDate: string; title: string; crmTask: boolean };
+type StepSnapshot =
+  | {
+      id: string;
+      order: number;
+      day: number;
+      channel: StepChannel;
+      title: string;
+      detail: string | null;
+      subject: string | null;
+      body: string | null;
+      status: StepStatus;
+      ownerUserId: string | null;
+      dueDate: string;
+      crmTask: boolean;
+    }
+  | { id: string; removed: true };
 
 const OPEN_STEP = ['todo', 'in_progress'];
 const CLOSED = ['completed', 'stopped', 'abandoned'];
@@ -36,12 +51,18 @@ export async function recordChange(ctx: ModuleContext, planId: string, kind: str
 }
 
 /** What `plan.changed` says about a step it touched. */
-export const snapshot = (s: Pick<Step, 'id' | 'status' | 'ownerUserId' | 'dueDate' | 'title' | 'crmTask'>): StepSnapshot => ({
+export const snapshot = (s: Pick<Step, 'id' | 'order' | 'day' | 'channel' | 'title' | 'detail' | 'subject' | 'body' | 'status' | 'ownerUserId' | 'dueDate' | 'crmTask'>): StepSnapshot => ({
   id: s.id,
+  order: s.order,
+  day: s.day,
+  channel: s.channel as StepChannel,
+  title: s.title,
+  detail: s.detail,
+  subject: s.subject,
+  body: s.body,
   status: s.status as StepStatus,
   ownerUserId: s.ownerUserId,
   dueDate: s.dueDate,
-  title: s.title,
   crmTask: s.crmTask,
 });
 
@@ -79,7 +100,15 @@ async function loadPlan(ctx: ModuleContext, planId: string): Promise<Plan> {
 const stepsOf = (ctx: ModuleContext, planId: string) =>
   ctx.tx.select().from(planStep).where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, planId))).orderBy(asc(planStep.order), asc(planStep.id));
 
-export type StepView = Omit<Step, 'tenantId' | 'planId'> & { ownerName: string | null; overdue: boolean; dueToday: boolean };
+export type StepView = Omit<Step, 'tenantId' | 'planId'> & {
+  ownerName: string | null;
+  overdue: boolean;
+  dueToday: boolean;
+  /** The account's people who hold a target role as stated or set by a person, read live. */
+  people: { id: string; name: string }[];
+  /** Target roles nobody holds. */
+  missingRoles: string[];
+};
 export type HistoryView = { id: string; kind: string; stepId: string | null; detail: unknown; by: string | null; byName: string | null; at: Date };
 export type PlanView = {
   id: string;
@@ -93,6 +122,8 @@ export type PlanView = {
   tier: string | null;
   assignmentId: string;
   sellerUserId: string | null;
+  /** A person added, edited or removed a step after the plan started. */
+  customised: boolean;
   startDate: string;
   stopWhen: string;
   /** Days since the start date in the workspace timezone (0 on the start day). */
@@ -108,6 +139,9 @@ const daysBetween = (from: string, to: string) => {
   return Math.max(0, Math.round((ms(to) - ms(from)) / 86_400_000));
 };
 
+const personName = (p: { firstName: string | null; lastName: string | null; email: string | null }) =>
+  [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email || 'Unnamed';
+
 async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
   const [template] = await ctx.tx.select().from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), eq(playbookTemplate.id, plan.templateId)));
   const steps = await stepsOf(ctx, plan.id);
@@ -120,6 +154,12 @@ async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
   const ids = [...steps.map((s) => s.ownerUserId), ...history.map((h) => h.by)].filter((x): x is string => !!x);
   const names = ids.length ? await userNames(ctx, ids) : new Map<string, string>();
   const today = localDate(Date.now(), await tenantTimezone(ctx));
+  // One read of the account's people for the whole plan; roles Enrich or a person added after acceptance count.
+  const people: (PlanPerson & { name: string })[] = steps.some((s) => s.targetBuyingRoles.length > 0)
+    ? (await listPeople(ctx, plan.accountId)).map((p) => ({ id: p.id, firstName: p.firstName, name: personName(p), roles: p.roles.map((r) => ({ key: r.key, origin: r.origin })) }))
+    : [];
+  // An archived buying role is not something to go and find.
+  const active = new Set(steps.some((s) => s.targetBuyingRoles.length > 0) ? (await listBuyingRoles(ctx)).map((r) => r.key) : []);
   return {
     id: plan.id,
     accountId: plan.accountId,
@@ -131,12 +171,15 @@ async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
     tier: plan.tier,
     assignmentId: plan.assignmentId,
     sellerUserId: plan.sellerUserId,
+    customised: plan.customised,
     startDate: plan.startDate,
     stopWhen: plan.stopWhen,
     day: daysBetween(plan.startDate, today),
     days: steps.reduce((m, s) => Math.max(m, s.day), 0),
     steps: steps.map(({ tenantId: _t, planId: _p, ...s }) => ({
       ...s,
+      people: linkedPeople(people, s.targetBuyingRoles).map((p) => ({ id: p.id, name: p.name })),
+      missingRoles: missingRoles(people, s.targetBuyingRoles).filter((k) => active.has(k)),
       ownerName: s.ownerUserId ? (names.get(s.ownerUserId) ?? null) : null,
       ...(OPEN_STEP.includes(s.status) ? dueFlags(s.dueDate, today) : { overdue: false, dueToday: false }),
     })),
@@ -166,9 +209,74 @@ const isRealDate = (s: string) => {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(ms) && new Date(ms).toISOString().slice(0, 10) === s;
 };
 
-export type StepPatch = { status?: StepStatus; note?: string | null; ownerUserId?: string | null; dueDate?: string };
+export const DONE_STEP_KEPT = "A done step can't be removed. Skip it instead.";
+export const NEEDS_TITLE = 'Give the step a title.';
 
-/** Changes a step: status, note, owner (a workspace member, or null for no one) or due date. Done publishes `playbooks.step.completed`. */
+export type StepPatch = {
+  status?: StepStatus;
+  note?: string | null;
+  ownerUserId?: string | null;
+  dueDate?: string;
+  title?: string;
+  detail?: string | null;
+  /** Moves the step and, unless `dueDate` is also given, recomputes its due date from the plan's start date. */
+  day?: number;
+  channel?: StepChannel;
+  subject?: string | null;
+  body?: string | null;
+  crmTask?: boolean;
+  targetBuyingRoles?: string[];
+};
+export type StepAdd = {
+  day: number;
+  channel: StepChannel;
+  ownerRole: 'seller' | 'leader' | 'operator';
+  title: string;
+  detail?: string | null;
+  subject?: string | null;
+  body?: string | null;
+  targetBuyingRoles?: string[];
+  crmTask?: boolean;
+  /** A workspace member; defaults from `ownerRole`. */
+  ownerUserId?: string | null;
+};
+
+const isMember = async (ctx: ModuleContext, userId: string) => (await memberDirectory(ctx)).some((m) => m.userId === userId);
+
+/** Target roles must be active buying roles, plus any the step already holds (a role archived since stays valid). */
+async function checkRoles(ctx: ModuleContext, roles: string[], kept: string[] = []): Promise<void> {
+  if (roles.length === 0) return;
+  const known = new Set([...(await listBuyingRoles(ctx)).map((r) => r.key), ...kept]);
+  const bad = roles.find((k) => !known.has(k));
+  if (bad !== undefined) throw invalid('target_buying_roles', 'Unknown buying role: ' + bad);
+}
+
+const checkDay = (day: number) => {
+  if (!Number.isInteger(day) || day < 0 || day > 365) throw invalid('day', 'Use a day from 0 to 365.');
+};
+
+const byOrder = (a: StepSnapshot, b: StepSnapshot) => ('order' in a && 'order' in b ? a.order - b.order : 0);
+
+/** Moves the steps at or after `order` up by one to make room. Returns the steps it moved. */
+async function makeRoom(ctx: ModuleContext, planId: string, order: number, exceptId?: string): Promise<Step[]> {
+  const rows = await ctx.tx
+    .update(planStep)
+    .set({ order: sql`${planStep.order} + 1` })
+    .where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, planId), sql`${planStep.order} >= ${order}`, exceptId ? sql`${planStep.id} <> ${exceptId}` : sql`true`))
+    .returning();
+  return rows.sort((a, b) => a.order - b.order);
+}
+
+/** Where a step on `day` goes: right after the last other step on that day or earlier (Ruling 8). */
+async function orderFor(ctx: ModuleContext, planId: string, day: number, exceptId?: string): Promise<number> {
+  return insertOrder((await stepsOf(ctx, planId)).filter((x) => x.id !== exceptId), day);
+}
+
+/**
+ * Changes a step: status, note, owner (a workspace member, or null for no one), due date, or its content (title, detail,
+ * day, channel, subject, body, HubSpot task, target roles). A content change makes the step `edited` and the plan
+ * customised; a new day recomputes the due date unless one is given. Done publishes `playbooks.step.completed`.
+ */
 export async function updateStep(ctx: ModuleContext, planId: string, stepId: string, patch: StepPatch): Promise<PlanView> {
   const plan = await loadPlan(ctx, planId);
   if (CLOSED.includes(plan.status)) throw ended();
@@ -199,7 +307,7 @@ export async function updateStep(ctx: ModuleContext, planId: string, stepId: str
     }
   }
   if (patch.ownerUserId !== undefined && patch.ownerUserId !== step.ownerUserId) {
-    if (patch.ownerUserId !== null && !(await memberDirectory(ctx)).some((m) => m.userId === patch.ownerUserId)) {
+    if (patch.ownerUserId !== null && !(await isMember(ctx, patch.ownerUserId))) {
       throw invalid('owner_user_id', 'Pick someone from this workspace.');
     }
     set.ownerUserId = patch.ownerUserId;
@@ -211,11 +319,59 @@ export async function updateStep(ctx: ModuleContext, planId: string, stepId: str
     changes.push(['due_date', { from: step.dueDate, to: patch.dueDate }]);
   }
 
+  // Content. Anything that changes marks the step edited and is recorded as one `step_edited` entry.
+  const edited: Record<string, { from: unknown; to: unknown }> = {};
+  const edit = <K extends keyof Step>(key: K, to: Step[K], label: string = key) => {
+    if (JSON.stringify(to) !== JSON.stringify(step[key])) {
+      set[key] = to;
+      edited[label] = { from: step[key], to };
+    }
+  };
+  if (patch.title !== undefined) {
+    const title = patch.title.trim();
+    if (!title) throw invalid('title', NEEDS_TITLE);
+    edit('title', title);
+  }
+  if (patch.detail !== undefined) edit('detail', patch.detail === null ? null : patch.detail.trim() || null);
+  if (patch.channel !== undefined) edit('channel', patch.channel);
+  const email = (set.channel ?? step.channel) === 'email';
+  if (patch.subject !== undefined) edit('subject', email ? patch.subject?.trim() || null : null);
+  if (patch.body !== undefined) edit('body', email ? patch.body?.trim() || null : null);
+  // Leaving email drops its text.
+  if (!email) {
+    if (patch.subject === undefined) edit('subject', null);
+    if (patch.body === undefined) edit('body', null);
+  }
+  if (patch.crmTask !== undefined) edit('crmTask', patch.crmTask, 'crm_task');
+  if (patch.targetBuyingRoles !== undefined) {
+    const roles = [...new Set(patch.targetBuyingRoles)];
+    await checkRoles(ctx, roles, step.targetBuyingRoles);
+    edit('targetBuyingRoles', roles, 'target_buying_roles');
+  }
+  if (patch.day !== undefined && patch.day !== step.day) {
+    checkDay(patch.day);
+    edit('day', patch.day);
+    edit('order', await orderFor(ctx, planId, patch.day, stepId));
+    const due = dueDateFor(plan.startDate, patch.day);
+    if (patch.dueDate === undefined && due !== step.dueDate) {
+      set.dueDate = due;
+      edited.due_date = { from: step.dueDate, to: due };
+    }
+  }
+  const customised = Object.keys(edited).length > 0;
+  if (customised) {
+    if (step.origin === 'template') set.origin = 'edited';
+    changes.push(['step_edited', { changed: edited }]);
+  }
+
   if (changes.length > 0) {
+    const shifted = set.order !== undefined ? await makeRoom(ctx, planId, set.order, stepId) : [];
     await ctx.tx.update(planStep).set(set).where(eq(planStep.id, stepId));
-    await ctx.tx.update(accountPlan).set({ updatedAt: new Date() }).where(eq(accountPlan.id, planId));
+    await ctx.tx.update(accountPlan).set({ updatedAt: new Date(), ...(customised ? { customised: true } : {}) }).where(eq(accountPlan.id, planId));
     for (const [kind, detail] of changes) await recordChange(ctx, planId, kind, detail, stepId);
-    await publishChanged(ctx, plan, changes.some(([k]) => k === 'owner') ? ['steps', 'owners'] : ['steps'], undefined, { steps: [snapshot({ ...step, ...set })] });
+    await publishChanged(ctx, plan, changes.some(([k]) => k === 'owner') ? ['steps', 'owners'] : ['steps'], undefined, {
+      steps: [...shifted.map(snapshot), snapshot({ ...step, ...set })].sort(byOrder),
+    });
     if (completed) {
       await publish(
         ctx,
@@ -226,6 +382,80 @@ export async function updateStep(ctx: ModuleContext, planId: string, stepId: str
     }
     await audit(ctx, { action: 'playbooks.plan_step.updated', subject: { type: 'account_plan', id: planId }, after: { stepId, changed: changes.map(([k]) => k) } });
   }
+  const [fresh] = await ctx.tx.select().from(accountPlan).where(eq(accountPlan.id, planId));
+  return view(ctx, fresh!);
+}
+
+/**
+ * Adds a step to an open (active or paused) plan. Its due date is the plan's start date plus its day, moved to a working
+ * day; its owner follows its role (seller: the plan's seller, leader: the assigning leader when the plan knows one,
+ * operator: no one) unless `ownerUserId` is given.
+ */
+export async function addStep(ctx: ModuleContext, planId: string, input: StepAdd): Promise<PlanView> {
+  const plan = await loadPlan(ctx, planId);
+  if (CLOSED.includes(plan.status)) throw ended();
+  const title = input.title.trim();
+  if (!title) throw invalid('title', NEEDS_TITLE);
+  checkDay(input.day);
+  const roles = [...new Set(input.targetBuyingRoles ?? [])];
+  await checkRoles(ctx, roles);
+  let ownerUserId: string | null = null;
+  if (input.ownerUserId) {
+    if (!(await isMember(ctx, input.ownerUserId))) throw invalid('owner_user_id', 'Pick someone from this workspace.');
+    ownerUserId = input.ownerUserId;
+  } else if (input.ownerRole === 'seller') {
+    ownerUserId = plan.sellerUserId;
+  } else if (input.ownerRole === 'leader') {
+    ownerUserId = (await stepsOf(ctx, planId)).find((s) => s.ownerRole === 'leader' && s.ownerUserId)?.ownerUserId ?? null;
+  }
+  const email = input.channel === 'email';
+  const order = await orderFor(ctx, planId, input.day);
+  const shifted = await makeRoom(ctx, planId, order);
+  const people = roles.length ? (await listPeople(ctx, plan.accountId)).map((p) => ({ id: p.id, firstName: p.firstName, roles: p.roles.map((r) => ({ key: r.key, origin: r.origin })) })) : [];
+  const [row] = await ctx.tx
+    .insert(planStep)
+    .values({
+      id: newId('stp'),
+      tenantId: ctx.tenantId,
+      planId,
+      templateStepId: null,
+      order,
+      day: input.day,
+      channel: input.channel,
+      ownerRole: input.ownerRole,
+      ownerUserId,
+      title,
+      detail: input.detail?.trim() || null,
+      targetPersonIds: linkedPeople(people, roles).map((p) => p.id),
+      targetBuyingRoles: roles,
+      dueDate: dueDateFor(plan.startDate, input.day),
+      status: 'todo',
+      origin: 'added',
+      crmTask: input.crmTask ?? true,
+      subject: email ? input.subject?.trim() || null : null,
+      body: email ? input.body?.trim() || null : null,
+    })
+    .returning();
+  await ctx.tx.update(accountPlan).set({ updatedAt: new Date(), customised: true }).where(eq(accountPlan.id, planId));
+  await recordChange(ctx, planId, 'step_added', { title, day: row!.day, channel: row!.channel, ownerRole: row!.ownerRole, ownerUserId, dueDate: row!.dueDate, order }, row!.id);
+  await publishChanged(ctx, plan, ownerUserId ? ['steps', 'owners'] : ['steps'], undefined, { steps: [...shifted.map(snapshot), snapshot(row!)].sort(byOrder) });
+  await audit(ctx, { action: 'playbooks.plan_step.added', subject: { type: 'account_plan', id: planId }, after: { stepId: row!.id } });
+  const [fresh] = await ctx.tx.select().from(accountPlan).where(eq(accountPlan.id, planId));
+  return view(ctx, fresh!);
+}
+
+/** Takes a step out of an open plan. A done step stays (409): skip it instead. */
+export async function removeStep(ctx: ModuleContext, planId: string, stepId: string): Promise<PlanView> {
+  const plan = await loadPlan(ctx, planId);
+  if (CLOSED.includes(plan.status)) throw ended();
+  const [step] = await ctx.tx.select().from(planStep).where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, planId), eq(planStep.id, stepId))).for('update');
+  if (!step) throw notFound();
+  if (step.status === 'done') throw new ScoutError({ slug: 'step-done', status: 409, title: DONE_STEP_KEPT });
+  await ctx.tx.delete(planStep).where(eq(planStep.id, stepId));
+  await ctx.tx.update(accountPlan).set({ updatedAt: new Date(), customised: true }).where(eq(accountPlan.id, planId));
+  await recordChange(ctx, planId, 'step_removed', { title: step.title, day: step.day, channel: step.channel, status: step.status, dueDate: step.dueDate }, stepId);
+  await publishChanged(ctx, plan, ['steps'], undefined, { steps: [{ id: stepId, removed: true }] });
+  await audit(ctx, { action: 'playbooks.plan_step.removed', subject: { type: 'account_plan', id: planId }, after: { stepId } });
   const [fresh] = await ctx.tx.select().from(accountPlan).where(eq(accountPlan.id, planId));
   return view(ctx, fresh!);
 }

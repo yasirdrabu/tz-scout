@@ -56,7 +56,7 @@ test('a playbook is built, assigned to a tier, suggested on assign, and starts w
     offerId = created.body!.id as string;
     expect((await api(page, `offers/${offerId}:approve`, 'POST')).status).toBe(200);
 
-    // The owner builds a playbook with two steps: an email on day 0 and a call on day 1.
+    // The owner builds a playbook with two steps: an email on day 1 and a call on day 2.
     await page.goto('/t/taazaa/playbooks?edit=new');
     const form = page.getByRole('dialog', { name: 'New playbook' });
     await form.getByLabel('Name').fill(playbookName);
@@ -64,21 +64,21 @@ test('a playbook is built, assigned to a tier, suggested on assign, and starts w
     await form.getByLabel('Description').fill('Made by the playbooks end-to-end test.');
     await form.getByRole('button', { name: 'Add step' }).click();
     let step = form.getByRole('group', { name: 'Step 1' });
-    await step.getByLabel('Day').fill('0');
+    await step.getByLabel('Day').fill('1');
     await step.getByLabel('Channel').selectOption({ label: 'Email' });
     await step.getByLabel('Title').fill('Intro email');
     await step.getByLabel('Subject').fill(subject);
     await step.getByLabel('Body').fill('Hi {person.first_name}, a note for {account.name}.');
     await form.getByRole('button', { name: 'Add step' }).click();
     step = form.getByRole('group', { name: 'Step 2' });
-    await step.getByLabel('Day').fill('1');
+    await step.getByLabel('Day').fill('2');
     await step.getByLabel('Channel').selectOption({ label: 'Call' });
     await step.getByLabel('Title').fill('Follow-up call');
     await form.getByRole('button', { name: 'Create playbook' }).click();
     await shows(page, `${playbookName} created.`);
     await expect(page.getByRole('heading', { level: 1, name: playbookName })).toBeVisible();
     playbookId = page.url().split('/playbooks/')[1]!.split('?')[0]!;
-    await expect(page.getByText('2 steps over 1 day').first()).toBeVisible();
+    await expect(page.getByText('2 steps over 2 days').first()).toBeVisible();
 
     // Assign it to the offer's Good fit tier from the Playbooks screen.
     await page.getByRole('link', { name: 'Assign', exact: true }).click();

@@ -23,7 +23,7 @@ describe('Playbooks list (§20)', () => {
     const row = (await screen.findByRole('link', { name: 'Public sector RFP' })).closest('tr')!;
     expect(row).toHaveTextContent('For agencies with an open notice.');
     expect(row).toHaveTextContent('Active');
-    expect(row).toHaveTextContent('3 steps over 14 days');
+    expect(row).toHaveTextContent('3 steps over 15 days');
     expect(row).toHaveTextContent('Email 1 · LinkedIn 1 · Call 1');
     await waitFor(() => expect(row).toHaveTextContent('Modernization Blueprint · Act now'));
     const cells = within(row).getAllByRole('cell');
@@ -32,7 +32,7 @@ describe('Playbooks list (§20)', () => {
     expect(cells[6]).toHaveTextContent('— Not available yet');
     const draft = screen.getByRole('link', { name: 'Warm intro' }).closest('tr')!;
     expect(draft).toHaveTextContent('Draft');
-    expect(draft).toHaveTextContent('1 step over 0 days');
+    expect(draft).toHaveTextContent('1 step over 1 day');
     expect(draft).toHaveTextContent('Not assigned');
     expect(screen.getByText('Reply and meeting rates are for accounts that finished the playbook in the last 90 days.')).toBeInTheDocument();
   });
@@ -83,9 +83,9 @@ describe('Playbook detail (§20)', () => {
     expect(tiles).toHaveTextContent('Running now');
     expect(tiles).toHaveTextContent('Accounts mid-playbook');
     for (const t of ['Finished', 'Replied', 'Booked a meeting', 'Won']) expect(tiles).toHaveTextContent(t);
-    expect(screen.getByText('3 steps over 14 days')).toBeInTheDocument();
+    expect(screen.getByText('3 steps over 15 days')).toBeInTheDocument();
     const one = screen.getByText('Send the opening email').closest('li')!;
-    expect(one).toHaveTextContent('Day 0');
+    expect(one).toHaveTextContent('Day 1');
     expect(one).toHaveTextContent('Reference the notice.');
     expect(one).toHaveTextContent('Email · Seller');
     expect(one).toHaveTextContent('Draft ready for AE');
@@ -95,7 +95,7 @@ describe('Playbook detail (§20)', () => {
     expect(two).toHaveTextContent('LinkedIn · Seller');
     expect(two).not.toHaveTextContent('HubSpot task');
     const three = screen.getByText('Call the sponsor').closest('li')!;
-    expect(three).toHaveTextContent('Day 14');
+    expect(three).toHaveTextContent('Day 15');
     expect(three).toHaveTextContent('Call · Leader');
     expect(three).toHaveTextContent('HubSpot task');
   });

@@ -57,6 +57,7 @@ export type PlanStepDraft = {
   title: string;
   detail: string | null;
   targetPersonIds: string[];
+  targetBuyingRoles: string[];
   dueDate: string;
   status: 'todo';
   origin: 'template';
@@ -99,7 +100,7 @@ export function dueDateFor(start: string, days: number): string {
 /** Roles a person holds on purpose: stated, or set by someone. Guessed roles do not count. */
 const KNOWN_ORIGINS = new Set(['stated', 'set_by_person']);
 
-function linkedPeople(people: PlanPerson[], targetRoles: string[]): PlanPerson[] {
+export function linkedPeople<P extends PlanPerson>(people: P[], targetRoles: string[]): P[] {
   if (targetRoles.length === 0) return [];
   return people.filter((p) => p.roles.some((r) => KNOWN_ORIGINS.has(r.origin) && targetRoles.includes(r.key)));
 }
@@ -128,6 +129,7 @@ export function buildPlan(input: PlanInput): PlanDraft {
         title: s.title,
         detail: s.detail === null ? null : render(s.detail, vars, 'detail'),
         targetPersonIds: linked.map((p) => p.id),
+        targetBuyingRoles: s.targetBuyingRoles,
         dueDate: dueDateFor(startDate, s.day),
         status: 'todo',
         origin: 'template',
@@ -145,4 +147,14 @@ export function buildPlan(input: PlanInput): PlanDraft {
     startDate,
     steps,
   };
+}
+
+/** The target roles nobody holds as stated or set by a person. */
+export function missingRoles(people: PlanPerson[], targetRoles: string[]): string[] {
+  return targetRoles.filter((role) => !people.some((p) => p.roles.some((r) => KNOWN_ORIGINS.has(r.origin) && r.key === role)));
+}
+
+/** The order for a step placed on `day`: right after the last step whose day is at or below it (1 when none). Later steps shift up by one. */
+export function insertOrder(steps: { order: number; day: number }[], day: number): number {
+  return steps.reduce((m, s) => (s.day <= day ? Math.max(m, s.order) : m), 0) + 1;
 }

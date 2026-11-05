@@ -106,6 +106,7 @@ import * as v1Offers from './routes/v1/offers/route';
 import * as v1OffersStats from './routes/v1/offers/stats/route';
 import * as v1PeopleId from './routes/v1/people/[id]/route';
 import * as v1PlansId from './routes/v1/plans/[id]/route';
+import * as v1PlansIdSteps from './routes/v1/plans/[id]/steps/route';
 import * as v1PlansIdStepsStepId from './routes/v1/plans/[id]/steps/[stepId]/route';
 import * as v1PlaybooksId from './routes/v1/playbooks/[id]/route';
 import * as v1Playbooks from './routes/v1/playbooks/route';
@@ -263,6 +264,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/people/:id`, module: v1PeopleId },
   { path: `${V1}/playbooks/:id`, module: v1PlaybooksId },
   { path: `${V1}/playbooks`, module: v1Playbooks },
+  { path: `${V1}/plans/:id/steps`, module: v1PlansIdSteps },
   { path: `${V1}/plans/:id/steps/:stepId`, module: v1PlansIdStepsStepId },
   { path: `${V1}/plans/:id`, module: v1PlansId },
   { path: `${V1}/practices/:id`, module: v1PracticesId },

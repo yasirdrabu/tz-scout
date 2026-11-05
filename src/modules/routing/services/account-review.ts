@@ -30,6 +30,9 @@ export type AccountReviewView = {
     notes: string | null;
     status: string;
     acceptedHow: string | null;
+    /** The playbook the assigner picked, and whether they chose to send none; the HTTP layer works out the name. */
+    templateId: string | null;
+    noPlaybook: boolean;
     respondedAt: Date | null;
   } | null;
   /** "Approved by {name} on {date}": the latest move to a status that approves the account. */
@@ -101,6 +104,8 @@ export async function getAccountReview(ctx: ModuleContext, accountId: string): P
             notes: open.notes,
             status: open.status,
             acceptedHow: open.acceptedHow,
+            templateId: open.templateId,
+            noPlaybook: open.noPlaybook,
             respondedAt: open.respondedAt,
           }
         : null,

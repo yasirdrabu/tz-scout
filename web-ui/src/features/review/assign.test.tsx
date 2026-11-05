@@ -312,7 +312,7 @@ describe('Assign dialog', () => {
       const rfp = within(cards).getByRole('radio', { name: /^Public sector RFP/ });
       expect(rfp).toBeChecked();
       expect(rfp.closest('label')).toHaveTextContent('Recommended for this account');
-      expect(rfp.closest('label')).toHaveTextContent('3 steps over 14 days · For agencies with an open notice.');
+      expect(rfp.closest('label')).toHaveTextContent('3 steps over 15 days · For agencies with an open notice.');
       expect(within(cards).getByRole('radio', { name: /^Warm intro/ })).not.toBeChecked();
       expect(within(cards).getByRole('radio', { name: /^No playbook/ })).not.toBeChecked();
       // Draft and retired playbooks are not offered.

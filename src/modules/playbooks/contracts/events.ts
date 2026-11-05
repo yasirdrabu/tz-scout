@@ -47,10 +47,49 @@ export const planCreated = defineEvent(
   }),
 );
 
+const channel = z.enum(['email', 'linkedin', 'call', 'meeting', 'task']);
+
+/** A step taken out of the plan: only its id. */
+const removedStep = z.object({ id: z.string(), removed: z.literal(true) });
+/** A step the change touched, in full. */
+const stepSnapshot = z.object({
+  id: z.string(),
+  order: z.number().int(),
+  day: z.number().int(),
+  channel,
+  title: z.string(),
+  detail: z.string().nullable(),
+  subject: z.string().nullable(),
+  body: z.string().nullable(),
+  status: z.enum(['todo', 'in_progress', 'done', 'skipped']),
+  ownerUserId: z.string().nullable(),
+  dueDate: z.string(),
+  crmTask: z.boolean(),
+});
+/** Rows stored before the snapshot was required: every field but the id may be missing. Parsed, never produced. */
+const legacyStep = z.object({
+  id: z.string(),
+  removed: z.boolean().optional(),
+  status: z.enum(['todo', 'in_progress', 'done', 'skipped']).optional(),
+  ownerUserId: z.string().nullable().optional(),
+  dueDate: z.string().optional(),
+  title: z.string().optional(),
+  crmTask: z.boolean().optional(),
+  order: z.number().int().optional(),
+  day: z.number().int().optional(),
+  channel: channel.optional(),
+  detail: z.string().nullable().optional(),
+  subject: z.string().nullable().optional(),
+  body: z.string().nullable().optional(),
+});
+export type PlanStepChange = z.infer<typeof removedStep> | z.infer<typeof stepSnapshot>;
+/** Typed as what is published today; a stored old row still parses through the legacy shape. */
+export const planStepChange = z.union([removedStep, stepSnapshot, legacyStep]) as unknown as z.ZodType<PlanStepChange>;
+
 /**
  * Any change to a plan after it started: status, steps, owners or its account (a merge repoint, with `previousAccountId`).
  * `steps` lists the steps the change touched (a step edit: that step; owner moves: the moved steps; a stop: the skipped
- * steps); it is empty for a status-only change.
+ * steps; a step taken out is `{id, removed: true}`); it is empty for a status-only change.
  */
 export const planChanged = defineEvent(
   'playbooks.plan.changed',
@@ -62,16 +101,7 @@ export const planChanged = defineEvent(
     changed: z.array(z.enum(['status', 'steps', 'owners', 'account'])),
     reason: z.string().optional(),
     previousAccountId: z.string().optional(),
-    steps: z.array(
-      z.object({
-        id: z.string(),
-        status: z.enum(['todo', 'in_progress', 'done', 'skipped']),
-        ownerUserId: z.string().nullable(),
-        dueDate: z.string(),
-        title: z.string(),
-        crmTask: z.boolean(),
-      }),
-    ),
+    steps: z.array(planStepChange),
   }),
 );
 

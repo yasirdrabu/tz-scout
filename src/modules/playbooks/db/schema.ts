@@ -185,6 +185,8 @@ export const accountPlan = playbooks.table(
     statusReason: text('status_reason'),
     /** When the accepted event that started, resumed or last took over the plan happened; an older accept never takes it back. Plans that existed before this column read their migration time. */
     acceptedAt: at('accepted_at').notNull().defaultNow(),
+    /** A person added, edited or removed a step after the plan started. */
+    customised: boolean('customised').notNull().default(false),
     createdAt: at('created_at').notNull().defaultNow(),
     updatedAt: at('updated_at').notNull().defaultNow(),
   },
@@ -219,6 +221,8 @@ export const planStep = playbooks.table(
     title: text('title').notNull(),
     detail: text('detail'),
     targetPersonIds: text('target_person_ids').array().notNull().default(sql`'{}'::text[]`),
+    /** Buying roles this step is aimed at, copied from the template step; the people shown are worked out when read. */
+    targetBuyingRoles: text('target_buying_roles').array().notNull().default(sql`'{}'::text[]`),
     dueDate: date('due_date', { mode: 'string' }).notNull(),
     status: text('status').notNull().default('todo'), // todo | in_progress | done | skipped
     doneAt: at('done_at'),

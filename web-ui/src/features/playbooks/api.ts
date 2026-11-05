@@ -94,8 +94,8 @@ export const TIER_WORD: Record<Tier, string> = { act_now: 'Act now', good_fit: '
 export const TIER_TONE = { act_now: 'good', good_fit: 'accent', watch: 'neutral' } as const;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-/** "{n} steps over {d} days". */
-export const span = (steps: number, days: number) => `${plural(steps, 'step', 'steps')} over ${plural(days, 'day', 'days')}`;
+/** "{n} steps over {d} days"; `lastDay` is the last step's 0-based day, so a template with days 0..10 spans 11 days. */
+export const span = (steps: number, lastDay: number) => `${plural(steps, 'step', 'steps')} over ${plural(lastDay + 1, 'day', 'days')}`;
 /** "Email 2 · Call 1", in the order of the channels. */
 export const mix = (channels: Playbook['channels']) =>
   (Object.keys(CHANNEL_WORD) as StepChannel[])

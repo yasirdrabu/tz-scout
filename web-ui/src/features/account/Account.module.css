@@ -550,3 +550,153 @@
   font-weight: 600;
   color: var(--text-soft);
 }
+
+.planHead {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.planProgress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.planBar {
+  width: 120px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--ink-150);
+}
+
+.planRows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.planRow {
+  display: grid;
+  grid-template-columns: 22px 72px 1fr 100px 110px;
+  align-items: center;
+  column-gap: 12px;
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: var(--text-sm);
+}
+
+.planRow:last-child {
+  border-bottom: 0;
+}
+
+.planRowDue {
+  background: #fdf8f0;
+}
+
+.planRowDone .planTitle {
+  color: var(--text-muted);
+}
+
+.planCheck {
+  display: flex;
+}
+
+.planCheck input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.planTitle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.planTitle:hover {
+  text-decoration: underline;
+}
+
+.planPill {
+  justify-self: start;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pillDone {
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+.pillDue {
+  background: var(--near-soft);
+  color: var(--near);
+}
+
+.pillProgress {
+  background: var(--accent-50);
+  color: var(--accent-700);
+}
+
+.pillIdle {
+  background: var(--ink-100);
+  color: var(--text-soft);
+}
+
+.planDetail {
+  grid-column: 1 / -1;
+  padding: 12px 0 4px 34px;
+}
+
+.planFields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.planPeople {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.planPeople li {
+  display: flex;
+  gap: 8px;
+}
+
+.draft {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+}
+
+.draftBody {
+  margin: 0;
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+}
+
+.draft .briefHead {
+  justify-content: space-between;
+}
