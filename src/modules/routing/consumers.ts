@@ -1,11 +1,12 @@
 import { accountMerged } from '@/modules/accounts/contracts/events';
 import { activityObserved, dealChanged, handoffCancelled, handoffCompleted, handoffFailed, handoffNeedsDecision } from '@/modules/crm/contracts/events';
+import { planNoReply } from '@/modules/playbooks/contracts/events';
 import { requestApproved, requestCancelled, requestCompleted, requestDeclined, requestFailed, requestFlagged } from '@/modules/enrichment/contracts/events';
 import { arrivalResolved } from '@/modules/intake/contracts/events';
 import { memberRemoved, tenantCreated } from '@/modules/tenancy/contracts/events';
 import { defineConsumer } from '@/platform/runtime/consumers';
 import { seedRoutingDefaults } from './defaults';
-import { onCrmActivity, onCrmDeal, onHandoffCancelled, onHandoffCompleted, onHandoffFailed, onHandoffNeedsDecision } from './services/crm-events';
+import { onCrmActivity, onCrmDeal, onHandoffCancelled, onHandoffCompleted, onHandoffFailed, onHandoffNeedsDecision, onPlanNoReply } from './services/crm-events';
 import { closeEnrichment, openEnrichment } from './services/enrichment-open';
 import { reviewOnArrival, reviewOnMerge } from './services/review';
 import { withdrawForRemovedMember } from './services/respond';
@@ -57,6 +58,14 @@ export const routingCrmDeal = defineConsumer({
   handle: onCrmDeal,
 });
 
+/** A playbook that ends with no reply moves the stage. */
+export const routingPlanNoReply = defineConsumer({
+  name: 'routing.plan_no_reply',
+  event: planNoReply,
+  orderedBy: (e) => e.data.accountId,
+  handle: onPlanNoReply,
+});
+
 
 /** The handoff events set the review's handoff state; the later `at` wins. */
 export const routingCrmHandoffCompleted = defineConsumer({ name: 'routing.crm_handoff.completed', event: handoffCompleted, orderedBy: (e) => e.data.accountId, handle: onHandoffCompleted });
@@ -77,4 +86,4 @@ export const routingEnrichmentCompleted = defineConsumer({ name: 'routing.enrich
 export const routingEnrichmentFailed = defineConsumer({ name: 'routing.enrichment_failed', event: requestFailed, orderedBy: (e) => e.data.accountId, handle: async (e, ctx) => closeEnrichment(ctx, e.data) });
 
 /** Every routing consumer, for the worker's list. */
-export const routingConsumers = [routingTenantDefaults, routingArrivalResolved, routingAccountMerged, routingMemberRemoved, routingCrmActivity, routingCrmDeal, routingCrmHandoffCompleted, routingCrmHandoffFailed, routingCrmHandoffNeedsDecision, routingCrmHandoffCancelled, routingEnrichmentFlagged, routingEnrichmentApproved, routingEnrichmentDeclined, routingEnrichmentCancelled, routingEnrichmentCompleted, routingEnrichmentFailed];
+export const routingConsumers = [routingTenantDefaults, routingArrivalResolved, routingAccountMerged, routingMemberRemoved, routingCrmActivity, routingCrmDeal, routingPlanNoReply, routingCrmHandoffCompleted, routingCrmHandoffFailed, routingCrmHandoffNeedsDecision, routingCrmHandoffCancelled, routingEnrichmentFlagged, routingEnrichmentApproved, routingEnrichmentDeclined, routingEnrichmentCancelled, routingEnrichmentCompleted, routingEnrichmentFailed];

@@ -106,7 +106,13 @@ export function moveFor(current: string, signals: StageSignal[], stages: Pipelin
   const ahead = furthest(fired.filter((x) => x.kind === 'flow' && x.position > cur.position));
   if (ahead) return ahead.key;
   if (cur.locked === 'won') return null;
-  return fired.find((x) => x.kind === 'exit')?.key ?? null;
+  const exit = fired.find((x) => x.kind === 'exit');
+  // A playbook that ends with no reply never pulls back an account that has replied, met or has a deal.
+  if (exit?.trigger === 'playbook_no_reply') {
+    const end = flow.find((x) => BEYOND_ACCEPTANCE.includes(x.trigger));
+    if (end && cur.position >= end.position) return null;
+  }
+  return exit?.key ?? null;
 }
 
 /** The label with its first letter lowercased, to sit in a sentence ("an AE accepts...", "HubSpot deal..." as is). */

@@ -131,7 +131,7 @@ describe('movement rules', () => {
   it('exits are entered from any flow stage but the won stage', () => {
     for (const from of ['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity']) {
       expect(moveFor(from, sig('deal_closed_lost'), DEFAULT_STAGES)).toBe('lost');
-      expect(moveFor(from, sig('playbook_no_reply'), DEFAULT_STAGES)).toBe('back_to_nurture');
+      if (!['engaged', 'opportunity'].includes(from)) expect(moveFor(from, sig('playbook_no_reply'), DEFAULT_STAGES)).toBe('back_to_nurture');
     }
     expect(moveFor('won', sig('deal_closed_lost'), DEFAULT_STAGES)).toBeNull();
     expect(moveFor('won', sig('reviewer_rejects'), DEFAULT_STAGES)).toBeNull();
@@ -174,6 +174,25 @@ describe('movement rules', () => {
     expect(moveFor('opportunity', reaches, stages)).toBe('stg_proposal');
     expect(moveFor('opportunity', [{ trigger: 'deal_reaches_stage', hubspotStage: 'other' }], stages)).toBeNull();
     expect(moveFor('won', reaches, stages)).toBeNull();
+  });
+  it('a playbook ending with no reply moves an accepted account to the exit, never one that engaged or went further', () => {
+    const noReply: StageSignal[] = [{ trigger: 'playbook_no_reply' }];
+    expect(moveFor('assigned', noReply, DEFAULT_STAGES)).toBe('back_to_nurture');
+    expect(moveFor('reviewed', noReply, DEFAULT_STAGES)).toBe('back_to_nurture');
+    expect(moveFor('engaged', noReply, DEFAULT_STAGES)).toBeNull();
+    expect(moveFor('opportunity', noReply, DEFAULT_STAGES)).toBeNull();
+    expect(moveFor('won', noReply, DEFAULT_STAGES)).toBeNull();
+    expect(moveFor('declined', noReply, DEFAULT_STAGES)).toBeNull();
+  });
+  it('a hand-set stage past the first reply or meeting stage does not go back to nurture, whatever its trigger', () => {
+    const stages = inserted(stage({ key: 'stg_demo', position: 5 }));
+    expect(moveFor('stg_demo', [{ trigger: 'playbook_no_reply' }], stages)).toBeNull();
+  });
+  it('with no stage past acceptance, a playbook ending with no reply moves from any flow stage but Won', () => {
+    const bare = DEFAULT_STAGES.filter((s) => !['engaged', 'opportunity'].includes(s.key)).map((s) => (s.key === 'won' ? { ...s, trigger: 'by_hand' as const } : s));
+    expect(moveFor('assigned', [{ trigger: 'playbook_no_reply' }], bare)).toBe('back_to_nurture');
+    expect(moveFor('arrived', [{ trigger: 'playbook_no_reply' }], bare)).toBe('back_to_nurture');
+    expect(moveFor('won', [{ trigger: 'playbook_no_reply' }], bare)).toBeNull();
   });
   it('an archived or unknown current stage only moves by hand', () => {
     expect(moveFor('stg_old', sig('ae_accepts'), DEFAULT_STAGES)).toBeNull();

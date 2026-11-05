@@ -59,7 +59,7 @@ stages are `stg_` ids. The locked first and won stages keep their keys forever, 
 | `deal_closed_won` | HubSpot deal is Closed won | deal status won | the won stage only |
 | `deal_closed_lost` | HubSpot deal is Closed lost | deal status lost | one stage |
 | `reviewer_rejects` | A reviewer rejects it | a declined review status | one stage |
-| `playbook_no_reply` | Playbook ends with no reply | playbook finished with no reply (fires once R2 playbooks run) | one stage |
+| `playbook_no_reply` | Playbook ends with no reply | the plan's last step closed with no reply or meeting since accept; never moves an account at or past the first stage triggered by a reply, a meeting or a deal | one stage |
 | `by_hand` | Set by hand | `Move to stage` only | many |
 
 ### Movement rules (replace `nextStage`)

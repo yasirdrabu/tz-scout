@@ -1,5 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
 import type { activityObserved, dealChanged, handoffCancelled, handoffCompleted, handoffFailed, handoffNeedsDecision } from '@/modules/crm/contracts/events';
+import type { planNoReply } from '@/modules/playbooks/contracts/events';
 import type { ModuleContext } from '@/platform/context';
 import type { Envelope } from '@/platform/events/envelope';
 import type { EventDef } from '@/platform/events/registry';
@@ -51,6 +52,14 @@ export async function onCrmDeal(e: EventOf<typeof dealChanged>, ctx: ModuleConte
     if (mapped) signals = [{ trigger: 'deal_reaches_stage', hubspotStage: e.data.stage }];
   }
   if (await moveStage(ctx, accountId, signals, e.id)) await publishReviewSnapshot(ctx, accountId);
+}
+
+/** `playbooks.plan.no_reply`: the plan's last step closed with no reply, so the stage that owns `playbook_no_reply` takes the account (`moveFor` keeps an engaged one where it is). */
+export async function onPlanNoReply(e: EventOf<typeof planNoReply>, ctx: ModuleContext): Promise<void> {
+  const { accountId } = e.data;
+  const row = await lockRow(ctx, accountId);
+  if (!row || row.mergedInto) return;
+  if (await moveStage(ctx, accountId, [{ trigger: 'playbook_no_reply' }], e.id)) await publishReviewSnapshot(ctx, accountId);
 }
 
 /** Sets `flags.handoff` unless the event is for an assignment other than the account's latest or the stored state is newer; one snapshot when it changed. */
