@@ -203,6 +203,15 @@ export const activity = crm.table(
     externalId: text('external_id').notNull(),
     kind: text('kind').notNull(), // email | reply | call | meeting | task_done
     occurredAt: at('occurred_at').notNull(),
+    /** The CRM contacts on it (R2d Ruling 4). */
+    contacts: jsonb('contacts').$type<{ externalId: string; name: string | null }[]>().notNull().default([]),
+    actorOwnerExternalId: text('actor_owner_external_id'),
+    /** The email subject or the meeting title; never a body. */
+    subject: text('subject'),
+    /** Meetings only. A stored meeting takes these again when the CRM moves or cancels it (Ruling 5). */
+    startAt: at('start_at'),
+    endAt: at('end_at'),
+    status: text('status'), // scheduled | held | no_show | cancelled
   },
   (t) => [
     uniqueIndex('activity_uq').on(t.tenantId, t.system, t.externalId),

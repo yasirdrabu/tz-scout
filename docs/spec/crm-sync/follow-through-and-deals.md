@@ -23,6 +23,23 @@ record; Scout reads, never writes, deal state.
   one `crm.activity` row and one `crm.activity.observed` event. Activities are keyed by
   (`system`, `external_id`) so a webhook and a poll never double count.
 - **Replies:** where the CRM marks an email as inbound from the account's domain, kind is `reply`.
+- **What is stored (R2d):** each `crm.activity` row keeps the CRM contacts on it (id and name), the
+  acting CRM owner, the email subject or meeting title, and for meetings the start, end and status
+  (`scheduled`, `held`, `no_show`, `cancelled`). Never an email or reply body.
+- **Where a sync starts (R2d):** from the latest activity already seen that is not in the future, else
+  the handoff. A booked meeting stored at its future start never hides the emails before it.
+- **Meetings change (R2d):** each sync also reads again the meetings that start from 30 days ago onward.
+  A meeting already stored takes its new title, contacts, start, end and status in place and publishes
+  nothing, so routing's `meeting_booked` and the playbook stop rule fire once, when the meeting is first
+  seen (booked). A meeting read again that is from before the handoff is not new.
+- **Meetings held and next meeting (R2d):** a meeting is held when its status is `held`, or `scheduled`
+  with its end (else start) before now. The next meeting is the earliest one starting after now that is
+  not cancelled or a no-show; it is shown "with" its title, else its first attendee's name plus " +{n}".
+- **Engagement per person (R2d):** for each person on the account, from the activity of the latest
+  completed handoff and the person's CRM contact link: "met" (the latest held meeting listing their
+  contact), else "replied" (the latest reply from it), else "emailed" (an email or call listing it),
+  else "not contacted" (including people with no contact link). Engaged = met or replied. Email opens
+  are not read.
 - **Who acted:** each activity carries the CRM owner who did it and, when a membership's `crm_owner_ids`
   holds that owner, the Scout user. Review and routing treats the assigned seller acting on the account
   as acceptance.
@@ -43,6 +60,10 @@ unseen.
 - CRM-E5-S1-AC2 "Check follow-through" refreshes now; scheduled checks run every 15 minutes for
   activity and hourly for deals.
 - CRM-E5-S1-AC3 Counts never include activity that existed before the handoff (baseline test).
+- CRM-E5-S1-AC4 (R2d) The account page shows meetings held and the next meeting; a meeting moved or
+  cancelled in the CRM changes them on the next sync without a second `crm.activity.observed`.
+- CRM-E5-S1-AC5 (R2d) The account page shows how each committee person engaged and "Buyers engaged
+  {x} of {y}", y being the people on the account.
 
 ### CRM-E5-S2 Activity events
 As the analytics and playbooks modules, I want an event for each real touch, so that the funnel's

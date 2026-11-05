@@ -2,6 +2,7 @@
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as getActivity } from '@/http/routes/v1/accounts/[id]/activity/route';
+import { GET as getEngagement } from '@/http/routes/v1/accounts/[id]/engagement/route';
 import { GET as getCrmCheck } from '@/http/routes/v1/accounts/[id]/crm-check/route';
 import { GET as getFacts } from '@/http/routes/v1/accounts/[id]/facts/route';
 import { GET as getHandoffs } from '@/http/routes/v1/accounts/[id]/handoffs/route';
@@ -10,11 +11,11 @@ import { GET as getAccountRoute, POST as accountAction } from '@/http/routes/v1/
 import { GET as getScore } from '@/http/routes/v1/accounts/[id]/score/route';
 import { POST as postArrival } from '@/http/routes/v1/arrivals/route';
 import { GET as getBuyingRoles } from '@/http/routes/v1/buying-roles/route';
-import { upsertFromArrival } from '@/modules/accounts';
+import { listPeople, upsertFromArrival } from '@/modules/accounts';
 import { buyingRole } from '@/modules/accounts/db/schema';
-import { seedMockCrm, syncOwners } from '@/modules/crm';
-import { activity, companyCheck, followThrough, handoff } from '@/modules/crm/db/schema';
-import { setMockFailure } from '@/modules/crm/fixtures';
+import { seedMockCrm, syncAccount, syncOwners } from '@/modules/crm';
+import { activity, companyCheck, followThrough, handoff, link } from '@/modules/crm/db/schema';
+import { mockAddActivity, setMockFailure } from '@/modules/crm/fixtures';
 import { arrival } from '@/modules/intake/db/schema';
 import { offer as offerTable } from '@/modules/offers/db/schema';
 import { offerMatch } from '@/modules/scoring/db/schema';
@@ -24,7 +25,7 @@ import { setPrincipalCacheTtl } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { completeOffer } from '../offers/helpers';
-import { setSummary } from '../routing/helpers';
+import { resolved, setSummary } from '../routing/helpers';
 import { call, keyFor, SEND } from './intake-helpers';
 import { workspace, type Workspace } from './review-helpers';
 
@@ -345,5 +346,71 @@ describe('handoffs and the activity feed', () => {
     const limited = await w.person('seller', { name: 'Lee Limited', dataLimit: { kind: 'own_accounts' } });
     expect((await w.as(limited, getActivity, `accounts/${a}/activity`)).status).toBe(404);
     expect((await w.as(seller, getActivity, `accounts/${a}/activity`)).status).toBe(200);
+  });
+});
+
+describe('GET /accounts/{id}/engagement (R2d Ruling 7)', () => {
+  let a: string;
+
+  beforeAll(async () => {
+    const arrivalId = newId('arr');
+    const mail = (n: string) => `${n}.${newId('acc').slice(-6).toLowerCase()}@engage.example`;
+    ({ accountId: a } = await w.run((ctx) =>
+      upsertFromArrival(ctx, {
+        arrivalId,
+        receivedAt: new Date(),
+        sourceChain: {},
+        account: { name: 'Engage Co', domain: `${newId('acc').slice(-10).toLowerCase()}-example.com` },
+        people: [
+          { firstName: 'Ana', lastName: 'Met', email: mail('ana'), roleKeys: ['business_owner'] },
+          { firstName: 'Ben', lastName: 'Replied', email: mail('ben'), roleKeys: ['technical_buyer'] },
+          { firstName: 'Cy', lastName: 'Emailed', email: mail('cy') },
+          { firstName: 'Dee', lastName: 'Unlinked', email: mail('dee') },
+        ],
+        signals: [],
+        facts: [],
+        research: {},
+        soleProprietor: false,
+        externalIds: [],
+      }),
+    ));
+    await resolved(w.tenant, a, { arrivalId, resolution: 'created' });
+    const res = await w.as(leader, accountAction, `accounts/${a}:assign`, 'POST', { seller_user_id: seller });
+    if (res.status !== 202) throw new Error(JSON.stringify(await res.json()));
+    await w.deliver();
+  });
+
+  it('engagement lists each committee person', async () => {
+    const co = (await adminDb.select().from(handoff).where(eq(handoff.accountId, a)))[0]!.companyExternalId!;
+    const people = await w.run((ctx) => listPeople(ctx, a));
+    const id = (first: string) => people.find((p) => p.firstName === first)!.id;
+    const links = await adminDb.select().from(link).where(and(eq(link.tenantId, w.tenantId), eq(link.scoutType, 'person')));
+    const contact = (first: string) => links.find((l) => l.scoutId === id(first))!.externalId;
+    await adminDb.delete(link).where(and(eq(link.tenantId, w.tenantId), eq(link.scoutType, 'person'), eq(link.scoutId, id('Dee'))));
+    const now = new Date();
+    await w.run(async (ctx) => {
+      await mockAddActivity(ctx, { companyExternalId: co, kind: 'email', contactExternalIds: [contact('Ana'), contact('Ben'), contact('Cy')] });
+      await mockAddActivity(ctx, { companyExternalId: co, kind: 'meeting', occurredAt: now, startAt: now, endAt: now, status: 'held', contactExternalIds: [contact('Ana')] });
+      await mockAddActivity(ctx, { companyExternalId: co, kind: 'reply', contactExternalIds: [contact('Ben')] });
+    });
+    await w.run((ctx) => syncAccount(ctx, a, new Date()));
+    const body = await json(w.as(leader, getEngagement, `accounts/${a}/engagement`));
+    const state = (first: string) => body.people.find((p: { person_id: string }) => p.person_id === id(first));
+    expect(state('Ana')).toEqual({ person_id: id('Ana'), state: 'met', at: now.toISOString() });
+    expect(state('Ben')).toMatchObject({ state: 'replied', at: expect.any(String) });
+    expect(state('Cy')).toMatchObject({ state: 'emailed' });
+    expect(state('Dee')).toEqual({ person_id: id('Dee'), state: 'not_contacted', at: null });
+    expect(body).toMatchObject({ engaged: 2, total: 4, gap_role: 'Commercial buyer' });
+    const handoffs = await json(w.as(leader, getHandoffs, `accounts/${a}/handoffs`));
+    expect(handoffs.follow_through).toMatchObject({ meetings_held: 1, next_meeting: null });
+  });
+
+  it('engagement is 404 for an account the caller cannot see', async () => {
+    const none = await keyFor(w.tenant, ['playbooks:read'], { dataLimit: { kind: 'all' } });
+    expect((await call(getEngagement, none, `accounts/${a}/engagement`)).status).toBe(403);
+    expect((await w.as(leader, getEngagement, `accounts/${otherAccount}/engagement`)).status).toBe(404);
+    const limited = await w.person('seller', { name: 'Lou Limited', dataLimit: { kind: 'own_accounts' } });
+    expect((await w.as(limited, getEngagement, `accounts/${a}/engagement`)).status).toBe(404);
+    expect((await w.as(seller, getEngagement, `accounts/${a}/engagement`)).status).toBe(200);
   });
 });

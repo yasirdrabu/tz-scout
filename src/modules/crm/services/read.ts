@@ -4,6 +4,7 @@ import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import type { HandoffUndone } from '../contracts/types';
 import { activity, deal, followThrough, handoff } from '../db/schema';
+import { meetingHeld, nextMeeting } from '../domain/engagement';
 import { countsOfRow, type FollowThroughCounts } from '../domain/follow-through';
 import { latestRow } from './handoff';
 import { companyChecks, refreshCheck, type CompanyCheck, type OpenDeal } from './checks';
@@ -30,15 +31,22 @@ export type HandoffsView = {
   links: AccountLinks;
   /** Newest first. */
   handoffs: HandoffRow[];
-  /** For the latest completed handoff, or null. */
-  followThrough: { handoffId: string; counts: FollowThroughCounts & { replies: number }; stage: string | null; checkedAt: Date | null } | null;
+  /** For the latest completed handoff, or null. `meetingsHeld` and `nextMeeting` are R2d Rulings 1, 2 and 7. */
+  followThrough: {
+    handoffId: string;
+    counts: FollowThroughCounts & { replies: number };
+    stage: string | null;
+    checkedAt: Date | null;
+    meetingsHeld: number;
+    nextMeeting: { at: string; with: string } | null;
+  } | null;
   deals: { id: string; name: string; stage: string | null; status: string; amountCents: number | null; currency: string | null; openedAt: Date | null; closedAt: Date | null }[];
   /** Two companies are linked: a person has to say which one is right. */
   conflict: boolean;
 };
 
 /** Everything the account page shows about the account's handoffs. Not found when the caller can't see the account. */
-export async function getHandoffs(ctx: ModuleContext, accountId: string): Promise<HandoffsView> {
+export async function getHandoffs(ctx: ModuleContext, accountId: string, now: Date = new Date()): Promise<HandoffsView> {
   if (!(await visible(ctx, accountId))) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
   const links = await getLinks(ctx, accountId);
   const rows = await ctx.tx
@@ -72,6 +80,12 @@ export async function getHandoffs(ctx: ModuleContext, accountId: string): Promis
           .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.handoffId, completed.id), eq(activity.kind, 'reply')))
       )[0]?.n ?? 0)
     : 0;
+  const meetings = completed
+    ? await ctx.tx
+        .select()
+        .from(activity)
+        .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.handoffId, completed.id), eq(activity.kind, 'meeting')))
+    : [];
   const company = await companyLink(ctx, accountId, rows[0]?.system ?? 'hubspot');
   const urls = new Map<string, string | null>();
   for (const r of rows) urls.set(r.id, await crmCompanyUrl(ctx, r.system, r.companyExternalId ?? company));
@@ -89,7 +103,16 @@ export async function getHandoffs(ctx: ModuleContext, accountId: string): Promis
       queuedAt: r.queuedAt,
       completedAt: r.completedAt,
     })),
-    followThrough: ft ? { handoffId: ft.handoffId, counts: { ...countsOfRow(ft, null, new Date()), replies }, stage: ft.stage, checkedAt: ft.checkedAt } : null,
+    followThrough: ft
+      ? {
+          handoffId: ft.handoffId,
+          counts: { ...countsOfRow(ft, null, now), replies },
+          stage: ft.stage,
+          checkedAt: ft.checkedAt,
+          meetingsHeld: meetings.filter((m) => meetingHeld(m, now)).length,
+          nextMeeting: nextMeeting(meetings, now),
+        }
+      : null,
     deals,
     conflict: links.conflict,
   };
