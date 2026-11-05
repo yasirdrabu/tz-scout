@@ -25,6 +25,7 @@ import { callLog, connection, usagePeriod } from '@/modules/integrations/db/sche
 import { periodBounds } from '@/modules/integrations/domain/caps';
 import { adminDb } from '@/platform/db/client';
 import { ScoutError } from '@/platform/errors';
+import { log } from '@/platform/log';
 import { outbox } from '@/platform/db/schema';
 import { accountBriefTask } from '@/modules/playbooks/tasks/account-brief';
 import type { BriefInput } from '@/modules/playbooks/domain/brief-io';
@@ -413,13 +414,28 @@ describe('helpers', () => {
   it('prices round half up and unknown models cost nothing', async () => {
     const t = await freshTenant();
     const price = (model: string, inputTokens: number, outputTokens: number) =>
-      t.run(async (ctx) => (await claudePrices(ctx, model)).cost({ inputTokens, outputTokens, cacheReadTokens: 0 }));
+      t.run(async (ctx) => (await claudePrices(ctx, model, 'live')).cost({ inputTokens, outputTokens, cacheReadTokens: 0 }));
     expect(await price('claude-haiku-5-5', 1, 0)).toBe(0);
     expect(await price('claude-haiku-5-5', 5000, 0)).toBe(1);
     expect(await price('claude-haiku-5-5', 1_000_000, 1_000_000)).toBe(600);
     expect(await price('nope', 9_000_000, 9)).toBe(0);
     // The worst case is held against limits, so it rounds up.
-    expect(await t.run(async (ctx) => (await claudePrices(ctx, 'claude-haiku-5-5')).worstCase(1, 0))).toBe(1);
+    expect(await t.run(async (ctx) => (await claudePrices(ctx, 'claude-haiku-5-5', 'live')).worstCase(1, 0))).toBe(1);
+  });
+  it('a mock run uses the list prices: a saved rate is not read and an unknown model is not warned about', async () => {
+    const t = await freshTenant();
+    await t.run((ctx) => setRates(ctx, 'anthropic', [{ item: 'claude-haiku-5-5:output', centsPerUnit: 1 }]));
+    const warn = vi.spyOn(log, 'warn');
+    try {
+      const mock = await t.run((ctx) => claudePrices(ctx, 'claude-haiku-5-5', 'mock'));
+      expect(mock.worstCase(0, 200)).toBe(1);
+      await t.run((ctx) => claudePrices(ctx, 'nope', 'mock'));
+      expect(warn).not.toHaveBeenCalled();
+      await t.run((ctx) => claudePrices(ctx, 'nope', 'live'));
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
   it('labels', () => {
     expect(AI_LABEL).toEqual({ live: 'Written by Claude', rules: 'Assembled from rules', mock: 'Sample output' });

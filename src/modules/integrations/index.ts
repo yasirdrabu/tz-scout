@@ -57,5 +57,5 @@ export { connectionTenant } from './services/inbound';
 export { MASTER_KEY_MISSING } from './services/vault';
 export { credentialsCleanupHandler, credentialsCleanupJob } from './jobs';
 export { getRates, priceCents, setRates } from './services/rates';
-export { priceOf } from './domain/rates';
+export { defaultRates, priceOf } from './domain/rates';
 export { usageRecorded } from './contracts/events';

@@ -254,7 +254,7 @@ export async function runTask<I, O>(
     if (hit) return reuse(hit);
   }
   // Read before the call: a timed-out job's transaction is gone when a late answer is priced.
-  const prices = tentative === 'none' ? undefined : await claudePrices(ctx, model);
+  const prices = tentative === 'none' ? undefined : await claudePrices(ctx, model, tentative);
 
   // 2. A call that could cost more than the limit is refused before it is made.
   let capRefused = false;
@@ -281,6 +281,8 @@ export async function runTask<I, O>(
     const mode = tentative;
     const started = performance.now();
     let entered = false;
+    /** Whether the gateway reached live Claude: only that is priced, even if the mode changed since step 1. */
+    let live = false;
     const callOpts = {
       module: 'ai-tasks',
       unit: 'tokens',
@@ -289,10 +291,10 @@ export async function runTask<I, O>(
       // Held against Claude's monthly cost limit before the call; mock calls hold it too, so the limit works locally.
       reserveCents: prices.worstCase(Math.ceil((task.system.length + user.length) / 4), task.maxTokens),
       // Both attempts' tokens are counted. Cost is only logged for live calls.
-      measure: (a: Attempt) => ({
-        units: a.usage.inputTokens + a.usage.outputTokens + a.usage.cacheReadTokens,
-        costCents: mode === 'live' ? prices.cost(a.usage) : 0,
-      }),
+      measure: (a: Attempt, call: { live: boolean }) => {
+        live = call.live;
+        return { units: a.usage.inputTokens + a.usage.outputTokens + a.usage.cacheReadTokens, costCents: live ? prices.cost(a.usage) : 0 };
+      },
     };
     try {
       const attempt = await gateway.call(
@@ -323,7 +325,7 @@ export async function runTask<I, O>(
         callOpts,
       );
       const durationMs = Math.round(performance.now() - started);
-      const cost = mode === 'live' ? prices.cost(attempt.usage) : 0;
+      const cost = live ? prices.cost(attempt.usage) : 0;
       if (attempt.ok) {
         const runId = await record(ctx, task, hash, opts.subject, {
           mode,

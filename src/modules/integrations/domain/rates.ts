@@ -1,4 +1,5 @@
 // R3a Rulings 1 and 2: the items each paid provider is priced by, their defaults from list prices, and the rounding.
+import { DEFAULT_CENTS_PER_CREDIT } from '../contracts/costs';
 
 /** Claude's list prices in cents per million tokens. Cache reads are billed at a tenth of the input price. */
 export const CLAUDE_LIST_PRICES: Record<string, { input: number; output: number }> = {
@@ -6,9 +7,6 @@ export const CLAUDE_LIST_PRICES: Record<string, { input: number; output: number 
   'claude-sonnet-5-5': { input: 300, output: 1500 },
   'claude-haiku-5-5': { input: 100, output: 500 },
 };
-
-/** Money per credit when the connection's settings set none. */
-export const DEFAULT_CENTS_PER_CREDIT: Record<string, number> = { apollo: 10, vibe: 10 };
 
 export type Rate = { item: string; centsPerUnit: number };
 export type UsageItem = { item: string; units: number };

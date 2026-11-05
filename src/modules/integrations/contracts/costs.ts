@@ -17,5 +17,8 @@ export const CATEGORY_OF_PROVIDER: Readonly<Record<string, CostCategory>> = {
   vibe: 'data_vendors',
 };
 
+/** Money per credit when neither a saved rate nor the connection's settings set one (R3a Ruling 1). */
+export const DEFAULT_CENTS_PER_CREDIT: Readonly<Record<string, number>> = { apollo: 10, vibe: 10 };
+
 /** The categories whose paid calls pause at 110% of the budget. */
 export const PAUSABLE: ReadonlySet<CostCategory> = new Set<CostCategory>(['ai_usage', 'data_vendors']);

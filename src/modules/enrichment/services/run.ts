@@ -1,7 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { getAccount, getSummaries, listBuyingRoles, type AccountView, type PersonView } from '@/modules/accounts';
 import { getRun } from '@/modules/ai-tasks';
-import { PROVIDERS, checkCap, connectionStatus, gateway, getRates, markConnectionFailing, priceCents, priceOf } from '@/modules/integrations';
+import { PROVIDERS, checkCap, connectionStatus, gateway, getRates, markConnectionFailing, priceOf } from '@/modules/integrations';
 import { checkArrivalCap, countryCode, ensureVendorSource, findArrivalByRef, normaliseDomain, readSource, submitArrival } from '@/modules/intake';
 import { getOffer } from '@/modules/offers';
 import { tenantSummary } from '@/modules/tenancy';
@@ -38,6 +38,8 @@ type Found = {
   signals: Signal[];
   facts: FactItem[];
   credits: number;
+  /** Each credit call's price at the rates read before the calls: what a live call logged (R3a Ruling 2). */
+  creditCents: number;
   /** Claude's cost for a website read. */
   aiCents: number;
   readByRules: boolean;
@@ -117,21 +119,24 @@ async function operate(ctx: ModuleContext, r: Row, domain: string, f: Found): Pr
   const rates = new Map((await getRates(ctx, r.providerKey)).map((x) => [x.item, x.centsPerUnit]));
   /**
    * One gateway call per operation, holding its worst case against the limit and settling what it spent (Pitfall 3).
-   * A live call's credits are priced at the provider's rate (R3a Ruling 2); a sample call costs 0.
+   * A live call's credits are priced at the provider's rate (R3a Ruling 2) and logged; a sample call logs 0, but the
+   * request still shows its price, as the estimate does.
    */
   const call = async <T>(operation: string, worst: number, fn: (a: EnrichmentAdapter) => Promise<Paid<T>>): Promise<T> => {
+    let priced = 0;
     const paid = await gateway.call(ctx, r.providerKey, operation, (a) => fn(a as EnrichmentAdapter), {
       module: 'enrichment',
       unit: 'credits',
       units: worst,
       accountId: r.accountId,
-      measure: (p: Paid<T>, { live }) => ({
-        units: p.creditsUsed,
-        costCents: live ? priceOf(rates, [{ item: 'credit', units: p.creditsUsed }]) : 0,
-      }),
+      measure: (p: Paid<T>, { live }) => {
+        priced = priceOf(rates, [{ item: 'credit', units: p.creditsUsed }]);
+        return { units: p.creditsUsed, costCents: live ? priced : 0 };
+      },
       requestSummary: summary,
     });
     f.credits += paid.creditsUsed;
+    f.creditCents += priced;
     return paid.value;
   };
   const params = r.params as Params;
@@ -287,10 +292,8 @@ async function roleLabels(ctx: ModuleContext, r: Row): Promise<string[]> {
   return ((r.params as { roles?: string[] }).roles ?? []).map((k) => labels.get(k) ?? k);
 }
 
-/** Credits at the provider's rate (R3a Ruling 2), plus Claude's cost for a website read. */
-async function costOf(ctx: ModuleContext, r: Row, f: Found): Promise<number> {
-  return (await priceCents(ctx, r.providerKey, [{ item: 'credit', units: f.credits }])) + f.aiCents;
-}
+/** The credit calls' prices (the sum a live run logged), plus Claude's cost for a website read. */
+const costOf = (f: Found): number => f.creditCents + f.aiCents;
 
 /** Submits what was found and writes `completed` or `partial` with the result; publishes `completed`. */
 async function finish(ctx: ModuleContext, r: Row, f: Found, before: AccountView | null, stopped?: ClassifiedError): Promise<void> {
@@ -304,7 +307,7 @@ async function finish(ctx: ModuleContext, r: Row, f: Found, before: AccountView 
   const { arrivalIds, found } = submitted;
   const name = providerName(r.providerKey);
   const message = stopped ? stopped.message : found === 0 ? nothingFound(name, r.kind as EnrichmentKind, await roleLabels(ctx, r)) : f.readByRules ? 'Read by rules' : undefined;
-  const costCents = await costOf(ctx, r, f);
+  const costCents = costOf(f);
   const result = {
     arrival_ids: arrivalIds,
     credits_used: f.credits,
@@ -341,7 +344,7 @@ async function finish(ctx: ModuleContext, r: Row, f: Found, before: AccountView 
 
 /** Writes `failed` and publishes `failed`. The job then returns normally: no retry. */
 async function writeFailed(ctx: ModuleContext, r: Row, f: Found, c: Failure, submitted: Submitted | null): Promise<void> {
-  const costCents = await costOf(ctx, r, f);
+  const costCents = costOf(f);
   const now = new Date();
   await ctx.tx
     .update(request)
@@ -403,7 +406,7 @@ export async function runRequest(ctx: ModuleContext, requestId: string): Promise
   const mode = (await connectionStatus(ctx, r.providerKey)).mode === 'live' ? 'live' : 'mock';
   if (!(await commit(ctx, r.id, { status: 'running', startedAt: r.startedAt ?? new Date(), waitingReason: null, connectionMode: mode }))) return;
 
-  const f: Found = { company: null, people: [], signals: [], facts: [], credits: 0, aiCents: 0, readByRules: false };
+  const f: Found = { company: null, people: [], signals: [], facts: [], credits: 0, creditCents: 0, aiCents: 0, readByRules: false };
   const before = await getAccount(ctx, r.accountId);
   const domain = normaliseDomain(before?.domain) ?? normaliseDomain(before?.websiteUrl);
   if (!domain) return writeFailed(ctx, r, f, { kind: 'bad_request', message: 'Add the company’s website first.' }, null);

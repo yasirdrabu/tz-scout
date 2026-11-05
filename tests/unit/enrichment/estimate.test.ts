@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { estimate, estimateText } from '@/modules/enrichment/domain/estimate';
 import { KINDS, kindLabel, operationsFor } from '@/modules/enrichment/domain/kinds';
-import { DEFAULT_CENTS_PER_CREDIT } from '@/modules/enrichment/domain/prices';
+import { DEFAULT_CENTS_PER_CREDIT } from '@/modules/integrations/contracts/costs';
 import { nothingFound, searchTitles } from '@/modules/enrichment/domain/run';
 
 describe('estimate (Rulings 4 and 5)', () => {

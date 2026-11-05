@@ -124,7 +124,7 @@ describe('integrations.usage.recorded (Ruling 3)', () => {
       costCents: 30,
       accountId: 'acc_1',
       correlationId,
-      occurredAt: expect.any(String),
+      occurredAt: row!.at.toISOString(),
     });
   });
 

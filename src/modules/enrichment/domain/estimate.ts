@@ -1,5 +1,6 @@
 import type { EnrichmentKind, Estimate } from '../contracts/types';
-import { DEFAULT_CENTS_PER_CREDIT, PEOPLE_PER_ROLE, SIGNALS_REFRESH_CREDITS } from './prices';
+import { DEFAULT_CENTS_PER_CREDIT } from '@/modules/integrations/contracts/costs';
+import { PEOPLE_PER_ROLE, SIGNALS_REFRESH_CREDITS } from './prices';
 
 export type EstimateInput = {
   provider: string;

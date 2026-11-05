@@ -684,19 +684,23 @@ describe('priced credit calls (R3a Rulings 2 and 3)', () => {
     await as(t4, owner4, (ctx) => saveCredential(ctx, 'apollo', { kind: 'api_key', value: 'apollo-live-key-12345' }));
     await as(t4, owner4, (ctx) => testConnection(ctx, 'apollo'));
     await as(t4, owner4, (ctx) => setMode(ctx, 'apollo', 'live'));
-    await as(t4, owner4, (ctx) => setRates(ctx, 'apollo', [{ item: 'credit', centsPerUnit: 12 }]));
+    // A fractional rate: each 1-credit call is 12.5 cents, logged as 13, and the request's total is their sum.
+    await as(t4, owner4, (ctx) => setRates(ctx, 'apollo', [{ item: 'credit', centsPerUnit: 12.5 }]));
     const second = await accountFrom(t4, agentId);
     const id = await approved(t4, owner4, second.accountId, { kind: 'signals_refresh', providerKey: 'apollo' });
     await runOutbox(t4.tenantId);
 
     const live = (await apolloCalls(t4)).slice(sample.length).filter((c) => c.outcome === 'ok' && c.operation !== 'apollo.test');
-    expect(live.length).toBeGreaterThan(0);
-    for (const c of live) expect(c.costCents).toBe((c.units ?? 0) * 12);
-    const total = live.reduce((n, c) => n + (c.costCents ?? 0), 0);
-    expect(total).toBeGreaterThan(0);
-    expect((await resultOf(t4, id)).cost_cents).toBe(total);
+    expect(live.map((c) => [c.units, c.costCents])).toEqual([
+      [1, 13],
+      [1, 13],
+      [1, 13],
+    ]);
     const events = await usage(t4);
-    expect(events).toHaveLength(live.filter((c) => (c.costCents ?? 0) > 0).length);
-    for (const e of events) expect(e).toMatchObject({ provider: 'apollo', module: 'enrichment', unit: 'credits', accountId: second.accountId, costCents: 12 });
+    expect(events).toHaveLength(3);
+    for (const e of events) expect(e).toMatchObject({ provider: 'apollo', module: 'enrichment', unit: 'credits', accountId: second.accountId, costCents: 13 });
+    const sum = events.reduce((n, e) => n + (e.costCents as number), 0);
+    expect(sum).toBe(39);
+    expect((await resultOf(t4, id)).cost_cents).toBe(sum);
   });
 });

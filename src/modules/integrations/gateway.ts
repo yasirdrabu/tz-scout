@@ -320,20 +320,24 @@ export async function runCall<T>(
       const callId = newId('call');
       const units = outcome === 'ok' ? (measured.units ?? opts.units ?? null) : null;
       const costCents = outcome === 'ok' ? (measured.costCents ?? opts.costCents ?? null) : null;
-      await tx.insert(callLog).values({
-        ...logBase,
-        id: callId,
-        statusCode,
-        outcome,
-        durationMs,
-        units,
-        unit: outcome === 'ok' ? (opts.unit ?? null) : null,
-        costCents,
-        errorMessage,
-      });
-      // R3a Ruling 3: a live call that cost money is usage, committed with its call log row.
+      const [row] = await tx
+        .insert(callLog)
+        .values({
+          ...logBase,
+          id: callId,
+          statusCode,
+          outcome,
+          durationMs,
+          units,
+          unit: outcome === 'ok' ? (opts.unit ?? null) : null,
+          costCents,
+          errorMessage,
+        })
+        .returning({ at: callLog.at });
+      // R3a Ruling 3: a live call that cost money is usage, committed with its call log row and dated by it. The event
+      // is checked before it is published, so a bad one is logged and dropped instead of rolling back the row.
       if (useLive && costCents !== null && costCents > 0) {
-        await publish({ ...ctx, tx }, usageRecorded, {
+        const usage = usageRecorded.data.safeParse({
           callId,
           provider,
           operation,
@@ -343,8 +347,10 @@ export async function runCall<T>(
           costCents,
           accountId: opts.accountId ?? null,
           correlationId: ctx.correlationId,
-          occurredAt: new Date().toISOString(),
+          occurredAt: row!.at.toISOString(),
         });
+        if (usage.success) await publish({ ...ctx, tx }, usageRecorded, usage.data);
+        else log.error({ err: usage.error, tenantId: ctx.tenantId, provider, operation }, 'integrations: usage event not valid, not published');
       }
       if (unit) {
         // Review Focus 3: a failed call releases its reservation and adds only what it spent: one
