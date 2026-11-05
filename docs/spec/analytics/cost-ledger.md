@@ -43,6 +43,30 @@ Rules:
 - Prices for credits and tokens are set in Integrations; a usage record with no price records the
   quantity with a zero amount and flags "Price not set".
 
+## Budgets and levels
+
+R3a (Rulings 6-8 and 11 of the R3a plan):
+
+- **Budgets.** `analytics.cost_budget(tenant_id, category, month 'YYYY-MM', amount_cents)`. A month's
+  budget is its own row, else the latest earlier month's row. None, or 0, means no alert and no pause.
+  `PUT /api/v1/costs/budgets` (`budgets:write`) saves the current or a future month; a past month gets
+  409 "Past months can't be changed." `GET /api/v1/costs/budgets?month` (`costs:read`) reads one month.
+- **Months.** A month is the calendar month in the tenant timezone. Spend leaves out voided lines.
+- **Levels.** `ok` below 90% of the budget, `alert` from 90%, `over` from 100%, `paused` from 110%.
+  Only AI usage and Data vendors can pause; the others top out at `over`.
+  `analytics.budget_state(tenant_id, category, month, level)` keeps the last level.
+- **When.** A line added or voided recomputes its category for the current tenant month, and so does a
+  budget saved for the current month. A line dated in another month changes the totals but no level. The
+  state row is locked while the level is worked out, so two changes at once are both counted.
+- **Event.** A level change publishes `analytics.budget.level_changed` v1
+  `{ category, month, level, spentCents, budgetCents }` in the same transaction. A new month starts at
+  `ok`, so a pause ends at the month boundary.
+- **Summary.** `GET /api/v1/costs/summary` (`costs:read`) gives `month`, `spend_month_cents`,
+  `budget_month_cents` (the categories' budgets summed), `spend_90d_cents` (the last 90 days up to
+  today), `categories[]` (`key`, `label`, `spend_90d_cents`, `spend_month_cents`, `budget_cents`,
+  `level`, `pausable`) and `months[]` (the last 6 months with `spend_cents` and the summed
+  `budget_cents`).
+
 ## Allocation
 
 To get cost per account and per source, lines are spread to accounts (pure function

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, check, date, index, pgSchema, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, check, date, index, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Analytics schema. Every table here is a tenant table: `tenant_id` not null, row level security
@@ -46,5 +46,42 @@ export const costLine = analytics.table(
       sql`${t.category} in ('partner_fees', 'data_vendors', 'agents_hosting', 'lists_events', 'ai_usage')`,
     ),
     check('cost_line_amount_valid', sql`${t.amountCents} >= 0`),
+  ],
+);
+
+/**
+ * Monthly budgets per category (R3a Ruling 7). A month with no row of its own carries the latest earlier
+ * month's row forward. None, or 0, means no alert and no pause.
+ */
+export const costBudget = analytics.table(
+  'cost_budget',
+  {
+    tenantId: text('tenant_id').notNull(),
+    category: text('category').notNull(),
+    month: text('month').notNull(), // YYYY-MM, the tenant-timezone calendar month
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.category, t.month] }),
+    check('cost_budget_amount_valid', sql`${t.amountCents} >= 0`),
+  ],
+);
+
+/**
+ * The last budget level per category and month (Ruling 8). A change publishes
+ * `analytics.budget.level_changed`; the row is locked while a level is worked out.
+ */
+export const budgetState = analytics.table(
+  'budget_state',
+  {
+    tenantId: text('tenant_id').notNull(),
+    category: text('category').notNull(),
+    month: text('month').notNull(),
+    level: text('level').notNull(), // ok | alert | over | paused
+    updatedAt: at('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.category, t.month] }),
+    check('budget_state_level_valid', sql`${t.level} in ('ok', 'alert', 'over', 'paused')`),
   ],
 );

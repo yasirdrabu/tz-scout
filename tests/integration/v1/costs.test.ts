@@ -1,6 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as listRoute, POST as addRoute } from '@/http/routes/v1/costs/lines/route';
 import { PATCH as editRoute, POST as actionRoute } from '@/http/routes/v1/costs/lines/[id]/route';
+import { GET as budgetsRoute, PUT as saveBudgetsRoute } from '@/http/routes/v1/costs/budgets/route';
+import { GET as summaryRoute } from '@/http/routes/v1/costs/summary/route';
 import { addManualLine, recordLine } from '@/modules/analytics';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl, type Role } from '@/modules/tenancy';
 import { newId } from '@/platform/ids';
@@ -122,5 +124,41 @@ describe('paging', () => {
   it('from and to bound occurred_on', async () => {
     const page = await (await listRoute(as('owner', '/costs/lines?category=agents_hosting&from=2026-10-02&to=2026-10-03'))).json();
     expect(new Set((page.data as { occurred_on: string }[]).map((l) => l.occurred_on))).toEqual(new Set(['2026-10-02', '2026-10-03']));
+  });
+});
+
+describe('budgets and summary', () => {
+  const save = (role: Role, month: string, budgets: unknown[] = [{ category: 'ai_usage', amount_cents: 25_000 }]) =>
+    saveBudgetsRoute(as(role, '/costs/budgets', { method: 'PUT', body: { month, budgets } }));
+
+  it('a leader can save budgets; an operator can read but gets 403 on the PUT; a seller gets 403 on all', async () => {
+    const current = await (await budgetsRoute(as('operator', '/costs/budgets'))).json();
+    expect(current.month).toMatch(/^\d{4}-\d{2}$/);
+    const res = await save('leader', current.month);
+    expect(res.status).toBe(200);
+    const saved = await res.json();
+    expect(saved).toMatchObject({ month: current.month, total_cents: 25_000 });
+    expect(saved.budgets).toContainEqual({ category: 'ai_usage', label: 'AI usage', amount_cents: 25_000, pausable: true });
+    expect((await save('operator', current.month)).status).toBe(403);
+    expect((await summaryRoute(as('operator', '/costs/summary'))).status).toBe(200);
+    const seller = [await budgetsRoute(as('seller', '/costs/budgets')), await save('seller', current.month), await summaryRoute(as('seller', '/costs/summary'))];
+    expect(seller.map((r) => r.status)).toEqual([403, 403, 403]);
+  });
+
+  it('a past month gets 409 "Past months can\'t be changed."; a bad month or amount gets 400', async () => {
+    const res = await save('owner', '2000-01');
+    expect(res.status).toBe(409);
+    expect((await res.json()).title).toBe("Past months can't be changed.");
+    expect((await save('owner', '2099-01', [{ category: 'ai_usage', amount_cents: -5 }])).status).toBe(400);
+    expect((await budgetsRoute(as('owner', '/costs/budgets?month=soon'))).status).toBe(400);
+  });
+
+  it('the summary carries the tiles, five categories and six months', async () => {
+    const body = await (await summaryRoute(as('owner', '/costs/summary'))).json();
+    expect(Object.keys(body).sort()).toEqual(['budget_month_cents', 'categories', 'month', 'months', 'spend_90d_cents', 'spend_month_cents']);
+    expect(body.categories.map((c: { key: string }) => c.key)).toEqual(['partner_fees', 'data_vendors', 'agents_hosting', 'lists_events', 'ai_usage']);
+    expect(Object.keys(body.categories[0]).sort()).toEqual(['budget_cents', 'key', 'label', 'level', 'pausable', 'spend_90d_cents', 'spend_month_cents']);
+    expect(body.months).toHaveLength(6);
+    expect(body.months[5]).toMatchObject({ month: body.month, spend_cents: body.spend_month_cents, budget_cents: body.budget_month_cents });
   });
 });

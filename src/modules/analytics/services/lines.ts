@@ -4,6 +4,7 @@ import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { costLine } from '../db/schema';
+import { recomputeForLine } from './budgets';
 
 type Row = typeof costLine.$inferSelect;
 
@@ -68,10 +69,12 @@ const view = (r: Row): CostLineView => ({
 });
 
 /**
- * Runs after any line is added or voided, with the category and date it touched. Budget levels hook in
- * here; for now it does nothing.
+ * Runs after any line is added or voided, with the category and date it touched: a line in the current
+ * tenant month recomputes that category's budget level (Ruling 8).
  */
-export async function afterLinesChanged(_ctx: ModuleContext, _category: CostCategory, _occurredOn: string): Promise<void> {}
+export async function afterLinesChanged(ctx: ModuleContext, category: CostCategory, occurredOn: string): Promise<void> {
+  await recomputeForLine(ctx, category, occurredOn);
+}
 
 const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`)) && new Date(`${s}T00:00:00Z`).toISOString().startsWith(s);
 

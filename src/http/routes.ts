@@ -72,8 +72,10 @@ import * as v1Batches from './routes/v1/batches/route';
 import * as v1CaseStudiesId from './routes/v1/case-studies/[id]/route';
 import * as v1CaseStudies from './routes/v1/case-studies/route';
 import * as v1ConflictsId from './routes/v1/conflicts/[id]/route';
+import * as v1CostsBudgets from './routes/v1/costs/budgets/route';
 import * as v1CostsLinesId from './routes/v1/costs/lines/[id]/route';
 import * as v1CostsLines from './routes/v1/costs/lines/route';
+import * as v1CostsSummary from './routes/v1/costs/summary/route';
 import * as v1CrmResource from './routes/v1/crm/[resource]/route';
 import * as v1DevUsers from './routes/v1/dev/users/route';
 import * as v1EnrichmentRequestsId from './routes/v1/enrichment-requests/[id]/route';
@@ -233,8 +235,10 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/case-studies/:id`, module: v1CaseStudiesId },
   { path: `${V1}/case-studies`, module: v1CaseStudies },
   { path: `${V1}/conflicts/:id`, module: v1ConflictsId },
+  { path: `${V1}/costs/budgets`, module: v1CostsBudgets },
   { path: `${V1}/costs/lines/:id`, module: v1CostsLinesId },
   { path: `${V1}/costs/lines`, module: v1CostsLines },
+  { path: `${V1}/costs/summary`, module: v1CostsSummary },
   { path: `${V1}/crm/:resource`, module: v1CrmResource },
   { path: `${V1}/dev/users`, module: v1DevUsers },
   { path: `${V1}/enrichment-requests/:id`, module: v1EnrichmentRequestsId },
