@@ -1,5 +1,6 @@
 import { getSummaries } from '@/modules/accounts';
 import { accountMerged, factRecorded, personAdded, personUpdated, signalRecorded } from '@/modules/accounts/contracts/events';
+import { activityObserved } from '@/modules/crm/contracts/events';
 import { assignmentAccepted, assignmentCreated, assignmentDeclined, assignmentWithdrawn, reviewChanged } from '@/modules/routing/contracts/events';
 import { accountScored } from '@/modules/scoring/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
@@ -7,6 +8,7 @@ import type { ModuleContext } from '@/platform/context';
 import { defineConsumer, type ConsumerDef } from '@/platform/runtime/consumers';
 import { freezeBrief, readBrief, requestDraft, unfreezeBrief } from './services/brief';
 import { seedPlaybooksDefaults } from './defaults';
+import { onCrmActivity } from './services/crm-activity';
 import { briefOnMerge } from './services/merge';
 import { pauseOnWithdrawn, plansOnMerge, startPlan } from './services/start';
 
@@ -132,6 +134,14 @@ export const planOnMerged = defineConsumer({
   handle: (e, ctx) => plansOnMerge(ctx, e.data.survivorId, e.data.mergedId),
 });
 
+/** Rulings 13 and 14: a reply or meeting stops the plan by its rule; a task done in the CRM marks its step done. */
+export const planOnCrmActivity = defineConsumer({
+  name: 'playbooks.plan_on_crm_activity',
+  event: activityObserved,
+  orderedBy: (e) => e.data.accountId,
+  handle: (e, ctx) => onCrmActivity(e, ctx),
+});
+
 /** Every playbooks consumer, for the worker's list. */
 export const playbooksConsumers: ConsumerDef[] = [
   playbooksTenantDefaults,
@@ -148,4 +158,5 @@ export const playbooksConsumers: ConsumerDef[] = [
   planOnAccepted,
   planPauseOnWithdrawn,
   planOnMerged,
+  planOnCrmActivity,
 ];

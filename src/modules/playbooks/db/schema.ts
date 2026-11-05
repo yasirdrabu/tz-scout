@@ -187,6 +187,10 @@ export const accountPlan = playbooks.table(
     acceptedAt: at('accepted_at').notNull().defaultNow(),
     /** A person added, edited or removed a step after the plan started. */
     customised: boolean('customised').notNull().default(false),
+    /** The first reply or meeting seen since accept, whatever the stop rule says. */
+    engagedAt: at('engaged_at'),
+    /** When `playbooks.plan.no_reply` fired: the last step closed with no reply or meeting. Once per plan. */
+    noReplyAt: at('no_reply_at'),
     createdAt: at('created_at').notNull().defaultNow(),
     updatedAt: at('updated_at').notNull().defaultNow(),
   },

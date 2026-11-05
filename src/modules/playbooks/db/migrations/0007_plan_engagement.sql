@@ -1,0 +1,2 @@
+ALTER TABLE "playbooks"."account_plan" ADD COLUMN "engaged_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "playbooks"."account_plan" ADD COLUMN "no_reply_at" timestamp with time zone;

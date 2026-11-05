@@ -107,8 +107,19 @@ Out of R2c (user, 2026-11-04): outreach sequences, call prep, proposals and outc
   `plan.day + 1` capped at `n`, `n` is `plan.days + 1`. Progress reads "{x} of {y} done": `x` counts
   done and skipped steps, `y` all steps, and the bar shows x/y. A newer template version shows "A
   newer version of {playbook} exists. This plan keeps the steps it started with." (no compare yet).
-- **Not in R2c-3a (R2c-3b):** a step done in the CRM marking the step done
-  (`crm.activity.observed`), CRM tasks created from the plan and the stop rule.
+- **Stop rule (R2c-3b).** `crm.activity.observed` of kind `reply` or `meeting` with `occurredAt` at or after the
+  plan's `accepted_at` (activity logged before accept is ignored) acts on the account's `active` or `paused` plan. It sets
+  `engaged_at` the first time, whatever `stop_when` says, then stops the plan when the rule matches: `reply_or_meeting`
+  on either, `meeting` on a meeting, `never` on neither. The stop skips the open steps and records the reason "They
+  replied" or "They booked a meeting", which the card shows as "Stopped: {reason}".
+- **Done in HubSpot (R2c-3b).** `crm.activity.observed` of kind `task_done` with a `stepId` marks that step `done` when it
+  is `todo` or `in_progress` on an `active` or `paused` plan: `done_at` is the event's `occurredAt`, `done_by` is null,
+  history gets `step_status` with `{from, to: 'done', source: 'crm'}`, and `plan.changed` and `step.completed`
+  (`doneBy: null`) are published. Any other case (skipped or done step, closed plan, no `stepId`) changes nothing.
+- **No reply (R2c-3b).** After a step status change (a person or HubSpot) or a step removal, an `active` plan with at
+  least one step, every step `done` or `skipped`, no `engaged_at` and no `no_reply_at` gets `no_reply_at = now` and
+  publishes `playbooks.plan.no_reply`. Once per plan; the status does not change (Complete stays manual). A stop,
+  an abandon or a completion never fires it.
 
 ## Where plans show (R2c-1 API)
 
@@ -179,6 +190,7 @@ Published (shapes in `architecture/event-catalog.md`):
 | `playbooks.plan.created` | `planId`, `accountId`, `offerId` and `tier` (null as above), `templateId`, `templateVersion`, `assignmentId`, `sellerUserId`, `stopWhen`, `steps[{id, order, day, channel, title, ownerUserId, dueDate, crmTask, subject, body}]` |
 | `playbooks.plan.changed` | `planId`, `accountId`, `status`, `changed` (any of `status`, `steps`, `owners`, `account`), `reason?`, `previousAccountId?` (a merge repoint) and `steps[{id, order, day, channel, title, detail, subject, body, status, ownerUserId, dueDate, crmTask}]`, the steps the change touched (a step edit: that step plus any steps its move shifted; an add: the new step and the steps it pushed down; owner moves on a resume or take-over: the moved steps; a stop: the skipped steps; empty for a status-only change). A removed step is `{id, removed: true}`. Every field but `id` is optional so older rows parse |
 | `playbooks.step.completed` | `planId`, `stepId`, `accountId`, `channel`, `doneBy`, `doneAt` |
+| `playbooks.plan.no_reply` | `planId`, `accountId`, `assignmentId`, `at`: the last step closed and nobody replied or booked since accept; once per plan, the plan's status does not change |
 | `playbooks.plan.not_started` | `accountId`, `assignmentId`, `reason`: `no_playbook_chosen`, `no_offer_playbook`, `superseded` or `template_unavailable` (draft, archived or deleted template); lets the screens explain an empty plan |
 
 `plan.changed` is published for step edits, adds and removals (`steps`, plus `owners` when the owner moved or was set), the four

@@ -10,6 +10,7 @@ import { planChanged, stepCompleted } from '../contracts/events';
 import { accountPlan, planChange, planStep, playbookTemplate } from '../db/schema';
 import { dueFlags, pickNextStep } from '../domain/next-step';
 import { dueDateFor, insertOrder, linkedPeople, localDate, missingRoles, type PlanPerson, type StepChannel } from '../domain/plan';
+import { checkNoReply } from './crm-activity';
 
 export const PLAN_ENDED = 'This plan has ended.';
 export const FINISH_STEPS = 'Finish or skip every step first.';
@@ -381,6 +382,7 @@ export async function updateStep(ctx: ModuleContext, planId: string, stepId: str
       );
     }
     await audit(ctx, { action: 'playbooks.plan_step.updated', subject: { type: 'account_plan', id: planId }, after: { stepId, changed: changes.map(([k]) => k) } });
+    if (set.status !== undefined) await checkNoReply(ctx, planId);
   }
   const [fresh] = await ctx.tx.select().from(accountPlan).where(eq(accountPlan.id, planId));
   return view(ctx, fresh!);
@@ -456,6 +458,7 @@ export async function removeStep(ctx: ModuleContext, planId: string, stepId: str
   await recordChange(ctx, planId, 'step_removed', { title: step.title, day: step.day, channel: step.channel, status: step.status, dueDate: step.dueDate }, stepId);
   await publishChanged(ctx, plan, ['steps'], undefined, { steps: [{ id: stepId, removed: true }] });
   await audit(ctx, { action: 'playbooks.plan_step.removed', subject: { type: 'account_plan', id: planId }, after: { stepId } });
+  await checkNoReply(ctx, planId);
   const [fresh] = await ctx.tx.select().from(accountPlan).where(eq(accountPlan.id, planId));
   return view(ctx, fresh!);
 }
