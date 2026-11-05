@@ -124,7 +124,7 @@ describe('Account page after assignment', () => {
     renderApp('/t/taazaa/accounts/acc_mdc');
     const outcomes = await screen.findByRole('region', { name: 'Outcomes' });
     expect(await within(outcomes).findByText('2 of 4')).toBeInTheDocument();
-    expect(within(outcomes).getByText('No Technical buyer contact yet').className).toMatch(/amber/);
+    expect(within(outcomes).getByText('No technical buyer contact yet').className).toMatch(/amber/);
   });
 
   it('the Buyers engaged tile reads Not yet, like Meetings held, until a handoff completed', async () => {

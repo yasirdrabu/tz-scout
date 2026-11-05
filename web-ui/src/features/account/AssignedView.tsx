@@ -59,7 +59,7 @@ function Outcomes({ handoffs, engagement }: { handoffs: Handoffs | undefined; en
         {ft && engagement ? (
           <>
             <span className={styles.big}>{`${f.number(engagement.engaged)} of ${f.number(engagement.total)}`}</span>
-            {engagement.gap_role && <span className={cx(styles.note, styles.amber)}>{`No ${engagement.gap_role} contact yet`}</span>}
+            {engagement.gap_role && <span className={cx(styles.note, styles.amber)}>{`No ${engagement.gap_role.toLowerCase()} contact yet`}</span>}
           </>
         ) : (
           <span className={styles.big}>Not yet</span>
