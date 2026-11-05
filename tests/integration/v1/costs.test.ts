@@ -50,13 +50,14 @@ describe('access', () => {
     expect((await listRoute(as('viewer', '/costs/lines'))).status).toBe(403);
   });
 
-  it('an API key with costs:write can neither add nor edit a line', async () => {
+  it('an API key with costs:write can neither add, edit nor void a line', async () => {
     const line = await run((ctx) => addManualLine(ctx, { occurredOn: '2026-11-02', category: 'partner_fees', amountCents: 100, note: null }));
     const { secret } = await run((ctx) => createApiKey(ctx, { name: 'k', environment: 'live', scopes: ['costs:write', 'costs:read'] }, SYSTEM_GRANTOR));
     const key = (path: string, method: string, body: unknown) =>
       new Request(`http://localhost:4240/api/v1${path}`, { method, headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect((await addRoute(key('/costs/lines', 'POST', manual()))).status).toBe(403);
     expect((await editRoute(key(`/costs/lines/${line.id}`, 'PATCH', { amount_cents: 1 }))).status).toBe(403);
+    expect((await actionRoute(key(`/costs/lines/${line.id}:void`, 'POST', { reason: 'No' }))).status).toBe(403);
   });
 });
 
@@ -65,6 +66,14 @@ describe('validation and changes', () => {
     const res = await addRoute(as('owner', '/costs/lines', { method: 'POST', body: manual({ amount_cents: 0 }) }));
     expect(res.status).toBe(400);
     expect((await res.json()).title).toBe('Enter an amount above zero.');
+  });
+
+  it('a date in the future gets 400 at occurred_on', async () => {
+    const res = await addRoute(as('owner', '/costs/lines', { method: 'POST', body: manual({ occurred_on: '2999-01-01' }) }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.title).toBe("A cost can't be dated in the future.");
+    expect(body.errors).toEqual([expect.objectContaining({ path: 'occurred_on' })]);
   });
 
   it('a note over 500 characters and an unknown category are refused', async () => {

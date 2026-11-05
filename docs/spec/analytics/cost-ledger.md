@@ -33,10 +33,13 @@ Rules:
   visible to owners. Editing a manual line does this in one step: the old line is voided "Edited" and the
   new one carries `replaces_id`. Usage lines can only be voided.
 - A line's date (`occurred_on`) is the tenant-timezone date; a usage line takes the date of the call.
+  A manual line (added or edited) can't be dated after today in the tenant timezone: 400 at
+  `occurred_on` "A cost can't be dated in the future."
   Spend leaves out voided lines.
 - Auto lines carry `origin_event_id`, so replaying an event never creates a second line.
 - One costed outside call = one `integrations.usage.recorded` = one line, and nothing else creates
-  automatic lines. `enrichment.request.completed` and `ai.run.completed` never create lines; from R3b
+  automatic lines. A call is priced in whole cents, half up (R3a Ruling 2), so a call priced under half a
+  cent costs 0, publishes no usage record and records no line. `enrichment.request.completed` and `ai.run.completed` never create lines; from R3b
   they only tell Analytics which account a usage record with the same `correlationId` belongs to. If the usage record is processed first, its line is
   created with target none and re-targeted when the matching event arrives (an internal update before
   the line is shown, not an edit of a visible line).
@@ -59,7 +62,9 @@ R3a (Rulings 6-8 and 11 of the R3a plan):
   budget saved for the current month. A line dated in another month changes the totals but no level. The
   state row is locked while the level is worked out, so two changes at once are both counted.
 - **Event.** A level change publishes `analytics.budget.level_changed` v1
-  `{ category, month, level, spentCents, budgetCents }` in the same transaction. A new month starts at
+  `{ category, month, level, spentCents, budgetCents, seq }` in the same transaction. `seq` is the
+  category month's change count in `budget_state`, bumped under its lock, so a late older event can be
+  ignored. A new month starts at
   `ok`, so a pause ends at the month boundary.
 - **Summary.** `GET /api/v1/costs/summary` (`costs:read`) gives `month`, `spend_month_cents`,
   `budget_month_cents` (the categories' budgets summed), `spend_90d_cents` (the last 90 days up to

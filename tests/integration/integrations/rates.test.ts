@@ -85,6 +85,12 @@ describe('rates and priceCents (Rulings 1 and 2)', () => {
     expect(claude).toContainEqual({ item: 'claude-haiku-5-5:input', centsPerUnit: 0.0001, isDefault: true });
   });
 
+  it('keeps six decimals of dollars per million tokens: $0.123456 per million is 0.0000123456 cents a token', async () => {
+    const t = await freshTenant();
+    await t.run((ctx) => setRates(ctx, 'anthropic', [{ item: 'claude-haiku-5-5:input', centsPerUnit: 0.0000123456 }]));
+    expect(await t.run((ctx) => getRates(ctx, 'anthropic'))).toContainEqual({ item: 'claude-haiku-5-5:input', centsPerUnit: 0.0000123456, isDefault: false });
+  });
+
   it('refuses a negative rate and an item the provider is not priced by', async () => {
     const t = await freshTenant();
     await expect(t.run((ctx) => setRates(ctx, 'apollo', [{ item: 'credit', centsPerUnit: -1 }]))).rejects.toMatchObject({

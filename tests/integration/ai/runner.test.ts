@@ -14,6 +14,21 @@ vi.mock('@/platform/config', async (orig) => {
   };
 });
 
+/** When set, the runner's first look at the connection says mock, as if the mode turned live just after. */
+const flip = vi.hoisted(() => ({ mockOnce: false }));
+vi.mock('@/modules/integrations', async (orig) => {
+  const real = await orig<typeof import('@/modules/integrations')>();
+  return {
+    ...real,
+    connectionStatus: async (...args: Parameters<typeof real.connectionStatus>) => {
+      const st = await real.connectionStatus(...args);
+      if (!flip.mockOnce) return st;
+      flip.mockOnce = false;
+      return { ...st, mode: 'mock' as const };
+    },
+  };
+});
+
 import { AI_LABEL, defineTask, getRun, listRuns, runTask, runTotalsThisMonth } from '@/modules/ai-tasks';
 import type { AnthropicAdapter } from '@/modules/ai-tasks';
 import { anthropicMock, registerAnthropicAdapter } from '@/modules/ai-tasks/adapters/anthropic/mock';
@@ -177,6 +192,20 @@ describe('runTask', () => {
       correlationId,
       occurredAt: expect.any(String),
     });
+  });
+
+  it('a run that looked like mock but reached live Claude is priced at the saved tenant rates', async () => {
+    const t = await freshTenant();
+    fakeLive([{ echoed: 'hi' }], { inputTokens: 100_000, outputTokens: 20_000, cacheReadTokens: 10_000 });
+    await goLive(t);
+    await t.run((ctx) => setRates(ctx, 'anthropic', [{ item: 'claude-haiku-5-5:output', centsPerUnit: 0.001 }]));
+    flip.mockOnce = true;
+    await t.run((ctx) => runTask(ctx, echo, { text: 'hi' }, { subject }));
+    expect(flip.mockOnce).toBe(false);
+    // The saved output rate gives 30 cents; the list prices would give 20.
+    const [call] = await callsOf(t.tenantId);
+    expect(call!.costCents).toBe(30);
+    expect((await usageEventsOf(t.tenantId))[0]!.data).toMatchObject({ costCents: 30 });
   });
 
   it('retries once with the errors, then stores invalid_output and names the task (AC2)', async () => {
@@ -437,24 +466,26 @@ describe('helpers', () => {
   it('prices round half up and unknown models cost nothing', async () => {
     const t = await freshTenant();
     const price = (model: string, inputTokens: number, outputTokens: number) =>
-      t.run(async (ctx) => (await claudePrices(ctx, model, 'live')).cost({ inputTokens, outputTokens, cacheReadTokens: 0 }));
+      t.run(async (ctx) => (await claudePrices(ctx, model)).cost({ inputTokens, outputTokens, cacheReadTokens: 0 }));
     expect(await price('claude-haiku-5-5', 1, 0)).toBe(0);
     expect(await price('claude-haiku-5-5', 5000, 0)).toBe(1);
     expect(await price('claude-haiku-5-5', 1_000_000, 1_000_000)).toBe(600);
     expect(await price('nope', 9_000_000, 9)).toBe(0);
     // The worst case is held against limits, so it rounds up.
-    expect(await t.run(async (ctx) => (await claudePrices(ctx, 'claude-haiku-5-5', 'live')).worstCase(1, 0))).toBe(1);
+    expect(await t.run(async (ctx) => (await claudePrices(ctx, 'claude-haiku-5-5')).worstCase(1, 0))).toBe(1);
   });
-  it('a mock run uses the list prices: a saved rate is not read and an unknown model is not warned about', async () => {
+  it('prices read the saved rates; an unknown model is warned about only when a live call is priced', async () => {
     const t = await freshTenant();
     await t.run((ctx) => setRates(ctx, 'anthropic', [{ item: 'claude-haiku-5-5:output', centsPerUnit: 1 }]));
     const warn = vi.spyOn(log, 'warn');
     try {
-      const mock = await t.run((ctx) => claudePrices(ctx, 'claude-haiku-5-5', 'mock'));
-      expect(mock.worstCase(0, 200)).toBe(1);
-      await t.run((ctx) => claudePrices(ctx, 'nope', 'mock'));
+      const saved = await t.run((ctx) => claudePrices(ctx, 'claude-haiku-5-5'));
+      expect(saved.worstCase(0, 200)).toBe(200);
+      const unknown = await t.run((ctx) => claudePrices(ctx, 'nope'));
+      expect(unknown.worstCase(10, 10)).toBe(0);
       expect(warn).not.toHaveBeenCalled();
-      await t.run((ctx) => claudePrices(ctx, 'nope', 'live'));
+      expect(unknown.cost({ inputTokens: 10, outputTokens: 10, cacheReadTokens: 0 })).toBe(0);
+      unknown.cost({ inputTokens: 10, outputTokens: 10, cacheReadTokens: 0 });
       expect(warn).toHaveBeenCalledTimes(1);
     } finally {
       warn.mockRestore();

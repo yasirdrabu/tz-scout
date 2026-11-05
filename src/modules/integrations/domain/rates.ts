@@ -12,7 +12,7 @@ export type Rate = { item: string; centsPerUnit: number };
 export type UsageItem = { item: string; units: number };
 
 export const RATE_NEGATIVE = "A rate can't be negative.";
-/** The most `numeric(14,6)` holds. */
+/** The most `numeric(18,10)` holds (eight whole digits). */
 export const MAX_RATE = 99_999_999;
 
 /** The provider's items with their default cents per unit; `settings` is the connection's (`cents_per_credit`). */

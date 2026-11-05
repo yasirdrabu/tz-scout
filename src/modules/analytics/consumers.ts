@@ -2,10 +2,8 @@ import { CATEGORY_OF_PROVIDER } from '@/modules/integrations/contracts/costs';
 import { usageRecorded } from '@/modules/integrations/contracts/events';
 import { tenantTimezone } from '@/modules/tenancy';
 import { defineConsumer, type ConsumerDef } from '@/platform/runtime/consumers';
+import { dayOf } from './domain/budgets';
 import { recordLine } from './services/lines';
-
-/** The tenant-timezone date (YYYY-MM-DD) of an instant. */
-const dayIn = (at: string, timeZone: string) => new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(at));
 
 /** Ruling 5: every priced paid call is one usage line, deduped on the event id. Lines come from nothing else. */
 export const analyticsUsageLines = defineConsumer({
@@ -17,7 +15,7 @@ export const analyticsUsageLines = defineConsumer({
     if (!category) throw new Error(`Usage from provider "${e.data.provider}" has no cost category`);
     await recordLine(ctx, {
       originEventId: e.id,
-      occurredOn: dayIn(e.data.occurredAt, await tenantTimezone(ctx)),
+      occurredOn: dayOf(new Date(e.data.occurredAt), await tenantTimezone(ctx)),
       category,
       provider: e.data.provider,
       amountCents: e.data.costCents,

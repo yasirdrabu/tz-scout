@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { addManualLine, analyticsUsageLines, editManualLine, listLines, voidLine } from '@/modules/analytics';
 import { costLine } from '@/modules/analytics/db/schema';
 import { usageRecorded } from '@/modules/integrations/contracts/events';
@@ -114,6 +114,19 @@ describe('manual lines', () => {
     expect(shown.data.map((l) => l.id)).not.toContain(line.id);
     const all = await run((ctx) => listLines(ctx, { category: 'lists_events', includeVoided: true }));
     expect(all.data.map((l) => l.id)).toContain(line.id);
+  });
+
+  it('a date after today in the tenant timezone is refused, on add and on edit', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-11-06T03:00:00Z')); // 22:00 on 5 November in New York
+      const future = { status: 400, message: "A cost can't be dated in the future.", errors: [{ path: 'occurred_on', message: "A cost can't be dated in the future." }] };
+      await expect(run((ctx) => addManualLine(ctx, { occurredOn: '2026-11-06', category: 'lists_events', amountCents: 100, note: null }))).rejects.toMatchObject(future);
+      const today = await run((ctx) => addManualLine(ctx, { occurredOn: '2026-11-05', category: 'lists_events', amountCents: 100, note: null }));
+      await expect(run((ctx) => editManualLine(ctx, today.id, { occurredOn: '2026-11-06' }))).rejects.toMatchObject(future);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('an amount of 0 is refused', async () => {

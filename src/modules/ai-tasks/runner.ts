@@ -253,8 +253,9 @@ export async function runTask<I, O>(
     const hit = await reusable(tentative);
     if (hit) return reuse(hit);
   }
-  // Read before the call: a timed-out job's transaction is gone when a late answer is priced.
-  const prices = tentative === 'none' ? undefined : await claudePrices(ctx, model, tentative);
+  // Read before the call: a timed-out job's transaction is gone when a late answer is priced. The tenant's rates
+  // whatever the tentative mode, so a call that turns live meanwhile is priced right.
+  const prices = tentative === 'none' ? undefined : await claudePrices(ctx, model);
 
   // 2. A call that could cost more than the limit is refused before it is made.
   let capRefused = false;

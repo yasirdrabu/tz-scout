@@ -18,8 +18,8 @@ goes through this module's gateway, so call logging, rate limits and caps live i
 | `call_log` | `id`, `tenant_id`, `connection_id`, `provider`, `operation` (e.g. `hubspot.company.upsert`), `module`, `principal_id` (user, key or system), `api_key_id`, `correlation_id`, `request_summary` (json, secrets and personal data redacted), `status_code`, `outcome` (ok, error, rate_limited, blocked_by_cap), `duration_ms`, `units` (credits, tokens, records), `cost_cents`, `error_message`, `at` |
 | `usage_cap` | `tenant_id`, `provider_key`, `unit` (calls, credits, cost_cents), `period` (day, month), `limit`, `overage_period_start` (date, null), `updated_by`, `updated_at`. One per provider (R2b-1, usage-caps.md Ruling 2) |
 | `usage_period` | `tenant_id`, `provider_key`, `period_start`, `used`, `reserved`, `warned`, `blocked`. The row `reserve` locks |
-| `provider_rate` | `tenant_id`, `provider`, `item` (`{model}:input`, `{model}:output` per token; `credit`), `cents_per_unit` (numeric 14,6), `updated_by`, `updated_at`. A missing row reads the default from code (R3a, usage-caps.md "Rates and usage") |
-| `paid_pause` | `tenant_id`, `category`, `month` (YYYY-MM), `paused`. Set from `analytics.budget.level_changed` (R3a) |
+| `provider_rate` | `tenant_id`, `provider`, `item` (`{model}:input`, `{model}:output` per token; `credit`), `cents_per_unit` (numeric 18,10, so $ per million tokens keeps 6 decimals), `updated_by`, `updated_at`. A missing row reads the default from code (R3a, usage-caps.md "Rates and usage") |
+| `paid_pause` | `tenant_id`, `category`, `month` (YYYY-MM), `paused`, `seq` (the event's `seq` last applied; an event whose `seq` is not above it is ignored). Set from `analytics.budget.level_changed` (R3a) |
 
 Call log rows are kept 180 days, then summarised into daily usage rows.
 

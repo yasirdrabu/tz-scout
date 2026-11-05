@@ -1,4 +1,4 @@
-import { defaultRates, getRates, priceOf } from '@/modules/integrations';
+import { getRates, priceOf } from '@/modules/integrations';
 import type { ModuleContext } from '@/platform/context';
 import { log } from '@/platform/log';
 
@@ -13,21 +13,26 @@ export type ClaudePrices = {
 
 /**
  * The tenant's Claude rates for `model` (R3a Ruling 1), read once before a call: pricing after it must not need the
- * caller's transaction, which a timed-out job has already lost. An unknown model costs 0. A mock run uses the list
- * prices (it only needs a worst case to hold against the limit), so it reads nothing and warns about nothing.
+ * caller's transaction, which a timed-out job has already lost. Read whatever mode the run expects, so a call that
+ * turns live meanwhile is still priced at the tenant's rates. An unknown model costs 0; `cost` is only called for
+ * live calls, so only those warn about it (once).
  */
-export async function claudePrices(ctx: ModuleContext, model: string, mode: 'live' | 'mock'): Promise<ClaudePrices> {
-  const list = mode === 'mock' ? defaultRates('anthropic', {}) : await getRates(ctx, 'anthropic');
-  const rates = new Map(list.map((r) => [r.item, r.centsPerUnit]));
+export async function claudePrices(ctx: ModuleContext, model: string): Promise<ClaudePrices> {
+  const rates = new Map((await getRates(ctx, 'anthropic')).map((r) => [r.item, r.centsPerUnit]));
   const input = `${model}:input`;
   const output = `${model}:output`;
-  if (mode === 'live' && !rates.has(input)) log.warn({ model }, 'ai: no price for model, cost recorded as 0');
+  let warned = false;
   return {
-    cost: (u) =>
-      priceOf(rates, [
+    cost: (u) => {
+      if (!warned && !rates.has(input)) {
+        warned = true;
+        log.warn({ model }, 'ai: no price for model, cost recorded as 0');
+      }
+      return priceOf(rates, [
         { item: input, units: u.inputTokens + u.cacheReadTokens / 10 },
         { item: output, units: u.outputTokens },
-      ]),
+      ]);
+    },
     worstCase: (inputTokens, maxTokens) => {
       const raw = inputTokens * (rates.get(input) ?? 0) + maxTokens * (rates.get(output) ?? 0);
       return raw <= 0 ? 0 : Math.ceil(raw - 1e-9);

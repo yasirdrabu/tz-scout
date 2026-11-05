@@ -110,14 +110,15 @@ export const usagePeriod = integrations.table(
   (t) => [primaryKey({ columns: [t.tenantId, t.providerKey, t.periodStart] })],
 );
 
-/** R3a Ruling 1: an owner's price for one item a provider bills (a missing row reads the default from code). */
+/** R3a Ruling 1: an owner's price for one item a provider bills (a missing row reads the default from code). Ten decimals
+ * of cents per token keep six decimals of dollars per million tokens. */
 export const providerRate = integrations.table(
   'provider_rate',
   {
     tenantId: text('tenant_id').notNull(),
     provider: text('provider').notNull(),
     item: text('item').notNull(), // `{model}:input` | `{model}:output` per token, or `credit`
-    centsPerUnit: numeric('cents_per_unit', { precision: 14, scale: 6, mode: 'number' }).notNull(),
+    centsPerUnit: numeric('cents_per_unit', { precision: 18, scale: 10, mode: 'number' }).notNull(),
     updatedBy: text('updated_by'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

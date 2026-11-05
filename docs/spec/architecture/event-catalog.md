@@ -67,7 +67,7 @@ module adds an event or tool.
 | `campaigns.ad_spend.recorded` | CMP | One day's spend for one ad campaign | ANL (automatic cost line) |
 | `campaigns.meeting.booked` / `.held` / `.no_show` / `.cancelled` | CMP | Meeting lifecycle from the booking flow | PLB (meeting outcome), ANL |
 | `analytics.cost.recorded` | ANL | A cost line was added. Not published yet (R3a writes lines without an event) | ANL |
-| `analytics.budget.level_changed` | ANL | A category's budget level for the current tenant month changed (`ok`, `alert` at 90%, `over` at 100%, `paused` at 110% for AI usage and Data vendors), with `spentCents` and `budgetCents`. Published only on a change, from the transaction of the line or budget that caused it (R3a) | INT (paid-call pause, R3a Task 4) |
+| `analytics.budget.level_changed` | ANL | A category's budget level for the current tenant month changed (`ok`, `alert` at 90%, `over` at 100%, `paused` at 110% for AI usage and Data vendors), with `spentCents`, `budgetCents` and `seq` (the category month's change count, so a late older event is ignored). Published only on a change, from the transaction of the line or budget that caused it (R3a) | INT (paid-call pause, R3a Task 4) |
 | `analytics.diagnosis.created` | ANL | Weekly diagnosis stored | owners (notify) |
 | `integrations.connection.changed` / `.tested` | INT | Connection added, edited, tested | Admin |
 | `integrations.usage.threshold_reached` | INT | 80% (`warn`) or 100% (`blocked`) of a provider limit, once per level per period | Settings, Integrations banner (in-app only; email later) |

@@ -422,12 +422,49 @@ describe('Prices (R3a)', () => {
     await userEvent.type(input, '4');
     await userEvent.click(within(prices).getByRole('button', { name: 'Save prices' }));
     expect(await screen.findByText('Prices saved.')).toBeInTheDocument();
-    expect(seen[0]!.body).toEqual({
-      rates: [
-        { item: 'claude-sonnet-5-5:input', cents_per_unit: 0.0004 },
-        { item: 'claude-sonnet-5-5:output', cents_per_unit: 0.0015 },
-      ],
-    });
+    // Only the box that changed: untouched defaults stay defaults.
+    expect(seen[0]!.body).toEqual({ rates: [{ item: 'claude-sonnet-5-5:input', cents_per_unit: 0.0004 }] });
+  });
+
+  it('parses prices strictly and keeps six decimals per million tokens and four per credit, without rounding', async () => {
+    serve([CLAUDE]);
+    const seen = serveRates('anthropic', CLAUDE_RATES);
+    const drawer = await openService('Manage Claude');
+    const prices = await within(drawer).findByRole('region', { name: 'Prices' });
+    const input = within(within(prices).getByRole('group', { name: 'claude-sonnet-5-5' })).getByLabelText('Input, $ per million tokens');
+    const save = () => userEvent.click(within(prices).getByRole('button', { name: 'Save prices' }));
+    for (const [text, error] of [
+      ['1e3', 'Enter a number.'],
+      ['0x10', 'Enter a number.'],
+      ['0.1234567', 'Use at most 6 decimal places.'],
+    ] as const) {
+      await userEvent.clear(input);
+      await userEvent.type(input, text);
+      await save();
+      expect(input).toHaveAccessibleDescription(error);
+    }
+    expect(seen).toHaveLength(0);
+    await userEvent.clear(input);
+    await userEvent.type(input, '0.123456');
+    await save();
+    expect(await screen.findByText('Prices saved.')).toBeInTheDocument();
+    expect(seen[0]!.body).toEqual({ rates: [{ item: 'claude-sonnet-5-5:input', cents_per_unit: 0.0000123456 }] });
+  });
+
+  it('refuses a fifth decimal in cents per credit', async () => {
+    serve();
+    const seen = serveRates('apollo', APOLLO_RATES);
+    const drawer = await openService('Manage Apollo');
+    const credit = within(await within(drawer).findByRole('region', { name: 'Prices' })).getByLabelText('Cents per credit');
+    await userEvent.clear(credit);
+    await userEvent.type(credit, '2.12345');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Save prices' }));
+    expect(credit).toHaveAccessibleDescription('Use at most 4 decimal places.');
+    await userEvent.clear(credit);
+    await userEvent.type(credit, '2.1234');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Save prices' }));
+    expect(await screen.findByText('Prices saved.')).toBeInTheDocument();
+    expect(seen[0]!.body).toEqual({ rates: [{ item: 'credit', cents_per_unit: 2.1234 }] });
   });
 
   it('shows Cents per credit for Apollo and refuses a negative price', async () => {

@@ -3,17 +3,29 @@ import { useState, type FormEvent } from 'react';
 import { Button } from '../../../ui/Button';
 import { Field } from '../../../ui/Field';
 import { ratesQuery, saveRates, type Rate } from '../../costs/api';
+import { parseDecimal } from '../../../lib/money-input';
 import { useRun } from '../shared';
 import styles from '../Settings.module.css';
 
 type Props = { serviceKey: string; tenant: string };
 
 const NEGATIVE = "A rate can't be negative.";
-const NOT_A_NUMBER = 'Enter a number.';
+/** Decimals a box keeps: dollars per million tokens, and cents per credit. */
+const PER_MILLION_PLACES = 6;
+const PER_CREDIT_PLACES = 4;
 
 /** Claude is priced per token; a box shows dollars per million tokens (cents per token x 10,000). */
-const perMillion = (centsPerToken: number) => String(Number((centsPerToken * 10_000).toPrecision(8)));
-const perToken = (dollarsPerMillion: number) => Number((dollarsPerMillion / 10_000).toFixed(6));
+const perMillion = (centsPerToken: number) => String(Number((centsPerToken * 10_000).toFixed(PER_MILLION_PLACES)));
+
+/** The typed rate in cents per unit, moving the decimal point in the text (not in floating point) for $ per million. */
+function rateOf(text: string, perToken: boolean): { cents: number } | { error: string } {
+  const negative = text.startsWith('-');
+  const parsed = parseDecimal(negative ? text.slice(1) : text, perToken ? PER_MILLION_PLACES : PER_CREDIT_PLACES);
+  if ('error' in parsed) return parsed;
+  if (negative) return { error: NEGATIVE };
+  const digits = `${parsed.whole}.${parsed.fraction || '0'}`;
+  return { cents: Number(perToken ? `${digits}e-4` : digits) };
+}
 
 type Box = { item: string; label: string; group: string | null; shown: string };
 
@@ -51,12 +63,13 @@ export function Prices({ serviceKey, tenant }: Props) {
     e.preventDefault();
     const found: Record<string, string> = {};
     const out: { item: string; cents_per_unit: number }[] = [];
+    // Only the boxes the person changed are sent, so an untouched default stays a default.
     for (const b of boxes) {
-      const text = value(b).trim();
-      const n = Number(text);
-      if (text === '' || !Number.isFinite(n)) found[b.item] = NOT_A_NUMBER;
-      else if (n < 0) found[b.item] = NEGATIVE;
-      else out.push({ item: b.item, cents_per_unit: b.group ? perToken(n) : n });
+      const text = typed[b.item]?.trim();
+      if (text === undefined || text === b.shown) continue;
+      const rate = rateOf(text, b.group !== null);
+      if ('error' in rate) found[b.item] = rate.error;
+      else out.push({ item: b.item, cents_per_unit: rate.cents });
     }
     setErrors(found);
     if (Object.keys(found).length > 0) return;

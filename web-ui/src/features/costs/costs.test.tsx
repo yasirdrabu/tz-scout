@@ -99,6 +99,8 @@ describe('Monthly budgets', () => {
     await open();
     await userEvent.click(await screen.findByRole('button', { name: 'Edit budgets' }));
     expect(screen.getByLabelText('AI usage budget')).toHaveValue('12.50');
+    // Mobile keypads need the decimal point for "12.50".
+    expect(screen.getByLabelText('AI usage budget')).toHaveAttribute('inputmode', 'decimal');
     await userEvent.click(screen.getByRole('button', { name: 'Save budgets' }));
     await screen.findByText('Budgets saved. Monthly total $12.50.');
     expect(seen.find((s) => s.method === 'PUT')!.body).toEqual({ month: '2026-11', budgets: [{ category: 'ai_usage', amount_cents: 1250 }] });

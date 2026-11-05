@@ -36,6 +36,13 @@
       "when": 1793890349556,
       "tag": "0004_paid_pause_seq",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793893648142,
+      "tag": "0005_provider_rate_scale",
+      "breakpoints": true
     }
   ]
 }

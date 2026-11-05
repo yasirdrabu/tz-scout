@@ -89,7 +89,7 @@ export function Budgets({ tenant, summary: s, canEdit }: Props) {
               {draft ? (
                 <input
                   className={`input ${styles.budgetInput}`}
-                  inputMode="numeric"
+                  inputMode="decimal"
                   aria-label={`${c.label} budget`}
                   value={draft[c.key] ?? ''}
                   onChange={(e) => setDraft({ ...draft, [c.key]: e.target.value })}

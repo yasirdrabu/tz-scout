@@ -1,9 +1,11 @@
 import { and, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
 import { COST_CATEGORIES, type CostCategory } from '@/modules/integrations/contracts/costs';
+import { tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { costLine } from '../db/schema';
+import { dayOf } from '../domain/budgets';
 import { recomputeForLine } from './budgets';
 
 type Row = typeof costLine.$inferSelect;
@@ -43,6 +45,7 @@ export const AMOUNT_ABOVE_ZERO = 'Enter an amount above zero.';
 export const ONLY_MANUAL = 'Only costs added by hand can be edited.';
 export const VOID_REASON_NEEDED = "Say why you're voiding this cost.";
 export const MAX_NOTE = 500;
+export const NOT_FUTURE = "A cost can't be dated in the future.";
 const EDITED = 'Edited';
 const OLD_CURSOR = 'That page link is out of date. Start from the first page.';
 const KEYS: readonly string[] = COST_CATEGORIES.map((c) => c.key);
@@ -78,8 +81,10 @@ export async function afterLinesChanged(ctx: ModuleContext, category: CostCatego
 
 const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`)) && new Date(`${s}T00:00:00Z`).toISOString().startsWith(s);
 
-function checked(input: ManualLineInput): ManualLineInput {
+/** A manual line is dated today or earlier in the tenant timezone, so a later month's level is never left stale. */
+async function checked(ctx: ModuleContext, input: ManualLineInput): Promise<ManualLineInput> {
   if (!isDate(input.occurredOn)) throw invalid('occurred_on', 'Enter a date like 2026-11-05.');
+  if (input.occurredOn > dayOf(new Date(), await tenantTimezone(ctx))) throw invalid('occurred_on', NOT_FUTURE);
   if (!KEYS.includes(input.category)) throw invalid('category', `Category must be one of: ${KEYS.join(', ')}.`);
   if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0) throw invalid('amount_cents', AMOUNT_ABOVE_ZERO);
   const note = input.note?.trim() || null;
@@ -128,7 +133,7 @@ async function insertManual(ctx: ModuleContext, input: ManualLineInput, replaces
 }
 
 export async function addManualLine(ctx: ModuleContext, input: ManualLineInput): Promise<CostLineView> {
-  const row = await insertManual(ctx, checked(input), null);
+  const row = await insertManual(ctx, await checked(ctx, input), null);
   await afterLinesChanged(ctx, row.category as CostCategory, row.occurredOn);
   return view(row);
 }
@@ -154,7 +159,7 @@ async function markVoided(ctx: ModuleContext, id: string, reason: string): Promi
 export async function editManualLine(ctx: ModuleContext, id: string, patch: Partial<ManualLineInput>): Promise<CostLineView> {
   const old = await openLine(ctx, id);
   if (old.origin !== 'manual') throw conflict(ONLY_MANUAL);
-  const next = checked({
+  const next = await checked(ctx, {
     occurredOn: patch.occurredOn ?? old.occurredOn,
     category: patch.category ?? (old.category as CostCategory),
     amountCents: patch.amountCents ?? old.amountCents,

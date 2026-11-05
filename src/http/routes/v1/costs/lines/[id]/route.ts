@@ -16,9 +16,9 @@ export const PATCH = v1Route({ permission: 'costs:write', peopleOnly: true }, as
   return editManualLine(ctx, id, await parseBody<Partial<ManualLineInput>>(req, editLineBody));
 });
 
-/** `POST /costs/lines/{id}:void` with `{ reason }`. */
+/** `POST /costs/lines/{id}:void` with `{ reason }`. People only, like add and edit. */
 export const POST = byAction('lines', {
-  void: v1Route({ permission: 'costs:write' }, async (req, _principal, ctx) => {
+  void: v1Route({ permission: 'costs:write', peopleOnly: true }, async (req, _principal, ctx) => {
     const id = idOf(req, true);
     const { reason } = await parseBody<{ reason?: string }>(req, voidLineBody);
     return voidLine(ctx, id, reason ?? '');
