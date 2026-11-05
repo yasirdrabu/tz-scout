@@ -15,12 +15,12 @@ import type { CrmAdapter } from '../contracts/adapter';
 import { handoffCancelled, handoffCompleted, handoffFailed, handoffNeedsDecision } from '../contracts/events';
 import { handoffPushJob, planSyncJob, PUSH_MAX_ATTEMPTS } from '../contracts/jobs';
 import { handoffPackageProvider } from '../contracts/ports';
-import { DEFAULT_FOLLOW_UP_DAYS } from '../contracts/types';
-import { crmSetting, fieldMapping, followThrough, handoff } from '../db/schema';
+import { DEFAULT_FOLLOW_UP_DAYS, type HandoffPackage } from '../contracts/types';
+import { crmSetting, fieldMapping, followThrough, handoff, taskLink } from '../db/schema';
 import { propertyValues } from '../domain/fields';
 import { buildNote } from '../domain/note';
 import { classifyPushError, NO_CRM_OWNER, NO_DOMAIN, NotPushable, OWNER_INACTIVE, REASON_LIMIT, RETRIES_FAILED } from '../domain/push-errors';
-import { buildTasks } from '../domain/tasks';
+import { buildTasks, type TaskSpec } from '../domain/tasks';
 import { batchFor, refreshBatch } from './batches';
 import { companyLifecycle } from './deals';
 import { getLinks, recordLink } from './links';
@@ -305,28 +305,11 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
   );
   await recordLink(ctx, { scoutType: 'note', scoutId: account.id, system, externalId: note.externalId, fingerprint: note.fingerprint });
 
-  // First touch and follow-ups, keyed by assignment so a re-push updates them in place (Ruling 3). None when the
-  // account has a plan for this handoff (R2c-3b Ruling 10): the plan sync queued below makes its tasks instead.
+  // First touch and follow-ups (Ruling 3). None when the account has a plan for this handoff (R2c-3b Ruling 10):
+  // the plan sync queued below makes its tasks instead.
   const plan = await handoffPackageProvider().planTasks?.(ctx, account.id);
   const planned = !!plan && (plan.status === 'active' || plan.status === 'paused' || plan.assignmentId === h.assignmentId);
-  const [setting] = await ctx.tx.select({ days: crmSetting.followUpDays }).from(crmSetting).where(eq(crmSetting.tenantId, ctx.tenantId));
-  const primary = account.people.find((p) => p.isPrimary && personName(p));
-  const best = pkg?.properties.best_offer;
-  const tasks = buildTasks({
-    account,
-    buyer: primary ? { name: personName(primary), title: primary.title, email: primary.email } : null,
-    offerName: typeof best === 'string' && best.trim() ? best : null,
-    followUpDays: setting?.days ?? DEFAULT_FOLLOW_UP_DAYS,
-    handoffAt: now,
-    timezone: await tenantTimezone(ctx),
-    pkg,
-  });
-  const keyed = planned
-    ? []
-    : [
-        { key: `${h.assignmentId}:first_touch`, spec: tasks.firstTouch },
-        ...tasks.followUps.map((f) => ({ key: `${h.assignmentId}:follow_up:${f.day}`, spec: f })),
-      ];
+  const keyed = planned ? [] : await fixedTasks(ctx, h.assignmentId, account, pkg, now);
   const taskIds: string[] = [];
   for (const { key, spec } of keyed) {
     const linked = links.tasks.find((l) => l.scoutId === key && l.system === system);
@@ -345,7 +328,16 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
     taskIds.push(r.externalId);
   }
 
-  const ft = await call('readFollowThrough', (a) => a.readFollowThrough({ companyExternalId: company.externalId, taskExternalIds: taskIds }));
+  // The baseline holds the account's plan tasks too, the same set the poll reads.
+  const planTaskIds = (
+    await ctx.tx
+      .select({ externalId: taskLink.externalTaskId })
+      .from(taskLink)
+      .where(and(eq(taskLink.tenantId, ctx.tenantId), eq(taskLink.accountId, h.accountId), eq(taskLink.system, system)))
+  ).map((r) => r.externalId);
+  const ft = await call('readFollowThrough', (a) =>
+    a.readFollowThrough({ companyExternalId: company.externalId, taskExternalIds: [...new Set([...taskIds, ...planTaskIds])] }),
+  );
 
   // Completion, its baseline, event and batch refresh in one transaction of its own (Ruling 6: only with no cancel).
   const outcome = await settle(
@@ -378,6 +370,28 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
     true,
   );
   if (outcome === 'cancelled') throw new Cancelled();
+}
+
+type PushedAccount = NonNullable<Awaited<ReturnType<typeof getAccount>>>;
+
+/** The first touch and follow-ups, keyed by assignment so a re-push updates them in place (Ruling 3). */
+async function fixedTasks(ctx: ModuleContext, assignmentId: string, account: PushedAccount, pkg: HandoffPackage | null, now: Date): Promise<{ key: string; spec: TaskSpec }[]> {
+  const [setting] = await ctx.tx.select({ days: crmSetting.followUpDays }).from(crmSetting).where(eq(crmSetting.tenantId, ctx.tenantId));
+  const primary = account.people.find((p) => p.isPrimary && personName(p));
+  const best = pkg?.properties.best_offer;
+  const tasks = buildTasks({
+    account,
+    buyer: primary ? { name: personName(primary), title: primary.title, email: primary.email } : null,
+    offerName: typeof best === 'string' && best.trim() ? best : null,
+    followUpDays: setting?.days ?? DEFAULT_FOLLOW_UP_DAYS,
+    handoffAt: now,
+    timezone: await tenantTimezone(ctx),
+    pkg,
+  });
+  return [
+    { key: `${assignmentId}:first_touch`, spec: tasks.firstTouch },
+    ...tasks.followUps.map((f) => ({ key: `${assignmentId}:follow_up:${f.day}`, spec: f })),
+  ];
 }
 
 /**

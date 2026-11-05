@@ -11,13 +11,11 @@ import { handoffPackageProvider } from '../contracts/ports';
 import type { PlanTasks } from '../contracts/types';
 import { link, taskLink } from '../db/schema';
 import { crmNotFound } from '../domain/push-errors';
-import { dueAtOn, planTaskSpec } from '../domain/tasks';
+import { CLOSED_BY_SCOUT, dueAtOn, planTaskSpec, REPLACED_TASK } from '../domain/tasks';
 import { latestCompleted } from './follow-through';
 import { lockAccount } from './handoff';
 import { recordLink } from './links';
 
-/** A fixed handoff task the plan sync has dealt with (closed, or found done or gone), keyed by assignment, so it is read once. */
-const REPLACED_TASK = 'replaced_task';
 const OPEN_STEP = ['todo', 'in_progress'];
 
 type Step = PlanTasks['steps'][number];
@@ -188,9 +186,8 @@ async function replaceFixedTasks(
   if (todo.length === 0) return;
   const ft = await call('readFollowThrough', (a) => a.readFollowThrough({ companyExternalId: company, taskExternalIds: todo }));
   for (const externalId of todo) {
-    if (ft.tasks.find((x) => x.externalId === externalId)?.status === 'open') {
-      await call('closeTask', (a) => a.closeTask({ externalId, note: `Replaced by the ${playbook} playbook.` }));
-    }
-    await recordLink(ctx, { scoutType: REPLACED_TASK, scoutId: assignmentId, system, externalId });
+    const open = ft.tasks.find((x) => x.externalId === externalId)?.status === 'open';
+    if (open) await call('closeTask', (a) => a.closeTask({ externalId, note: `Replaced by the ${playbook} playbook.` }));
+    await recordLink(ctx, { scoutType: REPLACED_TASK, scoutId: assignmentId, system, externalId, ...(open ? { fingerprint: CLOSED_BY_SCOUT } : {}) });
   }
 }

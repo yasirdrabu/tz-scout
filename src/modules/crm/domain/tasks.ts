@@ -38,7 +38,14 @@ export function dueAtOn(date: string, timezone: string): string {
   return dueAt(year, month, day, timezone);
 }
 
-export const NO_BUYER_SENTENCE = 'No buyer contact yet; the note lists who to look for.';
+/**
+ * A fixed handoff task the plan sync has dealt with (closed, or found done or gone): a `crm.link` keyed by assignment,
+ * so it is read once. Its fingerprint is CLOSED_BY_SCOUT when Scout closed it, so the poll never reports it done.
+ */
+export const REPLACED_TASK = 'replaced_task';
+export const CLOSED_BY_SCOUT = 'closed_by_scout';
+
+export const NO_BUYER_SENTENCE ='No buyer contact yet; the note lists who to look for.';
 
 export function buildTasks(input: TaskInput): { firstTouch: TaskSpec; followUps: (TaskSpec & { day: number })[] } {
   const { account, buyer, offerName, pkg, timezone } = input;

@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { editPerson, upsertFromArrival } from '@/modules/accounts';
 import { activityObserved, push, seedMockCrm, syncAccount, syncOwners, syncPlanTasks } from '@/modules/crm';
-import { handoff, link, mockTask, taskLink } from '@/modules/crm/db/schema';
+import { followThrough as followThroughTable, handoff, link, mockTask, taskLink } from '@/modules/crm/db/schema';
 import { dueAtOn } from '@/modules/crm/domain/tasks';
 import { mockAddActivity, mockCompleteTask } from '@/modules/crm/fixtures';
 import { callLog } from '@/modules/integrations/db/schema';
@@ -472,5 +472,30 @@ describe('the handoff with plan tasks (CRM-E3-S4, CRM-E5-S2-AC2)', () => {
     for (const s of stepIds) await setStep(planId, s, { status: 'done' });
     expect((await planOf(accountId)).noReplyAt).not.toBeNull();
     expect(await stageOf(accountId)).toBe('back_to_nurture');
+  });
+
+  it('fixed tasks Scout replaced are not reported done; one a person completed before accept is, once', async () => {
+    const made = await handedOff();
+    const fixed = await fixedLinks(made.assignmentId);
+    const first = fixed.find((l) => l.scoutId.endsWith(':first_touch'))!;
+    await t.run((ctx) => mockCompleteTask(ctx, first.externalId));
+    await acceptAs(made.assignmentId);
+    await sync(made.accountId);
+    await sync(made.accountId);
+
+    expect(await taskDone(first.externalId)).toHaveLength(1);
+    for (const l of fixed.filter((x) => x !== first)) {
+      expect((await mockTaskById(l.externalId)).status).toBe('completed');
+      expect(await taskDone(l.externalId)).toEqual([]);
+    }
+  });
+
+  it('a re-push while the plan stands keeps the plan tasks in the baseline', async () => {
+    const { accountId, planId } = await planned();
+    const { handoffId } = await asPerson(t, (ctx) => push(ctx, accountId), { userId: leader });
+    await runOutbox(t.tenantId);
+    const [row] = await t.run((ctx) => ctx.tx.select().from(followThroughTable).where(eq(followThroughTable.handoffId, handoffId)));
+    const ids = (await linksOf(planId)).map((l) => l.externalTaskId).sort();
+    expect(row!.tasks.map((x) => x.id).sort()).toEqual(ids);
   });
 });

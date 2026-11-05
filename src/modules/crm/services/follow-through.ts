@@ -12,6 +12,7 @@ import { syncJob } from '../contracts/jobs';
 import type { ActivityKind } from '../contracts/types';
 import { activity, followThrough as followThroughTable, handoff, link, taskLink } from '../db/schema';
 import { countsOfRow, type FollowThroughCounts } from '../domain/follow-through';
+import { CLOSED_BY_SCOUT, REPLACED_TASK } from '../domain/tasks';
 import { syncDeals } from './deals';
 import { lockAccount } from './handoff';
 import { crmSystem } from './owners';
@@ -56,26 +57,25 @@ export async function syncAccount(ctx: ModuleContext, accountId: string, now: Da
 
 async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternalId: string, now: Date): Promise<void> {
   const call = <T>(op: string, fn: (a: CrmAdapter) => Promise<T>) => gateway.call(ctx, h.system, op, (a) => fn(a as CrmAdapter), { module: 'crm' });
-  const taskIds = (
-    await ctx.tx
-      .select({ externalId: link.externalId })
-      .from(link)
-      .where(
-        and(
-          eq(link.tenantId, ctx.tenantId),
-          eq(link.scoutType, 'task'),
-          eq(link.system, h.system),
-          sql`left(${link.scoutId}, ${h.assignmentId.length + 1}) = ${h.assignmentId + ':'}`,
-        ),
-      )
-  ).map((r) => r.externalId);
-  // The account's plan tasks too (R2c-3b): one Scout closed is not reported done (Ruling 14).
+  const fixed = await ctx.tx
+    .select({ type: link.scoutType, externalId: link.externalId, fingerprint: link.fingerprint })
+    .from(link)
+    .where(
+      and(
+        eq(link.tenantId, ctx.tenantId),
+        eq(link.system, h.system),
+        sql`((${link.scoutType} = 'task' and left(${link.scoutId}, ${h.assignmentId.length + 1}) = ${h.assignmentId + ':'}) or (${link.scoutType} = ${REPLACED_TASK} and ${link.scoutId} = ${h.assignmentId}))`,
+      ),
+    );
+  // A fixed task Scout closed as replaced by the playbook is not reported done (Ruling 14).
+  const closedByScout = new Set(fixed.filter((r) => r.type === REPLACED_TASK && r.fingerprint === CLOSED_BY_SCOUT).map((r) => r.externalId));
+  // The account's plan tasks too (R2c-3b): one Scout closed is not reported done either.
   const planLinks = await ctx.tx
     .select({ stepId: taskLink.stepId, externalTaskId: taskLink.externalTaskId, status: taskLink.status })
     .from(taskLink)
     .where(and(eq(taskLink.tenantId, ctx.tenantId), eq(taskLink.accountId, h.accountId), eq(taskLink.system, h.system)));
   const planLinkOf = new Map(planLinks.map((l) => [l.externalTaskId, l]));
-  taskIds.push(...planLinks.map((l) => l.externalTaskId).filter((id) => !taskIds.includes(id)));
+  const taskIds = [...new Set([...fixed.filter((r) => r.type === 'task').map((r) => r.externalId), ...planLinks.map((l) => l.externalTaskId)])];
 
   // Nothing before the handoff, and nothing already seen, is new. A task_done is stamped when we saw it, so it does not move this.
   const [seen] = await ctx.tx
@@ -137,7 +137,7 @@ async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternal
   // closed is only kept in the stored list; an open one is marked done first, so the plan sync never closes it.
   for (const t of turnedDone) {
     const l = planLinkOf.get(t.externalId);
-    if (l?.status === 'closed') continue;
+    if (l?.status === 'closed' || closedByScout.has(t.externalId)) continue;
     if (l?.status === 'open') {
       await ctx.tx
         .update(taskLink)
