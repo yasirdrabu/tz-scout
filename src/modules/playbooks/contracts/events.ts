@@ -128,3 +128,10 @@ export const planNotStarted = defineEvent(
     reason: z.enum(['no_playbook_chosen', 'no_offer_playbook', 'template_unavailable', 'superseded']),
   }),
 );
+
+/** The plan's last step closed and nobody replied or booked since accept. Once per plan; the plan's status does not change. */
+export const planNoReply = defineEvent(
+  'playbooks.plan.no_reply',
+  1,
+  z.object({ planId: z.string(), accountId: z.string(), assignmentId: z.string(), at: z.string() }),
+);

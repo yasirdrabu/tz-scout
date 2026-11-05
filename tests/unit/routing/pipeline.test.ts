@@ -56,12 +56,16 @@ const sig = (...triggers: Trigger[]): StageSignal[] => triggers.map((trigger) =>
 const keys = DEFAULT_STAGES.map((s) => s.key);
 
 describe('REV-E4 equivalence: with the default stages moveFor does what nextStage did', () => {
-  const cases = (Object.keys(SIGNALS) as LegacyEvent[]).flatMap((event) => keys.map((stage) => [event, stage] as const));
+  // R2c-3b: Back to nurture (the no-reply exit) is left on a reply, meeting or deal; tested below.
+  const leavesNurture = (event: LegacyEvent, stage: string) => stage === 'back_to_nurture' && ['engaged', 'opportunity', 'won'].includes(event);
+  const cases = (Object.keys(SIGNALS) as LegacyEvent[]).flatMap((event) => keys.filter((stage) => !leavesNurture(event, stage)).map((stage) => [event, stage] as const));
   it.each(cases)('%s at %s', (event, stage) => {
     expect(moveFor(stage, SIGNALS[event], DEFAULT_STAGES)).toBe(legacyNextStage(stage, event));
   });
   it('a meeting (reply_or_meeting and meeting_booked) is an engaged event', () => {
-    for (const stage of keys) expect(moveFor(stage, sig('reply_or_meeting', 'meeting_booked'), DEFAULT_STAGES)).toBe(legacyNextStage(stage, 'engaged'));
+    for (const stage of keys.filter((s) => !leavesNurture('engaged', s))) {
+      expect(moveFor(stage, sig('reply_or_meeting', 'meeting_booked'), DEFAULT_STAGES)).toBe(legacyNextStage(stage, 'engaged'));
+    }
   });
 });
 
@@ -129,10 +133,9 @@ describe('movement rules', () => {
     expect(moveFor('assigned', sig('reply_or_meeting'), stages)).toBe('engaged');
   });
   it('exits are entered from any flow stage but the won stage', () => {
-    for (const from of ['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity']) {
-      expect(moveFor(from, sig('deal_closed_lost'), DEFAULT_STAGES)).toBe('lost');
-      expect(moveFor(from, sig('playbook_no_reply'), DEFAULT_STAGES)).toBe('back_to_nurture');
-    }
+    for (const from of ['arrived', 'reviewed', 'assigned', 'engaged', 'opportunity']) expect(moveFor(from, sig('deal_closed_lost'), DEFAULT_STAGES)).toBe('lost');
+    // A playbook ending with no reply stops short of an account that has engaged.
+    for (const from of ['arrived', 'reviewed', 'assigned']) expect(moveFor(from, sig('playbook_no_reply'), DEFAULT_STAGES)).toBe('back_to_nurture');
     expect(moveFor('won', sig('deal_closed_lost'), DEFAULT_STAGES)).toBeNull();
     expect(moveFor('won', sig('reviewer_rejects'), DEFAULT_STAGES)).toBeNull();
   });
@@ -174,6 +177,39 @@ describe('movement rules', () => {
     expect(moveFor('opportunity', reaches, stages)).toBe('stg_proposal');
     expect(moveFor('opportunity', [{ trigger: 'deal_reaches_stage', hubspotStage: 'other' }], stages)).toBeNull();
     expect(moveFor('won', reaches, stages)).toBeNull();
+  });
+  it('a playbook ending with no reply moves an accepted account to the exit, never one that engaged or went further', () => {
+    const noReply: StageSignal[] = [{ trigger: 'playbook_no_reply' }];
+    expect(moveFor('assigned', noReply, DEFAULT_STAGES)).toBe('back_to_nurture');
+    expect(moveFor('reviewed', noReply, DEFAULT_STAGES)).toBe('back_to_nurture');
+    expect(moveFor('engaged', noReply, DEFAULT_STAGES)).toBeNull();
+    expect(moveFor('opportunity', noReply, DEFAULT_STAGES)).toBeNull();
+    expect(moveFor('won', noReply, DEFAULT_STAGES)).toBeNull();
+    expect(moveFor('declined', noReply, DEFAULT_STAGES)).toBeNull();
+  });
+  it('an account in the no-reply exit leaves it on a later reply, meeting or deal, like from a flow stage', () => {
+    expect(moveFor('back_to_nurture', sig('reply_or_meeting'), DEFAULT_STAGES)).toBe('engaged');
+    expect(moveFor('back_to_nurture', sig('reply_or_meeting', 'meeting_booked'), DEFAULT_STAGES)).toBe('engaged');
+    expect(moveFor('back_to_nurture', sig('deal_created'), DEFAULT_STAGES)).toBe('opportunity');
+    expect(moveFor('back_to_nurture', sig('deal_closed_won'), DEFAULT_STAGES)).toBe('won');
+    const stages = inserted(stage({ key: 'stg_proposal', position: 5, trigger: 'deal_reaches_stage', hubspotStage: 'proposal' }));
+    expect(moveFor('back_to_nurture', [{ trigger: 'deal_reaches_stage', hubspotStage: 'proposal' }], stages)).toBe('stg_proposal');
+    expect(moveFor('back_to_nurture', sig('meeting_booked'), DEFAULT_STAGES)).toBeNull(); // no stage owns it
+    // Nothing else takes it out, and the other exits keep their rules.
+    expect(moveFor('back_to_nurture', sig('ae_accepts'), DEFAULT_STAGES)).toBeNull();
+    expect(moveFor('back_to_nurture', sig('reviewer_sets_tier'), DEFAULT_STAGES)).toBeNull();
+    expect(moveFor('back_to_nurture', sig('deal_closed_lost'), DEFAULT_STAGES)).toBeNull();
+    expect(moveFor('declined', sig('reply_or_meeting'), DEFAULT_STAGES)).toBeNull();
+  });
+  it('a hand-set stage past the first reply or meeting stage does not go back to nurture, whatever its trigger', () => {
+    const stages = inserted(stage({ key: 'stg_demo', position: 5 }));
+    expect(moveFor('stg_demo', [{ trigger: 'playbook_no_reply' }], stages)).toBeNull();
+  });
+  it('with no stage past acceptance, a playbook ending with no reply moves from any flow stage but Won', () => {
+    const bare = DEFAULT_STAGES.filter((s) => !['engaged', 'opportunity'].includes(s.key)).map((s) => (s.key === 'won' ? { ...s, trigger: 'by_hand' as const } : s));
+    expect(moveFor('assigned', [{ trigger: 'playbook_no_reply' }], bare)).toBe('back_to_nurture');
+    expect(moveFor('arrived', [{ trigger: 'playbook_no_reply' }], bare)).toBe('back_to_nurture');
+    expect(moveFor('won', [{ trigger: 'playbook_no_reply' }], bare)).toBeNull();
   });
   it('an archived or unknown current stage only moves by hand', () => {
     expect(moveFor('stg_old', sig('ae_accepts'), DEFAULT_STAGES)).toBeNull();

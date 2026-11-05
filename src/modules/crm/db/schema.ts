@@ -16,7 +16,7 @@ export const link = crm.table(
   {
     id: text('id').primaryKey(), // lnk_
     tenantId: text('tenant_id').notNull(),
-    scoutType: text('scout_type').notNull(), // account | person | note | task | deal | owner | undo_note
+    scoutType: text('scout_type').notNull(), // account | person | note | task | deal | owner | undo_note | undo_task | replaced_task
     scoutId: text('scout_id').notNull(),
     system: text('system').notNull(),
     externalId: text('external_id').notNull(),
@@ -211,7 +211,7 @@ export const activity = crm.table(
   ],
 );
 
-/** Playbook step to CRM task. */
+/** Playbook step to CRM task (R2c-3b Ruling 2). The fixed handoff tasks are in `link`, never here. */
 export const taskLink = crm.table(
   'task_link',
   {
@@ -220,9 +220,18 @@ export const taskLink = crm.table(
     system: text('system').notNull(),
     externalTaskId: text('external_task_id').notNull(),
     dueAt: at('due_at'),
+    /** open | closed (Scout closed it) | done (seen completed in the CRM) */
     status: text('status').notNull().default('open'),
+    accountId: text('account_id').notNull(),
+    planId: text('plan_id').notNull(),
+    /** Of what Scout last wrote (Ruling 11): an open link with the same fingerprint needs no CRM call. */
+    fingerprint: text('fingerprint'),
   },
-  (t) => [primaryKey({ columns: [t.tenantId, t.system, t.stepId] })],
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.system, t.stepId] }),
+    index('task_link_external_idx').on(t.tenantId, t.system, t.externalTaskId),
+    check('task_link_status_valid', sql`${t.status} in ('open', 'closed', 'done')`),
+  ],
 );
 
 /** What the CRM said about an account's company the last time we asked (Ruling 11). */

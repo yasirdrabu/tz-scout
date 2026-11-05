@@ -1,12 +1,13 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds, listBuyingRoles, listPeople, resolveAccountId } from '@/modules/accounts';
+import type { PlanTasks } from '@/modules/crm';
 import { memberDirectory, tenantTimezone, userNames } from '@/modules/tenancy';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
-import { planChanged, stepCompleted } from '../contracts/events';
+import { planChanged, planNoReply, stepCompleted } from '../contracts/events';
 import { accountPlan, planChange, planStep, playbookTemplate } from '../db/schema';
 import { dueFlags, pickNextStep } from '../domain/next-step';
 import { dueDateFor, insertOrder, linkedPeople, localDate, missingRoles, type PlanPerson, type StepChannel } from '../domain/plan';
@@ -38,8 +39,8 @@ type StepSnapshot =
     }
   | { id: string; removed: true };
 
-const OPEN_STEP = ['todo', 'in_progress'];
-const CLOSED = ['completed', 'stopped', 'abandoned'];
+export const OPEN_STEP = ['todo', 'in_progress'];
+export const CLOSED = ['completed', 'stopped', 'abandoned'];
 
 const notFound = () => new ScoutError({ slug: 'not-found', status: 404, title: 'That plan was not found.' });
 const ended = () => new ScoutError({ slug: 'plan-ended', status: 409, title: PLAN_ENDED });
@@ -88,6 +89,20 @@ export async function publishChanged(
     },
     { type: 'account', id: plan.accountId },
   );
+}
+
+/**
+ * Ruling 15: when the last open step of an active plan closes and nobody replied or booked since accept, publishes
+ * `playbooks.plan.no_reply` once. The plan's status does not change. Called inside the transaction that closed the step.
+ */
+export async function checkNoReply(ctx: ModuleContext, planId: string): Promise<void> {
+  const [plan] = await ctx.tx.select().from(accountPlan).where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.id, planId))).for('update');
+  if (!plan || plan.status !== 'active' || plan.engagedAt || plan.noReplyAt) return;
+  const steps = await ctx.tx.select({ status: planStep.status }).from(planStep).where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, planId)));
+  if (steps.length === 0 || steps.some((s) => OPEN_STEP.includes(s.status))) return;
+  const now = new Date();
+  await ctx.tx.update(accountPlan).set({ noReplyAt: now, updatedAt: now }).where(eq(accountPlan.id, planId));
+  await publish(ctx, planNoReply, { planId, accountId: plan.accountId, assignmentId: plan.assignmentId, at: now.toISOString() }, { type: 'account', id: plan.accountId });
 }
 
 /** A plan by id with its row locked. A plan on an account the caller cannot see is a 404. */
@@ -142,6 +157,22 @@ const daysBetween = (from: string, to: string) => {
 const personName = (p: { firstName: string | null; lastName: string | null; email: string | null }) =>
   [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email || 'Unnamed';
 
+/** One read of the account's people for a plan's steps (none when no step targets a role); roles Enrich or a person added after acceptance count. */
+async function planPeople(ctx: ModuleContext, accountId: string, steps: Step[]): Promise<(PlanPerson & { name: string })[]> {
+  if (!steps.some((s) => s.targetBuyingRoles.length > 0)) return [];
+  return (await listPeople(ctx, accountId)).map((p) => ({ id: p.id, firstName: p.firstName, name: personName(p), roles: p.roles.map((r) => ({ key: r.key, origin: r.origin })) }));
+}
+
+/** The account's plans, newest first, and the one that counts: the open plan, else the latest. */
+async function accountPlans(ctx: ModuleContext, accountId: string): Promise<{ plan: Plan | undefined; rows: Plan[] }> {
+  const rows = await ctx.tx
+    .select()
+    .from(accountPlan)
+    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, accountId)))
+    .orderBy(desc(accountPlan.createdAt), desc(accountPlan.id));
+  return { plan: rows.find((p) => !CLOSED.includes(p.status)) ?? rows[0], rows };
+}
+
 async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
   const [template] = await ctx.tx.select().from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), eq(playbookTemplate.id, plan.templateId)));
   const steps = await stepsOf(ctx, plan.id);
@@ -154,10 +185,7 @@ async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
   const ids = [...steps.map((s) => s.ownerUserId), ...history.map((h) => h.by)].filter((x): x is string => !!x);
   const names = ids.length ? await userNames(ctx, ids) : new Map<string, string>();
   const today = localDate(Date.now(), await tenantTimezone(ctx));
-  // One read of the account's people for the whole plan; roles Enrich or a person added after acceptance count.
-  const people: (PlanPerson & { name: string })[] = steps.some((s) => s.targetBuyingRoles.length > 0)
-    ? (await listPeople(ctx, plan.accountId)).map((p) => ({ id: p.id, firstName: p.firstName, name: personName(p), roles: p.roles.map((r) => ({ key: r.key, origin: r.origin })) }))
-    : [];
+  const people = await planPeople(ctx, plan.accountId, steps);
   // An archived buying role is not something to go and find.
   const active = new Set(steps.some((s) => s.targetBuyingRoles.length > 0) ? (await listBuyingRoles(ctx)).map((r) => r.key) : []);
   return {
@@ -194,13 +222,50 @@ async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
 export async function getPlan(ctx: ModuleContext, accountId: string): Promise<PlanView | null> {
   const found = await resolveAccountId(ctx, accountId);
   if (!found || (await filterVisibleAccountIds(ctx, [found.id])).length === 0) return null;
-  const rows = await ctx.tx
-    .select()
-    .from(accountPlan)
-    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, found.id)))
-    .orderBy(desc(accountPlan.createdAt), desc(accountPlan.id));
-  const plan = rows.find((p) => !CLOSED.includes(p.status)) ?? rows[0];
+  const { plan } = await accountPlans(ctx, found.id);
   return plan ? view(ctx, plan) : null;
+}
+
+/**
+ * CRM's read of the plan for its HubSpot tasks (R2c-3b Ruling 1): the plan `getPlan` picks, with each step's people
+ * worked out the same way, or null. A system read: no visibility check.
+ */
+export async function planTasks(ctx: ModuleContext, accountId: string): Promise<PlanTasks | null> {
+  const found = await resolveAccountId(ctx, accountId);
+  if (!found) return null;
+  const { plan, rows } = await accountPlans(ctx, found.id);
+  if (!plan) return null;
+  const templates = await ctx.tx
+    .select({ id: playbookTemplate.id, name: playbookTemplate.name })
+    .from(playbookTemplate)
+    .where(and(eq(playbookTemplate.tenantId, ctx.tenantId), inArray(playbookTemplate.id, [...new Set(rows.map((r) => r.templateId))])));
+  const nameOf = (templateId: string) => templates.find((x) => x.id === templateId)?.name ?? '';
+  const steps = await stepsOf(ctx, plan.id);
+  const people = await planPeople(ctx, plan.accountId, steps);
+  return {
+    planId: plan.id,
+    assignmentId: plan.assignmentId,
+    playbookName: nameOf(plan.templateId),
+    status: plan.status as PlanTasks['status'],
+    statusReason: plan.statusReason,
+    sellerUserId: plan.sellerUserId,
+    steps: steps.map((s) => ({
+      id: s.id,
+      channel: s.channel as StepChannel,
+      title: s.title,
+      detail: s.detail,
+      subject: s.subject,
+      body: s.body,
+      status: s.status as StepStatus,
+      ownerUserId: s.ownerUserId,
+      dueDate: s.dueDate,
+      crmTask: s.crmTask,
+      personIds: linkedPeople(people, s.targetBuyingRoles).map((p) => p.id),
+    })),
+    otherPlans: rows
+      .filter((r) => r.id !== plan.id)
+      .map((r) => ({ planId: r.id, playbookName: nameOf(r.templateId), status: r.status as PlanTasks['status'], statusReason: r.statusReason })),
+  };
 }
 
 /** 'YYYY-MM-DD' that is a real calendar day (2026-02-31 is not). */
@@ -381,6 +446,7 @@ export async function updateStep(ctx: ModuleContext, planId: string, stepId: str
       );
     }
     await audit(ctx, { action: 'playbooks.plan_step.updated', subject: { type: 'account_plan', id: planId }, after: { stepId, changed: changes.map(([k]) => k) } });
+    if (set.status !== undefined) await checkNoReply(ctx, planId);
   }
   const [fresh] = await ctx.tx.select().from(accountPlan).where(eq(accountPlan.id, planId));
   return view(ctx, fresh!);
@@ -456,6 +522,7 @@ export async function removeStep(ctx: ModuleContext, planId: string, stepId: str
   await recordChange(ctx, planId, 'step_removed', { title: step.title, day: step.day, channel: step.channel, status: step.status, dueDate: step.dueDate }, stepId);
   await publishChanged(ctx, plan, ['steps'], undefined, { steps: [{ id: stepId, removed: true }] });
   await audit(ctx, { action: 'playbooks.plan_step.removed', subject: { type: 'account_plan', id: planId }, after: { stepId } });
+  await checkNoReply(ctx, planId);
   const [fresh] = await ctx.tx.select().from(accountPlan).where(eq(accountPlan.id, planId));
   return view(ctx, fresh!);
 }
@@ -481,7 +548,10 @@ export async function resumePlan(ctx: ModuleContext, planId: string): Promise<Pl
   const plan = await loadPlan(ctx, planId);
   if (CLOSED.includes(plan.status)) throw ended();
   if (plan.status === 'active') return view(ctx, plan);
-  return view(ctx, await move(ctx, plan, 'active', null, 'resumed', { reason: 'by_hand' }, ['status']));
+  const resumed = await move(ctx, plan, 'active', null, 'resumed', { reason: 'by_hand' }, ['status']);
+  // Steps may have all closed while it was paused.
+  await checkNoReply(ctx, planId);
+  return view(ctx, resumed);
 }
 
 /** Completes a plan once every step is done or skipped (409 otherwise). */

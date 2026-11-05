@@ -48,3 +48,6 @@ export const ownersSyncJob = defineJob('crm.owners.sync', z.object({}), {});
 
 /** Checks one new account against the CRM (Ruling 11). */
 export const companyCheckJob = defineJob('crm.company.check', z.object({ accountId: z.string() }), {});
+
+/** Makes one account's HubSpot tasks match its plan (R2c-3b Ruling 12); queued by every plan event. */
+export const planSyncJob = defineJob('crm.plan.sync', z.object({ accountId: z.string() }), { timeoutMs: 120_000 });

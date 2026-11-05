@@ -51,7 +51,8 @@ Engaged stage and playbook outcomes are automatic.
   poll or both.
 - CRM-E5-S2-AC2 A CRM task linked to a playbook step that becomes completed publishes
   `crm.activity.observed` with kind `task_done`, `stepId` and `taskExternalId`, and Playbooks marks the
-  step done.
+  step done. Its link becomes `done`, so Scout never closes it. Not for a task Scout closed itself (link
+  `closed`): that one is only recorded.
 - CRM-E5-S2-AC3 Each activity carries `actorCrmOwnerId`, and `actorUserId` when the owner is linked to
   a Scout user; an email sent by the assigned seller has `actorUserId` = that seller.
 

@@ -12,7 +12,7 @@ import { planCreated, planNotStarted } from '../contracts/events';
 import { accountPlan, planStep, playbookTemplate, templateStep } from '../db/schema';
 import { buildPlan, type OwnerRole, type StepChannel, type StopWhen, type Tier } from '../domain/plan';
 import { MAPPED_TIERS, playbookFor } from './offer-playbooks';
-import { publishChanged, recordChange, snapshot } from './plans';
+import { checkNoReply, publishChanged, recordChange, snapshot } from './plans';
 
 type Accepted = z.output<typeof assignmentAccepted.data>;
 type NotStarted = 'no_playbook_chosen' | 'no_offer_playbook' | 'template_unavailable' | 'superseded';
@@ -49,6 +49,8 @@ async function takeOver(ctx: ModuleContext, plan: typeof accountPlan.$inferSelec
   const detail = { reason: 'accepted', assignmentId: d.assignmentId, previousAssignmentId: plan.assignmentId, sellerUserId: d.sellerUserId };
   await recordChange(ctx, plan.id, resuming ? 'resumed' : 'taken_over', detail);
   await publishChanged(ctx, row!, resuming ? ['status', 'owners'] : ['owners'], undefined, { steps: moved.map(snapshot) });
+  // Steps may have all closed while it was paused, as for `resumePlan`.
+  if (resuming) await checkNoReply(ctx, plan.id);
 }
 
 /**

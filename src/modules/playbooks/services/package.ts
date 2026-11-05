@@ -11,6 +11,7 @@ import { rulesBrief } from '../domain/rules-brief';
 import { readBrief } from './brief';
 import { bestOfferNames } from './best-offer';
 import { buildBriefInput, closestSource } from './inputs';
+import { planTasks } from './plans';
 
 const EMPTY: HandoffPackage = { sections: [], properties: {}, firstTouch: null, followUps: [], planSteps: [] };
 
@@ -86,5 +87,5 @@ export async function handoffPackage(ctx: ModuleContext, accountId: string): Pro
   });
 }
 
-/** CRM's `HandoffPackageProvider` (PLB-E3-S4-AC1), registered in src/entry/compose.ts. */
-export const playbooksHandoffPackage: HandoffPackageProvider = { package: (ctx, accountId) => handoffPackage(ctx, accountId), bestOfferNames };
+/** CRM's `HandoffPackageProvider` (PLB-E3-S4-AC1), registered in src/entry/compose.ts; `planTasks` feeds the plan task sync (R2c-3b). */
+export const playbooksHandoffPackage: HandoffPackageProvider = { package: (ctx, accountId) => handoffPackage(ctx, accountId), bestOfferNames, planTasks };

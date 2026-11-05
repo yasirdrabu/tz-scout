@@ -48,3 +48,31 @@ export type HandoffPackage = {
   followUps: { day: number; subject: string; body: string }[];
   planSteps: { stepId: string; subject: string; body: string; dueAt: string }[];
 };
+
+/**
+ * The account's plan as CRM's plan task sync reads it (R2c-3b Ruling 1): the open plan, else the most recent. `personIds`
+ * are the step's people as the plan shows them (target buying roles, read live).
+ */
+export type PlanTasks = {
+  planId: string;
+  assignmentId: string;
+  playbookName: string;
+  status: 'active' | 'paused' | 'completed' | 'stopped' | 'abandoned';
+  statusReason: string | null;
+  sellerUserId: string | null;
+  steps: {
+    id: string;
+    channel: 'email' | 'linkedin' | 'call' | 'meeting' | 'task';
+    title: string;
+    detail: string | null;
+    subject: string | null;
+    body: string | null;
+    status: 'todo' | 'in_progress' | 'done' | 'skipped';
+    ownerUserId: string | null;
+    dueDate: string;
+    crmTask: boolean;
+    personIds: string[];
+  }[];
+  /** The account's other plans, for the close note of a task an earlier plan left open. */
+  otherPlans: { planId: string; playbookName: string; status: PlanTasks['status']; statusReason: string | null }[];
+};
