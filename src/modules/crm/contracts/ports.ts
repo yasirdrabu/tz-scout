@@ -1,5 +1,5 @@
 import type { ModuleContext } from '@/platform/context';
-import type { HandoffPackage } from './types';
+import type { HandoffPackage, PlanTasks } from './types';
 
 // Ports CRM defines and higher modules implement (Playbooks, later). The composition root
 // (src/entry/compose.ts) registers implementations; until then the default applies.
@@ -11,6 +11,11 @@ export interface HandoffPackageProvider {
    * no brief and no package. Optional: without it the messages name no offer.
    */
   bestOfferNames?(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, string | null>>;
+  /**
+   * The account's latest plan (open, else most recent), or null, for its HubSpot tasks (R2c-3b Ruling 1). A system read:
+   * no visibility check. Optional: without it no plan tasks are made.
+   */
+  planTasks?(ctx: ModuleContext, accountId: string): Promise<PlanTasks | null>;
 }
 
 const defaultProvider: HandoffPackageProvider = { package: async () => null };

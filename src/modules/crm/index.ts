@@ -18,6 +18,7 @@ export {
   handoffUndoJob,
   ownersSyncJob,
   personPushJob,
+  planSyncJob,
   syncJob,
 } from './contracts/jobs';
 export { handoffPackageProvider, registerHandoffPackageProvider, type HandoffPackageProvider } from './contracts/ports';
@@ -32,6 +33,7 @@ export {
   type HandoffPackage,
   type HandoffStatus,
   type OwnershipAction,
+  type PlanTasks,
 } from './contracts/types';
 export { capabilitiesSchema, crmOperations, type CrmAdapter, type CrmCapabilities, type CrmDeal, type QualifiedLead } from './contracts/adapter';
 export {
@@ -44,9 +46,11 @@ export {
   crmConsumers,
   crmPersonAdded,
   crmPersonUpdated,
+  crmPlanChanged,
+  crmPlanCreated,
   crmTenantDefaults,
 } from './consumers';
-export { activityPollHandler, companyCheckHandler, dealsPollHandler, crmJobHandlers, syncHandler, handoffPushHandler, handoffUndoHandler, ownersSyncHandler, personPushHandler } from './jobs';
+export { activityPollHandler, companyCheckHandler, dealsPollHandler, crmJobHandlers, syncHandler, handoffPushHandler, handoffUndoHandler, ownersSyncHandler, personPushHandler, planSyncHandler } from './jobs';
 export { ASSIGN_FIRST, push, queuePersonPush, runPersonPush } from './services/push';
 export { POLL_LIMIT, POLL_WINDOW_MS, checkFollowThrough, followThrough, pollActivity, syncAccount } from './services/follow-through';
 export { crmCheckCard, crmFacts, getHandoffs, lastActivityAt, latestHandoff, type AccountCrmFacts, type CrmCheckCard, type HandoffRow, type HandoffsView } from './services/read';
@@ -62,6 +66,7 @@ export {
   type QualifiedLeadRule,
 } from './services/settings';
 export { MAX_ATTEMPTS, queueHandoff, runPush } from './services/handoff';
+export { syncPlanTasks } from './services/plan-tasks';
 export { crmMergeGuard } from './services/merge';
 export { requestUndo, runUndo, type UndoReason } from './services/undo';
 export { batchFor, getBatch, listBatches, markCopied, refreshBatch, type BatchView } from './services/batches';

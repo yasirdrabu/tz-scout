@@ -1,10 +1,11 @@
 import { defineJobHandler } from '@/platform/runtime/jobs';
 import { ScoutError } from '@/platform/errors';
-import { activityPollJob, companyCheckJob, dealsPollJob, handoffPushJob, handoffUndoJob, ownersSyncJob, personPushJob, syncJob } from './contracts/jobs';
+import { activityPollJob, companyCheckJob, dealsPollJob, handoffPushJob, handoffUndoJob, ownersSyncJob, personPushJob, planSyncJob, syncJob } from './contracts/jobs';
 import { checkCompany } from './services/checks';
 import { pollDeals } from './services/deals';
 import { pollActivity, syncAccount } from './services/follow-through';
 import { runPush } from './services/handoff';
+import { syncPlanTasks } from './services/plan-tasks';
 import { syncOwners } from './services/owners';
 import { runPersonPush } from './services/push';
 import { runUndo } from './services/undo';
@@ -55,5 +56,10 @@ export const syncHandler = defineJobHandler(syncJob, async (e, ctx) => {
   await syncAccount(ctx, e.data.accountId, new Date());
 });
 
+/** Makes the account's HubSpot tasks match its plan (R2c-3b). */
+export const planSyncHandler = defineJobHandler(planSyncJob, async (e, ctx) => {
+  await syncPlanTasks(ctx, e.data.accountId, new Date());
+});
+
 /** Every CRM job handler, for the worker's list. */
-export const crmJobHandlers = [companyCheckHandler, ownersSyncHandler, handoffPushHandler, handoffUndoHandler, personPushHandler, activityPollHandler, syncHandler, dealsPollHandler];
+export const crmJobHandlers = [companyCheckHandler, ownersSyncHandler, handoffPushHandler, handoffUndoHandler, personPushHandler, activityPollHandler, syncHandler, dealsPollHandler, planSyncHandler];

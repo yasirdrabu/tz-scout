@@ -1,9 +1,12 @@
 import { getAccount } from '@/modules/accounts';
 import { accountCreated, accountMerged, accountUpdated, personAdded, personUpdated } from '@/modules/accounts/contracts/events';
+import { planChanged, planCreated } from '@/modules/playbooks/contracts/events';
 import { assignmentCreated, assignmentDeclined, assignmentWithdrawn } from '@/modules/routing/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
 import type { ModuleContext } from '@/platform/context';
+import { enqueueJob } from '@/platform/events/outbox';
 import { defineConsumer } from '@/platform/runtime/consumers';
+import { planSyncJob } from './contracts/jobs';
 import { seedCrmDefaults } from './defaults';
 import { queueCompanyCheck } from './services/checks';
 import { queueHandoff } from './services/handoff';
@@ -120,6 +123,26 @@ export const crmAccountMerged = defineConsumer({
   handle: async (e, ctx) => moveCrmToSurvivor(ctx, e.data.survivorId, e.data.mergedId),
 });
 
+/** A new plan's steps become HubSpot tasks (R2c-3b Ruling 12): the job reads the plan as it is when it runs. */
+export const crmPlanCreated = defineConsumer({
+  name: 'crm.plan_created',
+  event: planCreated,
+  orderedBy: (e) => e.data.accountId,
+  handle: async (e, ctx) => {
+    await enqueueJob(ctx, planSyncJob, { accountId: e.data.accountId });
+  },
+});
+
+/** Every plan change, status-only ones too, syncs the account's plan tasks again. */
+export const crmPlanChanged = defineConsumer({
+  name: 'crm.plan_changed',
+  event: planChanged,
+  orderedBy: (e) => e.data.accountId,
+  handle: async (e, ctx) => {
+    await enqueueJob(ctx, planSyncJob, { accountId: e.data.accountId });
+  },
+});
+
 /** Every CRM consumer, for the worker's list. */
 export const crmConsumers = [
   crmTenantDefaults,
@@ -131,4 +154,6 @@ export const crmConsumers = [
   crmAssignmentWithdrawn,
   crmPersonAdded,
   crmPersonUpdated,
+  crmPlanCreated,
+  crmPlanChanged,
 ];

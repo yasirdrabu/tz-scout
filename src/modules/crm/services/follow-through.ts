@@ -23,7 +23,8 @@ export const POLL_LIMIT = 200;
 /** A handoff stops being polled this long after it completed. */
 export const POLL_WINDOW_MS = 180 * 24 * 60 * 60 * 1000;
 
-const latestCompleted = async (ctx: ModuleContext, accountId: string): Promise<Handoff | undefined> =>
+/** The account's latest completed handoff, or undefined. */
+export const latestCompleted = async (ctx: ModuleContext, accountId: string): Promise<Handoff | undefined> =>
   (
     await ctx.tx
       .select()

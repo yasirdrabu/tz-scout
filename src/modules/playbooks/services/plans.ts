@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds, listBuyingRoles, listPeople, resolveAccountId } from '@/modules/accounts';
+import type { PlanTasks } from '@/modules/crm';
 import { memberDirectory, tenantTimezone, userNames } from '@/modules/tenancy';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
@@ -215,6 +216,48 @@ export async function getPlan(ctx: ModuleContext, accountId: string): Promise<Pl
     .orderBy(desc(accountPlan.createdAt), desc(accountPlan.id));
   const plan = rows.find((p) => !CLOSED.includes(p.status)) ?? rows[0];
   return plan ? view(ctx, plan) : null;
+}
+
+/**
+ * CRM's read of the plan for its HubSpot tasks (R2c-3b Ruling 1): the plan `getPlan` picks, with each step's people
+ * worked out the same way, or null. A system read: no visibility check.
+ */
+export async function planTasks(ctx: ModuleContext, accountId: string): Promise<PlanTasks | null> {
+  const found = await resolveAccountId(ctx, accountId);
+  if (!found) return null;
+  const rows = await ctx.tx
+    .select()
+    .from(accountPlan)
+    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, found.id)))
+    .orderBy(desc(accountPlan.createdAt), desc(accountPlan.id));
+  const plan = rows.find((p) => !CLOSED.includes(p.status)) ?? rows[0];
+  if (!plan) return null;
+  const [template] = await ctx.tx.select({ name: playbookTemplate.name }).from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), eq(playbookTemplate.id, plan.templateId)));
+  const steps = await stepsOf(ctx, plan.id);
+  const people: PlanPerson[] = steps.some((s) => s.targetBuyingRoles.length > 0)
+    ? (await listPeople(ctx, plan.accountId)).map((p) => ({ id: p.id, firstName: p.firstName, roles: p.roles.map((r) => ({ key: r.key, origin: r.origin })) }))
+    : [];
+  return {
+    planId: plan.id,
+    assignmentId: plan.assignmentId,
+    playbookName: template?.name ?? '',
+    status: plan.status as PlanTasks['status'],
+    statusReason: plan.statusReason,
+    sellerUserId: plan.sellerUserId,
+    steps: steps.map((s) => ({
+      id: s.id,
+      channel: s.channel as StepChannel,
+      title: s.title,
+      detail: s.detail,
+      subject: s.subject,
+      body: s.body,
+      status: s.status as StepStatus,
+      ownerUserId: s.ownerUserId,
+      dueDate: s.dueDate,
+      crmTask: s.crmTask,
+      personIds: linkedPeople(people, s.targetBuyingRoles).map((p) => p.id),
+    })),
+  };
 }
 
 /** 'YYYY-MM-DD' that is a real calendar day (2026-02-31 is not). */
