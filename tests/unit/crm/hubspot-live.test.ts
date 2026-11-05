@@ -291,7 +291,7 @@ describe('hubspotLive properties', () => {
 });
 
 describe('hubspotLive activities, deals and leads', () => {
-  it('reads emails, calls and meetings for a company after a time (since is exclusive); an incoming email is a reply', async () => {
+  it('reads emails, calls and meetings for a company since a time (inclusive); an incoming email is a reply', async () => {
     const hit = (type: string, results: unknown[]) => on('POST', `/crm/v3/objects/${type}/search`, { body: { results } });
     const f = fake(
       hit('emails', [
@@ -311,7 +311,7 @@ describe('hubspotLive activities, deals and leads', () => {
     ]);
     const filters = f.calls[0]!.body!.filterGroups[0].filters;
     expect(filters).toContainEqual({ propertyName: 'associations.company', operator: 'EQ', value: '11' });
-    expect(filters).toContainEqual({ propertyName: 'hs_timestamp', operator: 'GT', value: String(Date.parse('2026-03-01T00:00:00Z')) });
+    expect(filters).toContainEqual({ propertyName: 'hs_timestamp', operator: 'GTE', value: String(Date.parse('2026-03-01T00:00:00Z')) });
   });
 
   it('lists deals changed since a time with their company and modified time; a deal with no company comes back with none, so the page count is true', async () => {
