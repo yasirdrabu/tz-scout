@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
 import { REQUESTER, serveEnrichment } from '../enrichment/testing';
+import type { Engagement } from './api';
 import { ACCOUNT, ASSIGNED, COMMITTEE, COMMITTEE_EMPTY, PAGE_LEADER, serveAccount } from './testing';
 
 const URL = '/t/taazaa/accounts/acc_mdc';
@@ -21,6 +22,76 @@ function serveRoles() {
 }
 
 beforeEach(() => localStorage.clear());
+
+const PEOPLE = ['per_met', 'per_rep', 'per_em', 'per_not', 'per_gone'].map((id, i) => ({
+  id,
+  first_name: ['Mia', 'Ravi', 'Eli', 'Nia', 'Gus'][i]!,
+  last_name: 'Test',
+  title: null,
+  is_primary: false,
+  decision_note: null,
+  roles: [],
+}));
+const ENGAGED: Engagement = {
+  people: [
+    { person_id: 'per_met', state: 'met', at: '2026-11-04T15:00:00Z' },
+    { person_id: 'per_rep', state: 'replied', at: '2026-11-03T15:00:00Z' },
+    { person_id: 'per_em', state: 'emailed', at: null },
+    { person_id: 'per_not', state: 'not_contacted', at: null },
+  ],
+  engaged: 2,
+  total: 5,
+  gap_role: null,
+};
+const rowOf = (r: ReturnType<typeof within>, name: string) => r.getByText(`${name} Test`).closest('li')!;
+
+describe('Committee engagement', () => {
+  it('each person reads Met, Replied, Emailed or Not contacted, and a person the answer left out reads Not contacted', async () => {
+    serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, review: ASSIGNED, engagement: ENGAGED });
+    renderApp(URL);
+    const r = await rail();
+    expect(await within(rowOf(r, 'Mia')).findByText('Met Nov 4')).toBeInTheDocument();
+    expect(within(rowOf(r, 'Ravi')).getByText('Replied Nov 3')).toBeInTheDocument();
+    expect(within(rowOf(r, 'Eli')).getByText('Emailed, no reply')).toBeInTheDocument();
+    expect(within(rowOf(r, 'Nia')).getByText('Not contacted')).toBeInTheDocument();
+    expect(within(rowOf(r, 'Gus')).getByText('Not contacted')).toBeInTheDocument();
+  });
+
+  it('the dots are green for met and replied, amber for emailed and gray for not contacted', async () => {
+    serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, review: ASSIGNED, engagement: ENGAGED });
+    renderApp(URL);
+    const r = await rail();
+    await within(rowOf(r, 'Mia')).findByText('Met Nov 4');
+    const dot = (name: string) => rowOf(r, name).querySelector('[data-dot]')!.className;
+    expect(dot('Mia')).toMatch(/good/);
+    expect(dot('Ravi')).toMatch(/good/);
+    expect(dot('Eli')).toMatch(/amber/);
+    expect(dot('Nia')).toMatch(/gray/);
+  });
+
+  it('the review page (before assignment) shows no dots and never reads the engagement', async () => {
+    const asked: string[] = [];
+    serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, engagement: ENGAGED });
+    server.use(http.get('/api/v1/accounts/acc_mdc/engagement', ({ request }) => (asked.push(request.url), HttpResponse.json(ENGAGED))));
+    renderApp(URL);
+    const r = await rail();
+    expect(await r.findByText('Mia Test')).toBeInTheDocument();
+    await new Promise((res) => setTimeout(res, 150));
+    expect(document.querySelectorAll('[data-dot]')).toHaveLength(0);
+    expect(r.queryByText('Not contacted')).toBeNull();
+    expect(asked).toHaveLength(0);
+  });
+
+  it('when the engagement fails, the committee has no dots and no engagement text', async () => {
+    serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, review: ASSIGNED, engagement: null });
+    renderApp(URL);
+    const r = await rail();
+    expect(await r.findByText('Mia Test')).toBeInTheDocument();
+    await new Promise((res) => setTimeout(res, 150));
+    expect(document.querySelectorAll('[data-dot]')).toHaveLength(0);
+    expect(r.queryByText('Not contacted')).toBeNull();
+  });
+});
 
 describe('Committee coverage and Find', () => {
   it('the rail shows the summary under the title and a gap row per missing role', async () => {

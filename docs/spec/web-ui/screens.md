@@ -268,16 +268,17 @@ step.
    roles, HubSpot task); each save is immediate with toasts "Step added.", "Step saved.", "Step removed.".
    Before the seller accepts, the card reads "{playbook} starts when {AE first name} accepts." ("resumes when" if the account already has a paused or active plan, from `plan_resumes`) or "No
    playbook. {AE first name} works it with no set steps." CRM tasks and the stop rule are R2c-3b.
-3. **HubSpot activity** ("Synced {when}"): dated entries of replies, emails, meetings, opens, and
+3. **HubSpot activity** ("Synced {when}"): dated entries of replies, emails, meetings (opens were removed for R2d), and
    Scout's own actions ("Scout set Ash Patel as company owner, logged the brief and started the
    playbook.").
 4. **Review record** ("Approved by {name} on {date}"): the scores, the brief sections shortened,
    `Show the full brief, signals and facts` (expands in place).
 5. **Right rail**: Assignment (AE, "Accepted {when}", "Accepted automatically {when}" or "Waiting for
    {AE} to accept", the assigner's quoted note, the handoff state); Buying committee with engagement
-   per person (R2: "Met Nov 4" green, "Opened, no reply" amber, "Not contacted" gray). The committee
+   per person (shipped R2d: "Met Nov 4" or "Replied Nov 3" green, "Emailed, no reply" amber, "Not contacted"
+   gray; no email opens in R2d). Only this page shows it; §4a's committee has no dots. The committee
    coverage summary, gap rows, `Find`, `Confirm`/`Remove` and the Edit person dialog are the same as §4a
-   (shipped R2b-3); engagement per person is still R2 later.
+   (shipped R2b-3).
 
 **States.**
 - Building: dashed card "Scout is still building this brief" / "Scores, dated signals and the brief

@@ -337,7 +337,7 @@
 }
 
 .tiles4 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .scoreTile {
@@ -407,6 +407,58 @@
   flex: none;
   width: 96px;
   color: var(--text-muted);
+}
+
+.amber {
+  color: var(--near);
+}
+
+.scoutAvatar,
+.feedGap {
+  display: inline-flex;
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.scoutAvatar {
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.engagement {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.dot_good {
+  background: var(--good);
+}
+
+.dot_amber {
+  background: var(--near);
+}
+
+.dot_gray {
+  background: var(--ink-400);
 }
 
 .factLabel {

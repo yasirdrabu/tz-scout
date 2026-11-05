@@ -13,7 +13,7 @@ import { newId } from '@/platform/ids';
 import { log } from '@/platform/log';
 import type { CrmAdapter } from '../contracts/adapter';
 import { handoffCancelled, handoffCompleted, handoffFailed, handoffNeedsDecision } from '../contracts/events';
-import { handoffPushJob, planSyncJob, PUSH_MAX_ATTEMPTS } from '../contracts/jobs';
+import { handoffPushJob, personPushJob, planSyncJob, PUSH_MAX_ATTEMPTS } from '../contracts/jobs';
 import { handoffPackageProvider } from '../contracts/ports';
 import { DEFAULT_FOLLOW_UP_DAYS, type HandoffPackage } from '../contracts/types';
 import { crmSetting, fieldMapping, followThrough, handoff, taskLink } from '../db/schema';
@@ -348,6 +348,9 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
       await storeBaseline(c, h.id, ft);
       // A plan sync that ran before this handoff completed did nothing (Ruling 12).
       await enqueueJob(c, planSyncJob, { accountId: h.accountId });
+      // Nor did the person pushes of people added while it ran (Ruling 22).
+      const linked = new Set([...links.people.filter((l) => l.system === system).map((l) => l.scoutId), ...people.map((p) => p.id)]);
+      await queueLatePeople(c, h.accountId, linked);
       await publish(
         c,
         handoffCompleted,
@@ -373,6 +376,18 @@ async function push(ctx: ModuleContext, h: Handoff, now: Date): Promise<void> {
 }
 
 type PushedAccount = NonNullable<Awaited<ReturnType<typeof getAccount>>>;
+
+/**
+ * People on the account now with a name and no person link (`linked`): those added while the push ran, whose
+ * `accounts.person.added` found no completed handoff. Each gets a `crm.person.push` within the push limit; the
+ * job checks the room and the links again, so one queued twice does nothing more.
+ */
+async function queueLatePeople(ctx: ModuleContext, accountId: string, linked: Set<string>): Promise<void> {
+  const [setting] = await ctx.tx.select({ on: crmSetting.pushNewPeople }).from(crmSetting).where(eq(crmSetting.tenantId, ctx.tenantId));
+  if (setting && !setting.on) return;
+  const late = ((await getAccount(ctx, accountId))?.people ?? []).filter((p) => personName(p) && !linked.has(p.id));
+  for (const p of late.slice(0, Math.max(0, PUSH_PEOPLE_LIMIT - linked.size))) await enqueueJob(ctx, personPushJob, { accountId, personId: p.id });
+}
 
 /** The first touch and follow-ups, keyed by assignment so a re-push updates them in place (Ruling 3). */
 async function fixedTasks(ctx: ModuleContext, assignmentId: string, account: PushedAccount, pkg: HandoffPackage | null, now: Date): Promise<{ key: string; spec: TaskSpec }[]> {

@@ -238,7 +238,13 @@ export const checkCrm = (tenant: string, id: string) => apiFetch<CrmCheck>(path(
 
 export type Handoffs = {
   handoffs: { id: string; status: string; crm_url: string | null; queued_at: string; completed_at: string | null }[];
-  follow_through: { counts: { emails: number; replies: number }; checked_at: string | null } | null;
+  follow_through: {
+    counts: { emails: number; replies: number; meetings: number };
+    meetings_held: number;
+    /** The earliest meeting still to come; `with` is null when there is no title or named attendee. */
+    next_meeting: { at: string; with: string | null } | null;
+    checked_at: string | null;
+  } | null;
   deals: { id: string; name: string; status: string; amount_cents: number | null; currency: string | null }[];
   conflict: boolean;
 };
@@ -250,7 +256,16 @@ export const handoffsQuery = (tenant: string, id: string) =>
     refetchInterval: PAGE_REFRESH_MS,
   });
 
-export type ActivityRow = { id: string; kind: string; at: string; summary: string };
+export type ActivityRow = {
+  id: string;
+  kind: string;
+  at: string;
+  /** Who did it (the API's words), or null. */
+  who: string | null;
+  actor: 'person' | 'contact' | 'scout';
+  /** What happened. */
+  summary: string;
+};
 
 export const activityQuery = (tenant: string, id: string) =>
   infiniteQueryOptions({
@@ -262,6 +277,23 @@ export const activityQuery = (tenant: string, id: string) =>
         { tenant },
       ),
     getNextPageParam: (last) => last.next_cursor,
+  });
+
+export type EngagementState = 'met' | 'replied' | 'emailed' | 'not_contacted';
+
+/** Per person, from the CRM activity since the handoff; `gap_role` names the first required role nobody covers. */
+export type Engagement = {
+  people: { person_id: string; state: EngagementState; at: string | null }[];
+  engaged: number;
+  total: number;
+  gap_role: string | null;
+};
+
+export const engagementQuery = (tenant: string, id: string) =>
+  queryOptions({
+    queryKey: ['account', tenant, id, 'engagement'],
+    queryFn: () => apiFetch<Engagement>(path(id, '/engagement'), { tenant }),
+    refetchInterval: PAGE_REFRESH_MS,
   });
 
 export const buyingRolesQuery = (tenant: string) =>

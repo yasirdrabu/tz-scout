@@ -118,7 +118,17 @@ export function runAdapterContract(make: () => CrmAdapter, opts: Opts): void {
     });
 
     it('lists activities, deals and qualified leads', async () => {
-      check('listActivities', await adapter.listActivities({ companyExternalId: state.company!, since: EARLY }));
+      type Row = { externalId: string; kind: string; contacts: { externalId: string; name: string | null }[]; subject: string | null; startAt: string | null; endAt: string | null; status: string | null };
+      const plain = check('listActivities', await adapter.listActivities({ companyExternalId: state.company!, since: EARLY })) as Row[];
+      // `meetingsFrom` only ever adds meetings, and the extra fields hold the same shape in both adapters.
+      const future = new Date(Date.now() + 86_400_000).toISOString();
+      const withFrom = check('listActivities', await adapter.listActivities({ companyExternalId: state.company!, since: future, meetingsFrom: EARLY })) as Row[];
+      for (const row of [...plain, ...withFrom]) {
+        expect(Array.isArray(row.contacts)).toBe(true);
+        if (row.kind === 'meeting') expect(row.status).not.toBeNull();
+        else expect([row.startAt, row.endAt, row.status]).toEqual([null, null, null]);
+      }
+      expect(withFrom.every((r) => r.kind === 'meeting')).toBe(true);
       check('listDeals', await adapter.listDeals({ companyExternalId: state.company! }));
       check('listDeals', await adapter.listDeals({ changedSince: EARLY }));
       const rule = { property: 'lifecyclestage', value: 'marketingqualifiedlead' };

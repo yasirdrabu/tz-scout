@@ -92,8 +92,90 @@ describe('Account page after assignment', () => {
     expect(await within(outcomes).findByText('3 of 9')).toBeInTheDocument();
     expect(outcomes).toHaveTextContent('Emails sent since Oct 27, 2026');
     expect(outcomes).toHaveTextContent('OpportunityNot yet');
-    expect(outcomes).not.toHaveTextContent('Meetings held');
-    expect(outcomes).not.toHaveTextContent('Buyers engaged');
+  });
+
+  it('the Meetings held tile counts held meetings and names the next one, and the tiles keep their order', async () => {
+    serveAccount({ review: ASSIGNED });
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const outcomes = await screen.findByRole('region', { name: 'Outcomes' });
+    const tile = within(outcomes).getByText('Meetings held').parentElement!;
+    expect(await within(tile).findByText('1')).toBeInTheDocument();
+    expect(tile).toHaveTextContent('Next: Nov 18 with Scoping call');
+    const labels = [...outcomes.children].map((t) => t.firstElementChild?.textContent);
+    expect(labels).toEqual(['Meetings held', 'Replies', 'Buyers engaged', 'Opportunity']);
+  });
+
+  it('the Meetings held tile without a title or attendee says only the day', async () => {
+    serveAccount({ review: ASSIGNED, handoffs: { ...HANDOFFS, follow_through: { ...HANDOFFS.follow_through!, next_meeting: { at: '2026-11-18T15:00:00Z', with: null } } } });
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const outcomes = await screen.findByRole('region', { name: 'Outcomes' });
+    expect(await within(outcomes).findByText('Next: Nov 18')).toBeInTheDocument();
+  });
+
+  it('the Meetings held tile with no meeting booked', async () => {
+    serveAccount({ review: ASSIGNED, handoffs: { ...HANDOFFS, follow_through: { ...HANDOFFS.follow_through!, meetings_held: 0, next_meeting: null } } });
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const outcomes = await screen.findByRole('region', { name: 'Outcomes' });
+    expect(await within(outcomes).findByText('No meeting booked')).toBeInTheDocument();
+  });
+
+  it('the Buyers engaged tile reads "{x} of {y}" with the missing role in amber', async () => {
+    serveAccount({ review: ASSIGNED, engagement: { people: [], engaged: 2, total: 4, gap_role: 'Technical buyer' } });
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const outcomes = await screen.findByRole('region', { name: 'Outcomes' });
+    expect(await within(outcomes).findByText('2 of 4')).toBeInTheDocument();
+    expect(within(outcomes).getByText('No technical buyer contact yet').className).toMatch(/amber/);
+  });
+
+  it('the Buyers engaged tile reads Not yet, like Meetings held, until a handoff completed', async () => {
+    serveAccount({ review: ASSIGNED, handoffs: { ...HANDOFFS, follow_through: null }, engagement: { people: [], engaged: 0, total: 4, gap_role: null } });
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const outcomes = await screen.findByRole('region', { name: 'Outcomes' });
+    const tile = within(outcomes).getByText('Buyers engaged').parentElement!;
+    await waitFor(() => expect(within(outcomes).getByText('Meetings held').parentElement!).toHaveTextContent('Not yet'));
+    await new Promise((res) => setTimeout(res, 150));
+    expect(within(tile).getByText('Not yet')).toBeInTheDocument();
+    expect(within(tile).queryByText('0 of 4')).toBeNull();
+  });
+
+  it('the Buyers engaged tile has no note when no role is missing', async () => {
+    serveAccount({ review: ASSIGNED, engagement: { people: [], engaged: 4, total: 4, gap_role: null } });
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const outcomes = await screen.findByRole('region', { name: 'Outcomes' });
+    const tile = within(outcomes).getByText('Buyers engaged').parentElement!;
+    expect(await within(tile).findByText('4 of 4')).toBeInTheDocument();
+    expect(tile.children).toHaveLength(2);
+  });
+
+  it('activity rows show who over what, with initials and an S for Scout', async () => {
+    serveAccount({ review: ASSIGNED });
+    server.use(
+      http.get('/api/v1/accounts/acc_mdc/activity', () =>
+        HttpResponse.json({
+          data: [
+            { id: 'a1', kind: 'email', at: '2026-11-04T15:00:00Z', who: 'Ash Patel', actor: 'person', summary: 'Sent "Intro" to Jarice Rodriguez' },
+            { id: 'a2', kind: 'reply', at: '2026-11-03T15:00:00Z', who: 'Jarice Rodriguez', actor: 'contact', summary: 'Replied: "Intro"' },
+            { id: 'a3', kind: 'scout', at: '2026-11-02T15:00:00Z', who: 'Scout', actor: 'scout', summary: 'Started the Outbound playbook' },
+            { id: 'a4', kind: 'call', at: '2026-11-01T15:00:00Z', who: null, actor: 'person', summary: 'Call logged' },
+          ],
+          next_cursor: null,
+          synced_at: null,
+        }),
+      ),
+    );
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const activity = await screen.findByRole('region', { name: 'HubSpot activity' });
+    const rows = await within(activity).findAllByRole('listitem');
+    expect(rows).toHaveLength(4);
+    expect(rows[0]).toHaveTextContent('Nov 4, 2026');
+    expect(within(rows[0]!).getByText('Ash Patel').tagName).toBe('STRONG');
+    expect(within(rows[0]!).getByText('Sent "Intro" to Jarice Rodriguez')).toBeInTheDocument();
+    expect(rows[0]).toHaveTextContent('AP');
+    expect(rows[1]).toHaveTextContent('JR');
+    expect(within(rows[2]!).getByText('S')).toBeInTheDocument();
+    expect(within(rows[2]!).getByText('Scout').tagName).toBe('STRONG');
+    expect(within(rows[3]!).getByText('Call logged')).toBeInTheDocument();
+    expect(rows[3]!.querySelector('strong')).toBeNull();
   });
 
   it('the Opportunity tile names the open deal and its value', async () => {
@@ -115,13 +197,13 @@ describe('Account page after assignment', () => {
           cursor
             ? {
                 data: [
-                  { id: 'hnd_1:undone', kind: 'scout', at: '2026-10-28T09:00:00Z', summary: 'Scout took the account back: Ash Patel declined it (Not my territory). Closed 2 tasks and gave the company back to Rita Gomez.' },
-                  { id: 'hnd_1:sent', kind: 'scout', at: '2026-10-27T09:00:00Z', summary: 'Scout sent the account to HubSpot with Ash Patel as owner and logged the brief.' },
+                  { id: 'hnd_1:undone', kind: 'scout', at: '2026-10-28T09:00:00Z', who: 'Scout', actor: 'scout', summary: 'Scout took the account back: Ash Patel declined it (Not my territory). Closed 2 tasks and gave the company back to Rita Gomez.' },
+                  { id: 'hnd_1:sent', kind: 'scout', at: '2026-10-27T09:00:00Z', who: 'Scout', actor: 'scout', summary: 'Scout sent the account to HubSpot with Ash Patel as owner and logged the brief.' },
                 ],
                 next_cursor: null,
                 synced_at: null,
               }
-            : { data: [{ id: 'a1', kind: 'reply', at: '2026-11-13T09:00:00Z', summary: 'Reply received' }], next_cursor: 'c2', synced_at: new Date(Date.now() - 2 * 60_000).toISOString() },
+            : { data: [{ id: 'a1', kind: 'reply', at: '2026-11-13T09:00:00Z', who: 'Jarice Rodriguez', actor: 'contact', summary: 'Reply received' }], next_cursor: 'c2', synced_at: new Date(Date.now() - 2 * 60_000).toISOString() },
         );
       }),
     );

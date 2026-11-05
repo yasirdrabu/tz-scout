@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { upsertFromArrival } from '@/modules/accounts';
-import { getHandoffs, lastActivityAt, latestHandoff, push, seedMockCrm, syncOwners } from '@/modules/crm';
+import { crmFacts, followThrough, getHandoffs, lastActivityAt, latestHandoff, push, seedMockCrm, syncOwners } from '@/modules/crm';
 import { activity } from '@/modules/crm/db/schema';
 import { setConnectionSettings } from '@/modules/integrations';
 import { assign } from '@/modules/routing';
@@ -94,5 +94,20 @@ describe('handoff reads', () => {
       ]),
     );
     expect(await asPerson(t, (ctx) => lastActivityAt(ctx, a))).toEqual(at);
+  });
+
+  it('the last activity ignores rows dated after now, so a booked meeting is not it', async () => {
+    const a = await handedOff();
+    const at = new Date(Date.now() - 86_400_000);
+    const booked = new Date(Date.now() + 7 * 86_400_000);
+    await t.run((ctx) =>
+      ctx.tx.insert(activity).values([
+        { id: newId('cac'), tenantId: ctx.tenantId, accountId: a, system: 'hubspot', externalId: newId('cac'), kind: 'email', occurredAt: at },
+        { id: newId('cac'), tenantId: ctx.tenantId, accountId: a, system: 'hubspot', externalId: newId('cac'), kind: 'meeting', occurredAt: booked, startAt: booked },
+      ]),
+    );
+    expect(await asPerson(t, (ctx) => lastActivityAt(ctx, a))).toEqual(at);
+    expect((await asPerson(t, (ctx) => crmFacts(ctx, [a]))).get(a)!.lastActivity).toEqual({ kind: 'email', at });
+    expect((await asPerson(t, (ctx) => followThrough(ctx, a)))!.lastActivityAt).toEqual(at);
   });
 });

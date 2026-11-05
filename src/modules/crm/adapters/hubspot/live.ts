@@ -54,6 +54,7 @@ const companyAssocSchema = objSchema.extend({
   associations: z.record(z.string(), z.object({ results: z.array(z.object({ id: z.coerce.string() })) })).optional(),
 });
 const dealAssocSchema = z.object({ results: z.array(z.object({ from: z.object({ id: z.coerce.string() }), to: z.array(z.object({ toObjectId: z.coerce.string() })) })) });
+const partialAssocSchema = z.object({ results: dealAssocSchema.shape.results.default([]) });
 const accountSchema = z.object({ portalId: z.coerce.string(), companyName: z.string().optional() });
 const tokenInfoSchema = z.object({ scopes: z.array(z.string()), hubId: z.coerce.string().optional() });
 
@@ -297,22 +298,80 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
     return contacts.map((c) => leadOut(c, companies.get(c.properties.associatedcompanyid ?? ''), rule, since));
   }
 
-  async function activitiesOf(object: 'emails' | 'calls' | 'meetings', companyId: string, since: string) {
-    const rows = await searchAll(
-      object,
-      [
-        { propertyName: 'associations.company', operator: 'EQ', value: companyId },
-        { propertyName: 'hs_timestamp', operator: 'GTE', value: toMs(since) },
-      ],
-      object === 'emails' ? ['hs_timestamp', 'hubspot_owner_id', 'hs_email_direction'] : ['hs_timestamp', 'hubspot_owner_id'],
-      500,
-      [{ propertyName: 'hs_timestamp', direction: 'ASCENDING' }],
-    );
+  const MEETING_STATUS: Record<string, 'scheduled' | 'held' | 'no_show' | 'cancelled'> = {
+    COMPLETED: 'held',
+    SCHEDULED: 'scheduled',
+    RESCHEDULED: 'scheduled',
+    NO_SHOW: 'no_show',
+    CANCELED: 'cancelled',
+  };
+  type ActivityContact = { externalId: string; name: string | null };
+
+  /** The contacts each activity lists: a batch associations read (100 ids a call), then a batch read of their names. */
+  async function contactsOf(object: string, ids: string[]): Promise<Map<string, ActivityContact[]>> {
+    const listed = new Map<string, string[]>();
+    for (let i = 0; i < ids.length; i += 100) {
+      // A 207 (some inputs failed) is a success here: the results present are used, the rest read as no contacts.
+      const r = await call(partialAssocSchema, 'POST', `/crm/v4/associations/${object}/contacts/batch/read`, { inputs: ids.slice(i, i + 100).map((id) => ({ id })) }, true);
+      for (const x of r.results) listed.set(x.from.id, [...new Set(x.to.map((t) => t.toObjectId))]);
+    }
+    const contactIds = [...new Set([...listed.values()].flat())];
+    const people = contactIds.length ? await readBatch('contacts', contactIds, ['firstname', 'lastname']) : new Map<string, Obj>();
+    const out = new Map<string, ActivityContact[]>();
+    for (const [id, cs] of listed) {
+      out.set(
+        id,
+        cs.map((c) => {
+          const p = people.get(c)?.properties;
+          return { externalId: c, name: [p?.firstname, p?.lastname].filter(Boolean).join(' ').trim() || null };
+        }),
+      );
+    }
+    return out;
+  }
+
+  async function activitiesOf(object: 'emails' | 'calls' | 'meetings', companyId: string, since: string, meetingsFrom?: string) {
+    const associated = { propertyName: 'associations.company', operator: 'EQ', value: companyId };
+    // Never a body property: subjects and titles only.
+    const properties =
+      object === 'emails'
+        ? ['hs_timestamp', 'hubspot_owner_id', 'hs_email_direction', 'hs_email_subject']
+        : object === 'meetings'
+          ? ['hs_timestamp', 'hubspot_owner_id', 'hs_meeting_title', 'hs_meeting_start_time', 'hs_meeting_end_time', 'hs_meeting_outcome']
+          : ['hs_timestamp', 'hubspot_owner_id'];
+    // At or after `since`: activities logged in the same second as the latest stored one must not be missed; storage skips rows it has.
+    const rows = await searchAll(object, [associated, { propertyName: 'hs_timestamp', operator: 'GTE', value: toMs(since) }], properties, 500, [
+      { propertyName: 'hs_timestamp', direction: 'ASCENDING' },
+    ]);
+    if (object === 'meetings' && meetingsFrom) {
+      // Meetings starting from `meetingsFrom` are read again so a moved or cancelled one updates; merged by id; on a duplicate the dedicated meeting read wins.
+      const wins = new Set<string>();
+      const again = await searchAll(object, [associated, { propertyName: 'hs_meeting_start_time', operator: 'GTE', value: toMs(meetingsFrom) }], properties, 500, [
+        { propertyName: 'hs_meeting_start_time', direction: 'ASCENDING' },
+      ]);
+      for (const r of again) wins.add(r.id);
+      rows.splice(0, rows.length, ...rows.filter((r) => !wins.has(r.id)), ...again);
+    }
+    const contacts = rows.length ? await contactsOf(object, rows.map((r) => r.id)) : new Map<string, ActivityContact[]>();
     return rows.flatMap((r) => {
-      const occurredAt = toIso(r.properties.hs_timestamp);
+      const p = r.properties;
+      const occurredAt = toIso(p.hs_timestamp);
       if (!occurredAt) return [];
-      const kind = object === 'emails' ? (r.properties.hs_email_direction === 'INCOMING_EMAIL' ? 'reply' : 'email') : object === 'calls' ? 'call' : 'meeting';
-      return [{ externalId: r.id, kind: kind as 'email' | 'reply' | 'call' | 'meeting', occurredAt, actorOwnerExternalId: text(r.properties.hubspot_owner_id) }];
+      const kind = object === 'emails' ? (p.hs_email_direction === 'INCOMING_EMAIL' ? 'reply' : 'email') : object === 'calls' ? 'call' : 'meeting';
+      const meeting = object === 'meetings';
+      return [
+        {
+          externalId: r.id,
+          kind: kind as 'email' | 'reply' | 'call' | 'meeting',
+          occurredAt,
+          actorOwnerExternalId: text(p.hubspot_owner_id),
+          contacts: contacts.get(r.id) ?? [],
+          subject: text(object === 'emails' ? p.hs_email_subject : meeting ? p.hs_meeting_title : null),
+          startAt: meeting ? toIso(p.hs_meeting_start_time) : null,
+          endAt: meeting ? toIso(p.hs_meeting_end_time) : null,
+          status: meeting ? (MEETING_STATUS[p.hs_meeting_outcome ?? ''] ?? ('scheduled' as const)) : null,
+        },
+      ];
     });
   }
 
@@ -524,10 +583,10 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
       };
     },
 
-    async listActivities({ companyExternalId, since }) {
+    async listActivities({ companyExternalId, since, meetingsFrom }) {
       // One after another: three searches at once would crowd HubSpot's per-second search limit.
       const all: Awaited<ReturnType<typeof activitiesOf>> = [];
-      for (const o of ['emails', 'calls', 'meetings'] as const) all.push(...(await activitiesOf(o, companyExternalId, since)));
+      for (const o of ['emails', 'calls', 'meetings'] as const) all.push(...(await activitiesOf(o, companyExternalId, since, meetingsFrom)));
       return all.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.externalId.localeCompare(b.externalId));
     },
 

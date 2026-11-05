@@ -3,7 +3,7 @@ import { crmOwnerId, members } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { withTenant } from '@/platform/db/tenant';
 import { ID_PREFIX, nextMockId, type MockFailureKind } from './adapters/hubspot/mock';
-import type { ActivityKind, DealStatus } from './contracts/types';
+import type { ActivityKind, DealStatus, MeetingStatus } from './contracts/types';
 import { mockActivity, mockCompany, mockDeal, mockFailure, mockNote, mockOwner, mockPerson, mockTask } from './db/schema';
 import { noteFingerprint } from './domain/fingerprint';
 
@@ -101,7 +101,17 @@ export async function mockCompleteTask(ctx: ModuleContext, externalId: string): 
 /** Adds an activity on a company; returns its external id. */
 export async function mockAddActivity(
   ctx: ModuleContext,
-  input: { companyExternalId: string; kind: ActivityKind; occurredAt?: Date; actorOwnerExternalId?: string | null },
+  input: {
+    companyExternalId: string;
+    kind: ActivityKind;
+    occurredAt?: Date;
+    actorOwnerExternalId?: string | null;
+    contactExternalIds?: string[];
+    subject?: string | null;
+    startAt?: Date | null;
+    endAt?: Date | null;
+    status?: MeetingStatus | null;
+  },
 ): Promise<string> {
   return withTenant(ctx.tenantId, async (tx) => {
     const externalId = await nextMockId(tx, ctx.tenantId, mockActivity, ID_PREFIX.activity);
@@ -112,9 +122,34 @@ export async function mockAddActivity(
       kind: input.kind,
       occurredAt: input.occurredAt ?? new Date(),
       actorOwnerExternalId: input.actorOwnerExternalId ?? null,
+      contactExternalIds: input.contactExternalIds ?? [],
+      subject: input.subject ?? null,
+      startAt: input.startAt ?? null,
+      endAt: input.endAt ?? null,
+      status: input.status ?? null,
     });
     return externalId;
   });
+}
+
+/** Moves, renames or cancels an activity (a meeting), as a person would in HubSpot. */
+export async function mockSetActivity(
+  ctx: ModuleContext,
+  externalId: string,
+  patch: { subject?: string | null; startAt?: Date | null; endAt?: Date | null; status?: MeetingStatus | null; contactExternalIds?: string[] },
+): Promise<void> {
+  await withTenant(ctx.tenantId, (tx) =>
+    tx
+      .update(mockActivity)
+      .set({
+        ...(patch.subject !== undefined ? { subject: patch.subject } : {}),
+        ...(patch.startAt !== undefined ? { startAt: patch.startAt } : {}),
+        ...(patch.endAt !== undefined ? { endAt: patch.endAt } : {}),
+        ...(patch.status !== undefined ? { status: patch.status } : {}),
+        ...(patch.contactExternalIds !== undefined ? { contactExternalIds: patch.contactExternalIds } : {}),
+      })
+      .where(and(eq(mockActivity.tenantId, ctx.tenantId), eq(mockActivity.externalId, externalId))),
+  );
 }
 
 /** Adds a deal on a company (open unless said otherwise); returns its external id. */

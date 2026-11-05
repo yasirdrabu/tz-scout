@@ -15,6 +15,7 @@ import * as v1AccountsIdBrief from './routes/v1/accounts/[id]/brief/route';
 import * as v1AccountsIdChanges from './routes/v1/accounts/[id]/changes/route';
 import * as v1AccountsIdConflicts from './routes/v1/accounts/[id]/conflicts/route';
 import * as v1AccountsIdCrmCheck from './routes/v1/accounts/[id]/crm-check/route';
+import * as v1AccountsIdEngagement from './routes/v1/accounts/[id]/engagement/route';
 import * as v1AccountsIdEnrichmentEstimate from './routes/v1/accounts/[id]/enrichment-estimate/route';
 import * as v1AccountsIdEnrichmentRequests from './routes/v1/accounts/[id]/enrichment-requests/route';
 import * as v1AccountsIdExclusionOverride from './routes/v1/accounts/[id]/exclusion-override/route';
@@ -172,6 +173,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/accounts/:id/changes`, module: v1AccountsIdChanges },
   { path: `${V1}/accounts/:id/conflicts`, module: v1AccountsIdConflicts },
   { path: `${V1}/accounts/:id/crm-check`, module: v1AccountsIdCrmCheck },
+  { path: `${V1}/accounts/:id/engagement`, module: v1AccountsIdEngagement },
   { path: `${V1}/accounts/:id/enrichment-estimate`, module: v1AccountsIdEnrichmentEstimate },
   { path: `${V1}/accounts/:id/enrichment-requests`, module: v1AccountsIdEnrichmentRequests },
   { path: `${V1}/accounts/:id/exclusion-override`, module: v1AccountsIdExclusionOverride },

@@ -19,6 +19,28 @@ export type DealStatus = z.infer<typeof dealStatusSchema>;
 export const activityKindSchema = z.enum(['email', 'reply', 'call', 'meeting', 'task_done']);
 export type ActivityKind = z.infer<typeof activityKindSchema>;
 
+/** A meeting's state in the CRM; null on activities that are not meetings. */
+export const meetingStatusSchema = z.enum(['scheduled', 'held', 'no_show', 'cancelled']);
+export type MeetingStatus = z.infer<typeof meetingStatusSchema>;
+
+/** What an adapter returns for each activity. No email or note bodies, ever. */
+export const activitySchema = z.object({
+  externalId: z.string().min(1),
+  kind: activityKindSchema,
+  occurredAt: z.string().min(1),
+  /** The CRM owner who did it (CRM-E5-S2-AC3), so Scout can name the user. */
+  actorOwnerExternalId: z.string().min(1).nullable(),
+  /** The CRM contacts on it; `name` is null when the CRM gives none. */
+  contacts: z.array(z.object({ externalId: z.string().min(1), name: z.string().nullable() })),
+  /** The email subject or the meeting title. */
+  subject: z.string().nullable(),
+  /** Meetings only: start, end and status. */
+  startAt: z.string().min(1).nullable(),
+  endAt: z.string().min(1).nullable(),
+  status: meetingStatusSchema.nullable(),
+});
+export type Activity = z.infer<typeof activitySchema>;
+
 /** `handoff.undone` (Ruling 7). */
 export type HandoffUndone = {
   tasksClosed: string[];
@@ -59,6 +81,8 @@ export type PlanTasks = {
   playbookName: string;
   status: 'active' | 'paused' | 'completed' | 'stopped' | 'abandoned';
   statusReason: string | null;
+  /** When the plan was made (its `created_at`), ISO. The feed's "Started the playbook" row (R2d Ruling 9). */
+  startedAt: string;
   sellerUserId: string | null;
   steps: {
     id: string;
@@ -74,5 +98,5 @@ export type PlanTasks = {
     personIds: string[];
   }[];
   /** The account's other plans, for the close note of a task an earlier plan left open. */
-  otherPlans: { planId: string; playbookName: string; status: PlanTasks['status']; statusReason: string | null }[];
+  otherPlans: { planId: string; playbookName: string; status: PlanTasks['status']; statusReason: string | null; startedAt: string }[];
 };

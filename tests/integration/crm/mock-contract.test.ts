@@ -5,7 +5,7 @@ import '@/entry/registry';
 import { hubspotMock, noteFingerprint, seedMockCrm, type CrmAdapter } from '@/modules/crm';
 import { hubspotLive } from '@/modules/crm/adapters/hubspot/live';
 import { mockCompany, mockOwner, mockPerson } from '@/modules/crm/db/schema';
-import { mockAddActivity, mockAddDeal, mockCompleteTask, mockEditNote, mockQualifyPerson, mockSetDeal, setMockFailure } from '@/modules/crm/fixtures';
+import { mockAddActivity, mockAddDeal, mockCompleteTask, mockEditNote, mockQualifyPerson, mockSetActivity, mockSetDeal, setMockFailure } from '@/modules/crm/fixtures';
 import { gateway, RateLimitedError } from '@/modules/integrations';
 import { callLog } from '@/modules/integrations/db/schema';
 import { addMember } from '@/modules/tenancy';
@@ -113,6 +113,65 @@ describe('mock HubSpot rules (CRM-E1-S3-AC2)', () => {
     const deals = await a.listDeals({ changedSince: EARLY });
     expect(deals.find((d) => d.externalId === deal)).toMatchObject({ status: 'won', amountCents: 1_250_000 });
     expect(await a.readFollowThrough({ companyExternalId: co.externalId, taskExternalIds: [] })).toMatchObject({ emails: 1, deals: 1, openDeals: 0 });
+  });
+
+  it('listActivities returns contacts with names, subject and meeting times', async () => {
+    const a = mock();
+    const co = await a.upsertCompany(company(`rich-${Date.now()}.example`));
+    const ctx = detached();
+    const pat = await a.upsertPerson({ name: 'Pat Rich', email: `pat@rich-${Date.now()}.example`, ownerExternalId: null, takeOverOwner: false, companyExternalId: co.externalId });
+    const start = new Date(Date.now() + 3 * 86_400_000);
+    const end = new Date(start.getTime() + 30 * 60_000);
+    const meeting = await mockAddActivity(ctx, {
+      companyExternalId: co.externalId, kind: 'meeting', occurredAt: start, contactExternalIds: [pat.externalId, 'mock-ct-unknown'],
+      subject: 'Intro call', startAt: start, endAt: end, status: 'scheduled',
+    });
+    const email = await mockAddActivity(ctx, { companyExternalId: co.externalId, kind: 'email', subject: 'Hello', contactExternalIds: [pat.externalId] });
+    const bare = await mockAddActivity(ctx, { companyExternalId: co.externalId, kind: 'call' });
+    const rows = await a.listActivities({ companyExternalId: co.externalId, since: EARLY });
+    const by = (id: string) => rows.find((r) => r.externalId === id);
+    expect(by(meeting)).toMatchObject({
+      contacts: [{ externalId: pat.externalId, name: 'Pat Rich' }, { externalId: 'mock-ct-unknown', name: null }],
+      subject: 'Intro call', startAt: start.toISOString(), endAt: end.toISOString(), status: 'scheduled',
+    });
+    expect(by(email)).toMatchObject({ subject: 'Hello', startAt: null, endAt: null, status: null });
+    expect(by(bare)).toMatchObject({ contacts: [], subject: null, startAt: null, endAt: null, status: null });
+  });
+
+  it('meetingsFrom returns meetings starting after it even when since is later', async () => {
+    const a = mock();
+    const co = await a.upsertCompany(company(`from-${Date.now()}.example`));
+    const ctx = detached();
+    const DAY = 86_400_000;
+    const start = new Date(Date.now() - 10 * DAY);
+    const meeting = await mockAddActivity(ctx, { companyExternalId: co.externalId, kind: 'meeting', occurredAt: start, startAt: start, endAt: new Date(start.getTime() + 3_600_000), status: 'held' });
+    await mockAddActivity(ctx, { companyExternalId: co.externalId, kind: 'email', occurredAt: start });
+    const since = new Date(Date.now() - DAY).toISOString();
+    const ids = async (meetingsFrom?: string) => (await a.listActivities({ companyExternalId: co.externalId, since, meetingsFrom })).map((r) => r.externalId);
+    expect(await ids()).toEqual([]);
+    expect(await ids(new Date(Date.now() - 30 * DAY).toISOString())).toEqual([meeting]);
+    expect(await ids(new Date(Date.now() - 5 * DAY).toISOString())).toEqual([]);
+  });
+
+  it('a meeting with no status reads scheduled, as live does', async () => {
+    const a = mock();
+    const co = await a.upsertCompany(company(`nostatus-${Date.now()}.example`));
+    const start = new Date(Date.now() + 86_400_000);
+    const meeting = await mockAddActivity(detached(), { companyExternalId: co.externalId, kind: 'meeting', occurredAt: start, startAt: start, endAt: start });
+    const [row] = await a.listActivities({ companyExternalId: co.externalId, since: EARLY });
+    expect(row).toMatchObject({ externalId: meeting, status: 'scheduled' });
+  });
+
+  it("a meeting's status changes after mockSetActivity", async () => {
+    const a = mock();
+    const co = await a.upsertCompany(company(`move-${Date.now()}.example`));
+    const ctx = detached();
+    const start = new Date(Date.now() + 86_400_000);
+    const meeting = await mockAddActivity(ctx, { companyExternalId: co.externalId, kind: 'meeting', occurredAt: start, startAt: start, endAt: start, status: 'scheduled' });
+    const later = new Date(start.getTime() + 86_400_000);
+    await mockSetActivity(ctx, meeting, { status: 'cancelled', startAt: later, endAt: later, subject: 'Moved' });
+    const [row] = await a.listActivities({ companyExternalId: co.externalId, since: EARLY });
+    expect(row).toMatchObject({ externalId: meeting, status: 'cancelled', subject: 'Moved', startAt: later.toISOString() });
   });
 
   it('lists a qualified lead by the lifecycle rule', async () => {

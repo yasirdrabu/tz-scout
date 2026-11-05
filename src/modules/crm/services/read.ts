@@ -1,9 +1,10 @@
-import { and, count, desc, eq, inArray, max } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, lte, max } from 'drizzle-orm';
 import { filterVisibleAccountIds, getAccount } from '@/modules/accounts';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import type { HandoffUndone } from '../contracts/types';
 import { activity, deal, followThrough, handoff } from '../db/schema';
+import { meetingHeld, nextMeeting } from '../domain/engagement';
 import { countsOfRow, type FollowThroughCounts } from '../domain/follow-through';
 import { latestRow } from './handoff';
 import { companyChecks, refreshCheck, type CompanyCheck, type OpenDeal } from './checks';
@@ -30,15 +31,22 @@ export type HandoffsView = {
   links: AccountLinks;
   /** Newest first. */
   handoffs: HandoffRow[];
-  /** For the latest completed handoff, or null. */
-  followThrough: { handoffId: string; counts: FollowThroughCounts & { replies: number }; stage: string | null; checkedAt: Date | null } | null;
+  /** For the latest completed handoff, or null. `meetingsHeld` and `nextMeeting` are R2d Rulings 1, 2 and 7. */
+  followThrough: {
+    handoffId: string;
+    counts: FollowThroughCounts & { replies: number };
+    stage: string | null;
+    checkedAt: Date | null;
+    meetingsHeld: number;
+    nextMeeting: { at: string; with: string | null } | null;
+  } | null;
   deals: { id: string; name: string; stage: string | null; status: string; amountCents: number | null; currency: string | null; openedAt: Date | null; closedAt: Date | null }[];
   /** Two companies are linked: a person has to say which one is right. */
   conflict: boolean;
 };
 
 /** Everything the account page shows about the account's handoffs. Not found when the caller can't see the account. */
-export async function getHandoffs(ctx: ModuleContext, accountId: string): Promise<HandoffsView> {
+export async function getHandoffs(ctx: ModuleContext, accountId: string, now: Date = new Date()): Promise<HandoffsView> {
   if (!(await visible(ctx, accountId))) throw new ScoutError({ slug: 'not-found', status: 404, title: 'That account was not found.' });
   const links = await getLinks(ctx, accountId);
   const rows = await ctx.tx
@@ -72,6 +80,12 @@ export async function getHandoffs(ctx: ModuleContext, accountId: string): Promis
           .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.handoffId, completed.id), eq(activity.kind, 'reply')))
       )[0]?.n ?? 0)
     : 0;
+  const meetings = completed
+    ? await ctx.tx
+        .select()
+        .from(activity)
+        .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.handoffId, completed.id), eq(activity.kind, 'meeting')))
+    : [];
   const company = await companyLink(ctx, accountId, rows[0]?.system ?? 'hubspot');
   const urls = new Map<string, string | null>();
   for (const r of rows) urls.set(r.id, await crmCompanyUrl(ctx, r.system, r.companyExternalId ?? company));
@@ -89,7 +103,16 @@ export async function getHandoffs(ctx: ModuleContext, accountId: string): Promis
       queuedAt: r.queuedAt,
       completedAt: r.completedAt,
     })),
-    followThrough: ft ? { handoffId: ft.handoffId, counts: { ...countsOfRow(ft, null, new Date()), replies }, stage: ft.stage, checkedAt: ft.checkedAt } : null,
+    followThrough: ft
+      ? {
+          handoffId: ft.handoffId,
+          counts: { ...countsOfRow(ft, null, now), replies },
+          stage: ft.stage,
+          checkedAt: ft.checkedAt,
+          meetingsHeld: meetings.filter((m) => meetingHeld(m, now)).length,
+          nextMeeting: nextMeeting(meetings, now),
+        }
+      : null,
     deals,
     conflict: links.conflict,
   };
@@ -108,13 +131,13 @@ export async function latestHandoff(
   return { id: h.id, status: h.status, ownershipAction: h.ownershipAction, crmUrl };
 }
 
-/** When the latest CRM activity on the account happened; null when none or not visible. */
-export async function lastActivityAt(ctx: ModuleContext, accountId: string): Promise<Date | null> {
+/** When the latest CRM activity on the account happened, not counting rows dated after now (a booked meeting); null when none or not visible. */
+export async function lastActivityAt(ctx: ModuleContext, accountId: string, now: Date = new Date()): Promise<Date | null> {
   if (!(await visible(ctx, accountId))) return null;
   const [row] = await ctx.tx
     .select({ at: max(activity.occurredAt) })
     .from(activity)
-    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, accountId)));
+    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, accountId), lte(activity.occurredAt, now)));
   return row?.at ?? null;
 }
 
@@ -124,13 +147,13 @@ export type AccountCrmFacts = {
   value: { amountCents: number | null; currency: string | null; kind: 'won' | 'open_deal'; dealName: string } | null;
 };
 
-/** CRM facts for list rows. The caller has already limited `accountIds` to accounts the principal can see. */
-export async function crmFacts(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, AccountCrmFacts>> {
+/** CRM facts for list rows; the latest activity is at or before now. The caller has already limited `accountIds` to accounts the principal can see. */
+export async function crmFacts(ctx: ModuleContext, accountIds: string[], now: Date = new Date()): Promise<Map<string, AccountCrmFacts>> {
   if (accountIds.length === 0) return new Map();
   const activities = await ctx.tx
     .selectDistinctOn([activity.accountId], { accountId: activity.accountId, kind: activity.kind, at: activity.occurredAt })
     .from(activity)
-    .where(and(eq(activity.tenantId, ctx.tenantId), inArray(activity.accountId, accountIds)))
+    .where(and(eq(activity.tenantId, ctx.tenantId), inArray(activity.accountId, accountIds), lte(activity.occurredAt, now)))
     .orderBy(activity.accountId, desc(activity.occurredAt), desc(activity.id));
   const deals = await ctx.tx
     .select({ accountId: deal.accountId, name: deal.name, status: deal.status, amountCents: deal.amountCents, currency: deal.currency, openedAt: deal.openedAt, closedAt: deal.closedAt })

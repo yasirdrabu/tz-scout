@@ -810,8 +810,9 @@ Files: `src/modules/crm/services/{push,read,leads,settings}.ts`, `src/modules/cr
 | 4a | "In HubSpot" check card: exists, owner, open deal name, amount, last activity | READY | `GET /api/v1/accounts/{id}/crm-check` (`accounts:read`) + `POST /api/v1/accounts/{id}:check-crm` (`accounts:read`, people only; 503 `crm_unavailable`) | `{exists, owner_name, lifecycle, open_deals, open_deal{name, amount_cents, currency, last_activity_at}, checked_at, hubspot_url}`, or `{exists: null, checked_at: null}` when never checked. The top open deal is stored on `crm.company_check`. |
 | 4b | Outcome tiles: meetings, emails, opportunity | READY | `GET /api/v1/accounts/{id}/handoffs` | `follow_through.counts{emails, calls, meetings, deals, open_deals, tasks_done, tasks_total, overdue, last_activity_at}` and `deals[]{name, stage, status, amount_cents}`. |
 | 4b | Replies "3 of 9" | READY | `follow_through.counts.replies` | Counts `reply` activity of the latest completed handoff. |
-| 4b | Buyers engaged "2 of 4", "Next: Nov 18 with ...", committee engagement per person | LATER (R2) | none | Activity is per account; no next meeting stored. |
-| 4b | HubSpot activity feed, "Synced {when}" | READY | `GET /api/v1/accounts/{id}/activity?cursor` (`accounts:read`) | `{data[{id, kind, at, summary}], next_cursor, synced_at}`, 25 a page; Scout rows (kind `scout`) from `crm.handoff`. |
+| 4b | Meetings held, "Next: Nov 18 with ..." | READY (R2d) | `GET /api/v1/accounts/{id}/handoffs` | `follow_through.meetings_held` (int) and `follow_through.next_meeting` (`{at, with}` or null). Held = status held, or scheduled with its end (else start) past; next = the earliest future meeting not cancelled or a no-show, `with` = its title, else the first attendee with a name plus " +{n}" for the other attendees, else null (the page shows "Next: {Mon D}"). |
+| 4b | Buyers engaged "2 of 4", gap note, committee engagement per person | READY (R2d) | `GET /api/v1/accounts/{id}/engagement` (`accounts:read`) | `{people[{person_id, state: met\|replied\|emailed\|not_contacted, at}], engaged, total, gap_role}`. `total` = people on the account, `engaged` = met or replied, `gap_role` = label of the first required role with no one (null when covered). 404 outside the data limit. |
+| 4b | HubSpot activity feed, "Synced {when}" | READY | `GET /api/v1/accounts/{id}/activity?cursor` (`accounts:read`) | `{data[{id, kind, at, who, actor, summary}], next_cursor, synced_at}`, 25 a page. `who` is a name or null (for email, call, meeting and task rows the CRM owner's member name, else the owner's name in the CRM roster), `actor` is `person` (the seller), `contact` (a reply) or `scout`; `summary` is the "what" (R2d Ruling 8: email subject, meeting title, attendees, duration; never a body). A meeting sits at its start. Scout rows (kind `scout`) come from `crm.handoff` and, at each plan start, the plan (`Started the {playbook} playbook`). |
 | 6 | Deal detail in the owner warning | READY | `:assign-preview` `preflight.deal` | Stored top open deal (row above); see routing. |
 | 6 | Seller without a HubSpot owner | NEW ENDPOINT | `crm_owner_linked` in `GET /api/v1/assignable-sellers` | Today a `blocked` preflight. `GET /api/v1/crm/owners` needs `members:manage`. |
 | 6, 7 | Push failures as a row flag; handoff progress | READY | `QueueRow.flags.handoff`, `GET /api/v1/accounts/{id}/handoffs` (`handoffs[].status, attempts, last_error`) | Push is async (202, 6 attempts, retries from 30 s). |
@@ -827,7 +828,7 @@ Files: `src/modules/crm/services/{push,read,leads,settings}.ts`, `src/modules/cr
 
 ### Release
 
-R1: all items. R2: per-person engagement and next meeting.
+R1: all items. R2 (R2d): meetings held, next meeting and per-person engagement.
 
 ## offers
 

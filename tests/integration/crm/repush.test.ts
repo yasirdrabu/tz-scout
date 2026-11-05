@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import '@/entry/compose';
 import { getAccount, upsertFromArrival, type ArrivalForAccounts } from '@/modules/accounts';
@@ -9,6 +9,7 @@ import { mockCompleteTask, mockEditNote, setMockFailure } from '@/modules/crm/fi
 import { assign, decline, withdraw } from '@/modules/routing';
 import { addMember } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
+import { outbox } from '@/platform/db/schema';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { runOutbox } from '../helpers/run-outbox';
@@ -309,4 +310,62 @@ describe('push new people (Ruling 22)', () => {
     await addPerson(a, person(30));
     expect(await personLinks(a)).toHaveLength(10);
   });
+
+  it('people added while the handoff runs are pushed when it completes', async () => {
+    const a = await account({ people: [person(40)] });
+    const made = await asLeader((ctx) => assign(ctx, a, { sellerUserId: ash }));
+    await runOutbox(t.tenantId, { until: async () => (await handoffsOf(a)).length > 0 });
+    // The test runs the push itself; the queued job is marked delivered so the outbox doesn't run it alongside.
+    await adminDb.update(outbox).set({ sentAt: new Date() }).where(unsentJobs('crm.handoff.push'));
+    const [h] = await handoffsOf(a);
+    expect(h!.assignmentId).toBe(made.id);
+
+    // The push has read the account and waits in its first CRM write; four people arrive and are seen meanwhile.
+    const hold = await holdMock();
+    const run = t.run((ctx) => runPush(ctx, h!.id));
+    try {
+      await until(pushWaitsOnMock);
+      for (const i of [41, 42, 43, 44]) await addPerson(a, person(i));
+      expect((await handoffsOf(a))[0]!.status).toBe('running');
+    } finally {
+      hold.release();
+      await hold.done;
+      await run;
+    }
+    expect((await handoffsOf(a))[0]!.status).toBe('completed');
+    expect(await personLinks(a)).toHaveLength(1);
+    await runOutbox(t.tenantId);
+    expect(await personLinks(a)).toHaveLength(5);
+  });
 });
+
+const unsentJobs = (name: string) => and(eq(outbox.tenantId, t.tenantId), isNull(outbox.sentAt), sql`${outbox.payload}->>'type' = ${`jobs.${name}`}`);
+const MOCK_LOCK = () => `crm-mock:${t.tenantId}`;
+/** True once a session waits on the mock CRM's id lock (a push, inside a write that makes a new record). */
+const pushWaitsOnMock = async () => {
+  const rows = await adminDb.execute(sql`
+    select 1 from pg_locks
+    where locktype = 'advisory' and not granted and objsubid = 1
+      and objid::bigint = (hashtext(${MOCK_LOCK()})::bigint & 4294967295)`);
+  return rows.length > 0;
+};
+const until = async (check: () => Promise<boolean>) => {
+  for (let i = 0; i < 200; i++) {
+    if (await check()) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error('timed out waiting');
+};
+/** Holds the mock CRM's id lock until `release`, so a push blocks in its first write that makes a new record. */
+async function holdMock(): Promise<{ release: () => void; done: Promise<void> }> {
+  let release!: () => void;
+  let held!: () => void;
+  const isHeld = new Promise<void>((r) => (held = r));
+  const done = adminDb.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${MOCK_LOCK()}))`);
+    held();
+    await new Promise<void>((r) => (release = r));
+  });
+  await isHeld;
+  return { release, done };
+}

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, max, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte, max, sql } from 'drizzle-orm';
 import { filterVisibleAccountIds } from '@/modules/accounts';
 import { checkCap, gateway } from '@/modules/integrations';
 import { userForCrmOwner } from '@/modules/tenancy';
@@ -9,7 +9,7 @@ import { log } from '@/platform/log';
 import type { CrmAdapter } from '../contracts/adapter';
 import { activityObserved } from '../contracts/events';
 import { syncJob } from '../contracts/jobs';
-import type { ActivityKind } from '../contracts/types';
+import type { Activity, ActivityKind } from '../contracts/types';
 import { activity, followThrough as followThroughTable, handoff, link, taskLink } from '../db/schema';
 import { countsOfRow, type FollowThroughCounts } from '../domain/follow-through';
 import { CLOSED_BY_SCOUT, REPLACED_TASK } from '../domain/tasks';
@@ -23,6 +23,8 @@ type Handoff = typeof handoff.$inferSelect;
 export const POLL_LIMIT = 200;
 /** A handoff stops being polled this long after it completed. */
 export const POLL_WINDOW_MS = 180 * 24 * 60 * 60 * 1000;
+/** Each sync reads meetings that start from this long ago onward again, so moves and cancels are seen (R2d Ruling 5). */
+export const MEETINGS_REREAD_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** The account's latest completed handoff, or undefined. */
 export const latestCompleted = async (ctx: ModuleContext, accountId: string): Promise<Handoff | undefined> =>
@@ -55,6 +57,24 @@ export async function syncAccount(ctx: ModuleContext, accountId: string, now: Da
   for (const company of companies) await syncDeals(ctx, system, company, now);
 }
 
+type ActivityDetails = Pick<typeof activity.$inferInsert, 'contacts' | 'subject' | 'startAt' | 'endAt' | 'status'>;
+
+const detailsOf = (a: Activity): ActivityDetails => ({
+  contacts: a.contacts,
+  subject: a.subject,
+  startAt: a.startAt ? new Date(a.startAt) : null,
+  endAt: a.endAt ? new Date(a.endAt) : null,
+  status: a.status,
+});
+
+const time = (d: Date | null | undefined) => d?.getTime() ?? null;
+const sameDetails = (x: ActivityDetails, y: ActivityDetails) =>
+  x.subject === y.subject &&
+  x.status === y.status &&
+  time(x.startAt) === time(y.startAt) &&
+  time(x.endAt) === time(y.endAt) &&
+  JSON.stringify(x.contacts?.map((c) => [c.externalId, c.name])) === JSON.stringify(y.contacts?.map((c) => [c.externalId, c.name]));
+
 async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternalId: string, now: Date): Promise<void> {
   const call = <T>(op: string, fn: (a: CrmAdapter) => Promise<T>) => gateway.call(ctx, h.system, op, (a) => fn(a as CrmAdapter), { module: 'crm' });
   const fixed = await ctx.tx
@@ -78,14 +98,16 @@ async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternal
   const taskIds = [...new Set([...fixed.filter((r) => r.type === 'task').map((r) => r.externalId), ...planLinks.map((l) => l.externalTaskId)])];
 
   // Nothing before the handoff, and nothing already seen, is new. A task_done is stamped when we saw it, so it does not move this.
+  // Nor does a meeting (R2d Ruling 5): one stored at its booked start must not hide the emails before it; meetings are read
+  // again through `meetingsFrom` instead.
   const [seen] = await ctx.tx
     .select({ at: max(activity.occurredAt) })
     .from(activity)
-    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, h.accountId), ne(activity.kind, 'task_done')));
+    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, h.accountId), inArray(activity.kind, ['email', 'reply', 'call']), lte(activity.occurredAt, now)));
   const since = seen?.at && h.completedAt && seen.at > h.completedAt ? seen.at : (h.completedAt ?? now);
 
   const ft = await call('readFollowThrough', (a) => a.readFollowThrough({ companyExternalId, taskExternalIds: taskIds }));
-  const found = await call('listActivities', (a) => a.listActivities({ companyExternalId, since: since.toISOString() }));
+  const found = await call('listActivities', (a) => a.listActivities({ companyExternalId, since: since.toISOString(), meetingsFrom: new Date(now.getTime() - MEETINGS_REREAD_MS).toISOString() }));
 
   const [stored] = await ctx.tx
     .select()
@@ -101,10 +123,21 @@ async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternal
     return users.get(owner) ?? null;
   };
 
-  const observe = async (a: { externalId: string; kind: ActivityKind; occurredAt: Date; owner: string | null; taskExternalId?: string }) => {
+  const observe = async (a: { externalId: string; kind: ActivityKind; occurredAt: Date; owner: string | null; taskExternalId?: string; details?: ActivityDetails }) => {
     const inserted = await ctx.tx
       .insert(activity)
-      .values({ id: newId('cac'), tenantId: ctx.tenantId, accountId: h.accountId, handoffId: h.id, system: h.system, externalId: a.externalId, kind: a.kind, occurredAt: a.occurredAt })
+      .values({
+        id: newId('cac'),
+        tenantId: ctx.tenantId,
+        accountId: h.accountId,
+        handoffId: h.id,
+        system: h.system,
+        externalId: a.externalId,
+        kind: a.kind,
+        occurredAt: a.occurredAt,
+        actorOwnerExternalId: a.owner,
+        ...a.details,
+      })
       .onConflictDoNothing()
       .returning({ id: activity.id });
     if (inserted.length === 0) return;
@@ -132,7 +165,30 @@ async function syncFollowThrough(ctx: ModuleContext, h: Handoff, companyExternal
     );
   };
 
-  for (const a of found) await observe({ externalId: a.externalId, kind: a.kind, occurredAt: new Date(a.occurredAt), owner: a.actorOwnerExternalId });
+  for (const a of found) {
+    const details = detailsOf(a);
+    // A meeting already stored takes its new title, contacts, times and status, and is never observed again (R2d Ruling 5).
+    // It is written only when one of them changed.
+    if (a.kind === 'meeting') {
+      const [stored] = await ctx.tx
+        .select({ subject: activity.subject, contacts: activity.contacts, startAt: activity.startAt, endAt: activity.endAt, status: activity.status })
+        .from(activity)
+        .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.system, h.system), eq(activity.externalId, a.externalId)));
+      if (stored) {
+        if (!sameDetails(stored, details)) {
+          await ctx.tx
+            .update(activity)
+            .set(details)
+            .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.system, h.system), eq(activity.externalId, a.externalId)));
+        }
+        continue;
+      }
+    }
+    const occurredAt = new Date(a.occurredAt);
+    // A meeting read again for its start can be from before the handoff: that is not new.
+    if (h.completedAt && occurredAt < h.completedAt) continue;
+    await observe({ externalId: a.externalId, kind: a.kind, occurredAt, owner: a.actorOwnerExternalId, details });
+  }
   // The CRM does not say when a task was completed or by whom: it is stamped now, with no actor. A plan task Scout
   // closed is only kept in the stored list; an open one is marked done first, so the plan sync never closes it.
   for (const t of turnedDone) {
@@ -213,9 +269,10 @@ export async function followThrough(ctx: ModuleContext, accountId: string, now: 
     .from(followThroughTable)
     .where(and(eq(followThroughTable.tenantId, ctx.tenantId), eq(followThroughTable.handoffId, h.id)));
   if (!row) return null;
+  // Rows dated after now (a booked meeting) are not the last activity.
   const [last] = await ctx.tx
     .select({ at: max(activity.occurredAt) })
     .from(activity)
-    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, accountId)));
+    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, accountId), lte(activity.occurredAt, now)));
   return countsOfRow(row, last?.at ?? null, now);
 }

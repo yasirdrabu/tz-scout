@@ -2,6 +2,7 @@
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET as getActivity } from '@/http/routes/v1/accounts/[id]/activity/route';
+import { GET as getEngagement } from '@/http/routes/v1/accounts/[id]/engagement/route';
 import { GET as getCrmCheck } from '@/http/routes/v1/accounts/[id]/crm-check/route';
 import { GET as getFacts } from '@/http/routes/v1/accounts/[id]/facts/route';
 import { GET as getHandoffs } from '@/http/routes/v1/accounts/[id]/handoffs/route';
@@ -10,11 +11,11 @@ import { GET as getAccountRoute, POST as accountAction } from '@/http/routes/v1/
 import { GET as getScore } from '@/http/routes/v1/accounts/[id]/score/route';
 import { POST as postArrival } from '@/http/routes/v1/arrivals/route';
 import { GET as getBuyingRoles } from '@/http/routes/v1/buying-roles/route';
-import { upsertFromArrival } from '@/modules/accounts';
+import { listPeople, upsertFromArrival } from '@/modules/accounts';
 import { buyingRole } from '@/modules/accounts/db/schema';
-import { seedMockCrm, syncOwners } from '@/modules/crm';
-import { activity, companyCheck, followThrough, handoff } from '@/modules/crm/db/schema';
-import { setMockFailure } from '@/modules/crm/fixtures';
+import { handoffPackageProvider, registerHandoffPackageProvider, seedMockCrm, syncAccount, syncOwners } from '@/modules/crm';
+import { activity, companyCheck, followThrough, handoff, link } from '@/modules/crm/db/schema';
+import { mockAddActivity, setMockFailure } from '@/modules/crm/fixtures';
 import { arrival } from '@/modules/intake/db/schema';
 import { offer as offerTable } from '@/modules/offers/db/schema';
 import { offerMatch } from '@/modules/scoring/db/schema';
@@ -24,7 +25,7 @@ import { setPrincipalCacheTtl } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { completeOffer } from '../offers/helpers';
-import { setSummary } from '../routing/helpers';
+import { resolved, setSummary } from '../routing/helpers';
 import { call, keyFor, SEND } from './intake-helpers';
 import { workspace, type Workspace } from './review-helpers';
 
@@ -325,7 +326,7 @@ describe('handoffs and the activity feed', () => {
     expect(res.status).toBe(200);
     const first = await res.json();
     expect(first.data).toHaveLength(25);
-    expect(first.data[0]).toEqual({ id: expect.stringMatching(/^cac_/), kind: 'email', at: expect.any(String), summary: 'Email sent' });
+    expect(first.data[0]).toEqual({ id: expect.stringMatching(/^cac_/), kind: 'email', at: expect.any(String), who: null, actor: 'person', summary: 'Email sent' });
     expect(first.data[1].summary).toBe('Task done');
     expect(first.next_cursor).toEqual(expect.any(String));
     expect(first.synced_at).toBe('2026-10-31T09:00:00.000Z');
@@ -345,5 +346,132 @@ describe('handoffs and the activity feed', () => {
     const limited = await w.person('seller', { name: 'Lee Limited', dataLimit: { kind: 'own_accounts' } });
     expect((await w.as(limited, getActivity, `accounts/${a}/activity`)).status).toBe(404);
     expect((await w.as(seller, getActivity, `accounts/${a}/activity`)).status).toBe(200);
+  });
+});
+
+describe('feed rows say who did what (R2d Ruling 8)', () => {
+  let a: string;
+  let h: typeof handoff.$inferSelect;
+  const startedAt = '2026-10-30T10:00:00.000Z';
+  let before: ReturnType<typeof handoffPackageProvider> | null = null;
+
+  beforeAll(async () => {
+    a = await w.sent({ name: 'Who Co', industry: 'Logistics' });
+    const res = await w.as(leader, accountAction, `accounts/${a}:assign`, 'POST', { seller_user_id: seller });
+    if (res.status !== 202) throw new Error(JSON.stringify(await res.json()));
+    await w.deliver();
+    h = (await adminDb.select().from(handoff).where(eq(handoff.accountId, a)))[0]!;
+    const base = h.completedAt!.getTime();
+    const row = (i: number, over: Partial<typeof activity.$inferInsert>) => ({
+      id: newId('cac'),
+      tenantId: w.tenantId,
+      accountId: a,
+      handoffId: h.id,
+      system: 'hubspot',
+      externalId: `who-${a}-${i}`,
+      kind: 'email',
+      occurredAt: new Date(base + (i + 1) * 60_000),
+      ...over,
+    });
+    const pat = { externalId: 'c-pat', name: 'Pat Lee' };
+    await adminDb.insert(activity).values([
+      row(0, { kind: 'email', actorOwnerExternalId: `mock-${seller}`, contacts: [pat], subject: 'Pilot scope' }),
+      row(1, { kind: 'reply', contacts: [pat], subject: 'Re: Pilot scope' }),
+      row(2, { kind: 'meeting', status: 'scheduled', startAt: new Date('2099-11-18T15:00:00Z'), endAt: new Date('2099-11-18T16:00:00Z'), contacts: [pat] }),
+    ]);
+    before = handoffPackageProvider();
+    registerHandoffPackageProvider({
+      package: async () => null,
+      planTasks: async () => ({ planId: 'apl_who', playbookName: 'Logistics intro', startedAt, otherPlans: [] }) as never,
+    });
+  });
+  // Put back the provider compose registered, not the default.
+  afterAll(() => registerHandoffPackageProvider(before));
+
+  it('names the seller on their email, the contact on a reply, and Scout on its own rows', async () => {
+    const body = await json(w.as(leader, getActivity, `accounts/${a}/activity`));
+    const by = (summary: string) => body.data.find((r: { summary: string }) => r.summary === summary);
+    expect(by('Sent "Pilot scope" to Pat Lee')).toMatchObject({ kind: 'email', who: 'Sam Seller', actor: 'person' });
+    expect(by('Replied: "Re: Pilot scope"')).toMatchObject({ kind: 'reply', who: 'Pat Lee', actor: 'contact' });
+    expect(body.data.find((r: { id: string }) => r.id === `${h.id}:sent`)).toMatchObject({ who: 'Scout', actor: 'scout' });
+    expect(by('Started the Logistics intro playbook')).toEqual({ id: 'apl_who:started', kind: 'scout', at: startedAt, who: 'Scout', actor: 'scout', summary: 'Started the Logistics intro playbook' });
+  });
+
+  it('puts a meeting at its start and words it as booked', async () => {
+    const body = await json(w.as(leader, getActivity, `accounts/${a}/activity`));
+    expect(body.data[0]).toMatchObject({ kind: 'meeting', at: '2099-11-18T15:00:00.000Z', summary: 'Meeting booked for Nov 18 with Pat Lee' });
+  });
+
+  it('never carries a body', async () => {
+    const body = await json(w.as(leader, getActivity, `accounts/${a}/activity`));
+    for (const r of body.data) expect(Object.keys(r).sort()).toEqual(['actor', 'at', 'id', 'kind', 'summary', 'who']);
+  });
+});
+
+describe('GET /accounts/{id}/engagement (R2d Ruling 7)', () => {
+  let a: string;
+
+  beforeAll(async () => {
+    const arrivalId = newId('arr');
+    const mail = (n: string) => `${n}.${newId('acc').slice(-6).toLowerCase()}@engage.example`;
+    ({ accountId: a } = await w.run((ctx) =>
+      upsertFromArrival(ctx, {
+        arrivalId,
+        receivedAt: new Date(),
+        sourceChain: {},
+        account: { name: 'Engage Co', domain: `${newId('acc').slice(-10).toLowerCase()}-example.com` },
+        people: [
+          { firstName: 'Ana', lastName: 'Met', email: mail('ana'), roleKeys: ['business_owner'] },
+          { firstName: 'Ben', lastName: 'Replied', email: mail('ben'), roleKeys: ['technical_buyer'] },
+          { firstName: 'Cy', lastName: 'Emailed', email: mail('cy') },
+          { firstName: 'Dee', lastName: 'Unlinked', email: mail('dee') },
+        ],
+        signals: [],
+        facts: [],
+        research: {},
+        soleProprietor: false,
+        externalIds: [],
+      }),
+    ));
+    await resolved(w.tenant, a, { arrivalId, resolution: 'created' });
+    const res = await w.as(leader, accountAction, `accounts/${a}:assign`, 'POST', { seller_user_id: seller });
+    if (res.status !== 202) throw new Error(JSON.stringify(await res.json()));
+    await w.deliver();
+  });
+
+  it('engagement lists each committee person', async () => {
+    const co = (await adminDb.select().from(handoff).where(eq(handoff.accountId, a)))[0]!.companyExternalId!;
+    const people = await w.run((ctx) => listPeople(ctx, a));
+    const id = (first: string) => people.find((p) => p.firstName === first)!.id;
+    const links = await adminDb.select().from(link).where(and(eq(link.tenantId, w.tenantId), eq(link.scoutType, 'person')));
+    const contact = (first: string) => links.find((l) => l.scoutId === id(first))!.externalId;
+    await adminDb.delete(link).where(and(eq(link.tenantId, w.tenantId), eq(link.scoutType, 'person'), eq(link.scoutId, id('Dee'))));
+    const now = new Date();
+    const next = new Date(now.getTime() + 5 * 86_400_000);
+    await w.run(async (ctx) => {
+      await mockAddActivity(ctx, { companyExternalId: co, kind: 'email', contactExternalIds: [contact('Ana'), contact('Ben'), contact('Cy')] });
+      await mockAddActivity(ctx, { companyExternalId: co, kind: 'meeting', occurredAt: now, startAt: now, endAt: now, status: 'held', contactExternalIds: [contact('Ana')] });
+      await mockAddActivity(ctx, { companyExternalId: co, kind: 'reply', contactExternalIds: [contact('Ben')] });
+      await mockAddActivity(ctx, { companyExternalId: co, kind: 'meeting', occurredAt: next, startAt: next, endAt: next, status: 'scheduled', subject: 'Scoping call' });
+    });
+    await w.run((ctx) => syncAccount(ctx, a, new Date()));
+    const body = await json(w.as(leader, getEngagement, `accounts/${a}/engagement`));
+    const state = (first: string) => body.people.find((p: { person_id: string }) => p.person_id === id(first));
+    expect(state('Ana')).toEqual({ person_id: id('Ana'), state: 'met', at: now.toISOString() });
+    expect(state('Ben')).toMatchObject({ state: 'replied', at: expect.any(String) });
+    expect(state('Cy')).toMatchObject({ state: 'emailed' });
+    expect(state('Dee')).toEqual({ person_id: id('Dee'), state: 'not_contacted', at: null });
+    expect(body).toMatchObject({ engaged: 2, total: 4, gap_role: 'Commercial buyer' });
+    const handoffs = await json(w.as(leader, getHandoffs, `accounts/${a}/handoffs`));
+    expect(handoffs.follow_through).toMatchObject({ meetings_held: 1, next_meeting: { at: next.toISOString(), with: 'Scoping call' } });
+  });
+
+  it('engagement is 404 for an account the caller cannot see', async () => {
+    const none = await keyFor(w.tenant, ['playbooks:read'], { dataLimit: { kind: 'all' } });
+    expect((await call(getEngagement, none, `accounts/${a}/engagement`)).status).toBe(403);
+    expect((await w.as(leader, getEngagement, `accounts/${otherAccount}/engagement`)).status).toBe(404);
+    const limited = await w.person('seller', { name: 'Lou Limited', dataLimit: { kind: 'own_accounts' } });
+    expect((await w.as(limited, getEngagement, `accounts/${a}/engagement`)).status).toBe(404);
+    expect((await w.as(seller, getEngagement, `accounts/${a}/engagement`)).status).toBe(200);
   });
 });

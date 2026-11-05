@@ -26,12 +26,14 @@ export {
   CRM_SYSTEMS,
   DEFAULT_FOLLOW_UP_DAYS,
   HANDOFF_STATUSES,
+  type Activity,
   type ActivityKind,
   type CompanyLifecycle,
   type CrmSystem,
   type DealStatus,
   type HandoffPackage,
   type HandoffStatus,
+  type MeetingStatus,
   type OwnershipAction,
   type PlanTasks,
 } from './contracts/types';
@@ -55,6 +57,7 @@ export { ASSIGN_FIRST, push, queuePersonPush, runPersonPush } from './services/p
 export { POLL_LIMIT, POLL_WINDOW_MS, checkFollowThrough, followThrough, pollActivity, syncAccount } from './services/follow-through';
 export { crmCheckCard, crmFacts, getHandoffs, lastActivityAt, latestHandoff, type AccountCrmFacts, type CrmCheckCard, type HandoffRow, type HandoffsView } from './services/read';
 export { ACTIVITY_PAGE, activityCursor, listActivity, type ActivityCursor } from './services/activity';
+export { engagement, type Engagement } from './services/engagement';
 export type { ActivityEntry } from './domain/activity';
 export {
   DEFAULT_QUALIFIED_LEAD_RULE,
