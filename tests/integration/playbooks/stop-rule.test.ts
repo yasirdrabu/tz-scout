@@ -5,7 +5,7 @@ import { activityObserved } from '@/modules/crm/contracts/events';
 import { approveOffer, createOffer, createPractice } from '@/modules/offers';
 import { abandonPlan, completePlan, createTemplate, removeStep, resumePlan, pausePlan, updateStep } from '@/modules/playbooks';
 import { accountPlan, planChange, planStep } from '@/modules/playbooks/db/schema';
-import { assign, accept } from '@/modules/routing';
+import { assign, accept, withdraw } from '@/modules/routing';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
 import { publishTestEvent } from '../helpers/publish';
@@ -259,6 +259,23 @@ describe('no reply', () => {
     await observe(accountId, 'reply');
     await asSeller((ctx) => resumePlan(ctx, planId));
     expect(await events('playbooks.plan.no_reply', accountId)).toHaveLength(0);
+  });
+
+  it('a plan paused by a withdrawal fires once when the next acceptance resumes it', async () => {
+    const { accountId, assignmentId, planId, stepIds } = await account();
+    await asPerson(t, (ctx) => withdraw(ctx, assignmentId), { userId: leader });
+    await runPlaybooks(t.tenantId);
+    expect((await plan(planId)).status).toBe('paused');
+    await tick(planId, stepIds);
+    expect(await events('playbooks.plan.no_reply', accountId)).toHaveLength(0);
+
+    const again = await asPerson(t, (ctx) => assign(ctx, accountId, { sellerUserId: seller }), { userId: leader });
+    await asPerson(t, (ctx) => accept(ctx, again.id), { userId: seller, dataLimit: { kind: 'own_accounts' } });
+    await runPlaybooks(t.tenantId);
+    expect(await plan(planId)).toMatchObject({ status: 'active', assignmentId: again.id, noReplyAt: expect.any(Date) });
+    const fired = await events('playbooks.plan.no_reply', accountId);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]!.data).toMatchObject({ planId, assignmentId: again.id });
   });
 
   it('removing the last open step fires no_reply', async () => {

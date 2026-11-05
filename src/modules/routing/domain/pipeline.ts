@@ -71,7 +71,7 @@ const furthest = (stages: PipelineStage[]) => stages.reduce<PipelineStage | null
 /**
  * Where an account at `current` goes on `signals`, or null for no move (REV-E5 "Movement rules"). Flow
  * stages move forward only, to the furthest stage the signals fire; exits are entered from any flow stage
- * but the won one and left only by the three listed returns or by hand.
+ * but the won one and left only by the listed returns or by hand.
  */
 export function moveFor(current: string, signals: StageSignal[], stages: PipelineStage[]): string | null {
   for (const s of signals) {
@@ -99,6 +99,8 @@ export function moveFor(current: string, signals: StageSignal[], stages: Pipelin
     signals.some((s) => 'trigger' in s && s.trigger === x.trigger && (x.trigger !== 'deal_reaches_stage' || (!!x.hubspotStage && x.hubspotStage === s.hubspotStage))),
   );
   if (cur.kind === 'exit') {
+    // An account sent to nurture by a playbook with no reply comes back on a later reply, meeting or deal (R2c-3b).
+    if (cur.trigger === 'playbook_no_reply') return furthest(fired.filter((x) => x.kind === 'flow' && BEYOND_ACCEPTANCE.includes(x.trigger)))?.key ?? null;
     // A new open deal reopens an account lost with its last one.
     if (cur.trigger !== 'deal_closed_lost') return null;
     return furthest(fired.filter((x) => x.kind === 'flow' && (x.trigger === 'deal_created' || x.trigger === 'deal_reaches_stage')))?.key ?? null;

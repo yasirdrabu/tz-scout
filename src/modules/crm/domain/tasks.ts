@@ -45,7 +45,7 @@ export function dueAtOn(date: string, timezone: string): string {
 export const REPLACED_TASK = 'replaced_task';
 export const CLOSED_BY_SCOUT = 'closed_by_scout';
 
-export const NO_BUYER_SENTENCE ='No buyer contact yet; the note lists who to look for.';
+export const NO_BUYER_SENTENCE = 'No buyer contact yet; the note lists who to look for.';
 
 export function buildTasks(input: TaskInput): { firstTouch: TaskSpec; followUps: (TaskSpec & { day: number })[] } {
   const { account, buyer, offerName, pkg, timezone } = input;

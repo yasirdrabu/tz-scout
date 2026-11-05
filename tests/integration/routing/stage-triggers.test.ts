@@ -142,6 +142,17 @@ describe('a playbook ending with no reply moves the account to the exit that own
     expect(await stageIn(d, a)).toBe('engaged');
   });
 
+  it('a reply after it went back to nurture moves the account to Engaged', async () => {
+    const d = await routingTenant();
+    const s = await member(d, 'seller');
+    const a = await accepted(d, s);
+    await noReply(d, a);
+    expect(await stageIn(d, a)).toBe('back_to_nurture');
+    await publishTestEvent(d.tenantId, activityObserved, { accountId: a, handoffId: null, system: 'hubspot', externalId: newId('cac'), kind: 'reply', occurredAt: new Date().toISOString(), actorCrmOwnerId: null, actorUserId: s });
+    await runOutbox(d.tenantId);
+    expect(await stageIn(d, a)).toBe('engaged');
+  });
+
   it('a workspace that gave the trigger to another exit moves there, whatever its key', async () => {
     const w = await routingTenant();
     await w.run(async (ctx) => {

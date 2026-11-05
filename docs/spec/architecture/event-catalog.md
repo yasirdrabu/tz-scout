@@ -99,6 +99,7 @@ Jobs travel the same way as events, as `jobs.<name>` messages. Each module spec 
 | `crm.deals.poll` | CRM | Hourly, per tenant: reads deals changed since the last poll (at most 1,000, oldest change first) and keeps those on linked companies. After a full page the cursor moves to the last deal's modified time, not to now. A webhook about a deal Scout has not seen queues one at most every 5 minutes |
 | `crm.owners.sync` | CRM | Daily at 05:00 UTC, per tenant: reads the CRM's owner roster (up to 2,000 owners) |
 | `crm.sync` | CRM | Reads one account's follow-through, activity and deals now (from the activity poll, a webhook or "Check follow-through"), under the account lock. Timeout 120 seconds |
+| `crm.plan.sync` | CRM | Makes one account's HubSpot tasks match its latest plan (create, update in place, close with a note) and closes the handoff's open fixed tasks as replaced; queued on `playbooks.plan.created` / `.changed` and when a push completes. Does nothing before a handoff completed. Under the account lock; usage limits and retryable errors handled as `crm.sync` |
 
 ## Versions and arrival ids
 

@@ -13,8 +13,9 @@ epic keeps its rules and makes it event driven, retried and visible.
 1. `routing.assignment.created` arrives. The consumer creates a `crm.handoff` (status `queued`) and
    publishes `jobs.crm.handoff.push` through the outbox. Ordered by `accountId`. Every job that writes to the CRM for an account (push, undo, person push, sync) first takes the advisory lock `crm:<tenant>:<account>`.
 2. The job loads the account and people from Accounts, and the handoff package (scores, best offer,
-   fit parts, signals as scored, offer and case studies, brief, opener, follow-up sequence, plan
-   steps) from the registered `HandoffPackageProvider` (Playbooks), then builds the note (CRM-E3-S3).
+   fit parts, signals as scored, offer and case studies, brief, opener, follow-up sequence) from the
+   registered `HandoffPackageProvider` (Playbooks), then builds the note (CRM-E3-S3). Plan steps are not
+   pushed: `crm.plan.sync` makes their tasks (step 6).
    CRM never calls Scoring, Offers or Playbooks directly.
 3. Ownership decision (CRM-E3-S2). If it stops, status `needs_decision` and
    `crm.handoff.needs_decision` is published.
@@ -125,9 +126,10 @@ As a leader, I want to push again after new facts or a reassignment, so that the
 As a seller, I want an account I declined to leave my CRM queue, so that my tasks and book stay
 accurate.
 - CRM-E3-S7-AC1 Given `routing.assignment.declined` or `.withdrawn` for a pushed account, within 10
-  seconds the open tasks Scout created are closed with "Declined in Scout: <reason label>" (or "Withdrawn in
+  seconds the open first-touch and follow-up tasks Scout created are closed with "Declined in Scout: <reason label>" (or "Withdrawn in
   Scout"), and ownership returns to the previous owner recorded on the handoff, or the assigner when
   none was recorded or that owner is inactive. Ownership returns only for an `assign` handoff whose company is still owned by the seller, and covers the company and the people Scout set an owner on. When the assigner has no CRM owner either, the owner stays and the undo records "Owner left as is: <assigner> has no HubSpot owner". A `keep` handoff changes no owner.
+  Tasks made from a playbook plan are not closed by the undo: the plan sync handles them (CRM-E3-S4-AC3). The withdrawal pauses the plan, and a paused plan keeps its tasks open until it resumes (their owner moves to the new seller) or ends.
 - CRM-E3-S7-AC2 A separate short note is added on the company ("Returned by <seller> on <Mon D, YYYY>: <reason label>", or "Withdrawn by <name of whoever withdrew> on <date>"); the context note is never edited by an undo, and the note, people
   and anything a person wrote in the CRM are never deleted.
 - CRM-E3-S7-AC3 Tasks a person already completed stay completed. The handoff records what was undone (`undone` = `tasksClosed[]`, `tasksLeftDone[]`, `ownerReturnedTo`, `noteExternalId`, `at`), and the account page lists it. A completed handoff that was undone stays `completed` with `undone` set, and `crm.handoff.cancelled` tells Routing it is no longer in the CRM.

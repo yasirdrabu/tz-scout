@@ -70,7 +70,8 @@ stages are `stg_` ids. The locked first and won stages keep their keys forever, 
   except the three rules below.
 - **Exits** are entered from any flow stage except the won stage. An account in an exit moves only
   by: reopening (a declined review status changed back: to the first stage), a new open deal (from the
-  `deal_closed_lost` exit to the `deal_created` stage, as today), or by hand.
+  `deal_closed_lost` exit to the `deal_created` stage, as today), a later reply, meeting or deal (from the
+  `playbook_no_reply` exit to the furthest flow stage those fire, as from a flow stage), or by hand.
 - **An assignment declined or withdrawn** moves an account back to the `reviewer_sets_tier` stage, else
   the first stage (today's assigned → reviewed), when it is at a flow stage from the `ae_accepts` stage
   up to, not including, the first stage triggered by a reply, a meeting or a deal (`reply_or_meeting`,

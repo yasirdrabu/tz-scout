@@ -80,6 +80,7 @@ A stage move's `cause_event_id` is suffixed by the action (`<id>:accepted`, `:de
 | `crm.activity.observed` | an activity by the open pending assignment's seller accepts it (`acceptedHow` `crm_activity`); a reply or meeting from anyone moves the stage to Engaged | yes |
 | `crm.deal.changed` | status `open` moves the stage to Opportunity, `won` to Won, `lost` to Lost | yes |
 | `playbooks.outcome.recorded` | stage engaged on reply or meeting | yes |
+| `playbooks.plan.no_reply` | move to the exit stage that owns `playbook_no_reply` (default Back to nurture), never from at or past the first stage a reply, meeting or deal triggers | yes |
 | `accounts.account.merged` | move review, assignments and history to the survivor | yes |
 | `tenancy.member.removed` | open assignments of that seller go back to the assigner as `withdrawn` | no |
 | `jobs.history.republish` | re-publish stored status, assignment and stage events with `replay: true` (events-and-async.md) | no |
