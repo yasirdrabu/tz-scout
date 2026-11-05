@@ -43,8 +43,10 @@ export {
 export {
   LIMIT_INVALID,
   allowOverage,
+  budgetPaused,
   checkCap,
   isCapWait,
+  isPaused,
   listCaps,
   reserve,
   setCapLimit,
@@ -56,3 +58,7 @@ export { DEFAULT_CAPS, type CapLevel, type CapPeriod, type CapUnit } from './dom
 export { connectionTenant } from './services/inbound';
 export { MASTER_KEY_MISSING } from './services/vault';
 export { credentialsCleanupHandler, credentialsCleanupJob } from './jobs';
+export { getRates, priceCents, setRates } from './services/rates';
+export { defaultRates, priceOf } from './domain/rates';
+export { usageRecorded } from './contracts/events';
+export { integrationsBudgetPause, integrationsConsumers } from './consumers';

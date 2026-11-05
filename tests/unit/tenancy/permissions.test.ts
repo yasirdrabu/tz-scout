@@ -16,9 +16,9 @@ import {
 const has = (role: keyof typeof ROLE_PERMISSIONS, p: Permission) => ROLE_PERMISSIONS[role].includes(p);
 
 describe('permissions', () => {
-  it('has 35 permissions', () => {
-    expect(PERMISSIONS.length).toBe(35);
-    expect(new Set(PERMISSIONS).size).toBe(35);
+  it('has 37 permissions', () => {
+    expect(PERMISSIONS.length).toBe(37);
+    expect(new Set(PERMISSIONS).size).toBe(37);
   });
 
   it.each([
@@ -34,6 +34,8 @@ describe('permissions', () => {
     ['imports:run', { owner: true, leader: true, seller: false, operator: true }],
     ['analytics:read', { owner: true, leader: true, seller: true, operator: true }],
     ['costs:write', { owner: true, leader: true, seller: false, operator: true }],
+    ['costs:read', { owner: true, leader: true, seller: false, operator: true }],
+    ['budgets:write', { owner: true, leader: true, seller: false, operator: false }],
     ['playbooks:write', { owner: true, leader: true, seller: true, operator: true }],
     ['playbooks:manage', { owner: true, leader: true, seller: false, operator: true }],
     ['offers:read', { owner: true, leader: true, seller: true, operator: true }],
@@ -53,7 +55,7 @@ describe('permissions', () => {
     const p = permissionsFor('seller', ['review:act', 'accounts:read'], false);
     expect(p).toContain('review:act');
     expect(p.filter((x) => x === 'accounts:read')).toHaveLength(1);
-    expect(permissionsFor('operator', [], true).length).toBe(35);
+    expect(permissionsFor('operator', [], true).length).toBe(37);
   });
 
   it('the Viewer role holds exactly the four read permissions', () => {

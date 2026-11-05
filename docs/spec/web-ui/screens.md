@@ -679,18 +679,27 @@ value; "No wins from this source yet.").
 
 ## 18. Costs
 
-**Tag** R3 · **Route** `/t/:tenant/costs` · **Who** `analytics:read`; budgets `costs:write`
+**Tag** R3a (spend, budgets, cost lines, banners) and R3b (what each source returns) · **Route** `/t/:tenant/costs` · **Who** `costs:read`; budgets `budgets:write`; cost lines `costs:write`
 
-Title "Costs", sub "What finding accounts costs, where the money goes, and what each source returns
-for it. Last 90 days." Tiles: Spend, Cost per account sent, Cost per won account (target), Return on
-spend ("{n}x"). "Where the money goes" by category (Partner fees, Data vendors, Agents and hosting,
-Lists and events, AI usage; the API maps its cost categories onto these), each with what is in it.
-"Monthly spend" bars against the budget. "Monthly budgets", per category and month (Decision 26;
-"Scout alerts the owner at 90% and pauses paid pulls at 110%."): per category used, "of {budget}",
-"{n}% used", "Over by {x}", "{x} left"; `Edit budgets` to inputs, `Cancel`, `Save budgets` (toast
-"Budgets saved. Monthly total {x}."). "Cost by source" table: Source, Spend, Share, Per account sent,
-Per assigned, Per won account, Return; row opens the funnel drill. Footnote "Return is the value of
-won deals divided by spend. Won value is what each deal closed at."
+**R3a.** Title "Costs", sub "What finding accounts costs and where the money goes. Last 90 days."
+Tiles: "Spend this month", "Budget used" ("{n}%" of the monthly total) and "Last 90 days". "Where
+the money goes" by category (Partner fees, Data vendors, Agents and hosting, Lists and events, AI
+usage), 90-day spend with each share. "Monthly spend": six bars against the summed budget line; a bar
+over 100% is red and one from 90% is amber. "Monthly budgets" for the current month ("Scout alerts the
+owner at 90% and pauses paid pulls at 110%."): per category used, "of {budget}", "{n}% used", "Over
+by {x}" or "{x} left"; `Edit budgets` to inputs, `Cancel`, `Save budgets` (toast "Budgets saved.
+Monthly total {x}."). "Cost lines": newest first with `Add cost`, `Edit` (costs added by hand
+only), `Void` (asks for a reason) and a "Show voided" toggle. Banners, on Costs and on Settings >
+Integrations for `costs:read`: "{Category} has used {n}% of its {Month} budget." and "{Category} is
+paused: it is over 110% of its {Month} budget. Raise the budget to resume." Settings > Integrations,
+each paid service's Manage panel, has a "Prices" section (Claude per model: "Input, $ per million
+tokens" and "Output, $ per million tokens"; Apollo and Vibe: "Cents per credit"; toast "Prices
+saved.").
+
+**R3b.** Tiles Cost per account sent, Cost per won account (target) and Return on spend ("{n}x"),
+and the "Cost by source" table: Source, Spend, Share, Per account sent, Per assigned, Per won
+account, Return; a row opens the funnel drill. Footnote "Return is the value of won deals divided by
+spend. Won value is what each deal closed at."
 
 ## 19. Offers and practices
 

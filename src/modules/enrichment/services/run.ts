@@ -1,7 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { getAccount, getSummaries, listBuyingRoles, type AccountView, type PersonView } from '@/modules/accounts';
 import { getRun } from '@/modules/ai-tasks';
-import { PROVIDERS, checkCap, connectionStatus, gateway, markConnectionFailing } from '@/modules/integrations';
+import { PROVIDERS, budgetPaused, checkCap, connectionStatus, gateway, getRates, markConnectionFailing, priceOf } from '@/modules/integrations';
 import { checkArrivalCap, countryCode, ensureVendorSource, findArrivalByRef, normaliseDomain, readSource, submitArrival } from '@/modules/intake';
 import { getOffer } from '@/modules/offers';
 import { tenantSummary } from '@/modules/tenancy';
@@ -13,12 +13,12 @@ import type { CompanyFacts, EnrichmentAdapter, Paid, Person, Signal, SitePage } 
 import { requestCompleted, requestFailed } from '../contracts/events';
 import type { EnrichmentKind, RequestStatus } from '../contracts/types';
 import { request } from '../db/schema';
-import { classifyError, type ClassifiedError } from '../domain/errors';
-import { DEFAULT_CENTS_PER_CREDIT, MAX_PEOPLE, PEOPLE_PER_ROLE } from '../domain/prices';
+import { budgetWaiting, classifyError, pausedCategoryOf, type ClassifiedError } from '../domain/errors';
+import { MAX_PEOPLE, PEOPLE_PER_ROLE } from '../domain/prices';
 import { readWebsiteInput, websiteFacts } from '../domain/read-website';
 import { nothingFound, searchTitles, type LeadOffer } from '../domain/run';
 import { readWebsite } from '../tasks/read-website';
-import { connectionFacts, fromStoredEstimate } from './requests';
+import { fromStoredEstimate } from './requests';
 
 // The run of an approved request (Rulings 8 and 9). State the job must keep when it throws (the wait for a limit,
 // `running`, a retry's error) is committed in its own transaction; the end state is written in the job's transaction,
@@ -38,6 +38,8 @@ type Found = {
   signals: Signal[];
   facts: FactItem[];
   credits: number;
+  /** Each credit call's price at the rates read before the calls: what a live call logged (R3a Ruling 2). */
+  creditCents: number;
   /** Claude's cost for a website read. */
   aiCents: number;
   readByRules: boolean;
@@ -113,16 +115,28 @@ const asPerson = (p: PersonView): Person => ({
 /** Runs the kind's provider operations, adding what each finds to `f` as it goes, so an error keeps the rest. */
 async function operate(ctx: ModuleContext, r: Row, domain: string, f: Found): Promise<void> {
   const summary = { requestId: r.id, accountId: r.accountId };
-  /** One gateway call per operation, holding its worst case against the limit and settling what it spent (Pitfall 3). */
+  // Read before the calls: pricing an answer must not need the job's transaction, which a timeout loses.
+  const rates = new Map((await getRates(ctx, r.providerKey)).map((x) => [x.item, x.centsPerUnit]));
+  /**
+   * One gateway call per operation, holding its worst case against the limit and settling what it spent (Pitfall 3).
+   * A live call's credits are priced at the provider's rate (R3a Ruling 2) and logged; a sample call logs 0, but the
+   * request still shows its price, as the estimate does.
+   */
   const call = async <T>(operation: string, worst: number, fn: (a: EnrichmentAdapter) => Promise<Paid<T>>): Promise<T> => {
+    let priced = 0;
     const paid = await gateway.call(ctx, r.providerKey, operation, (a) => fn(a as EnrichmentAdapter), {
       module: 'enrichment',
       unit: 'credits',
       units: worst,
-      measure: (p: Paid<T>) => ({ units: p.creditsUsed }),
+      accountId: r.accountId,
+      measure: (p: Paid<T>, { live }) => {
+        priced = priceOf(rates, [{ item: 'credit', units: p.creditsUsed }]);
+        return { units: p.creditsUsed, costCents: live ? priced : 0 };
+      },
       requestSummary: summary,
     });
     f.credits += paid.creditsUsed;
+    f.creditCents += priced;
     return paid.value;
   };
   const params = r.params as Params;
@@ -181,7 +195,7 @@ async function operate(ctx: ModuleContext, r: Row, domain: string, f: Found): Pr
         module: 'enrichment',
         requestSummary: summary,
       });
-      const read = await readWebsite(ctx, readWebsiteInput(domain, pages), { subject: subject(r.id) });
+      const read = await readWebsite(ctx, readWebsiteInput(domain, pages), { subject: subject(r.id), accountId: r.accountId });
       f.readByRules = read.mode !== 'live';
       f.aiCents += (await getRun(ctx, read.runId))?.costCents ?? 0;
       f.facts.push(...websiteFacts(read.output));
@@ -278,11 +292,8 @@ async function roleLabels(ctx: ModuleContext, r: Row): Promise<string[]> {
   return ((r.params as { roles?: string[] }).roles ?? []).map((k) => labels.get(k) ?? k);
 }
 
-/** Credits at the rate the estimate used (Ruling 5), plus Claude's cost for a website read. */
-async function costOf(ctx: ModuleContext, r: Row, f: Found): Promise<number> {
-  const rate = (await connectionFacts(ctx, r.providerKey)).centsPerCredit ?? DEFAULT_CENTS_PER_CREDIT[r.providerKey] ?? 0;
-  return f.credits * rate + f.aiCents;
-}
+/** The credit calls' prices (the sum a live run logged), plus Claude's cost for a website read. */
+const costOf = (f: Found): number => f.creditCents + f.aiCents;
 
 /** Submits what was found and writes `completed` or `partial` with the result; publishes `completed`. */
 async function finish(ctx: ModuleContext, r: Row, f: Found, before: AccountView | null, stopped?: ClassifiedError): Promise<void> {
@@ -296,7 +307,7 @@ async function finish(ctx: ModuleContext, r: Row, f: Found, before: AccountView 
   const { arrivalIds, found } = submitted;
   const name = providerName(r.providerKey);
   const message = stopped ? stopped.message : found === 0 ? nothingFound(name, r.kind as EnrichmentKind, await roleLabels(ctx, r)) : f.readByRules ? 'Read by rules' : undefined;
-  const costCents = await costOf(ctx, r, f);
+  const costCents = costOf(f);
   const result = {
     arrival_ids: arrivalIds,
     credits_used: f.credits,
@@ -333,7 +344,7 @@ async function finish(ctx: ModuleContext, r: Row, f: Found, before: AccountView 
 
 /** Writes `failed` and publishes `failed`. The job then returns normally: no retry. */
 async function writeFailed(ctx: ModuleContext, r: Row, f: Found, c: Failure, submitted: Submitted | null): Promise<void> {
-  const costCents = await costOf(ctx, r, f);
+  const costCents = costOf(f);
   const now = new Date();
   await ctx.tx
     .update(request)
@@ -389,13 +400,14 @@ export async function runRequest(ctx: ModuleContext, requestId: string): Promise
   // 1. The estimate against the limit. The wait is committed: the throw rolls this transaction back.
   const cap = await checkCap(ctx, r.providerKey, fromStoredEstimate(r.estimate).credits);
   if (cap.status === 'blocked') {
-    await commit(ctx, r.id, { waitingReason: waiting });
-    throw capWait(name, cap.resetsAt);
+    // A budget pause (R3a Ruling 9) waits for the budget to be raised, not for the limit to reset.
+    await commit(ctx, r.id, { waitingReason: cap.paused ? budgetWaiting(cap.paused) : waiting });
+    throw cap.paused ? budgetPaused(cap.paused) : capWait(name, cap.resetsAt);
   }
   const mode = (await connectionStatus(ctx, r.providerKey)).mode === 'live' ? 'live' : 'mock';
   if (!(await commit(ctx, r.id, { status: 'running', startedAt: r.startedAt ?? new Date(), waitingReason: null, connectionMode: mode }))) return;
 
-  const f: Found = { company: null, people: [], signals: [], facts: [], credits: 0, aiCents: 0, readByRules: false };
+  const f: Found = { company: null, people: [], signals: [], facts: [], credits: 0, creditCents: 0, aiCents: 0, readByRules: false };
   const before = await getAccount(ctx, r.accountId);
   const domain = normaliseDomain(before?.domain) ?? normaliseDomain(before?.websiteUrl);
   if (!domain) return writeFailed(ctx, r, f, { kind: 'bad_request', message: 'Add the company’s website first.' }, null);
@@ -414,7 +426,8 @@ export async function runRequest(ctx: ModuleContext, requestId: string): Promise
     if (c.kind === 'cap_reached') {
       if (hasResults(f)) return finish(ctx, r, f, before, c);
       const orgId = f.orgId && f.orgId !== (r.params as Params).org_id ? { params: { ...(r.params as Params), org_id: f.orgId } } : {};
-      await commit(ctx, r.id, { waitingReason: waiting, ...orgId });
+      const paused = pausedCategoryOf(e);
+      await commit(ctx, r.id, { waitingReason: paused ? budgetWaiting(paused) : waiting, ...orgId });
       throw e;
     }
     // Partial means it kept something: out of credits before anything was found is a failure.

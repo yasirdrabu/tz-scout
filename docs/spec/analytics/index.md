@@ -20,7 +20,7 @@ re-implement that math (v1 rule, carried).
 | `analytics.source_touch` | `tenant_id`, `account_id`, `source_id`, `source_level` (person, agent, vendor), `batch_id`, `arrival_id`, `first_seen_at` | Every source that ever sent the account, for the "any source" view. |
 | `analytics.decline` | `tenant_id`, `account_id`, `kind` (review, assignment), `reason_key`, `note`, `by_user_id`, `source_id`, `at` | Decline reasons by source and seller |
 | `analytics.step_credit` | `tenant_id`, `outcome_id`, `outcome_kind`, `step_id`, `step_type`, `playbook_template_id`, `practice_id`, `offer_id`, `occurred_at` | One row per credited step per outcome, for "what worked" |
-| `analytics.cost_line` | `id` (`cst_`), `tenant_id`, `origin` (auto, manual), `category` (vendor_credits, ai, ad_spend, integration_usage, hours, event, referral_fee, other), `amount_cents`, `currency`, `incurred_on`, `period_start`, `period_end`, `target_type` (account, batch, source, practice, offer, none), `target_id`, `origin_event_id`, `quantity`, `unit` (credits, tokens, hours), `note`, `created_by`, `voided_at`, `voided_by`, `void_reason` | Ledger. Never edited; corrections void and re-add. |
+| `analytics.cost_line` | `id` (`cst_`), `tenant_id`, `occurred_on` (tenant-timezone date), `category` (partner_fees, data_vendors, agents_hosting, lists_events, ai_usage), `provider` (usage lines), `amount_cents`, `origin` (usage, manual), `origin_event_id` (unique), `account_id`, `note`, `created_by`, `created_at`, `voided_at`, `void_reason`, `voided_by`, `replaces_id` | Ledger (R3a). Never changed in place: an edit voids the line ("Edited") and adds one with `replaces_id`. Targets other than the account, quantities and hours wait for R3b. |
 | `analytics.hour_rate` | `tenant_id`, `role_key`, `rate_cents_per_hour`, `effective_from` | For turning logged hours into cost. |
 | `analytics.week` | `tenant_id`, `start_date` (Monday), `built_at`, `counts` (raw counts json) | Scorecard weeks; raw counts only. |
 | `analytics.scorecard_target` | `tenant_id`, `metric_key`, `target`, `min_sample` | Targets and minimum samples per row. |
@@ -62,9 +62,9 @@ render time; nothing in those modules depends on Analytics, so no cycle forms.
 | `playbooks.outcome.recorded` | `analytics.step_credit` rows from `creditedStepIds`, for the "what worked" roll-up |
 | `accounts.account.merged` | merge journeys (earliest timestamps win; touches combined) |
 | `scoring.account.scored` | `practice_id`, `offer_id` until assignment |
-| `integrations.usage.recorded` | **the** auto cost line for every costed outside call (vendor credits, AI tokens, paid API usage), one line per event; `costCents` from the event, target from `sourceId` or the account found by `correlationId` |
-| `enrichment.request.completed` | no line of its own; supplies the account (and request id `enr_…`) for usage records with the same `correlationId` |
-| `ai.run.completed` | no line of its own; supplies the account for AI usage records with the same `correlationId` |
+| `integrations.usage.recorded` | **the only** source of automatic cost lines (vendor credits, AI tokens, paid API usage): one `usage` line per event, deduped on the event id; `costCents` from the event, the category from the provider (`CATEGORY_OF_PROVIDER`), `occurred_on` the tenant-timezone date of `occurredAt`, the account from the event's `accountId` |
+| `enrichment.request.completed` | no line of its own; will supply the account (and request id `enr_…`) for usage records with the same `correlationId` (R3b; not consumed in R3a) |
+| `ai.run.completed` | no line of its own; will supply the account for AI usage records with the same `correlationId` (R3b; not consumed in R3a) |
 | `campaigns.ad_spend.recorded` | auto cost line (ad spend, reported by the channel, not a costed call) |
 | `playbooks.learning.recorded` | learnings count for the flywheel |
 | `intake.source.trust_changed` | trust trend |
@@ -73,7 +73,7 @@ render time; nothing in those modules depends on Analytics, so no cycle forms.
 
 | Event | Data |
 |---|---|
-| `analytics.cost.recorded` | `costLineId`, `origin`, `category`, `amountCents`, `currency`, `targetType`, `targetId`, `incurredOn` |
+| `analytics.cost.recorded` | `costLineId`, `origin`, `category`, `amountCents`, `currency`, `targetType`, `targetId`, `incurredOn`. Not published yet. |
 | `analytics.diagnosis.created` | `weekStart`, `diagnosisId`, `bottleneck` |
 
 ## API endpoints
@@ -85,6 +85,15 @@ Fixed in `public-api/index.md` (JSON is `snake_case`):
 | `GET /api/v1/analytics/funnel?by=source\|practice\|offer&from&to` | `analytics:read` | Funnel counts and conversion per stage. Optional extra query: `view` (cohort, activity), `attribution` (first, any), `source_level` (person, agent, vendor), `format=csv` |
 | `GET /api/v1/costs?from&to&source_id` | `analytics:read` | Cost lines, with totals by category and target; `format=csv` |
 | `POST /api/v1/costs` | `costs:write` | Add a manual cost line |
+
+Built in R3a (the cost ledger), in place of `GET /costs` and `POST /costs` above:
+
+| Method and path | Scope | Does |
+|---|---|---|
+| `GET /api/v1/costs/lines?category&from&to&include_voided&cursor` | `costs:read` | Cost lines, 50 a page, newest first (`occurred_on`, then when added); voided lines only with `include_voided=true` |
+| `POST /api/v1/costs/lines` | `costs:write`, people only | Add a manual line `{ occurred_on, category, amount_cents, note }`; the amount must be above zero ("Enter an amount above zero."), the note up to 500 characters |
+| `PATCH /api/v1/costs/lines/{id}` | `costs:write`, people only | Manual lines only (others get 409 "Only costs added by hand can be edited."): voids the line "Edited" and returns the new line with `replaces_id`; an edit that changes nothing returns the line as it is |
+| `POST /api/v1/costs/lines/{id}:void` | `costs:write` | Void any line with `{ reason }` (required) |
 
 Proposed additions (to be added to `public-api/index.md` before R3; not yet in the fixed list):
 

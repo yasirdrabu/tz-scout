@@ -35,7 +35,7 @@ export async function explainConflict(ctx: ModuleContext, conflictId: string): P
   };
   let result;
   try {
-    result = await runTask(ctx, conflictExplanationTask, input, { subject: { type: 'conflict', id: c.id } });
+    result = await runTask(ctx, conflictExplanationTask, input, { subject: { type: 'conflict', id: c.id }, accountId: c.accountId });
   } catch (e) {
     if (e instanceof ScoutError && e.slug === 'ai_unavailable') return;
     throw e;

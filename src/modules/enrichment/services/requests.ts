@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { accountNames, filterVisibleAccountIds, getAccount, listBuyingRoles } from '@/modules/accounts';
-import { PROVIDERS, connectionSettings, connectionStatus } from '@/modules/integrations';
+import { PROVIDERS, connectionStatus, getRates } from '@/modules/integrations';
 import { readSource, recordSourceFeedback } from '@/modules/intake';
 import { apiKeyNames, can, requirePermission, tenantSummary, userNames, type Principal } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
@@ -130,12 +130,12 @@ async function requesterLabel(ctx: ModuleContext, p: Principal): Promise<string>
 
 // ---- Checking a request and its estimate ----
 
-/** The connection's money per credit and whether it answers with sample data. An unknown provider is sample data. */
+/** The provider's money per credit (its rate, R3a Ruling 1) and whether it answers with sample data. An unknown provider is sample data. */
 export async function connectionFacts(ctx: ModuleContext, provider: string): Promise<{ sample: boolean; centsPerCredit?: number }> {
   if (!PROVIDERS.some((p) => p.key === provider)) return { sample: true };
   const { mode } = await connectionStatus(ctx, provider);
-  const cents = (await connectionSettings(ctx, provider)).cents_per_credit;
-  return { sample: mode !== 'live', ...(typeof cents === 'number' && Number.isInteger(cents) && cents >= 0 ? { centsPerCredit: cents } : {}) };
+  const credit = (await getRates(ctx, provider)).find((r) => r.item === 'credit');
+  return { sample: mode !== 'live', ...(credit ? { centsPerCredit: credit.centsPerUnit } : {}) };
 }
 
 type Checked = { accountId: string; params: { roles?: string[]; person_ids?: string[] }; estimate: Estimate; sample: boolean };

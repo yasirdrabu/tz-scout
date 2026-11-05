@@ -74,8 +74,8 @@ and per API key stop that (D16): warn at 80%, block at 100%.
 10. **Waiting jobs (INT-E4-S3-AC2).** The worker catches `blocked_by_cap` from any job or consumer and
     puts the message back after min(reset - now, 15 minutes) without using up a run (like a closed
     workspace). A raised limit resumes the work within 15 minutes; a reset resumes it on time.
-11. **Deferred.** The usage page (INT-E4-S4) moves to R3a (Costs). `integrations.usage.recorded` moves to
-    R3a, where analytics first consumes it; `call_log` already holds every unit and cent.
+11. **Deferred.** The usage page (INT-E4-S4) moves to R3a (Costs). `integrations.usage.recorded` is
+    published from R3a (see "Rates and usage" below), where analytics first consumes it.
 
 Build rulings:
 
@@ -100,6 +100,48 @@ Build rulings:
   rules (or `allowRules: false`) rethrows `blocked_by_cap`, so its job waits and a route returns 429.
 - A new limit that puts the current period below a level it had reached clears that level's flag, so
   reaching it again publishes `integrations.usage.threshold_reached` again.
+
+## Rates and usage (R3a)
+
+- **Rates.** `provider_rate` holds the owner's price per item: for Claude, `{model}:input` and
+  `{model}:output` per token; for Apollo and Vibe, `credit`. A missing row reads the default from code:
+  Claude's list prices (per million tokens, divided down to per token) and the connection's
+  `settings.cents_per_credit`, else 10 cents a credit. `GET /api/v1/integrations/{provider}/rates`
+  lists every item with `cents_per_unit` and `is_default`; `PUT` (`integrations:manage`, people only)
+  takes `{ rates: [{ item, cents_per_unit }] }`, refuses a rate below 0 with 400 "A rate can't be
+  negative." and an item the provider isn't priced by with 400, and is audited as `integrations.rates.set`.
+- **Pricing.** `priceCents(ctx, provider, [{ item, units }])` sums units x rate and rounds to whole cents,
+  half up. The AI runner prices Claude calls with it (cache reads count as a tenth of an input token; the
+  worst case held before a call is rounded up). Enrichment prices each credit call with it, so credit calls
+  now write `call_log.cost_cents`, and a request's cost is its credits at the rate.
+- **Live only.** Only a call the live adapter answered is priced: the gateway tells `measure` whether the
+  call was live, and sample and mock calls log `cost_cents` 0.
+- **Usage event.** A successful live call with `cost_cents` above 0 publishes `integrations.usage.recorded`
+  v1 from the call log's transaction: `{ callId, provider, operation, module, units, unit, costCents,
+  accountId, correlationId, occurredAt }`. Callers pass `accountId` in the call options when they know it.
+- **Categories.** `contracts/costs` names the cost categories (`partner_fees` "Partner fees",
+  `data_vendors` "Data vendors", `agents_hosting` "Agents and hosting", `lists_events` "Lists and events",
+  `ai_usage` "AI usage"), maps `anthropic` to `ai_usage` and `apollo` and `vibe` to `data_vendors`, and
+  marks `ai_usage` and `data_vendors` pausable.
+
+## Budget pause (R3a Ruling 9)
+
+- **Flag.** INT consumes `analytics.budget.level_changed` into `integrations.paid_pause(tenant_id, category,
+  month, paused, seq)`: level `paused` sets it, any lower level clears it. Only pausable categories are kept.
+  The event carries `seq`, the category month's change count from `analytics.budget_state`; an event whose
+  `seq` is not above the stored one (an older event delivered late) is ignored.
+- **Gateway.** Before `reserve`, a call to a provider whose category is paused for the current tenant month
+  (`periodBounds` in the tenant timezone, so a pause from an earlier month never blocks this one) is
+  refused with `budgetPaused(category)`: slug `blocked_by_cap`, 429, `extensions.category`, title "{Category}
+  is over its monthly budget." and detail "{Category} is over its monthly budget. An owner or leader can
+  raise it on the Costs page." The `call_log` row has outcome `blocked_by_cap` and the detail as its error.
+  It applies to live and sample calls alike, so it shows on sample data. Connection tests are not paused.
+  HubSpot and other unpaid providers are never paused.
+- **Pre-check.** `checkCap` returns `blocked` with `paused: {category}` while paused; `isPaused(ctx, provider,
+  now)` answers the same question alone.
+- **Waiting and resuming.** `isCapWait` is true, so the worker puts the job back (Ruling 10) for up to 15
+  minutes (there is no `resets_at`). Raising the budget or voiding a line drops the level, the flag clears,
+  and the waiting job runs on its next delivery, after about 15 minutes. Calls already running finish.
 
 ## Stories
 

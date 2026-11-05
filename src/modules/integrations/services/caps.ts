@@ -5,8 +5,9 @@ import type { ModuleContext } from '@/platform/context';
 import { withTenant, type Tx } from '@/platform/db/tenant';
 import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
+import { CATEGORY_OF_PROVIDER, PAUSABLE, categoryLabel, type CostCategory } from '../contracts/costs';
 import { usageThresholdReached } from '../contracts/events';
-import { usageCap, usagePeriod } from '../db/schema';
+import { paidPause, usageCap, usagePeriod } from '../db/schema';
 import { DEFAULT_CAPS, levelOf, periodBounds, type CapLevel, type CapPeriod, type CapUnit } from '../domain/caps';
 import { providerName } from '../providers';
 
@@ -54,6 +55,40 @@ function capBlocked(providerKey: string, period: string, resetsAt: Date, now: Da
 
 /** Whether `e` is a usage-limit refusal (Ruling 8): a job should wait for the limit (Ruling 10), not record a failure. */
 export const isCapWait = (e: unknown): e is ScoutError => e instanceof ScoutError && e.slug === 'blocked_by_cap';
+
+/**
+ * R3a Ruling 9: a paid call refused because its cost category is over 110% of this month's budget. It uses the cap
+ * slug, so `isCapWait` is true and the worker puts the job back; the flag clears when the budget is raised.
+ */
+export function budgetPaused(category: CostCategory): ScoutError {
+  const label = categoryLabel(category);
+  return new ScoutError({
+    slug: 'blocked_by_cap',
+    status: 429,
+    title: `${label} is over its monthly budget.`,
+    detail: `${label} is over its monthly budget. An owner or leader can raise it on the Costs page.`,
+    extensions: { category },
+  });
+}
+
+/** The provider's category when it is paused for the tenant month containing `now`, else null. Unpaid providers never are. */
+async function pausedCategory(ctx: ModuleContext, providerKey: string, now: Date, timeZone: string): Promise<CostCategory | null> {
+  const category = CATEGORY_OF_PROVIDER[providerKey];
+  if (!category || !PAUSABLE.has(category)) return null;
+  // The current tenant month only: a pause left from an earlier month never blocks this one.
+  const month = periodBounds('month', now, timeZone).start.slice(0, 7);
+  const [row] = await ctx.tx
+    .select({ paused: paidPause.paused })
+    .from(paidPause)
+    .where(and(eq(paidPause.tenantId, ctx.tenantId), eq(paidPause.category, category), eq(paidPause.month, month)));
+  return row?.paused ? category : null;
+}
+
+/** Whether the provider's cost category is paused over its budget for the current tenant month (R3a Ruling 9). */
+export async function isPaused(ctx: ModuleContext, providerKey: string, now = new Date()): Promise<boolean> {
+  if (!CATEGORY_OF_PROVIDER[providerKey]) return false;
+  return (await pausedCategory(ctx, providerKey, now, await tenantTimezone(ctx))) !== null;
+}
 
 const noCap = (providerKey: string) =>
   new ScoutError({ slug: 'not-found', status: 404, title: `${providerName(providerKey)} has no usage limit.` });
@@ -180,21 +215,26 @@ export async function capUnit(ctx: ModuleContext, providerKey: string): Promise<
   return cap ? (cap.unit as CapUnit) : null;
 }
 
-/** Read-only check for estimates: the level `amount` more would reach. No limit reads as ok with `limit` null. */
+/**
+ * Read-only check for estimates: the level `amount` more would reach. No limit reads as ok with `limit` null.
+ * A provider whose cost category is paused over its budget reads as blocked, with `paused` naming the category (R3a Ruling 9).
+ */
 export async function checkCap(
   ctx: ModuleContext,
   providerKey: string,
   amount: number,
   now = new Date(),
-): Promise<{ status: CapLevel; used: number; limit: number | null; resetsAt: Date | null }> {
+): Promise<{ status: CapLevel; used: number; limit: number | null; resetsAt: Date | null; paused?: CostCategory }> {
   const timeZone = await tenantTimezone(ctx);
+  const paused = await pausedCategory(ctx, providerKey, now, timeZone);
+  const orPaused = (status: CapLevel) => (paused ? { status: 'blocked' as const, paused } : { status });
   const cap = await readCap(ctx.tx, ctx.tenantId, providerKey);
-  if (!cap) return { status: 'ok', used: 0, limit: null, resetsAt: null };
+  if (!cap) return { ...orPaused('ok'), used: 0, limit: null, resetsAt: null };
   const b = boundsOf(cap, now, timeZone);
   const [row] = await ctx.tx.select().from(usagePeriod).where(periodKey(ctx.tenantId, providerKey, b.start));
   const used = row?.used ?? 0;
   return {
-    status: levelOf(used, (row?.reserved ?? 0) + amount, cap.limit, cap.overagePeriodStart === b.start),
+    ...orPaused(levelOf(used, (row?.reserved ?? 0) + amount, cap.limit, cap.overagePeriodStart === b.start)),
     used,
     limit: cap.limit,
     resetsAt: b.resetsAt,

@@ -5,6 +5,7 @@ import { Button } from '../../../ui/Button';
 import { EmptyState } from '../../../ui/EmptyState';
 import { Pill } from '../../../ui/Pill';
 import table from '../../../ui/Table.module.css';
+import { BudgetBanners } from '../../costs/BudgetBanners';
 import type { TabProps } from '../SettingsScreen';
 import { LoadFailed, LoadingRows } from '../shared';
 import styles from '../Settings.module.css';
@@ -33,6 +34,7 @@ export function IntegrationsTab({ tenant, open, setOpen }: TabProps) {
   const selected = open ? rows.find((r) => r.key === open) : undefined;
   return (
     <>
+      <BudgetBanners tenant={tenant} />
       <div className={styles.section}>
         <h2 className={styles.sectionTitle}>{line}</h2>
         {notices.length > 0 && (

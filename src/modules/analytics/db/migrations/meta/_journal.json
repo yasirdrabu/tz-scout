@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793885955859,
+      "tag": "0000_cost_line",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793888045226,
+      "tag": "0001_budgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793890348101,
+      "tag": "0002_budget_seq",
+      "breakpoints": true
+    }
+  ]
+}

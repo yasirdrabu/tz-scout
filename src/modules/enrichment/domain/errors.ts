@@ -1,4 +1,5 @@
 import { isCapWait } from '@/modules/integrations';
+import { COST_CATEGORIES, categoryLabel, type CostCategory } from '@/modules/integrations/contracts/costs';
 import type { EnrichmentErrorKind } from '../contracts/types';
 
 // What a failed provider call means (Ruling 9). `retry` says the run should rethrow for the job's backoff.
@@ -8,11 +9,23 @@ export type ClassifiedError = { kind: EnrichmentErrorKind; message: string; retr
 
 export const SOMETHING_WRONG = 'Something went wrong. Try again.';
 
+/** The cost category a budget pause (R3a Ruling 9) refused the call for, or null for any other error. */
+export function pausedCategoryOf(e: unknown): CostCategory | null {
+  if (!isCapWait(e)) return null;
+  const category = e.extensions?.category;
+  return COST_CATEGORIES.some((c) => c.key === category) ? (category as CostCategory) : null;
+}
+
+/** What a request waiting on a paused budget reads (R3a Ruling 9). */
+export const budgetWaiting = (category: CostCategory): string => `Waiting for budget: ${categoryLabel(category)} is over its monthly budget`;
+
 type Shape = { name?: unknown; message?: unknown; status?: unknown; statusCode?: unknown; kind?: unknown; slug?: unknown };
 
 export function classifyError(e: unknown, providerName: string): ClassifiedError {
   const fail = (kind: EnrichmentErrorKind, message: string): ClassifiedError => ({ kind, message, retry: false });
   const retry = (kind: EnrichmentErrorKind, message: string): ClassifiedError => ({ kind, message, retry: true });
+  const paused = pausedCategoryOf(e);
+  if (paused) return fail('cap_reached', `Stopped: ${categoryLabel(paused)} is over its monthly budget.`);
   if (isCapWait(e)) return fail('cap_reached', `Stopped at the ${providerName} monthly limit.`);
   const o = (e && typeof e === 'object' ? e : {}) as Shape;
   const message = typeof o.message === 'string' ? o.message : '';

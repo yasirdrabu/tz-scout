@@ -1,27 +1,41 @@
+import { getRates, priceOf } from '@/modules/integrations';
+import type { ModuleContext } from '@/platform/context';
 import { log } from '@/platform/log';
-
-/** Cents per million tokens. Cache reads are billed at a tenth of the input price. */
-type Price = { input: number; output: number; cacheRead: number };
-
-export const PRICES: Record<string, Price> = {
-  'claude-opus-5-5': { input: 1500, output: 7500, cacheRead: 150 },
-  'claude-sonnet-5-5': { input: 300, output: 1500, cacheRead: 30 },
-  'claude-haiku-5-5': { input: 100, output: 500, cacheRead: 10 },
-};
 
 export type Usage = { inputTokens: number; outputTokens: number; cacheReadTokens: number };
 
-/** Cost in whole cents, rounded up. An unknown model costs 0 and logs a warning. */
-export function costCents(model: string, u: Usage): number {
-  const p = PRICES[model];
-  if (!p) {
-    log.warn({ model }, 'ai: no price for model, cost recorded as 0');
-    return 0;
-  }
-  const raw = (u.inputTokens * p.input + u.outputTokens * p.output + u.cacheReadTokens * p.cacheRead) / 1_000_000;
-  return raw <= 0 ? 0 : Math.ceil(raw - 1e-9);
-}
+export type ClaudePrices = {
+  /** Cost in whole cents, rounded half up (R3a Ruling 2). Cache reads are billed at a tenth of the input price. */
+  cost: (u: Usage) => number;
+  /** Most a call could cost: the estimated input plus a full output allowance. Rounded up, as it is held against limits. */
+  worstCase: (inputTokens: number, maxTokens: number) => number;
+};
 
-/** Most this call could cost: the estimated input plus a full output allowance. */
-export const worstCaseCents = (model: string, inputTokens: number, maxTokens: number): number =>
-  PRICES[model] ? costCents(model, { inputTokens, outputTokens: maxTokens, cacheReadTokens: 0 }) : 0;
+/**
+ * The tenant's Claude rates for `model` (R3a Ruling 1), read once before a call: pricing after it must not need the
+ * caller's transaction, which a timed-out job has already lost. Read whatever mode the run expects, so a call that
+ * turns live meanwhile is still priced at the tenant's rates. An unknown model costs 0; `cost` is only called for
+ * live calls, so only those warn about it (once).
+ */
+export async function claudePrices(ctx: ModuleContext, model: string): Promise<ClaudePrices> {
+  const rates = new Map((await getRates(ctx, 'anthropic')).map((r) => [r.item, r.centsPerUnit]));
+  const input = `${model}:input`;
+  const output = `${model}:output`;
+  let warned = false;
+  return {
+    cost: (u) => {
+      if (!warned && !rates.has(input)) {
+        warned = true;
+        log.warn({ model }, 'ai: no price for model, cost recorded as 0');
+      }
+      return priceOf(rates, [
+        { item: input, units: u.inputTokens + u.cacheReadTokens / 10 },
+        { item: output, units: u.outputTokens },
+      ]);
+    },
+    worstCase: (inputTokens, maxTokens) => {
+      const raw = inputTokens * (rates.get(input) ?? 0) + maxTokens * (rates.get(output) ?? 0);
+      return raw <= 0 ? 0 : Math.ceil(raw - 1e-9);
+    },
+  };
+}

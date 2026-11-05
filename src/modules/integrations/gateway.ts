@@ -5,10 +5,13 @@ import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { log } from '@/platform/log';
 import { config } from '@/platform/config';
+import { publish } from '@/platform/events/outbox';
 import { registerInboundRoute } from '@/modules/tenancy';
+import { usageRecorded } from './contracts/events';
 import { callLog, connection, credential } from './db/schema';
 import { adapterFactories, isKnownProvider, needsCredential, providerName, type Adapter } from './providers';
-import { capUnit, LOCK_TIMEOUT, recordUsage, reserve, settle, type Reservation } from './services/caps';
+import { CATEGORY_OF_PROVIDER } from './contracts/costs';
+import { budgetPaused, capUnit, isPaused, LOCK_TIMEOUT, recordUsage, reserve, settle, type Reservation } from './services/caps';
 import type { CapUnit } from './domain/caps';
 import { credentialAad, openValue } from './services/vault';
 
@@ -34,8 +37,14 @@ export type CallOpts = {
   /** Most the call could cost, held against a cents limit before the call (else `costCents`). */
   reserveCents?: number;
   apiKeyId?: string;
-  /** Called with the result after a successful call; its units and cost are logged (use when they are only known afterwards). */
-  measure?: (result: never) => { units?: number; costCents?: number };
+  /** The account the call is for, when the caller knows it: carried on `integrations.usage.recorded`. */
+  accountId?: string;
+  /**
+   * Called with the result after a successful call; its units and cost are logged (use when they are only known afterwards).
+   * `live` says whether the live adapter answered: only a live call is priced (R3a Ruling 2). It runs after the
+   * outside call, when a timed-out caller's transaction may be gone, so read any rates before the call.
+   */
+  measure?: (result: never, call: { live: boolean }) => Measured;
   /** Module making the call, for the call log. */
   module?: string;
   /** Non-secret facts about the request. Secrets, emails and phone numbers are dropped before it is stored. */
@@ -223,6 +232,33 @@ export async function runCall<T>(
     requestSummary: opts.requestSummary === undefined ? null : redactSummary(opts.requestSummary),
   };
 
+  // Ruling 8: a refusal is logged, and no outside call is made.
+  const logRefusal = async (errorMessage: string) => {
+    try {
+      await withTenant(ctx.tenantId, async (tx) => {
+        await tx.execute(sql`select set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`);
+        await tx.insert(callLog).values({
+          ...logBase,
+          id: newId('call'),
+          statusCode: null,
+          outcome: 'blocked_by_cap',
+          durationMs: 0,
+          errorMessage,
+        });
+      });
+    } catch (bookkeeping) {
+      log.error({ err: bookkeeping, tenantId: ctx.tenantId, provider, operation }, 'integrations: could not write call log');
+    }
+  };
+
+  // R3a Ruling 9: a paid provider whose category is over its budget this tenant month waits, live or sample.
+  // A connection test is not work that waits, so an owner can still check a key while paused.
+  if (mode === 'normal' && (await isPaused(ctx, provider))) {
+    const e = budgetPaused(CATEGORY_OF_PROVIDER[provider]!);
+    await logRefusal(e.detail!);
+    throw e;
+  }
+
   // Ruling 6: hold the call's share of the provider's limit before it is made. A call with no
   // up-front amount in the limit's unit is neither held nor refused; what it spends is counted after.
   const unit = await capUnit(ctx, provider);
@@ -232,24 +268,7 @@ export async function runCall<T>(
     try {
       reservation = await reserve(ctx, provider, estimate);
     } catch (e) {
-      if (e instanceof ScoutError && e.slug === 'blocked_by_cap') {
-        // Ruling 8: the refusal is logged, and no outside call is made.
-        try {
-          await withTenant(ctx.tenantId, async (tx) => {
-            await tx.execute(sql`select set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`);
-            await tx.insert(callLog).values({
-              ...logBase,
-              id: newId('call'),
-              statusCode: null,
-              outcome: 'blocked_by_cap',
-              durationMs: 0,
-              errorMessage: e.message,
-            });
-          });
-        } catch (bookkeeping) {
-          log.error({ err: bookkeeping, tenantId: ctx.tenantId, provider, operation }, 'integrations: could not write call log');
-        }
-      }
+      if (e instanceof ScoutError && e.slug === 'blocked_by_cap') await logRefusal(e.message);
       throw e;
     }
   }
@@ -286,7 +305,7 @@ export async function runCall<T>(
     } else adapter = factories.mock(ctx);
     result = await fn(adapter, { scrub });
     try {
-      const m = (opts.measure as ((r: T) => Measured) | undefined)?.(result) ?? {};
+      const m = (opts.measure as ((r: T, call: { live: boolean }) => Measured) | undefined)?.(result, { live: useLive }) ?? {};
       // A value that is not a usable amount falls back to the one given up front.
       measured = { units: amountOf(m.units), costCents: amountOf(m.costCents) };
     } catch {
@@ -309,17 +328,41 @@ export async function runCall<T>(
   try {
     await withTenant(ctx.tenantId, async (tx) => {
       await tx.execute(sql`select set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`);
-      await tx.insert(callLog).values({
-        ...logBase,
-        id: newId('call'),
-        statusCode,
-        outcome,
-        durationMs,
-        units: outcome === 'ok' ? (measured.units ?? opts.units ?? null) : null,
-        unit: outcome === 'ok' ? (opts.unit ?? null) : null,
-        costCents: outcome === 'ok' ? (measured.costCents ?? opts.costCents ?? null) : null,
-        errorMessage,
-      });
+      const callId = newId('call');
+      const units = outcome === 'ok' ? (measured.units ?? opts.units ?? null) : null;
+      const costCents = outcome === 'ok' ? (measured.costCents ?? opts.costCents ?? null) : null;
+      const [row] = await tx
+        .insert(callLog)
+        .values({
+          ...logBase,
+          id: callId,
+          statusCode,
+          outcome,
+          durationMs,
+          units,
+          unit: outcome === 'ok' ? (opts.unit ?? null) : null,
+          costCents,
+          errorMessage,
+        })
+        .returning({ at: callLog.at });
+      // R3a Ruling 3: a live call that cost money is usage, committed with its call log row and dated by it. The event
+      // is checked before it is published, so a bad one is logged and dropped instead of rolling back the row.
+      if (useLive && costCents !== null && costCents > 0) {
+        const usage = usageRecorded.data.safeParse({
+          callId,
+          provider,
+          operation,
+          module: logBase.module,
+          units,
+          unit: opts.unit ?? null,
+          costCents,
+          accountId: opts.accountId ?? null,
+          correlationId: ctx.correlationId,
+          occurredAt: row!.at.toISOString(),
+        });
+        if (usage.success) await publish({ ...ctx, tx }, usageRecorded, usage.data);
+        else log.error({ err: usage.error, tenantId: ctx.tenantId, provider, operation }, 'integrations: usage event not valid, not published');
+      }
       if (unit) {
         // Review Focus 3: a failed call releases its reservation and adds only what it spent: one
         // call against a calls limit (it reached the service), nothing against credits or cents.

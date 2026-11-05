@@ -24,4 +24,6 @@ import '@/modules/playbooks/contracts/events';
 import '@/modules/playbooks';
 import '@/modules/enrichment/contracts/events';
 import '@/modules/enrichment';
+import '@/modules/analytics/contracts/events';
+import '@/modules/analytics';
 import './compose';

@@ -1,4 +1,4 @@
-import { bigint, boolean, date, index, integer, jsonb, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, boolean, date, index, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Integrations schema. Every table here is a tenant table: `tenant_id` not null, row level security
@@ -108,4 +108,33 @@ export const usagePeriod = integrations.table(
     blocked: boolean('blocked').notNull().default(false),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.providerKey, t.periodStart] })],
+);
+
+/** R3a Ruling 1: an owner's price for one item a provider bills (a missing row reads the default from code). Ten decimals
+ * of cents per token keep six decimals of dollars per million tokens. */
+export const providerRate = integrations.table(
+  'provider_rate',
+  {
+    tenantId: text('tenant_id').notNull(),
+    provider: text('provider').notNull(),
+    item: text('item').notNull(), // `{model}:input` | `{model}:output` per token, or `credit`
+    centsPerUnit: numeric('cents_per_unit', { precision: 18, scale: 10, mode: 'number' }).notNull(),
+    updatedBy: text('updated_by'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.provider, t.item] })],
+);
+
+/** R3a Ruling 9: whether a cost category is paused for a tenant month, from `analytics.budget.level_changed`. */
+export const paidPause = integrations.table(
+  'paid_pause',
+  {
+    tenantId: text('tenant_id').notNull(),
+    category: text('category').notNull(),
+    month: text('month').notNull(), // YYYY-MM
+    paused: boolean('paused').notNull().default(false),
+    /** The `seq` of the level event that set `paused`: an older event delivered late is ignored. */
+    seq: bigint('seq', { mode: 'number' }).notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.category, t.month] })],
 );

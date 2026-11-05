@@ -9,6 +9,12 @@ Release R3 · Module ANL
 
 ## Cost lines
 
+R3a stores five categories (Ruling 4 of the R3a plan): `partner_fees` "Partner fees", `data_vendors`
+"Data vendors", `agents_hosting` "Agents and hosting", `lists_events` "Lists and events" and `ai_usage`
+"AI usage". Usage lines land in the provider's category (`anthropic` in AI usage, `apollo` and `vibe` in
+Data vendors). Manual lines can go in any category. The table below is the fuller picture R3b and R4
+map onto these.
+
 | Category | Origin | Comes from | Target |
 |---|---|---|---|
 | Vendor credits (Apollo, Vibe, company data) | auto | `integrations.usage.recorded` for the provider (every costed call goes through Integrations' `gateway.call`) | the account of the matching enrichment request (`enr_…`, same `correlationId`), else the event's `sourceId` (a scheduled pull), else none |
@@ -23,16 +29,48 @@ Release R3 · Module ANL
 Rules:
 
 - Amounts in integer cents with the tenant's currency.
-- Lines are never edited. A wrong line is voided with a reason and a new one added; both stay visible
-  to owners.
+- Lines are never edited in place. A wrong line is voided with a reason and a new one added; both stay
+  visible to owners. Editing a manual line does this in one step: the old line is voided "Edited" and the
+  new one carries `replaces_id`. Usage lines can only be voided.
+- A line's date (`occurred_on`) is the tenant-timezone date; a usage line takes the date of the call.
+  A manual line (added or edited) can't be dated after today in the tenant timezone: 400 at
+  `occurred_on` "A cost can't be dated in the future."
+  Spend leaves out voided lines.
 - Auto lines carry `origin_event_id`, so replaying an event never creates a second line.
-- One costed outside call = one `integrations.usage.recorded` = one line. `enrichment.request.completed`
-  and `ai.run.completed` never create lines; they only tell Analytics which account a usage record
-  with the same `correlationId` belongs to. If the usage record is processed first, its line is
+- One costed outside call = one `integrations.usage.recorded` = one line, and nothing else creates
+  automatic lines. A call is priced in whole cents, half up (R3a Ruling 2), so a call priced under half a
+  cent costs 0, publishes no usage record and records no line. `enrichment.request.completed` and `ai.run.completed` never create lines; from R3b
+  they only tell Analytics which account a usage record with the same `correlationId` belongs to. If the usage record is processed first, its line is
   created with target none and re-targeted when the matching event arrives (an internal update before
   the line is shown, not an edit of a visible line).
 - Prices for credits and tokens are set in Integrations; a usage record with no price records the
   quantity with a zero amount and flags "Price not set".
+
+## Budgets and levels
+
+R3a (Rulings 6-8 and 11 of the R3a plan):
+
+- **Budgets.** `analytics.cost_budget(tenant_id, category, month 'YYYY-MM', amount_cents)`. A month's
+  budget is its own row, else the latest earlier month's row. None, or 0, means no alert and no pause.
+  `PUT /api/v1/costs/budgets` (`budgets:write`) saves the current or a future month; a past month gets
+  409 "Past months can't be changed." `GET /api/v1/costs/budgets?month` (`costs:read`) reads one month.
+- **Months.** A month is the calendar month in the tenant timezone. Spend leaves out voided lines.
+- **Levels.** `ok` below 90% of the budget, `alert` from 90%, `over` from 100%, `paused` from 110%.
+  Only AI usage and Data vendors can pause; the others top out at `over`.
+  `analytics.budget_state(tenant_id, category, month, level)` keeps the last level.
+- **When.** A line added or voided recomputes its category for the current tenant month, and so does a
+  budget saved for the current month. A line dated in another month changes the totals but no level. The
+  state row is locked while the level is worked out, so two changes at once are both counted.
+- **Event.** A level change publishes `analytics.budget.level_changed` v1
+  `{ category, month, level, spentCents, budgetCents, seq }` in the same transaction. `seq` is the
+  category month's change count in `budget_state`, bumped under its lock, so a late older event can be
+  ignored. A new month starts at
+  `ok`, so a pause ends at the month boundary.
+- **Summary.** `GET /api/v1/costs/summary` (`costs:read`) gives `month`, `spend_month_cents`,
+  `budget_month_cents` (the categories' budgets summed), `spend_90d_cents` (the last 90 days up to
+  today), `categories[]` (`key`, `label`, `spend_90d_cents`, `spend_month_cents`, `budget_cents`,
+  `level`, `pausable`) and `months[]` (the last 6 months with `spend_cents` and the summed
+  `budget_cents`).
 
 ## Allocation
 

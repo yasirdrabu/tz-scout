@@ -2,9 +2,6 @@ import type { EnrichmentKind } from '../contracts/types';
 
 // Credits and operations per kind (Ruling 4). Code constants for now: the spec's `provider_price` table is deferred.
 
-/** Money per credit when the connection's settings set none (Ruling 5). */
-export const DEFAULT_CENTS_PER_CREDIT: Record<string, number> = { apollo: 10, vibe: 10 };
-
 /** Credits a person found by `people_for_roles` may cost, per role, at most. */
 export const PEOPLE_PER_ROLE = 3;
 

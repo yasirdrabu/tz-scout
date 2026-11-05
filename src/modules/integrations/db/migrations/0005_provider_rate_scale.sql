@@ -1,0 +1,1 @@
+ALTER TABLE "integrations"."provider_rate" ALTER COLUMN "cents_per_unit" SET DATA TYPE numeric(18, 10);

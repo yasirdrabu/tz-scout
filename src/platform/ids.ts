@@ -61,6 +61,7 @@ export type IdPrefix =
   | 'wic'
   | 'rsr'
   | 'enr'
+  | 'cst'
   | 'plb'
   | 'pls'
   | 'pln'

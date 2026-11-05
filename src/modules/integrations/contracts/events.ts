@@ -40,3 +40,24 @@ export const usageThresholdReached = defineEvent(
     resetsAt: z.string(),
   }),
 );
+
+/**
+ * R3a Ruling 3: one successful live call that cost money, from the call log's transaction. `callId` is the call log
+ * row; `units` and `unit` are what the call log holds. Sample and mock calls never publish it.
+ */
+export const usageRecorded = defineEvent(
+  'integrations.usage.recorded',
+  1,
+  z.object({
+    callId: z.string(),
+    provider: z.string(),
+    operation: z.string(),
+    module: z.string().nullable(),
+    units: z.number().nullable(),
+    unit: z.string().nullable(),
+    costCents: z.number().int().positive(),
+    accountId: z.string().nullable(),
+    correlationId: z.string(),
+    occurredAt: z.string(),
+  }),
+);

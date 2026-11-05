@@ -11,7 +11,7 @@ export {
   type RequestStatus,
 } from './contracts/types';
 export { kindLabel, operationsFor } from './domain/kinds';
-export { DEFAULT_CENTS_PER_CREDIT, WEBSITE_READ_WORST_CENTS } from './domain/prices';
+export { WEBSITE_READ_WORST_CENTS } from './domain/prices';
 export { estimate, estimateText, type EstimateInput } from './domain/estimate';
 export { canTransition, statusText, type StatusFields } from './domain/status';
 export { SOMETHING_WRONG, classifyError, type ClassifiedError } from './domain/errors';

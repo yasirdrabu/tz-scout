@@ -1,6 +1,20 @@
 // The run job (Rulings 8 and 9): approved requests carried out against the sample adapters, driven with runOutbox.
-import { and, eq } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { and, eq, isNull, sql } from 'drizzle-orm';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+
+// A master key, so the live test can save an Apollo key.
+vi.mock('@/platform/config', async (orig) => {
+  const real = await orig<typeof import('@/platform/config')>();
+  const { cfg } = await import('../integrations/cfg');
+  const over = cfg as Record<string, unknown>;
+  return {
+    ...real,
+    config: new Proxy(real.config, {
+      get: (t, p) => (over[p as string] !== undefined ? over[p as string] : (t as never)[p]),
+    }),
+  };
+});
+
 import '@/entry/compose';
 import { getAccount, getFacts, listBuyingRoles, listConflicts, listPeople } from '@/modules/accounts';
 import {
@@ -16,18 +30,25 @@ import {
 import { apolloMock } from '@/modules/enrichment/adapters/apollo/mock';
 import type { Signal } from '@/modules/enrichment/contracts/adapter';
 import { request } from '@/modules/enrichment/db/schema';
-import { listCaps, registerAdapter, setCapLimit, setDisabled } from '@/modules/integrations';
+import { listCaps, registerAdapter, saveCredential, setCapLimit, setDisabled, setMode, setRates, testConnection } from '@/modules/integrations';
 import { callLog, connection, usageCap } from '@/modules/integrations/db/schema';
 import { ensureVendorSource, submitArrival } from '@/modules/intake';
 import { accountSummary, buyingRole } from '@/modules/accounts/db/schema';
 import { arrival, source } from '@/modules/intake/db/schema';
 import { createOffer, createPractice } from '@/modules/offers';
-import type { Principal } from '@/modules/tenancy';
+import { tenantTimezone, type Principal } from '@/modules/tenancy';
 import { adminDb, closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { enqueueJob } from '@/platform/events/outbox';
+import { addManualLine, saveBudgets, voidLine } from '@/modules/analytics';
+import { integrationsBudgetPause } from '@/modules/integrations';
+import { outbox } from '@/platform/db/schema';
+import { EnvelopeSchema, type Envelope } from '@/platform/events/envelope';
+import { deliverOnce } from '@/platform/runtime/worker';
 import { runOutbox } from '../helpers/run-outbox';
-import { accountFrom, as, enrichmentTenant, messagesFor, type Tenant } from './helpers';
+import { cfg } from '../integrations/cfg';
+import { newKey } from '../integrations/helpers';
+import { accountFrom, as, enrichmentTenant, messages, messagesFor, type Tenant } from './helpers';
 
 let t: Tenant;
 let owner: Principal;
@@ -36,6 +57,7 @@ let apolloSourceId: string;
 
 afterAll(closeDbs);
 beforeAll(async () => {
+  cfg.masterKey = newKey();
   const e = await enrichmentTenant();
   t = e.t;
   owner = e.owner;
@@ -547,6 +569,64 @@ describe('usage limits and redelivery', () => {
   });
 });
 
+describe('a paused budget (R3a Ruling 9)', () => {
+  /**
+   * Delivers the tenant's unsent budget level events to the integrations consumer only. The waiting run job sits
+   * ahead of them in the outbox, and runOutbox stops at its refusal; the worker delivers them independently.
+   */
+  const deliverLevels = async (tenant: Tenant) => {
+    const rows = await adminDb
+      .select()
+      .from(outbox)
+      .where(and(eq(outbox.tenantId, tenant.tenantId), isNull(outbox.sentAt), sql`${outbox.payload}->>'type' = 'analytics.budget.level_changed'`));
+    for (const row of rows) {
+      await deliverOnce(integrationsBudgetPause, EnvelopeSchema.parse(row.payload) as Envelope<never>);
+      await adminDb.update(outbox).set({ sentAt: new Date() }).where(eq(outbox.id, row.id));
+    }
+  };
+
+  /** A tenant whose Data vendors spend (one line) is over 110% of its budget, with an Apollo request waiting on it. */
+  async function waitingOnBudget() {
+    const { t: t5, owner: owner5, agentId } = await enrichmentTenant();
+    // The current month and day in the tenant's timezone, as analytics and the gateway read them.
+    const timeZone = await t5.run((ctx) => tenantTimezone(ctx));
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date());
+    const month = day.slice(0, 7);
+    await as(t5, owner5, (ctx) => saveBudgets(ctx, month, [{ category: 'data_vendors', amountCents: 1_000 }]));
+    const line = await as(t5, owner5, (ctx) => addManualLine(ctx, { occurredOn: day, category: 'data_vendors', amountCents: 1_200, note: null }));
+    await runOutbox(t5.tenantId);
+
+    const { accountId } = await accountFrom(t5, agentId);
+    const id = await approved(t5, owner5, accountId, technical);
+    await expect(runOutbox(t5.tenantId)).rejects.toMatchObject({ slug: 'blocked_by_cap' });
+    return { t5, owner5, id, month, lineId: line.id };
+  }
+
+  it('waits with the budget reason and makes no call; raising the budget resumes it on the next try (Review Focus 2)', async () => {
+    const { t5, owner5, id, month } = await waitingOnBudget();
+    const reason = 'Waiting for budget: Data vendors is over its monthly budget';
+    expect(await rowOf(t5, id)).toMatchObject({ status: 'approved', waitingReason: reason });
+    expect((await viewOf(t5, id))!.statusText).toBe(reason);
+    const calls = await adminDb.select().from(callLog).where(and(eq(callLog.tenantId, t5.tenantId), eq(callLog.provider, 'apollo')));
+    expect(calls).toHaveLength(0);
+
+    // The level drops back to ok, the flag clears, and the waiting job runs on its next delivery.
+    await as(t5, owner5, (ctx) => saveBudgets(ctx, month, [{ category: 'data_vendors', amountCents: 100_000 }]));
+    await deliverLevels(t5);
+    await runOutbox(t5.tenantId);
+    expect(await rowOf(t5, id)).toMatchObject({ status: 'completed', waitingReason: null });
+  });
+
+  it('voiding the line that took spend over 110% resumes the waiting request on the next try (Review Focus 2)', async () => {
+    const { t5, owner5, id, lineId } = await waitingOnBudget();
+    expect((await rowOf(t5, id)).waitingReason).toBe('Waiting for budget: Data vendors is over its monthly budget');
+    await as(t5, owner5, (ctx) => voidLine(ctx, lineId, 'Booked twice'));
+    await deliverLevels(t5);
+    await runOutbox(t5.tenantId);
+    expect(await rowOf(t5, id)).toMatchObject({ status: 'completed', waitingReason: null });
+  });
+});
+
 describe('final review fixes', () => {
   let t3: Tenant;
   let owner3: Principal;
@@ -645,5 +725,45 @@ describe('final review fixes', () => {
     expect(row.status).toBe('completed');
     expect(lookups).toBe(1);
     expect((row.result as Result).credits_used).toBe(2);
+  });
+});
+
+describe('priced credit calls (R3a Rulings 2 and 3)', () => {
+  const apolloCalls = (tenant: Tenant) =>
+    adminDb.select().from(callLog).where(and(eq(callLog.tenantId, tenant.tenantId), eq(callLog.provider, 'apollo'))).orderBy(callLog.at);
+  const usage = async (tenant: Tenant) => (await messages(tenant, 'integrations.usage.recorded')).map((m) => m.data);
+
+  it('a live call stores cost_cents = credits × rate and records usage for the account; a sample call stores 0', async () => {
+    const { t: t4, owner: owner4, agentId } = await enrichmentTenant();
+    const first = await accountFrom(t4, agentId);
+    await approved(t4, owner4, first.accountId, { kind: 'signals_refresh', providerKey: 'apollo' });
+    await runOutbox(t4.tenantId);
+    const sample = await apolloCalls(t4);
+    expect(sample.length).toBeGreaterThan(0);
+    expect(sample.every((c) => c.costCents === 0)).toBe(true);
+    expect(await usage(t4)).toHaveLength(0);
+
+    registerAdapter('apollo', { mock: () => apolloMock(), live: () => apolloMock() });
+    await as(t4, owner4, (ctx) => saveCredential(ctx, 'apollo', { kind: 'api_key', value: 'apollo-live-key-12345' }));
+    await as(t4, owner4, (ctx) => testConnection(ctx, 'apollo'));
+    await as(t4, owner4, (ctx) => setMode(ctx, 'apollo', 'live'));
+    // A fractional rate: each 1-credit call is 12.5 cents, logged as 13, and the request's total is their sum.
+    await as(t4, owner4, (ctx) => setRates(ctx, 'apollo', [{ item: 'credit', centsPerUnit: 12.5 }]));
+    const second = await accountFrom(t4, agentId);
+    const id = await approved(t4, owner4, second.accountId, { kind: 'signals_refresh', providerKey: 'apollo' });
+    await runOutbox(t4.tenantId);
+
+    const live = (await apolloCalls(t4)).slice(sample.length).filter((c) => c.outcome === 'ok' && c.operation !== 'apollo.test');
+    expect(live.map((c) => [c.units, c.costCents])).toEqual([
+      [1, 13],
+      [1, 13],
+      [1, 13],
+    ]);
+    const events = await usage(t4);
+    expect(events).toHaveLength(3);
+    for (const e of events) expect(e).toMatchObject({ provider: 'apollo', module: 'enrichment', unit: 'credits', accountId: second.accountId, costCents: 13 });
+    const sum = events.reduce((n, e) => n + (e.costCents as number), 0);
+    expect(sum).toBe(39);
+    expect((await resultOf(t4, id)).cost_cents).toBe(sum);
   });
 });

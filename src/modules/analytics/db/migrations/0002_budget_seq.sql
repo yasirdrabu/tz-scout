@@ -1,0 +1,1 @@
+ALTER TABLE "analytics"."budget_state" ADD COLUMN "seq" bigint DEFAULT 0 NOT NULL;

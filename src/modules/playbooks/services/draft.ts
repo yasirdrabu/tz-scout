@@ -40,6 +40,7 @@ async function draftOutput(ctx: ModuleContext, built: BuiltInput, plan: Plan): P
   try {
     const r = await runTask(ctx, accountBriefTask, built.input, {
       subject,
+      accountId: built.accountId,
       rulesOnly: !claudeAllowed,
       ...(plan.manual ? { fresh: true, reuseAfter: plan.queuedAt } : {}),
     });

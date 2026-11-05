@@ -39,7 +39,7 @@ true`. Same key with a different body returns 409. Arrivals and batch items also
 ```
 
 Error types: `validation`, `unauthenticated`, `key-revoked`, `forbidden` (with `missing_scope`),
-`not-found`, `conflict`, `idempotency-mismatch`, `rate-limited`, `cap-reached` (with `resets_at`),
+`not-found`, `conflict`, `idempotency-mismatch`, `rate-limited`, `cap-reached` (with `resets_at`; a budget pause has `category` instead),
 `integration-unavailable`, `internal`.
 
 **Rate limits.** Per key or grant: requests per minute (default 600) with headers `RateLimit-Limit`,

@@ -25,7 +25,7 @@ type Target = 'control' | 'workspace' | 'both';
 
 const CONTROL_ONLY = /"?tenancy"?\s*\.|"?platform"?\s*\.\s*"?ping_result\b/i;
 const BOTH = /"?platform"?\s*\.\s*"?(outbox|processed_event|idempotency_key|dead_job|delivery_attempt|schedule|audit_log)\b/i;
-const WORKSPACE = /"?(platform|integrations|ai|offers|accounts|intake|scoring|routing|crm|playbooks|enrichment)"?\s*\.\s*"?[a-z_]+/i;
+const WORKSPACE = /"?(platform|integrations|ai|offers|accounts|intake|scoring|routing|crm|playbooks|enrichment|analytics)"?\s*\.\s*"?[a-z_]+/i;
 
 const DDL = /^\s*(create|drop|alter|truncate|comment|grant|revoke)\b/i;
 const ADVISORY = /\bpg_(try_)?advisory/i;
