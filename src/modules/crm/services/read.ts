@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, max } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, lte, max } from 'drizzle-orm';
 import { filterVisibleAccountIds, getAccount } from '@/modules/accounts';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -131,13 +131,13 @@ export async function latestHandoff(
   return { id: h.id, status: h.status, ownershipAction: h.ownershipAction, crmUrl };
 }
 
-/** When the latest CRM activity on the account happened; null when none or not visible. */
-export async function lastActivityAt(ctx: ModuleContext, accountId: string): Promise<Date | null> {
+/** When the latest CRM activity on the account happened, not counting rows dated after now (a booked meeting); null when none or not visible. */
+export async function lastActivityAt(ctx: ModuleContext, accountId: string, now: Date = new Date()): Promise<Date | null> {
   if (!(await visible(ctx, accountId))) return null;
   const [row] = await ctx.tx
     .select({ at: max(activity.occurredAt) })
     .from(activity)
-    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, accountId)));
+    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, accountId), lte(activity.occurredAt, now)));
   return row?.at ?? null;
 }
 
@@ -147,13 +147,13 @@ export type AccountCrmFacts = {
   value: { amountCents: number | null; currency: string | null; kind: 'won' | 'open_deal'; dealName: string } | null;
 };
 
-/** CRM facts for list rows. The caller has already limited `accountIds` to accounts the principal can see. */
-export async function crmFacts(ctx: ModuleContext, accountIds: string[]): Promise<Map<string, AccountCrmFacts>> {
+/** CRM facts for list rows; the latest activity is at or before now. The caller has already limited `accountIds` to accounts the principal can see. */
+export async function crmFacts(ctx: ModuleContext, accountIds: string[], now: Date = new Date()): Promise<Map<string, AccountCrmFacts>> {
   if (accountIds.length === 0) return new Map();
   const activities = await ctx.tx
     .selectDistinctOn([activity.accountId], { accountId: activity.accountId, kind: activity.kind, at: activity.occurredAt })
     .from(activity)
-    .where(and(eq(activity.tenantId, ctx.tenantId), inArray(activity.accountId, accountIds)))
+    .where(and(eq(activity.tenantId, ctx.tenantId), inArray(activity.accountId, accountIds), lte(activity.occurredAt, now)))
     .orderBy(activity.accountId, desc(activity.occurredAt), desc(activity.id));
   const deals = await ctx.tx
     .select({ accountId: deal.accountId, name: deal.name, status: deal.status, amountCents: deal.amountCents, currency: deal.currency, openedAt: deal.openedAt, closedAt: deal.closedAt })

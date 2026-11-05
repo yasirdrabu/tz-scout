@@ -12,7 +12,7 @@ import { offerQuery } from '../offers/api';
 import { SellerGuide } from '../offers/SellerGuide';
 import { HandoffChip } from '../review/parts';
 import { errorText } from '../settings/shared';
-import { activityQuery, briefQuery, engagementQuery, handoffsQuery, scoreQuery, type Handoffs } from './api';
+import { activityQuery, briefQuery, engagementQuery, handoffsQuery, scoreQuery, type Engagement, type Handoffs } from './api';
 import { BriefCard } from './BriefCard';
 import styles from './Account.module.css';
 import { AccountFacts, WhyNow, type ViewProps } from './ReviewView';
@@ -21,10 +21,8 @@ import { BuyingCommittee } from './RightRail';
 import { ScoreStrip, ScoreTile } from './ScoreStrip';
 
 /** §4b 1. Outcome tiles: Meetings held, Replies, Buyers engaged, Opportunity. */
-function Outcomes({ tenant, id, handoffs }: { tenant: string; id: string; handoffs: Handoffs | undefined }) {
+function Outcomes({ handoffs, engagement }: { handoffs: Handoffs | undefined; engagement: Engagement | undefined }) {
   const f = useFormat();
-  // Loading or failed: the Buyers engaged tile reads Not yet.
-  const engagement = useQuery(engagementQuery(tenant, id)).data;
   const ft = handoffs?.follow_through ?? null;
   const done = handoffs?.handoffs.find((h) => h.status === 'completed');
   const deal = handoffs?.deals.find((d) => d.status === 'open') ?? handoffs?.deals.find((d) => d.status === 'won') ?? null;
@@ -57,7 +55,8 @@ function Outcomes({ tenant, id, handoffs }: { tenant: string; id: string; handof
       </div>
       <div className={styles.scoreTile}>
         <span className={styles.label}>Buyers engaged</span>
-        {engagement ? (
+        {/* Like Meetings held: Not yet until a handoff completed (follow_through), or while engagement is loading or failed. */}
+        {ft && engagement ? (
           <>
             <span className={styles.big}>{`${f.number(engagement.engaged)} of ${f.number(engagement.total)}`}</span>
             {engagement.gap_role && <span className={cx(styles.note, styles.amber)}>{`No ${engagement.gap_role} contact yet`}</span>}
@@ -249,18 +248,20 @@ function SellerGuideCard({ tenant, offerId }: { tenant: string; offerId: string 
 export function AssignedView(props: ViewProps) {
   const { tenant, me, account, review, onFind } = props;
   const handoffs = useQuery(handoffsQuery(tenant, account.id));
+  // Loading or failed: the Buyers engaged tile reads Not yet and the committee shows no dots.
+  const engagement = useQuery(engagementQuery(tenant, account.id)).data;
   return (
     <div className={styles.layout}>
       <div className={styles.main}>
         {review.current_assignment?.status === 'pending' ? <PendingPlan assignment={review.current_assignment} /> : <PlanCard tenant={tenant} me={me} accountId={account.id} accepted={review.current_assignment?.status === 'accepted'} onFind={onFind} />}
-        <Outcomes tenant={tenant} id={account.id} handoffs={handoffs.data} />
+        <Outcomes handoffs={handoffs.data} engagement={engagement} />
         <Activity tenant={tenant} id={account.id} />
         <ReviewRecord {...props} />
       </div>
       <aside className={styles.rail} aria-label="Account details">
         <AssignmentCard review={review} />
         {review.lead_offer && hasScope(me, 'offers:read') && <SellerGuideCard tenant={tenant} offerId={review.lead_offer.offer_id} />}
-        <BuyingCommittee tenant={tenant} me={me} account={account} onFind={onFind} />
+        <BuyingCommittee tenant={tenant} me={me} account={account} onFind={onFind} engagement={engagement} />
       </aside>
     </div>
   );

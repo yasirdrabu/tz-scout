@@ -46,6 +46,9 @@ describe('activity entries', () => {
     expect(activityEntry(reply, ctx)).toMatchObject({ who: 'Pat Lee', actor: 'contact', summary: 'Replied: "Re: Pilot scope"' });
     expect(activityEntry({ ...reply, subject: null }, ctx).summary).toBe('Replied');
     expect(activityEntry({ ...reply, contacts: [] }, ctx)).toMatchObject({ who: null, actor: 'contact', summary: 'Replied: "Re: Pilot scope"' });
+    // The first contact with a name, else null.
+    expect(activityEntry({ ...reply, contacts: [{ externalId: 'c0', name: null }, ...people.slice(1, 2)] }, ctx).who).toBe('Sam Roe');
+    expect(activityEntry({ ...reply, contacts: [{ externalId: 'c0', name: null }] }, ctx).who).toBeNull();
   });
 
   it('words a call', () => {
@@ -81,6 +84,8 @@ describe('activity entries', () => {
       actor: 'scout',
       summary: 'Started the Logistics intro playbook',
     });
+    expect(planStartEntry({ planId: 'apl_1', playbookName: '', startedAt: at('13').toISOString() }).summary).toBe('Started the playbook');
+    expect(planStartEntry({ planId: 'apl_1', playbookName: '  ', startedAt: at('13').toISOString() }).summary).toBe('Started the playbook');
   });
 
   it("words Scout's push with the seller as owner, or the owner it left", () => {

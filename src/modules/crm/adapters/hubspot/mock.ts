@@ -361,7 +361,8 @@ ${note}` : note) : task.body;
           subject: a.subject,
           startAt: iso(a.startAt),
           endAt: iso(a.endAt),
-          status: a.status as MeetingStatus | null,
+          // A meeting with no status reads scheduled, as live maps a missing outcome.
+          status: a.kind === 'meeting' ? ((a.status as MeetingStatus | null) ?? 'scheduled') : (a.status as MeetingStatus | null),
         }));
       }),
 

@@ -275,9 +275,10 @@ step.
    `Show the full brief, signals and facts` (expands in place).
 5. **Right rail**: Assignment (AE, "Accepted {when}", "Accepted automatically {when}" or "Waiting for
    {AE} to accept", the assigner's quoted note, the handoff state); Buying committee with engagement
-   per person (R2: "Met Nov 4" green, "Opened, no reply" amber, "Not contacted" gray). The committee
+   per person (shipped R2d: "Met Nov 4" or "Replied Nov 3" green, "Emailed, no reply" amber, "Not contacted"
+   gray; no email opens in R2d). Only this page shows it; §4a's committee has no dots. The committee
    coverage summary, gap rows, `Find`, `Confirm`/`Remove` and the Edit person dialog are the same as §4a
-   (shipped R2b-3); engagement per person is still R2 later.
+   (shipped R2b-3).
 
 **States.**
 - Building: dashed card "Scout is still building this brief" / "Scores, dated signals and the brief

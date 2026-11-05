@@ -339,7 +339,8 @@ export function hubspotLive(creds: LiveCredentials, fetchImpl: typeof fetch = fe
         : object === 'meetings'
           ? ['hs_timestamp', 'hubspot_owner_id', 'hs_meeting_title', 'hs_meeting_start_time', 'hs_meeting_end_time', 'hs_meeting_outcome']
           : ['hs_timestamp', 'hubspot_owner_id'];
-    const rows = await searchAll(object, [associated, { propertyName: 'hs_timestamp', operator: 'GTE', value: toMs(since) }], properties, 500, [
+    // After `since`, not at it: the latest activity already stored is not read (and its contacts not looked up) again.
+    const rows = await searchAll(object, [associated, { propertyName: 'hs_timestamp', operator: 'GT', value: toMs(since) }], properties, 500, [
       { propertyName: 'hs_timestamp', direction: 'ASCENDING' },
     ]);
     if (object === 'meetings' && meetingsFrom) {

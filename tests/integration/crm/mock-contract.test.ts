@@ -153,6 +153,15 @@ describe('mock HubSpot rules (CRM-E1-S3-AC2)', () => {
     expect(await ids(new Date(Date.now() - 5 * DAY).toISOString())).toEqual([]);
   });
 
+  it('a meeting with no status reads scheduled, as live does', async () => {
+    const a = mock();
+    const co = await a.upsertCompany(company(`nostatus-${Date.now()}.example`));
+    const start = new Date(Date.now() + 86_400_000);
+    const meeting = await mockAddActivity(detached(), { companyExternalId: co.externalId, kind: 'meeting', occurredAt: start, startAt: start, endAt: start });
+    const [row] = await a.listActivities({ companyExternalId: co.externalId, since: EARLY });
+    expect(row).toMatchObject({ externalId: meeting, status: 'scheduled' });
+  });
+
   it("a meeting's status changes after mockSetActivity", async () => {
     const a = mock();
     const co = await a.upsertCompany(company(`move-${Date.now()}.example`));

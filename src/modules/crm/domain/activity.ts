@@ -55,7 +55,7 @@ function meetingSummary(a: StoredActivity, names: string | null, now: Date, time
 
 /**
  * One CRM row as a feed entry (R2d Ruling 8). `who` is the seller's name for what they did (null when the actor is not known);
- * a reply is by the first contact. Meetings sit at their start. With nothing known the old fixed words apply.
+ * a reply is by the first contact with a name. Meetings sit at their start. With nothing known the old fixed words apply.
  */
 export function activityEntry(a: StoredActivity, ctx: { who: string | null; now: Date; timeZone: string }): ActivityEntry {
   const names = namesOf(a.contacts);
@@ -65,7 +65,7 @@ export function activityEntry(a: StoredActivity, ctx: { who: string | null; now:
     case 'email':
       return { ...person, summary: a.subject ? `Sent "${a.subject}"${names ? ` to ${names}` : ''}` : names ? `Sent an email to ${names}` : FIXED.email! };
     case 'reply':
-      return { ...entry, who: a.contacts[0]?.name ?? null, actor: 'contact', summary: a.subject ? `Replied: "${a.subject}"` : names ? 'Replied' : FIXED.reply! };
+      return { ...entry, who: a.contacts.find((c) => c.name)?.name ?? null, actor: 'contact', summary: a.subject ? `Replied: "${a.subject}"` : names ? 'Replied' : FIXED.reply! };
     case 'call':
       return { ...person, summary: names ? `Call with ${names}` : FIXED.call! };
     case 'meeting':
@@ -82,7 +82,7 @@ export const planStartEntry = (p: { planId: string; playbookName: string; starte
   at: new Date(p.startedAt),
   who: 'Scout',
   actor: 'scout',
-  summary: `Started the ${p.playbookName} playbook`,
+  summary: p.playbookName.trim() ? `Started the ${p.playbookName.trim()} playbook` : 'Started the playbook',
 });
 
 const and = (parts: string[]) => (parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] ?? ''));

@@ -269,9 +269,10 @@ export async function followThrough(ctx: ModuleContext, accountId: string, now: 
     .from(followThroughTable)
     .where(and(eq(followThroughTable.tenantId, ctx.tenantId), eq(followThroughTable.handoffId, h.id)));
   if (!row) return null;
+  // Rows dated after now (a booked meeting) are not the last activity.
   const [last] = await ctx.tx
     .select({ at: max(activity.occurredAt) })
     .from(activity)
-    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, accountId)));
+    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.accountId, accountId), lte(activity.occurredAt, now)));
   return countsOfRow(row, last?.at ?? null, now);
 }

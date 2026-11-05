@@ -13,7 +13,7 @@ import { useToast } from '../../ui/Toast';
 import { addNote, notesQuery, type AccountReview } from '../review/api';
 import { NOTE_MAX } from '../review/ReasonPicker';
 import { errorText, useRun } from '../settings/shared';
-import { accountQuery, addPerson, buyingRolesQuery, checkCrm, committeeQuery, crmCheckQuery, editPerson, engagementQuery, listWithAnd, personName, type AccountDetail, type CrmCheck, type Engagement, type EngagementState, type Person } from './api';
+import { accountQuery, addPerson, buyingRolesQuery, checkCrm, committeeQuery, crmCheckQuery, editPerson, listWithAnd, personName, type AccountDetail, type CrmCheck, type Engagement, type EngagementState, type Person } from './api';
 import { EditPersonDialog } from './EditPersonDialog';
 import styles from './Account.module.css';
 
@@ -34,8 +34,11 @@ function EngagementLabel({ engagement, personId }: { engagement: Engagement; per
   );
 }
 
-/** §4a 8. Buying committee: people with their role labels and notes; `Add a person` with `people:write`. */
-export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: { tenant: string; me: Me; account: AccountDetail; canAdd?: boolean; onFind: (roles: string[]) => void }) {
+/**
+ * §4a 8. Buying committee: people with their role labels and notes; `Add a person` with `people:write`.
+ * `engagement` (§4b 5) is passed by the assigned page only; without it there are no dots.
+ */
+export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind, engagement }: { tenant: string; me: Me; account: AccountDetail; canAdd?: boolean; onFind: (roles: string[]) => void; engagement?: Engagement }) {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Person | null>(null);
   const queryClient = useQueryClient();
@@ -46,8 +49,6 @@ export function BuyingCommittee({ tenant, me, account, canAdd = true, onFind }: 
   const find = hasScope(me, 'enrichment:request');
   // Loading or failed: the rail is today's, with no coverage.
   const committee = useQuery(committeeQuery(tenant, account.id)).data;
-  // Loading or failed: no dots. Once answered, a person it leaves out reads Not contacted.
-  const engagement = useQuery(engagementQuery(tenant, account.id)).data;
   const required = committee?.roles.filter((r) => r.required) ?? [];
   const gapRows = committee?.roles.filter((r) => r.status === 'gap') ?? [];
   const saveRoles = (p: Person, body: { role_keys?: string[]; confirm_role_keys?: string[] }, done: string) =>

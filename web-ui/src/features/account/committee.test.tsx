@@ -47,7 +47,7 @@ const rowOf = (r: ReturnType<typeof within>, name: string) => r.getByText(`${nam
 
 describe('Committee engagement', () => {
   it('each person reads Met, Replied, Emailed or Not contacted, and a person the answer left out reads Not contacted', async () => {
-    serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, engagement: ENGAGED });
+    serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, review: ASSIGNED, engagement: ENGAGED });
     renderApp(URL);
     const r = await rail();
     expect(await within(rowOf(r, 'Mia')).findByText('Met Nov 4')).toBeInTheDocument();
@@ -58,7 +58,7 @@ describe('Committee engagement', () => {
   });
 
   it('the dots are green for met and replied, amber for emailed and gray for not contacted', async () => {
-    serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, engagement: ENGAGED });
+    serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, review: ASSIGNED, engagement: ENGAGED });
     renderApp(URL);
     const r = await rail();
     await within(rowOf(r, 'Mia')).findByText('Met Nov 4');
@@ -69,8 +69,21 @@ describe('Committee engagement', () => {
     expect(dot('Nia')).toMatch(/gray/);
   });
 
+  it('the review page (before assignment) shows no dots and never reads the engagement', async () => {
+    const asked: string[] = [];
+    serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, engagement: ENGAGED });
+    server.use(http.get('/api/v1/accounts/acc_mdc/engagement', ({ request }) => (asked.push(request.url), HttpResponse.json(ENGAGED))));
+    renderApp(URL);
+    const r = await rail();
+    expect(await r.findByText('Mia Test')).toBeInTheDocument();
+    await new Promise((res) => setTimeout(res, 150));
+    expect(document.querySelectorAll('[data-dot]')).toHaveLength(0);
+    expect(r.queryByText('Not contacted')).toBeNull();
+    expect(asked).toHaveLength(0);
+  });
+
   it('when the engagement fails, the committee has no dots and no engagement text', async () => {
-    serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, engagement: null });
+    serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, review: ASSIGNED, engagement: null });
     renderApp(URL);
     const r = await rail();
     expect(await r.findByText('Mia Test')).toBeInTheDocument();

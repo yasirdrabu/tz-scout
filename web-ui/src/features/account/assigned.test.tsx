@@ -127,6 +127,17 @@ describe('Account page after assignment', () => {
     expect(within(outcomes).getByText('No Technical buyer contact yet').className).toMatch(/amber/);
   });
 
+  it('the Buyers engaged tile reads Not yet, like Meetings held, until a handoff completed', async () => {
+    serveAccount({ review: ASSIGNED, handoffs: { ...HANDOFFS, follow_through: null }, engagement: { people: [], engaged: 0, total: 4, gap_role: null } });
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const outcomes = await screen.findByRole('region', { name: 'Outcomes' });
+    const tile = within(outcomes).getByText('Buyers engaged').parentElement!;
+    await waitFor(() => expect(within(outcomes).getByText('Meetings held').parentElement!).toHaveTextContent('Not yet'));
+    await new Promise((res) => setTimeout(res, 150));
+    expect(within(tile).getByText('Not yet')).toBeInTheDocument();
+    expect(within(tile).queryByText('0 of 4')).toBeNull();
+  });
+
   it('the Buyers engaged tile has no note when no role is missing', async () => {
     serveAccount({ review: ASSIGNED, engagement: { people: [], engaged: 4, total: 4, gap_role: null } });
     renderApp('/t/taazaa/accounts/acc_mdc');
