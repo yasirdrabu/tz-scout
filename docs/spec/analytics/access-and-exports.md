@@ -4,12 +4,16 @@ Release R3 · Module ANL
 
 ## Rules
 
+Costs need `costs:read` (owners, leaders and operators by default); sellers and viewers get 403 on every
+`/costs` route. Adding, editing and voiding lines needs `costs:write` (owners, leaders and operators), and
+budgets need `budgets:write` (owners and leaders). `analytics:read` alone does not show costs.
+
 | Who | Sees |
 |---|---|
 | Owner | Everything in the tenant, including the cost ledger and voided lines |
 | Leader (CRO, sales leader) | All funnels, sources, costs and the scorecard |
-| Seller (AE) | The funnel and outcomes of accounts assigned to them; no cost ledger; costs only as cost per won client for their own accounts |
-| Operator | Funnels, sources, costs (no voiding) |
+| Seller (AE) | The funnel and outcomes of accounts assigned to them; no cost ledger; costs only as cost per won client for their own accounts (R3b) |
+| Operator | Funnels, sources, costs; adds, edits and voids cost lines |
 | Agent principal | Only its own source's performance (ANL-E3-S3), and costs only with `analytics:read` |
 
 Data limits from `tenancy-and-access/roles-and-data-scopes.md` apply on top: a person limited to

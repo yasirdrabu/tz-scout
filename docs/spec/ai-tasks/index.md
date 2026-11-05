@@ -47,7 +47,7 @@ the version so any output can be traced to the exact prompt.
 |---|---|
 | `ai.run.completed` | `runId`, `task`, `promptVersion`, `mode`, `model`, `status`, `inputTokens`, `outputTokens`, `costCents`, `subject` (`{ type, id }`), `correlationId` |
 
-ANL turns `costCents` into automatic cost lines (agent compute). Consumes nothing.
+ANL makes no cost lines from this event: AI cost lines come only from the gateway's `integrations.usage.recorded`, one per priced live call (R3a). `costCents` here is for the run log. Consumes nothing.
 
 ## API endpoints
 

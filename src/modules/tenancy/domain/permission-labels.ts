@@ -28,7 +28,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'searches:manage': 'Manage saved searches',
   'warm_intro:declare': 'Mark warm introductions',
   'analytics:read': 'See reports',
+  'costs:read': 'See costs',
   'costs:write': 'Record costs',
+  'budgets:write': 'Edit budgets',
   'integrations:manage': 'Manage integrations',
   'members:read': 'See members',
   'members:manage': 'Manage members',
@@ -59,7 +61,7 @@ const GROUPS: Record<PermissionGroup, Permission[]> = {
   ],
   'Review and sources': ['arrivals:write', 'arrivals:read', 'imports:run', 'sources:manage', 'review:act', 'assign:act', 'assignments:respond'],
   'Offers and playbooks': ['offers:read', 'offers:manage', 'playbooks:read', 'playbooks:write', 'playbooks:manage', 'scoring:manage', 'campaigns:read', 'campaigns:manage'],
-  'Pipeline and money': ['crm:push', 'analytics:read', 'costs:write'],
+  'Pipeline and money': ['crm:push', 'analytics:read', 'costs:read', 'costs:write', 'budgets:write'],
   Workspace: ['members:read', 'members:manage', 'keys:manage', 'integrations:manage', 'webhooks:manage', 'settings:manage', 'status:read', 'audit:read'],
 };
 

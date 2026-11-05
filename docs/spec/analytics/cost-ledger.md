@@ -9,6 +9,12 @@ Release R3 · Module ANL
 
 ## Cost lines
 
+R3a stores five categories (Ruling 4 of the R3a plan): `partner_fees` "Partner fees", `data_vendors`
+"Data vendors", `agents_hosting` "Agents and hosting", `lists_events` "Lists and events" and `ai_usage`
+"AI usage". Usage lines land in the provider's category (`anthropic` in AI usage, `apollo` and `vibe` in
+Data vendors). Manual lines can go in any category. The table below is the fuller picture R3b and R4
+map onto these.
+
 | Category | Origin | Comes from | Target |
 |---|---|---|---|
 | Vendor credits (Apollo, Vibe, company data) | auto | `integrations.usage.recorded` for the provider (every costed call goes through Integrations' `gateway.call`) | the account of the matching enrichment request (`enr_…`, same `correlationId`), else the event's `sourceId` (a scheduled pull), else none |
@@ -23,12 +29,15 @@ Release R3 · Module ANL
 Rules:
 
 - Amounts in integer cents with the tenant's currency.
-- Lines are never edited. A wrong line is voided with a reason and a new one added; both stay visible
-  to owners.
+- Lines are never edited in place. A wrong line is voided with a reason and a new one added; both stay
+  visible to owners. Editing a manual line does this in one step: the old line is voided "Edited" and the
+  new one carries `replaces_id`. Usage lines can only be voided.
+- A line's date (`occurred_on`) is the tenant-timezone date; a usage line takes the date of the call.
+  Spend leaves out voided lines.
 - Auto lines carry `origin_event_id`, so replaying an event never creates a second line.
-- One costed outside call = one `integrations.usage.recorded` = one line. `enrichment.request.completed`
-  and `ai.run.completed` never create lines; they only tell Analytics which account a usage record
-  with the same `correlationId` belongs to. If the usage record is processed first, its line is
+- One costed outside call = one `integrations.usage.recorded` = one line, and nothing else creates
+  automatic lines. `enrichment.request.completed` and `ai.run.completed` never create lines; from R3b
+  they only tell Analytics which account a usage record with the same `correlationId` belongs to. If the usage record is processed first, its line is
   created with target none and re-targeted when the matching event arrives (an internal update before
   the line is shown, not an edit of a visible line).
 - Prices for credits and tokens are set in Integrations; a usage record with no price records the

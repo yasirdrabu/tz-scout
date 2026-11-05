@@ -66,12 +66,12 @@ module adds an event or tool.
 | `campaigns.statement.decided` | CMP | Keep, drop, rewrite or retest, with verdict | PLB (winning words) |
 | `campaigns.ad_spend.recorded` | CMP | One day's spend for one ad campaign | ANL (automatic cost line) |
 | `campaigns.meeting.booked` / `.held` / `.no_show` / `.cancelled` | CMP | Meeting lifecycle from the booking flow | PLB (meeting outcome), ANL |
-| `analytics.cost.recorded` | ANL | A cost line was added | ANL |
+| `analytics.cost.recorded` | ANL | A cost line was added. Not published yet (R3a writes lines without an event) | ANL |
 | `analytics.diagnosis.created` | ANL | Weekly diagnosis stored | owners (notify) |
 | `integrations.connection.changed` / `.tested` | INT | Connection added, edited, tested | Admin |
 | `integrations.usage.threshold_reached` | INT | 80% (`warn`) or 100% (`blocked`) of a provider limit, once per level per period | Settings, Integrations banner (in-app only; email later) |
 | `integrations.usage.recorded` | INT | A successful live outside call with a cost (credits, tokens) above 0 cents, priced at the tenant's rates (R3a). Sample and mock calls never publish it | ANL (automatic cost lines) |
-| `ai.run.completed` | AI | An AI task ran (cost, tokens) | ANL (cost) |
+| `ai.run.completed` | AI | An AI task ran (cost, tokens) | Nobody yet. ANL never makes cost lines from it: AI cost lines come only from `integrations.usage.recorded`. Re-targeting a line to the run's account by `correlationId` is R3b |
 | `platform.job.dead` | PLT | A job exhausted its retries | Admin |
 
 ## Jobs

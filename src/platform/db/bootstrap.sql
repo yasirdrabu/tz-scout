@@ -36,10 +36,11 @@ create schema if not exists routing authorization scout_admin;
 create schema if not exists crm authorization scout_admin;
 create schema if not exists playbooks authorization scout_admin;
 create schema if not exists enrichment authorization scout_admin;
+create schema if not exists analytics authorization scout_admin;
 
-grant usage on schema platform, tenancy, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment to scout_app;
-grant select, insert, update, delete on all tables in schema platform, tenancy, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment to scout_app;
-grant usage, select on all sequences in schema platform, tenancy, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment to scout_app;
+grant usage on schema platform, tenancy, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment, analytics to scout_app;
+grant select, insert, update, delete on all tables in schema platform, tenancy, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment, analytics to scout_app;
+grant usage, select on all sequences in schema platform, tenancy, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment, analytics to scout_app;
 
 -- The audit log is append only for the app role (table is created by migration 0005).
 do $$ begin
@@ -52,7 +53,7 @@ do $$ begin
   end if;
 end $$;
 
-alter default privileges for role scout_admin in schema platform, tenancy, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment
+alter default privileges for role scout_admin in schema platform, tenancy, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment, analytics
   grant select, insert, update, delete on tables to scout_app;
-alter default privileges for role scout_admin in schema platform, tenancy, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment
+alter default privileges for role scout_admin in schema platform, tenancy, integrations, ai, offers, accounts, intake, scoring, routing, crm, playbooks, enrichment, analytics
   grant usage, select on sequences to scout_app;
