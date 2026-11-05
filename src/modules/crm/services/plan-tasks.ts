@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import { getAccount } from '@/modules/accounts';
 import { gateway } from '@/modules/integrations';
 import { crmOwnerId, tenantSummary, tenantTimezone } from '@/modules/tenancy';
@@ -25,11 +25,17 @@ type TaskLinkRow = typeof taskLink.$inferSelect;
 /** Close notes (Ruling 8). */
 const STEP_NOTE = { done: 'Marked done in Scout.', skipped: 'Skipped in Scout.' } as const;
 const takenOut = (playbook: string) => `Taken out of the ${playbook} playbook.`;
-function planNote(plan: PlanTasks): string {
+type PlanState = Pick<PlanTasks, 'playbookName' | 'status' | 'statusReason'>;
+/** The note for a task whose plan is no longer active or paused. */
+function planNote(plan: PlanState): string {
   if (plan.status === 'stopped') return `The ${plan.playbookName} playbook stopped: ${plan.statusReason ?? 'no reason given'}.`;
   if (plan.status === 'completed') return `The ${plan.playbookName} playbook was completed.`;
-  return `The ${plan.playbookName} playbook was abandoned.`;
+  if (plan.status === 'abandoned') return `The ${plan.playbookName} playbook was abandoned.`;
+  return takenOut(plan.playbookName);
 }
+
+/** The CRM answered that the task is not there (deleted in HubSpot): both adapters say so with status 404. */
+const notFound = (e: unknown) => typeof e === 'object' && e !== null && (e as { status?: unknown }).status === 404;
 
 /** Ruling 11: what Scout wrote, so an unchanged task makes no CRM call. */
 const fingerprintOf = (t: { subject: string; body: string; owner: string | null; person: string | null; dueAt: string }) =>
@@ -53,7 +59,7 @@ async function saveLink(ctx: ModuleContext, row: Omit<TaskLinkRow, 'tenantId'>):
  * stands for the latest handoff, that handoff's open fixed tasks are closed as replaced. Nothing happens before a
  * handoff completed: the push queues the sync. Errors are left to the platform, as for `crm.sync`.
  */
-export async function syncPlanTasks(ctx: ModuleContext, accountId: string, _now: Date = new Date()): Promise<void> {
+export async function syncPlanTasks(ctx: ModuleContext, accountId: string): Promise<void> {
   await lockAccount(ctx, accountId);
   const h = await latestCompleted(ctx, accountId);
   if (!h?.companyExternalId) return;
@@ -66,12 +72,24 @@ export async function syncPlanTasks(ctx: ModuleContext, accountId: string, _now:
 
   if (live || plan.assignmentId === h.assignmentId) await replaceFixedTasks(ctx, h.assignmentId, system, company, plan.playbookName, call);
 
+  // This plan's links, and the open ones an earlier plan of the account left behind (its sync had not run when this plan started).
   const links = await ctx.tx
     .select()
     .from(taskLink)
-    .where(and(eq(taskLink.tenantId, ctx.tenantId), eq(taskLink.system, system), eq(taskLink.planId, plan.planId)));
+    .where(
+      and(
+        eq(taskLink.tenantId, ctx.tenantId),
+        eq(taskLink.system, system),
+        or(eq(taskLink.planId, plan.planId), and(eq(taskLink.accountId, accountId), eq(taskLink.status, 'open'))),
+      ),
+    );
+  /** A task already gone from the CRM counts as closed. */
   const close = async ({ tenantId: _t, ...l }: TaskLinkRow, note: string) => {
-    await call('closeTask', (a) => a.closeTask({ externalId: l.externalTaskId, note }));
+    try {
+      await call('closeTask', (a) => a.closeTask({ externalId: l.externalTaskId, note }));
+    } catch (e) {
+      if (!notFound(e)) throw e;
+    }
     await saveLink(ctx, { ...l, status: 'closed' });
   };
 
@@ -96,9 +114,10 @@ export async function syncPlanTasks(ctx: ModuleContext, accountId: string, _now:
       const person = step.personIds.map((id) => personOf.get(id)).find((x) => !!x) ?? (primary ? personOf.get(primary.id) : undefined) ?? null;
       const dueAt = dueAtOn(step.dueDate, timezone);
       const fingerprint = fingerprintOf({ ...spec, owner, person, dueAt });
-      const l = links.find((x) => x.stepId === step.id);
+      const l = links.find((x) => x.stepId === step.id && x.planId === plan.planId);
       if (l?.status === 'open' && l.fingerprint === fingerprint) continue;
-      // A closed or done task is never reopened: a step back to open gets a new one (Ruling 9).
+      // A closed or done task is never reopened: a step back to open gets a new one (Ruling 9). A task deleted in the CRM
+      // is made again by the adapter.
       const r = await call('upsertTask', (a) =>
         a.upsertTask({
           externalId: l?.status === 'open' ? l.externalTaskId : undefined,
@@ -118,6 +137,11 @@ export async function syncPlanTasks(ctx: ModuleContext, accountId: string, _now:
   const byId = new Map<string, Step>(plan.steps.map((s) => [s.id, s]));
   for (const l of links) {
     if (l.status !== 'open') continue;
+    if (l.planId !== plan.planId) {
+      const earlier = plan.otherPlans.find((x) => x.planId === l.planId);
+      await close(l, earlier ? planNote(earlier) : takenOut(plan.playbookName));
+      continue;
+    }
     const step = byId.get(l.stepId);
     if (step && wanted.includes(step)) continue;
     if (!live) await close(l, planNote(plan));

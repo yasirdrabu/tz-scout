@@ -73,4 +73,6 @@ export type PlanTasks = {
     crmTask: boolean;
     personIds: string[];
   }[];
+  /** The account's other plans, for the close note of a task an earlier plan left open. */
+  otherPlans: { planId: string; playbookName: string; status: PlanTasks['status']; statusReason: string | null }[];
 };

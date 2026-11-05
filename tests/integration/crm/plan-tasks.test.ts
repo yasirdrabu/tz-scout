@@ -46,18 +46,22 @@ beforeAll(async () => {
 });
 afterAll(closeDbs);
 
-type Made = { accountId: string; assignmentId: string; personId: string };
+type Made = { accountId: string; assignmentId: string; personId: string; personIds: string[] };
 
-/** An account with Ana (business owner) assigned to the seller with the playbook and pushed to the mock; not yet accepted. */
-async function handedOff(name = 'Plan Co'): Promise<Made> {
+/**
+ * An account with Ana (the primary person) assigned to the seller with the playbook and pushed to the mock; not yet
+ * accepted. Ana holds business_owner, unless `ben` adds Ben as a second person who holds it instead.
+ */
+async function handedOff(name = 'Plan Co', opts: { ben?: boolean } = {}): Promise<Made> {
   const d = domain();
-  const a = arrival({ account: { name, domain: d }, people: [{ firstName: 'Ana', lastName: 'Act', title: 'CTO', email: `ana@${d}` }] });
+  const people = [{ firstName: 'Ana', lastName: 'Act', title: 'CTO', email: `ana@${d}` }, ...(opts.ben ? [{ firstName: 'Ben', lastName: 'Buy', title: 'COO', email: `ben@${d}` }] : [])];
+  const a = arrival({ account: { name, domain: d }, people });
   const { accountId, personIds } = await t.run((ctx) => upsertFromArrival(ctx, a));
   await resolved(t, accountId, { arrivalId: a.arrivalId, resolution: 'created' });
-  await asPerson(t, (ctx) => editPerson(ctx, personIds[0]!, { roleKeys: ['business_owner'] }));
+  await asPerson(t, (ctx) => editPerson(ctx, personIds[opts.ben ? 1 : 0]!, { roleKeys: ['business_owner'] }));
   const made = await asPerson(t, (ctx) => assign(ctx, accountId, { sellerUserId: seller, templateId }), { userId: leader });
   await runOutbox(t.tenantId);
-  return { accountId, assignmentId: made.id, personId: personIds[0]! };
+  return { accountId, assignmentId: made.id, personId: personIds[0]!, personIds };
 }
 
 const acceptAs = async (assignmentId: string, userId = seller) => {
@@ -185,7 +189,7 @@ describe('plan tasks follow the account plan (CRM-E3-S4)', () => {
   it('a second sync with no change writes nothing', async () => {
     const { accountId } = await planned();
     const before = await calls();
-    await t.run((ctx) => syncPlanTasks(ctx, accountId, new Date()));
+    await t.run((ctx) => syncPlanTasks(ctx, accountId));
     expect(await calls()).toBe(before);
     expect(await calls(['upsertTask', 'closeTask'])).toBeGreaterThan(0);
   });
@@ -268,8 +272,85 @@ describe('plan tasks follow the account plan (CRM-E3-S4)', () => {
     await runPlaybooks(t.tenantId); // the plan starts; the push never runs
     const plan = await planOf(accountId);
     const before = await calls();
-    await t.run((ctx) => syncPlanTasks(ctx, accountId, new Date()));
+    await t.run((ctx) => syncPlanTasks(ctx, accountId));
     expect(await calls()).toBe(before);
+    expect(await linksOf(plan.id)).toEqual([]);
+  });
+});
+
+const deleteMockTask = (externalId: string) => adminDb.delete(mockTask).where(and(eq(mockTask.tenantId, t.tenantId), eq(mockTask.externalId, externalId)));
+
+describe('plan tasks, edge cases', () => {
+  it('a task deleted in HubSpot counts as closed when its step closes', async () => {
+    const { planId, stepIds } = await planned();
+    await deleteMockTask((await linkOf(stepIds[1]!))!.externalTaskId);
+    await setStep(planId, stepIds[1]!, { status: 'skipped' });
+    expect((await linkOf(stepIds[1]!))!.status).toBe('closed');
+    // The rest of the plan still syncs.
+    await setStep(planId, stepIds[0]!, { status: 'done' });
+    expect((await taskOf(stepIds[0]!)).status).toBe('completed');
+  });
+
+  it('a task deleted in HubSpot is made again when its open step changes', async () => {
+    const { planId, stepIds } = await planned();
+    const old = (await linkOf(stepIds[1]!))!.externalTaskId;
+    await deleteMockTask(old);
+    await setStep(planId, stepIds[1]!, { title: 'Call again' });
+    const l = (await linkOf(stepIds[1]!))!;
+    expect(l.externalTaskId).not.toBe(old);
+    expect(l.status).toBe('open');
+    expect((await taskOf(stepIds[1]!)).subject).toBe('Call again (Plan Co)');
+  });
+
+  it('open tasks an earlier plan left are closed with that plan note when a new plan starts', async () => {
+    const first = await handedOff();
+    await acceptAs(first.assignmentId);
+    const a = await planOf(first.accountId);
+    expect((await linksOf(a.id)).filter((l) => l.status === 'open')).toHaveLength(3);
+    // Plan A ends and plan B starts before A's sync runs.
+    await asSeller((ctx) => abandonPlan(ctx, a.id, 'Wrong fit'));
+    await asPerson(t, (ctx) => withdraw(ctx, first.assignmentId), { userId: leader });
+    const again = await asPerson(t, (ctx) => assign(ctx, first.accountId, { sellerUserId: seller, templateId }), { userId: leader });
+    await asPerson(t, (ctx) => accept(ctx, again.id), { userId: seller, dataLimit: { kind: 'own_accounts' } });
+    await runOutbox(t.tenantId);
+
+    const plans = await t.run((ctx) => ctx.tx.select().from(accountPlan).where(eq(accountPlan.accountId, first.accountId)));
+    const b = plans.find((p) => p.id !== a.id)!;
+    expect(b.status).toBe('active');
+    for (const l of await linksOf(a.id)) {
+      expect(l.status).toBe('closed');
+      expect((await mockTaskById(l.externalTaskId)).body!.endsWith(`\n\nThe ${PLAYBOOK} playbook was abandoned.`)).toBe(true);
+    }
+    expect((await linksOf(b.id)).filter((l) => l.status === 'open')).toHaveLength(3);
+  });
+
+  it('the step person beats the primary person (Ruling 7)', async () => {
+    const made = await handedOff('Two People Co', { ben: true });
+    await acceptAs(made.assignmentId);
+    const rows = await stepsOf((await planOf(made.accountId)).id);
+    const ana = await personLink(made.personIds[0]!);
+    const ben = await personLink(made.personIds[1]!);
+    expect(ana).not.toBe(ben);
+    expect((await taskOf(rows[0]!.id)).personExternalId).toBe(ben); // targets business_owner: Ben
+    expect((await taskOf(rows[1]!.id)).personExternalId).toBe(ana); // no target: the primary person
+  });
+
+  it('a step owner with no CRM owner falls back to the plan seller (Ruling 6)', async () => {
+    const { planId, stepIds } = await planned();
+    await setStep(planId, stepIds[1]!, { ownerUserId: leader });
+    expect((await stepsOf(planId))[1]!.ownerUserId).toBe(leader);
+    expect((await taskOf(stepIds[1]!)).ownerExternalId).toBe(`mock-${seller}`);
+  });
+
+  it('a plan that ended before its first sync still replaces the fixed tasks of its assignment (Ruling 10)', async () => {
+    const made = await handedOff();
+    const fixed = await fixedLinks(made.assignmentId);
+    await asPerson(t, (ctx) => accept(ctx, made.assignmentId), { userId: seller, dataLimit: { kind: 'own_accounts' } });
+    await runPlaybooks(t.tenantId); // the plan starts; CRM has not seen it yet
+    const plan = await planOf(made.accountId);
+    await asSeller((ctx) => abandonPlan(ctx, plan.id, 'Wrong fit'));
+    await t.run((ctx) => syncPlanTasks(ctx, made.accountId));
+    for (const l of fixed) expect((await mockTaskById(l.externalId)).body!.endsWith(`\n\nReplaced by the ${PLAYBOOK} playbook.`)).toBe(true);
     expect(await linksOf(plan.id)).toEqual([]);
   });
 });

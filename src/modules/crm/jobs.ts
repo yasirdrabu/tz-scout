@@ -58,7 +58,7 @@ export const syncHandler = defineJobHandler(syncJob, async (e, ctx) => {
 
 /** Makes the account's HubSpot tasks match its plan (R2c-3b). */
 export const planSyncHandler = defineJobHandler(planSyncJob, async (e, ctx) => {
-  await syncPlanTasks(ctx, e.data.accountId, new Date());
+  await syncPlanTasks(ctx, e.data.accountId);
 });
 
 /** Every CRM job handler, for the worker's list. */

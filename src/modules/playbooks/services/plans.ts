@@ -157,6 +157,22 @@ const daysBetween = (from: string, to: string) => {
 const personName = (p: { firstName: string | null; lastName: string | null; email: string | null }) =>
   [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email || 'Unnamed';
 
+/** One read of the account's people for a plan's steps (none when no step targets a role); roles Enrich or a person added after acceptance count. */
+async function planPeople(ctx: ModuleContext, accountId: string, steps: Step[]): Promise<(PlanPerson & { name: string })[]> {
+  if (!steps.some((s) => s.targetBuyingRoles.length > 0)) return [];
+  return (await listPeople(ctx, accountId)).map((p) => ({ id: p.id, firstName: p.firstName, name: personName(p), roles: p.roles.map((r) => ({ key: r.key, origin: r.origin })) }));
+}
+
+/** The account's plans, newest first, and the one that counts: the open plan, else the latest. */
+async function accountPlans(ctx: ModuleContext, accountId: string): Promise<{ plan: Plan | undefined; rows: Plan[] }> {
+  const rows = await ctx.tx
+    .select()
+    .from(accountPlan)
+    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, accountId)))
+    .orderBy(desc(accountPlan.createdAt), desc(accountPlan.id));
+  return { plan: rows.find((p) => !CLOSED.includes(p.status)) ?? rows[0], rows };
+}
+
 async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
   const [template] = await ctx.tx.select().from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), eq(playbookTemplate.id, plan.templateId)));
   const steps = await stepsOf(ctx, plan.id);
@@ -169,10 +185,7 @@ async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
   const ids = [...steps.map((s) => s.ownerUserId), ...history.map((h) => h.by)].filter((x): x is string => !!x);
   const names = ids.length ? await userNames(ctx, ids) : new Map<string, string>();
   const today = localDate(Date.now(), await tenantTimezone(ctx));
-  // One read of the account's people for the whole plan; roles Enrich or a person added after acceptance count.
-  const people: (PlanPerson & { name: string })[] = steps.some((s) => s.targetBuyingRoles.length > 0)
-    ? (await listPeople(ctx, plan.accountId)).map((p) => ({ id: p.id, firstName: p.firstName, name: personName(p), roles: p.roles.map((r) => ({ key: r.key, origin: r.origin })) }))
-    : [];
+  const people = await planPeople(ctx, plan.accountId, steps);
   // An archived buying role is not something to go and find.
   const active = new Set(steps.some((s) => s.targetBuyingRoles.length > 0) ? (await listBuyingRoles(ctx)).map((r) => r.key) : []);
   return {
@@ -209,12 +222,7 @@ async function view(ctx: ModuleContext, plan: Plan): Promise<PlanView> {
 export async function getPlan(ctx: ModuleContext, accountId: string): Promise<PlanView | null> {
   const found = await resolveAccountId(ctx, accountId);
   if (!found || (await filterVisibleAccountIds(ctx, [found.id])).length === 0) return null;
-  const rows = await ctx.tx
-    .select()
-    .from(accountPlan)
-    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, found.id)))
-    .orderBy(desc(accountPlan.createdAt), desc(accountPlan.id));
-  const plan = rows.find((p) => !CLOSED.includes(p.status)) ?? rows[0];
+  const { plan } = await accountPlans(ctx, found.id);
   return plan ? view(ctx, plan) : null;
 }
 
@@ -225,22 +233,19 @@ export async function getPlan(ctx: ModuleContext, accountId: string): Promise<Pl
 export async function planTasks(ctx: ModuleContext, accountId: string): Promise<PlanTasks | null> {
   const found = await resolveAccountId(ctx, accountId);
   if (!found) return null;
-  const rows = await ctx.tx
-    .select()
-    .from(accountPlan)
-    .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, found.id)))
-    .orderBy(desc(accountPlan.createdAt), desc(accountPlan.id));
-  const plan = rows.find((p) => !CLOSED.includes(p.status)) ?? rows[0];
+  const { plan, rows } = await accountPlans(ctx, found.id);
   if (!plan) return null;
-  const [template] = await ctx.tx.select({ name: playbookTemplate.name }).from(playbookTemplate).where(and(eq(playbookTemplate.tenantId, ctx.tenantId), eq(playbookTemplate.id, plan.templateId)));
+  const templates = await ctx.tx
+    .select({ id: playbookTemplate.id, name: playbookTemplate.name })
+    .from(playbookTemplate)
+    .where(and(eq(playbookTemplate.tenantId, ctx.tenantId), inArray(playbookTemplate.id, [...new Set(rows.map((r) => r.templateId))])));
+  const nameOf = (templateId: string) => templates.find((x) => x.id === templateId)?.name ?? '';
   const steps = await stepsOf(ctx, plan.id);
-  const people: PlanPerson[] = steps.some((s) => s.targetBuyingRoles.length > 0)
-    ? (await listPeople(ctx, plan.accountId)).map((p) => ({ id: p.id, firstName: p.firstName, roles: p.roles.map((r) => ({ key: r.key, origin: r.origin })) }))
-    : [];
+  const people = await planPeople(ctx, plan.accountId, steps);
   return {
     planId: plan.id,
     assignmentId: plan.assignmentId,
-    playbookName: template?.name ?? '',
+    playbookName: nameOf(plan.templateId),
     status: plan.status as PlanTasks['status'],
     statusReason: plan.statusReason,
     sellerUserId: plan.sellerUserId,
@@ -257,6 +262,9 @@ export async function planTasks(ctx: ModuleContext, accountId: string): Promise<
       crmTask: s.crmTask,
       personIds: linkedPeople(people, s.targetBuyingRoles).map((p) => p.id),
     })),
+    otherPlans: rows
+      .filter((r) => r.id !== plan.id)
+      .map((r) => ({ planId: r.id, playbookName: nameOf(r.templateId), status: r.status as PlanTasks['status'], statusReason: r.statusReason })),
   };
 }
 
