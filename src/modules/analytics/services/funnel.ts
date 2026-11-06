@@ -169,6 +169,9 @@ export type SourcePerformance = {
   of: number;
   prevId: string | null;
   nextId: string | null;
+  /** 1-based place among the funnel rows, and how many rows there are ("{i} of {n}"); null when not a row. */
+  position: number | null;
+  rowCount: number | null;
   targetCostPerWonCents: number | null;
   totals: {
     sent: number;
@@ -251,6 +254,8 @@ export async function sourcePerformance(ctx: ModuleContext, sourceId: string, f:
     of: ranked.length,
     prevId: at > 0 ? rows[at - 1]!.sourceId : null,
     nextId: at >= 0 && at < rows.length - 1 ? rows[at + 1]!.sourceId : null,
+    position: at < 0 ? null : at + 1,
+    rowCount: at < 0 ? null : rows.length,
     targetCostPerWonCents: b.spend ? b.target : null,
     totals: {
       sent,

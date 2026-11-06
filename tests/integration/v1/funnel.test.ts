@@ -240,7 +240,7 @@ describe('GET /api/v1/analytics/sources/{id}/performance (Ruling 11)', () => {
   it("Alpha's totals, rank, neighbours, insight, stages, batches and won accounts by value", async () => {
     const body = await json(w.as(w.owner, drillRoute, `analytics/sources/${alpha}/performance`));
     expect(body.source).toEqual({ id: alpha, name: 'Alpha', kind: 'person' });
-    expect(body).toMatchObject({ rank: 1, of: 1, prev_id: null, next_id: beta, target_cost_per_won_cents: 250_000 });
+    expect(body).toMatchObject({ rank: 1, of: 1, prev_id: null, next_id: beta, position: 1, row_count: 2, target_cost_per_won_cents: 250_000 });
     expect(body.totals).toEqual({
       sent: 12,
       won: 2,
@@ -264,8 +264,12 @@ describe('GET /api/v1/analytics/sources/{id}/performance (Ruling 11)', () => {
   it('Beta is too early to judge and has no rank; a child source has no rank or neighbours', async () => {
     const b = await json(w.as(w.owner, drillRoute, `analytics/sources/${beta}/performance`));
     expect(b).toMatchObject({ rank: null, of: 1, prev_id: alpha, next_id: null, insight: 'Too early to judge.' });
+    // The second funnel row: "2 of {rows}".
+    const rows = (await json(w.as(w.owner, funnelRoute, 'analytics/funnel'))).rows;
+    expect(rows[1].source_id).toBe(beta);
+    expect(b).toMatchObject({ position: 2, row_count: rows.length });
     const child = await json(w.as(w.owner, drillRoute, `analytics/sources/${alphaList}/performance`));
-    expect(child).toMatchObject({ rank: null, prev_id: null, next_id: null, totals: { sent: 2, won: 1 } });
+    expect(child).toMatchObject({ rank: null, prev_id: null, next_id: null, position: null, row_count: null, totals: { sent: 2, won: 1 } });
     expect(child.totals.spend_cents).toBe(100_000);
   });
 
