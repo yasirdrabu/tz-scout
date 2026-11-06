@@ -179,12 +179,11 @@ export const funnelRoute = createRoute({
   component: lazyRouteComponent(() => import('../features/funnel/FunnelScreen'), 'FunnelScreen'),
 });
 
-/** A placeholder until Task 6 builds the Funnel drill (§17); the Funnel's rows link here. */
 export const funnelDrillRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'funnel/$sourceId',
   validateSearch: funnelSearch,
-  component: () => <Placeholder screen={{ title: 'Funnel drill by source', section: '17', tag: 'R3' }} />,
+  component: lazyRouteComponent(() => import('../features/funnel/DrillScreen'), 'DrillScreen'),
 });
 
 export const costsRoute = createRoute({

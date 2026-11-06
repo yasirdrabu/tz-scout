@@ -66,6 +66,11 @@ export function SourceHeader({ tenant, source: s, canAct, busy, onPause, onSync 
             </div>
             <p className={styles.meta}>{ownerLine(s, (at) => f.relative(at))}</p>
           </div>
+          <div className={styles.actions}>
+            <Link to="/t/$tenant/funnel/$sourceId" params={{ tenant, sourceId: s.id }} className={buttonClass('secondary', 'sm')}>
+              See in funnel
+            </Link>
+          </div>
           {canAct && !archived && (
             <div className={styles.actions}>
               <Button size="sm" variant="secondary" disabled={busy} onClick={onPause}>

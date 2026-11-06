@@ -56,6 +56,9 @@ export type SourceStat = {
   won_pct: number | null;
   by_stage: { key: string; label: string; count: number }[];
   is_new: boolean;
+  /** All-time spend and spend / won: null without costs:read (the second is also null with no wins). */
+  spend_cents: number | null;
+  cost_per_won_cents: number | null;
 };
 
 export type SourceKey = { id: string; name: string; prefix: string; mask: string; created_at: string; last_used_at: string | null; revoked_at: string | null };

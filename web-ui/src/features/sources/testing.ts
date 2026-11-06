@@ -98,9 +98,9 @@ const stage = (arrived: number, reviewed: number, assigned: number, won: number)
 ];
 
 export const STATS: SourceStat[] = [
-  { source_id: 'src_marcus', sent: 2, reviewed: 1, assigned: 1, won: 0, reviewed_pct: 33, assigned_pct: 71, won_pct: 9, by_stage: stage(1, 0, 1, 0), is_new: false },
-  { source_id: 'src_rfp', sent: 41, reviewed: 38, assigned: 19, won: 6, reviewed_pct: 93, assigned_pct: 50, won_pct: 32, by_stage: stage(3, 19, 13, 6), is_new: false },
-  { source_id: 'src_csv', sent: 0, reviewed: 0, assigned: 0, won: 0, reviewed_pct: null, assigned_pct: null, won_pct: null, by_stage: stage(0, 0, 0, 0), is_new: true },
+  { source_id: 'src_marcus', sent: 2, reviewed: 1, assigned: 1, won: 0, reviewed_pct: 33, assigned_pct: 71, won_pct: 9, by_stage: stage(1, 0, 1, 0), is_new: false, spend_cents: null, cost_per_won_cents: null },
+  { source_id: 'src_rfp', sent: 41, reviewed: 38, assigned: 19, won: 6, reviewed_pct: 93, assigned_pct: 50, won_pct: 32, by_stage: stage(3, 19, 13, 6), is_new: false, spend_cents: null, cost_per_won_cents: null },
+  { source_id: 'src_csv', sent: 0, reviewed: 0, assigned: 0, won: 0, reviewed_pct: null, assigned_pct: null, won_pct: null, by_stage: stage(0, 0, 0, 0), is_new: true, spend_cents: null, cost_per_won_cents: null },
 ];
 
 export const detail = (s: Source, extra: Partial<SourceDetail> = {}): SourceDetail => ({
@@ -147,7 +147,7 @@ export const ACCOUNT_ROW: SourceAccount = {
 };
 
 /** The Sources screen and Source page answered from fixtures. Returns the request log by method and path. */
-export function serveSources(opts: { scopes?: string[]; sources?: Source[]; meta?: Partial<SourcesMeta>; one?: SourceDetail } = {}) {
+export function serveSources(opts: { scopes?: string[]; sources?: Source[]; meta?: Partial<SourcesMeta>; one?: SourceDetail; stats?: SourceStat[] } = {}) {
   const seen: { method: string; url: URL; body: unknown }[] = [];
   const log = async (request: Request) => {
     const body = request.method === 'GET' || request.method === 'DELETE' ? undefined : await request.clone().json().catch(() => undefined);
@@ -164,7 +164,7 @@ export function serveSources(opts: { scopes?: string[]; sources?: Source[]; meta
       const data = sources.filter((s) => (!kinds.length || kinds.includes(s.kind)) && (!q || s.name.toLowerCase().includes(q)));
       return HttpResponse.json({ data, next_cursor: null, meta: { ...META, ...opts.meta } });
     }),
-    http.get('/api/v1/sources/stats', () => HttpResponse.json({ data: STATS })),
+    http.get('/api/v1/sources/stats', () => HttpResponse.json({ data: opts.stats ?? STATS })),
     http.get('/api/v1/sources/:id', ({ params }) => {
       const s = sources.find((x) => x.id === params.id);
       return s ? HttpResponse.json(opts.one && opts.one.id === s.id ? opts.one : detail(s)) : HttpResponse.json({ title: 'Not found.', status: 404 }, { status: 404 });

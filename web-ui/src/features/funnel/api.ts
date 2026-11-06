@@ -68,3 +68,49 @@ export const STATUS_WORD: Partial<Record<CostStatus, string>> = {
   no_wins: 'No wins yet',
   no_target: 'No target set',
 };
+
+// Funnel drill (§17, Ruling 11): src/http/routes/v1/analytics/sources/[id]/performance/route.ts.
+
+export type DrillStage = {
+  key: string;
+  name: string;
+  count: number;
+  all_count: number;
+  moved_on_pct: number | null;
+  all_moved_on_pct: number | null;
+  lost: number;
+  cost_each_cents: number | null;
+};
+
+export type Drill = {
+  source: { id: string; name: string; kind: string };
+  period: { key: PeriodKey; from: string; to: string };
+  rank: number | null;
+  of: number;
+  prev_id: string | null;
+  next_id: string | null;
+  /** This source's place among the funnel rows, null for a source that is not a row. */
+  position: number | null;
+  row_count: number | null;
+  target_cost_per_won_cents: number | null;
+  totals: {
+    sent: number;
+    won: number;
+    won_pct: number | null;
+    all_won_pct: number | null;
+    spend_cents: number | null;
+    cost_per_sent_cents: number | null;
+    cost_per_won_cents: number | null;
+    status: CostStatus | null;
+  };
+  insight: string | null;
+  stages: DrillStage[];
+  batches: { batch_id: string; name: string; sent: number; won: number }[];
+  won_accounts: { account_id: string; name: string; offer_name: string | null; value_cents: number | null }[];
+};
+
+export const drillQuery = (tenant: string, sourceId: string, f: FunnelFilters) =>
+  queryOptions({
+    queryKey: ['funnel', tenant, 'drill', sourceId, f],
+    queryFn: () => apiFetch<Drill>(`/analytics/sources/${encodeURIComponent(sourceId)}/performance?${funnelParams(f)}`, { tenant }),
+  });
