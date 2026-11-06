@@ -1,7 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 import { renderApp } from '../../test/renderApp';
-import { funnel, NO_COSTS, serveDrill, serveFunnel } from './testing';
+import { server } from '../../test/server';
+import { funnel, NO_COSTS, SELLER, serveDrill, serveFunnel, withoutSpend } from './testing';
 
 const open = async (path = '/t/taazaa/funnel') => {
   const app = renderApp(path);
@@ -130,5 +132,46 @@ describe('Funnel empty', () => {
     serveFunnel({ funnel: funnel({ rows: [], totals: { sent: 0, sources: 0, won: 0, won_pct: null, spend_cents: 0, cost_per_won_cents: null } }) });
     await open();
     expect(await screen.findByText('No accounts arrived in this period.')).toBeInTheDocument();
+  });
+});
+
+describe('Funnel when spend is not split', () => {
+  it('with a practice, offer or batch filter it hides spend as without costs:read and says why', async () => {
+    serveFunnel({ funnel: { ...withoutSpend(funnel()), spend_split: false } });
+    await open('/t/taazaa/funnel?practice=p1');
+    const table = await screen.findByRole('table');
+    expect(screen.getByText("Spend isn't split by practice, offer or batch.")).toBeInTheDocument();
+    expect(within(table).queryByRole('columnheader', { name: /^Spend/ })).toBeNull();
+    expect(within(table).queryByRole('columnheader', { name: /^Cost per won/ })).toBeNull();
+    expect(within(table).getByText('RFP Watch').closest('tr')).not.toHaveTextContent('per account');
+    const tiles = screen.getByRole('list', { name: 'Funnel totals' });
+    expect(within(tiles).queryByText('Spend')).toBeNull();
+    expect(within(tiles).queryByText('Cost per won account')).toBeNull();
+    expect(screen.queryByText(/^Cost per won account: green/)).toBeNull();
+  });
+
+  it('says nothing about the split when spend is split', async () => {
+    serveFunnel();
+    await open();
+    await screen.findByRole('table');
+    expect(screen.queryByText("Spend isn't split by practice, offer or batch.")).toBeNull();
+  });
+});
+
+describe('Funnel for a seller', () => {
+  it('has no Batch filter and never lists batches', async () => {
+    serveFunnel({ scopes: SELLER });
+    let listed = 0;
+    server.use(
+      http.get('/api/v1/batches', () => {
+        listed += 1;
+        return HttpResponse.json({ data: [], next_cursor: null });
+      }),
+    );
+    await open();
+    await screen.findByRole('table');
+    expect(screen.getByLabelText('Practice')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Batch')).toBeNull();
+    expect(listed).toBe(0);
   });
 });

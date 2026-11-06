@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { renderApp } from '../../test/renderApp';
-import { drill, NO_COSTS, serveDrill } from './testing';
+import { drill, NO_COSTS, SELLER, serveDrill } from './testing';
 
 const open = async (path = '/t/taazaa/funnel/src_rfp?period=90d&practice=p1') => {
   const app = renderApp(path);
@@ -123,5 +123,36 @@ describe('Funnel drill stage table and lists', () => {
     serveDrill({ drill: drill({ won_accounts: [] }) });
     await open();
     expect(screen.getByText('No wins from this source yet.')).toBeInTheDocument();
+  });
+});
+
+describe('Funnel drill when spend is not split', () => {
+  it('hides the spend tiles and Cost each and says why', async () => {
+    const d = drill();
+    serveDrill({
+      drill: drill({
+        spend_split: false,
+        rank: null,
+        target_cost_per_won_cents: null,
+        totals: { ...d.totals, spend_cents: null, cost_per_sent_cents: null, cost_per_won_cents: null, status: null },
+        stages: d.stages.map((s) => ({ ...s, cost_each_cents: null })),
+      }),
+    });
+    await open();
+    expect(screen.getByText("Spend isn't split by practice, offer or batch.")).toBeInTheDocument();
+    expect(screen.queryByText('Spend')).toBeNull();
+    expect(screen.queryByText('Cost per won account')).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'Cost each' })).toBeNull();
+  });
+});
+
+describe('Funnel drill for a seller', () => {
+  it('has no Open source page and shows batches as plain text', async () => {
+    serveDrill({ scopes: SELLER });
+    await open();
+    expect(screen.queryByRole('link', { name: 'Open source page' })).toBeNull();
+    const batches = screen.getByRole('list', { name: 'Batches' });
+    expect(within(batches).getByText('October list')).toBeInTheDocument();
+    expect(within(batches).queryByRole('link')).toBeNull();
   });
 });

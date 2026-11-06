@@ -24,8 +24,11 @@ export function FunnelScreen() {
   const data = useQuery(funnelQuery(tenant, filters));
   const practices = useQuery(practicesQuery(tenant));
   const offers = useQuery(offersQuery(tenant));
-  const batches = useQuery(batchOptionsQuery(tenant));
-  const showSpend = !!me.data && hasScope(me.data, 'costs:read');
+  // Batches need arrivals:read, as GET /batches does.
+  const canBatches = !!me.data && hasScope(me.data, 'arrivals:read');
+  const batches = useQuery({ ...batchOptionsQuery(tenant), enabled: canBatches });
+  // Spend isn't split by practice, offer or batch: with one set, spend hides as for people without costs:read.
+  const showSpend = !!me.data && hasScope(me.data, 'costs:read') && data.data?.spend_split !== false;
   const update = (patch: FunnelFilters) => void navigate({ search: (prev) => ({ ...prev, ...patch }) });
   const offerList = (offers.data ?? []).filter((o) => !search.practice || o.practice_id === search.practice);
   return (
@@ -37,9 +40,10 @@ export function FunnelScreen() {
       <div className={styles.filters}>
         <Filter label="Practice" value={search.practice} all="All practices" options={(practices.data ?? []).map((p) => ({ value: p.id, label: p.name }))} onChange={(v) => update({ practice: v, offer: undefined })} />
         <Filter label="Offer" value={search.offer} all="All offers" options={offerList.map((o) => ({ value: o.id, label: o.name }))} onChange={(v) => update({ offer: v })} />
-        <Filter label="Batch" value={search.batch} all="All batches" options={(batches.data ?? []).map((b) => ({ value: b.id, label: b.name }))} onChange={(v) => update({ batch: v })} />
+        {canBatches && <Filter label="Batch" value={search.batch} all="All batches" options={(batches.data ?? []).map((b) => ({ value: b.id, label: b.name }))} onChange={(v) => update({ batch: v })} />}
         <Filter label="Period" value={search.period ?? DEFAULT_PERIOD} options={PERIODS.map((p) => ({ value: p.key, label: p.label }))} onChange={(v) => update({ period: v })} />
       </div>
+      {data.data?.spend_split === false && <p className={styles.legend}>Spend isn&apos;t split by practice, offer or batch.</p>}
       {me.isPending || data.isPending ? (
         <LoadingRows>Loading the funnel</LoadingRows>
       ) : data.isError ? (

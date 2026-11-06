@@ -35,6 +35,8 @@ export type Funnel = {
   totals: { sent: number; sources: number; won: number; won_pct: number | null; spend_cents: number | null; cost_per_won_cents: number | null };
   rows: FunnelRow[];
   shared_spend_cents: number | null;
+  /** False when practice, offer or batch is set: spend isn't split that way, so every spend field is null. */
+  spend_split: boolean;
   updated_at: string | null;
 };
 
@@ -93,6 +95,8 @@ export type Drill = {
   position: number | null;
   row_count: number | null;
   target_cost_per_won_cents: number | null;
+  /** As the funnel's. */
+  spend_split: boolean;
   totals: {
     sent: number;
     won: number;

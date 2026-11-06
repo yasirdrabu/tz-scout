@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getRouteApi, Link } from '@tanstack/react-router';
 import { ApiError } from '../../api/errors';
-import { hasScope, meQuery } from '../../api/me';
+import { hasScope, meQuery, type Scope } from '../../api/me';
 import { useFormat } from '../../lib/useFormat';
 import page from '../../routes/Page.module.css';
 import { buttonClass } from '../../ui/Button';
@@ -49,10 +49,23 @@ export function DrillScreen() {
       </div>
     );
   }
-  return <Body tenant={tenant} drill={data.data} carry={carry} showSpend={!!me.data && hasScope(me.data, 'costs:read')} />;
+  const can = (scope: Scope) => !!me.data && hasScope(me.data, scope);
+  return (
+    <Body
+      tenant={tenant}
+      drill={data.data}
+      carry={carry}
+      showSpend={can('costs:read') && data.data.spend_split}
+      // The Sources page's nav rule, and the scope the batch routes require.
+      canOpenSource={can('sources:manage') && can('arrivals:read')}
+      canOpenBatches={can('arrivals:read')}
+    />
+  );
 }
 
-function Body({ tenant, drill: d, carry, showSpend }: { tenant: string; drill: Drill; carry: Record<string, string>; showSpend: boolean }) {
+type BodyProps = { tenant: string; drill: Drill; carry: Record<string, string>; showSpend: boolean; canOpenSource: boolean; canOpenBatches: boolean };
+
+function Body({ tenant, drill: d, carry, showSpend, canOpenSource, canOpenBatches }: BodyProps) {
   const f = useFormat();
   const t = d.totals;
   const period = PERIODS.find((p) => p.key === d.period.key)?.label ?? d.period.key;
@@ -85,11 +98,14 @@ function Body({ tenant, drill: d, carry, showSpend }: { tenant: string; drill: D
           {d.position !== null && d.row_count !== null && <span className={styles.sub}>{`${d.position} of ${d.row_count}`}</span>}
           {d.prev_id && sibling(d.prev_id, 'Previous source')}
           {d.next_id && sibling(d.next_id, 'Next source')}
-          <Link to="/t/$tenant/sources/$id" params={{ tenant, id: d.source.id }} className={buttonClass('primary', 'sm')}>
-            Open source page
-          </Link>
+          {canOpenSource && (
+            <Link to="/t/$tenant/sources/$id" params={{ tenant, id: d.source.id }} className={buttonClass('primary', 'sm')}>
+              Open source page
+            </Link>
+          )}
         </div>
       </div>
+      {!d.spend_split && <p className={styles.legend}>Spend isn&apos;t split by practice, offer or batch.</p>}
       <ul className={showSpend ? styles.tiles : `${styles.tiles} ${styles.tilesTwo}`} aria-label="Source totals">
         <Tile label="Sent" value={f.number(t.sent)} note="Accounts into review" />
         <Tile label="Won" value={f.number(t.won)} note={`${t.won_pct ?? 0}% of sent · all sources ${t.all_won_pct ?? 0}%`} />
@@ -132,9 +148,13 @@ function Body({ tenant, drill: d, carry, showSpend }: { tenant: string; drill: D
             <ul className={styles.plain} aria-label="Batches">
               {d.batches.map((b) => (
                 <li key={b.batch_id}>
-                  <Link to="/t/$tenant/batches/$id" params={{ tenant, id: b.batch_id }} className={table.open}>
-                    {b.name}
-                  </Link>
+                  {canOpenBatches ? (
+                    <Link to="/t/$tenant/batches/$id" params={{ tenant, id: b.batch_id }} className={table.open}>
+                      {b.name}
+                    </Link>
+                  ) : (
+                    b.name
+                  )}
                   <span className={styles.sub}>{` ${f.number(b.sent)} sent · ${f.number(b.won)} won`}</span>
                 </li>
               ))}

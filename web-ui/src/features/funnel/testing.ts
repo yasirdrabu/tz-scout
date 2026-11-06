@@ -5,8 +5,10 @@ import type { Drill, Funnel, FunnelRow } from './api';
 
 // Fixtures in the API's shapes (snake_case) for the Funnel tests.
 
-export const ANALYST = ['analytics:read', 'costs:read'];
+export const ANALYST = ['analytics:read', 'costs:read', 'arrivals:read', 'sources:manage'];
 export const NO_COSTS = ['analytics:read'];
+/** A seller: no costs, no source page and no batches. */
+export const SELLER = ['analytics:read', 'accounts:read'];
 
 export const STAGES = [
   { key: 'arrived', name: 'Arrived' },
@@ -42,6 +44,7 @@ export const funnel = (f: Partial<Funnel> = {}): Funnel => ({
   totals: { sent: 76, sources: 6, won: 5, won_pct: 7, spend_cents: 100_000, cost_per_won_cents: 20_000 },
   rows: ROWS,
   shared_spend_cents: 25_000,
+  spend_split: true,
   updated_at: '2026-11-06T10:00:00Z',
   ...f,
 });
@@ -85,6 +88,7 @@ export const drill = (d: Partial<Drill> = {}): Drill => ({
   position: 3,
   row_count: 6,
   target_cost_per_won_cents: 20_000,
+  spend_split: true,
   totals: { sent: 40, won: 4, won_pct: 10, all_won_pct: 7, spend_cents: 40_000, cost_per_sent_cents: 1_000, cost_per_won_cents: 10_000, status: 'good' },
   insight: 'Most accounts stall between Arrived and Reviewed.',
   stages: [
