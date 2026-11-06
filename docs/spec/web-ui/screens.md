@@ -275,7 +275,8 @@ step.
    `Show the full brief, signals and facts` (expands in place).
 5. **Right rail**: Assignment (AE, "Accepted {when}", "Accepted automatically {when}" or "Waiting for
    {AE} to accept", the assigner's quoted note, the handoff state); Buying committee with engagement
-   per person (shipped R2d: "Met Nov 4" or "Replied Nov 3" green, "Emailed, no reply" amber, "Not contacted"
+   per person (shipped R2d: "Met Nov 4" or "Replied Nov 3" green, "Meeting set up Nov 18" (a meeting coming
+   up) and "Emailed, no reply" amber, "Not contacted"
    gray; no email opens in R2d). Only this page shows it; §4a's committee has no dots. The committee
    coverage summary, gap rows, `Find`, `Confirm`/`Remove` and the Edit person dialog are the same as §4a
    (shipped R2b-3).

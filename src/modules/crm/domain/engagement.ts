@@ -10,7 +10,7 @@ export type EngagementActivity = {
   status: string | null;
 };
 
-export type EngagementState = 'met' | 'replied' | 'emailed' | 'not_contacted';
+export type EngagementState = 'met' | 'replied' | 'meeting_set' | 'emailed' | 'not_contacted';
 export type PersonEngagement = { personId: string; state: EngagementState; at: string | null };
 
 /** When a meeting starts: its start, else when the CRM logged it (HubSpot logs a meeting at its start). */
@@ -23,13 +23,17 @@ export function meetingHeld(a: EngagementActivity, now: Date): boolean {
   return (a.status === 'scheduled' || a.status === null) && (a.endAt ?? startOf(a)).getTime() < now.getTime();
 }
 
+/** A meeting that starts after now and is not cancelled or a no-show. */
+const upcoming = (a: EngagementActivity, now: Date) =>
+  a.kind === 'meeting' && a.status !== 'cancelled' && a.status !== 'no_show' && startOf(a).getTime() > now.getTime();
+
 /**
  * R2d Ruling 1: the earliest meeting that starts after now and is not cancelled or a no-show. `with` is its title, else
  * the first attendee with a name plus " +{n}" for the other attendees, else null. Null when none is coming up.
  */
 export function nextMeeting(rows: EngagementActivity[], now: Date): { at: string; with: string | null } | null {
   const next = rows
-    .filter((a) => a.kind === 'meeting' && a.status !== 'cancelled' && a.status !== 'no_show' && startOf(a).getTime() > now.getTime())
+    .filter((a) => upcoming(a, now))
     .sort((x, y) => startOf(x).getTime() - startOf(y).getTime() || x.externalId.localeCompare(y.externalId))[0];
   if (!next) return null;
   const named = next.contacts.find((c) => c.name)?.name;
@@ -40,8 +44,8 @@ export function nextMeeting(rows: EngagementActivity[], now: Date): { at: string
 
 /**
  * R2d Ruling 6: each person's state from the given activity (since the latest completed handoff). Met is the latest held
- * meeting listing one of their contacts, then the latest reply from one, then an email or call listing one; a person
- * with no contact link is not contacted. Kept in `contactsByPerson` order.
+ * meeting listing one of their contacts, then the latest reply from one, then the earliest meeting coming up that lists
+ * one (meeting set, user 2026-11-05), then an email or call listing one; a person with no contact link is not contacted. Kept in `contactsByPerson` order.
  */
 export function personStates(rows: EngagementActivity[], contactsByPerson: Map<string, string[]>, now: Date): PersonEngagement[] {
   return [...contactsByPerson].map(([personId, contactIds]) => {
@@ -52,6 +56,8 @@ export function personStates(rows: EngagementActivity[], contactsByPerson: Map<s
     if (met) return { personId, state: 'met', at: met };
     const replied = latest(theirs.filter((a) => a.kind === 'reply'), (a) => a.occurredAt);
     if (replied) return { personId, state: 'replied', at: replied };
+    const next = theirs.filter((a) => upcoming(a, now));
+    if (next.length) return { personId, state: 'meeting_set', at: new Date(Math.min(...next.map((a) => startOf(a).getTime()))).toISOString() };
     const emailed = latest(theirs.filter((a) => a.kind === 'email' || a.kind === 'call'), (a) => a.occurredAt);
     if (emailed) return { personId, state: 'emailed', at: emailed };
     return { personId, state: 'not_contacted', at: null };

@@ -17,7 +17,7 @@ import { accountQuery, addPerson, buyingRolesQuery, checkCrm, committeeQuery, cr
 import { EditPersonDialog } from './EditPersonDialog';
 import styles from './Account.module.css';
 
-const ENGAGEMENT_TONE: Record<EngagementState, 'good' | 'amber' | 'gray'> = { met: 'good', replied: 'good', emailed: 'amber', not_contacted: 'gray' };
+const ENGAGEMENT_TONE: Record<EngagementState, 'good' | 'amber' | 'gray'> = { met: 'good', replied: 'good', meeting_set: 'amber', emailed: 'amber', not_contacted: 'gray' };
 
 /** A dot and the words for one person; one the answer leaves out reads Not contacted. */
 function EngagementLabel({ engagement, personId }: { engagement: Engagement; personId: string }) {
@@ -25,7 +25,7 @@ function EngagementLabel({ engagement, personId }: { engagement: Engagement; per
   const e = engagement.people.find((x) => x.person_id === personId);
   const state = e?.state ?? 'not_contacted';
   const day = e?.at ? ` ${f.monthDay(e.at)}` : '';
-  const text = { met: `Met${day}`, replied: `Replied${day}`, emailed: 'Emailed, no reply', not_contacted: 'Not contacted' }[state];
+  const text = { met: `Met${day}`, replied: `Replied${day}`, meeting_set: `Meeting set up${day}`, emailed: 'Emailed, no reply', not_contacted: 'Not contacted' }[state];
   return (
     <span className={styles.engagement}>
       <span data-dot className={cx(styles.dot, styles[`dot_${ENGAGEMENT_TONE[state]}`])} aria-hidden="true" />

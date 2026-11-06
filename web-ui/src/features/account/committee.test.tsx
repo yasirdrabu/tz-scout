@@ -23,9 +23,9 @@ function serveRoles() {
 
 beforeEach(() => localStorage.clear());
 
-const PEOPLE = ['per_met', 'per_rep', 'per_em', 'per_not', 'per_gone'].map((id, i) => ({
+const PEOPLE = ['per_met', 'per_rep', 'per_em', 'per_not', 'per_gone', 'per_set'].map((id, i) => ({
   id,
-  first_name: ['Mia', 'Ravi', 'Eli', 'Nia', 'Gus'][i]!,
+  first_name: ['Mia', 'Ravi', 'Eli', 'Nia', 'Gus', 'Sol'][i]!,
   last_name: 'Test',
   title: null,
   is_primary: false,
@@ -38,26 +38,28 @@ const ENGAGED: Engagement = {
     { person_id: 'per_rep', state: 'replied', at: '2026-11-03T15:00:00Z' },
     { person_id: 'per_em', state: 'emailed', at: null },
     { person_id: 'per_not', state: 'not_contacted', at: null },
+    { person_id: 'per_set', state: 'meeting_set', at: '2026-11-18T15:00:00Z' },
   ],
   engaged: 2,
-  total: 5,
+  total: 6,
   gap_role: null,
 };
 const rowOf = (r: ReturnType<typeof within>, name: string) => r.getByText(`${name} Test`).closest('li')!;
 
 describe('Committee engagement', () => {
-  it('each person reads Met, Replied, Emailed or Not contacted, and a person the answer left out reads Not contacted', async () => {
+  it('each person reads Met, Replied, Meeting set up, Emailed or Not contacted, and a person the answer left out reads Not contacted', async () => {
     serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, review: ASSIGNED, engagement: ENGAGED });
     renderApp(URL);
     const r = await rail();
     expect(await within(rowOf(r, 'Mia')).findByText('Met Nov 4')).toBeInTheDocument();
     expect(within(rowOf(r, 'Ravi')).getByText('Replied Nov 3')).toBeInTheDocument();
+    expect(within(rowOf(r, 'Sol')).getByText('Meeting set up Nov 18')).toBeInTheDocument();
     expect(within(rowOf(r, 'Eli')).getByText('Emailed, no reply')).toBeInTheDocument();
     expect(within(rowOf(r, 'Nia')).getByText('Not contacted')).toBeInTheDocument();
     expect(within(rowOf(r, 'Gus')).getByText('Not contacted')).toBeInTheDocument();
   });
 
-  it('the dots are green for met and replied, amber for emailed and gray for not contacted', async () => {
+  it('the dots are green for met and replied, amber for meeting set up and emailed, and gray for not contacted', async () => {
     serveAccount({ account: { ...ACCOUNT, people: PEOPLE }, review: ASSIGNED, engagement: ENGAGED });
     renderApp(URL);
     const r = await rail();
@@ -65,6 +67,7 @@ describe('Committee engagement', () => {
     const dot = (name: string) => rowOf(r, name).querySelector('[data-dot]')!.className;
     expect(dot('Mia')).toMatch(/good/);
     expect(dot('Ravi')).toMatch(/good/);
+    expect(dot('Sol')).toMatch(/amber/);
     expect(dot('Eli')).toMatch(/amber/);
     expect(dot('Nia')).toMatch(/gray/);
   });

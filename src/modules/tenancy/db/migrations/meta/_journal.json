@@ -71,6 +71,13 @@
       "when": 1793887174898,
       "tag": "0009_cost_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793922421449,
+      "tag": "0010_operator_playbooks_write",
+      "breakpoints": true
     }
   ]
 }

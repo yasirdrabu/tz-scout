@@ -90,11 +90,13 @@ The Viewer role (web-ui Decision 17) sees the pipeline and the scorecard and cha
 
 - A workspace's role sets live in `tenancy.role_permission` (one row per tenant and role, the role's
   permission list). A role with no row uses the default above, so a new workspace needs no seed and a
-  later change to the defaults reaches every workspace that never edited that role. A workspace with a
-  customised Operator role keeps its saved list, so it does not gain `playbooks:write` until the role is
-  restored to the defaults or edited (R2c-2). R3a's new `costs:read` and `budgets:write` are the exception:
-  a tenancy migration (`0009_cost_permissions`) adds them to saved Leader and Operator lists (`budgets:write` to
-  Leader only) where missing, since no saved list could have unticked a permission that did not exist yet.
+  later change to the defaults reaches every workspace that never edited that role; a saved list keeps
+  what it has. Two tenancy migrations added permissions to saved lists, each only where missing:
+  - R3a's new `costs:read` and `budgets:write` (`0009_cost_permissions`) went to saved Leader and Operator
+    lists (`budgets:write` to Leader only), since no saved list could have unticked a permission that did
+    not exist yet.
+  - R2c-2's Operator `playbooks:write` (`0010_operator_playbooks_write`) went to every saved Operator list
+    (user, 2026-11-05).
 - `GET /api/v1/roles` (`members:read`) returns per role its current `permissions`, its
   `default_permissions`, `customised` and `locked` (true for Owner), and the permission list with labels
   and groups. `PUT /api/v1/roles/{role}` (`members:manage`, people only) replaces one role's list.

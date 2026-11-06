@@ -39,7 +39,8 @@ record; Scout reads, never writes, deal state.
   for the other attendees, else with no one.
 - **Engagement per person (R2d):** for each person on the account, from the activity of the latest
   completed handoff and the person's CRM contact link: "met" (the latest held meeting listing their
-  contact), else "replied" (the latest reply from it), else "emailed" (an email or call listing it),
+  contact), else "replied" (the latest reply from it), else "meeting set" (the earliest meeting coming up,
+  not cancelled or a no-show, listing it; user 2026-11-05), else "emailed" (an email or call listing it),
   else "not contacted" (including people with no contact link). Engaged = met or replied. Email opens
   are not read.
 - **Who acted:** each activity carries the CRM owner who did it and, when a membership's `crm_owner_ids`

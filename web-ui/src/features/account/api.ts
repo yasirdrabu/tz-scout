@@ -279,7 +279,7 @@ export const activityQuery = (tenant: string, id: string) =>
     getNextPageParam: (last) => last.next_cursor,
   });
 
-export type EngagementState = 'met' | 'replied' | 'emailed' | 'not_contacted';
+export type EngagementState = 'met' | 'replied' | 'meeting_set' | 'emailed' | 'not_contacted';
 
 /** Per person, from the CRM activity since the handoff; `gap_role` names the first required role nobody covers. */
 export type Engagement = {

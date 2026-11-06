@@ -1,4 +1,4 @@
-// Run with tsx (it resolves the `@/` alias): `tsx tests/e2e/prepare-db.ts [create|drop|dead-job|mock-activity <accountId> <personId> <personId> <personId>]`.
+// Run with tsx (it resolves the `@/` alias): `tsx tests/e2e/prepare-db.ts [create|drop|dead-job|mock-activity <accountId> <met> <met> <replier> <booked>]`.
 import { E2E_DB } from './env';
 
 /** One sample AI run for the taazaa workspace, so the AI page has something to list. */
@@ -57,7 +57,7 @@ async function seedDeadJob() {
  * Mock HubSpot activity for an account the e2e run handed off (R2d): a held meeting with the first two people, a
  * reply from the third and a meeting still to come. `argv`: accountId, then three person ids.
  */
-async function seedMockActivity(accountId: string, [met1, met2, replier]: string[]) {
+async function seedMockActivity(accountId: string, [met1, met2, replier, booked]: string[]) {
   await import('@/entry/registry');
   const { and, eq, inArray } = await import('drizzle-orm');
   const { listTenants } = await import('@/modules/tenancy');
@@ -71,13 +71,14 @@ async function seedMockActivity(accountId: string, [met1, met2, replier]: string
     const ctx = { tenantId: tenant.id, actor: { kind: 'system' as const, id: 'e2e' }, correlationId: newId('cor'), tx };
     const [h] = await tx.select().from(handoff).where(and(eq(handoff.accountId, accountId), eq(handoff.status, 'completed')));
     // The worker pushes added people as contacts on its own schedule; push any it has not reached yet.
-    for (const personId of [met1!, met2!, replier!]) await runPersonPush(ctx, accountId, personId);
-    const links = await tx.select().from(link).where(and(eq(link.scoutType, 'person'), inArray(link.scoutId, [met1!, met2!, replier!])));
-    const [c1, c2, c3] = [met1!, met2!, replier!].map((personId) => links.find((l) => l.scoutId === personId)!.externalId);
+    const pushed = [met1!, met2!, replier!, booked!];
+    for (const personId of pushed) await runPersonPush(ctx, accountId, personId);
+    const links = await tx.select().from(link).where(and(eq(link.scoutType, 'person'), inArray(link.scoutId, pushed)));
+    const [c1, c2, c3, c4] = pushed.map((personId) => links.find((l) => l.scoutId === personId)!.externalId);
     const company = h!.companyExternalId!;
     const now = Date.now();
     await mockAddActivity(ctx, { companyExternalId: company, kind: 'meeting', occurredAt: new Date(now), subject: 'Scoping call', startAt: new Date(now - 35 * 60_000), endAt: new Date(now - 5 * 60_000), status: 'held', contactExternalIds: [c1!, c2!] });
-    await mockAddActivity(ctx, { companyExternalId: company, kind: 'meeting', occurredAt: new Date(now), subject: 'Roadmap review', startAt: new Date(now + 7 * 86_400_000), endAt: new Date(now + 7 * 86_400_000 + 1_800_000), status: 'scheduled', contactExternalIds: [c1!] });
+    await mockAddActivity(ctx, { companyExternalId: company, kind: 'meeting', occurredAt: new Date(now), subject: 'Roadmap review', startAt: new Date(now + 7 * 86_400_000), endAt: new Date(now + 7 * 86_400_000 + 1_800_000), status: 'scheduled', contactExternalIds: [c1!, c4!] });
     await mockAddActivity(ctx, { companyExternalId: company, kind: 'reply', occurredAt: new Date(now), subject: 'Re: Hello from Taazaa', contactExternalIds: [c3!] });
   });
 }
