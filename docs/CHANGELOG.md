@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-06: Taazaa Scout R3b-1 funnel by source and cost per win
+
+- **Funnel by source, the source drill, cost per win and Costs by source** read `analytics.journey`, a read model the analytics consumers fill from arrivals, stage moves, scores and deals as they happen.
+- **After deploying, run `scout backfill-journeys <slug>` once per existing workspace.** The consumers only see events from the deploy on, so a workspace with accounts from before has no journeys for them: the Sources page shows zeros and the Funnel is empty until the backfill fills them from intake's arrivals, routing's stage history, the account summary and crm's deals. It is safe to run again (a second run reports 0 new). `scout seed` runs it for the workspaces it seeds.
+- **Cost per won** on Costs (the summary and Cost by source) counts the same wins as the Funnel: accounts that arrived in the 90 days and reached the last flow stage. Return on spend stays over won deals closed in the 90 days.
+- **Spend isn't split by practice, offer or batch**: with any of those filters the Funnel and the drill show no spend (`spend_split: false`).
+
 ## 2026-10-31: The HTTP layer runs on Hono; the API moves to /api/v1
 
 - **Next.js is gone** (spec W4): `scout web` is one Node HTTP server (Hono 4.13.13 on `@hono/node-server` 2.1.5) serving the API, sign-in, the health checks and the built web app on one origin (W2). The route handlers moved unchanged from `src/app` to `src/http/routes`; `src/http/routes.ts` mounts each one at the path its folder names, and a test fails when one is missed. A path a handler serves answers other methods with 405 and `Allow`; unknown `/api` paths keep the problem+json 404; every other GET or HEAD gets the app's `index.html` (`no-cache`), and hashed `/assets/*` cache for a year. The server fills `X-Forwarded-For` from the socket when no proxy sent one, as Next did, refuses bodies over the largest handler limit (25 MB plus form framing; each handler keeps its own smaller limit), and on SIGTERM, SIGINT or the IPC "shutdown" message finishes in-flight requests (up to 10 seconds), closes the database pools and NATS and exits 0.

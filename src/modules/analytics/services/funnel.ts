@@ -47,6 +47,8 @@ export type FunnelView = {
   totals: { sent: number; sources: number; won: number; wonPct: number | null; spendCents: number | null; costPerWonCents: number | null };
   rows: FunnelRow[];
   sharedSpendCents: number | null;
+  /** False when practice, offer or batch narrows the cohort: spend isn't split that way, so every spend field is null. */
+  spendSplit: boolean;
   updatedAt: Date | null;
 };
 
@@ -60,6 +62,7 @@ type Basis = {
   totalSpend: number;
   target: number | null;
   spend: boolean;
+  spendSplit: boolean;
 };
 
 const firstSources = (js: Journey[]) => new Map(js.map((j) => [j.accountId, j.firstSourceId]));
@@ -70,7 +73,10 @@ async function visible(ctx: ModuleContext, js: Journey[]): Promise<Journey[]> {
   return js.filter((j) => ok.has(j.accountId));
 }
 
-/** The period's cohort under the filters and the caller's data limit, and the period's spend per source. */
+/**
+ * The period's cohort under the filters and the caller's data limit, and the period's spend per source. Spend is
+ * not split by practice, offer or batch, so with any of them set no spend is shown.
+ */
 async function basis(ctx: ModuleContext, f: FunnelFilters, opts: FunnelOpts): Promise<Basis> {
   const range = periodRange(f.period, opts.now ?? new Date(), await tenantTimezone(ctx));
   const flow = (await stageDefs(ctx)).filter((s) => s.kind === 'flow');
@@ -83,6 +89,7 @@ async function basis(ctx: ModuleContext, f: FunnelFilters, opts: FunnelOpts): Pr
       (!f.offerId || j.offerId === f.offerId) &&
       (!f.batchId || j.firstBatchId === f.batchId),
   );
+  const spendSplit = !f.practiceId && !f.offerId && !f.batchId;
   const lines = await spendLines(ctx, range);
   const { tree, sources } = await sourceTree(ctx);
   return {
@@ -94,7 +101,8 @@ async function basis(ctx: ModuleContext, f: FunnelFilters, opts: FunnelOpts): Pr
     bySource: spendBySource(lines, firstSources(all)).bySource,
     totalSpend: sumOf(lines),
     target: await getTarget(ctx),
-    spend: opts.spend,
+    spend: opts.spend && spendSplit,
+    spendSplit,
   };
 }
 
@@ -158,6 +166,7 @@ export async function funnel(ctx: ModuleContext, f: FunnelFilters, opts: FunnelO
     rows,
     // Whatever no row shows: lines with no source or account, and spend under sources with no row.
     sharedSpendCents: b.spend ? b.totalSpend - inRows : null,
+    spendSplit: b.spendSplit,
     updatedAt: await journeysUpdatedAt(ctx),
   };
 }
@@ -173,6 +182,7 @@ export type SourcePerformance = {
   position: number | null;
   rowCount: number | null;
   targetCostPerWonCents: number | null;
+  spendSplit: boolean;
   totals: {
     sent: number;
     won: number;
@@ -257,6 +267,7 @@ export async function sourcePerformance(ctx: ModuleContext, sourceId: string, f:
     position: at < 0 ? null : at + 1,
     rowCount: at < 0 ? null : rows.length,
     targetCostPerWonCents: b.spend ? b.target : null,
+    spendSplit: b.spendSplit,
     totals: {
       sent,
       won,

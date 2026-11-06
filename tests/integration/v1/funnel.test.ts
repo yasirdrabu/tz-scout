@@ -210,6 +210,23 @@ describe('GET /api/v1/analytics/funnel (Ruling 10)', () => {
     expect(byBatch.rows[0].counts).toEqual([1, 1, 1, 0, 0, 0]);
   });
 
+  it('spend is not split by practice, offer or batch: with any of them every spend field is null and spend_split is false', async () => {
+    expect((await json(w.as(w.owner, funnelRoute, 'analytics/funnel'))).spend_split).toBe(true);
+    for (const q of [`practice=${practiceId}`, `offer=${offerId}`, `batch=${batchId}`]) {
+      const body = await json(w.as(w.owner, funnelRoute, `analytics/funnel?${q}`));
+      expect(body.spend_split).toBe(false);
+      expect(body.totals).toMatchObject({ spend_cents: null, cost_per_won_cents: null });
+      expect(body).toMatchObject({ shared_spend_cents: null });
+      for (const r of body.rows) expect(r).toMatchObject({ cost_per_account_cents: null, spend_cents: null, cost_per_won_cents: null, status: null });
+    }
+    const drill = await json(w.as(w.owner, drillRoute, `analytics/sources/${alpha}/performance?practice=${practiceId}`));
+    expect(drill.spend_split).toBe(false);
+    expect(drill.totals).toMatchObject({ sent: 1, spend_cents: null, cost_per_sent_cents: null, cost_per_won_cents: null, status: null });
+    expect(drill.stages[0].cost_each_cents).toBeNull();
+    expect(drill.rank).toBeNull();
+    expect((await json(w.as(w.owner, drillRoute, `analytics/sources/${alpha}/performance`))).spend_split).toBe(true);
+  });
+
   it('refuses an unknown period', async () => {
     await json(w.as(w.owner, funnelRoute, 'analytics/funnel?period=week'), 400);
   });

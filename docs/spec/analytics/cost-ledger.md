@@ -71,8 +71,9 @@ R3a (Rulings 6-8 and 11 of the R3a plan):
   today), `categories[]` (`key`, `label`, `spend_90d_cents`, `spend_month_cents`, `budget_cents`,
   `level`, `pausable`) and `months[]` (the last 6 months with `spend_cents` and the summed
   `budget_cents`). R3b-1 adds, over the same 90 days: `cost_per_sent_cents` (the ledger total over the
-  journeys that arrived), `cost_per_won_cents` (over the journeys that first entered the last flow stage),
-  `return_ratio` (won deal amounts with `closed_at` in the 90 days over the spend, 1 decimal, null with no
+  journeys that arrived), `cost_per_won_cents` (over the cohort's wins, as the Funnel counts them: journeys
+  that arrived in the 90 days and reached the last flow stage; an account that arrived earlier and was won
+  in the window does not count), `return_ratio` (won deal amounts with `closed_at` in the 90 days over the spend, 1 decimal, null with no
   spend; a won deal with no amount adds nothing) and `target_cost_per_won_cents`.
 
 ## Source target (R3b-1, as built)
@@ -93,7 +94,9 @@ R3a (Rulings 6-8 and 11 of the R3a plan):
   `{ source_id, name, kind, spend_cents, share_pct, per_sent_cents, per_assigned_cents, per_won_cents,
   return_ratio }` for each top-level, non-removed source with spend or accounts sent, by spend descending
   (then name); then `{ source_id: null, name: "Shared costs", spend_cents, share_pct }`; plus
-  `total_spend_cents`. A `per_*` value is null when its count is 0. Shared costs also holds spend that shows in
+  `total_spend_cents`. Sent, assigned and won are the cohort that arrived in the 90 days, so `per_won_cents`
+  equals the source's funnel `cost_per_won_cents` for `90d` with no filters; `return_ratio` is over won deals
+  with `closed_at` in the 90 days. A `per_*` value is null when its count is 0. Shared costs also holds spend that shows in
   no row (under a removed top-level source), so the spends always add up to the total.
 
 ## Allocation

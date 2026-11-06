@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { addManualLine, costsBySource, recordArrival, recordDeal, recordLine, recordStage, summary, voidLine } from '@/modules/analytics';
+import { addManualLine, costsBySource, funnel, recordArrival, recordDeal, recordLine, recordStage, summary, voidLine } from '@/modules/analytics';
 import { addDays, dayOf } from '@/modules/analytics/domain/budgets';
 import { registerSource, removeSource } from '@/modules/intake';
 import { closeDbs } from '@/platform/db/client';
@@ -130,5 +130,27 @@ describe('costsBySource (Rulings 6 and 12)', () => {
     const s = await t.run((ctx) => summary(ctx, NOW));
     expect(s.spend90dCents).toBe(1_000);
     expect(s).toMatchObject({ costPerSentCents: Math.round(1_000 / 3), costPerWonCents: 1_000, returnRatio: 500 });
+  });
+});
+
+describe('cost per won is over cohort wins, as the Funnel counts them', () => {
+  it('an account that arrived before the 90 days but was won inside them does not count; per won matches the funnel row', async () => {
+    const tn = await tenant();
+    const src = await person(tn, 'Cohort person');
+    for (let i = 0; i < 4; i++) await arrive(tn, `acc_c${i}`, src, 20);
+    await stage(tn, 'acc_c0', 'won', 5);
+    await stage(tn, 'acc_c1', 'won', 5);
+    // Arrived before the window, won inside it: not a cohort win.
+    await arrive(tn, 'acc_c_old', src, 200);
+    await stage(tn, 'acc_c_old', 'won', 5);
+    await manual(tn, 60_000, 5, src);
+
+    const r = await tn.run((ctx) => costsBySource(ctx, NOW));
+    const row = r.rows.find((x) => x.sourceId === src)!;
+    expect(row).toMatchObject({ perWonCents: 30_000 });
+    const f = await tn.run((ctx) => funnel(ctx, { period: '90d' }, { spend: true, now: NOW }));
+    expect(row).toMatchObject({ perWonCents: f.rows.find((x) => x.sourceId === src)!.costPerWonCents });
+    const s = await tn.run((ctx) => summary(ctx, NOW));
+    expect(s.costPerWonCents).toBe(30_000);
   });
 });

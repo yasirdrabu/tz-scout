@@ -11,7 +11,7 @@ import {
   type Journey,
 } from '@/modules/analytics';
 import { journey, journeyDeal, journeyStage } from '@/modules/analytics/db/schema';
-import { account } from '@/modules/accounts/db/schema';
+import { account, accountAlias } from '@/modules/accounts/db/schema';
 import { hubspotMock, pollDeals, recordLink, seedMockCrm } from '@/modules/crm';
 import { mockAddDeal, mockSetDeal } from '@/modules/crm/fixtures';
 import { submitArrival } from '@/modules/intake';
@@ -252,6 +252,46 @@ describe('merge', () => {
     expect(await journeyOf(merged)).toBeUndefined();
     const left = await t.run((ctx) => ctx.tx.select().from(journeyStage).where(eq(journeyStage.accountId, merged)));
     expect(left).toEqual([]);
+  });
+
+  it("the survivor keeps its own exit when it has one, else takes the merged account's", async () => {
+    const both = newAccount();
+    const bothMerged = newAccount();
+    await arrived(both, { personSourceId: 'src_p1' }, T0);
+    await arrived(bothMerged, { personSourceId: 'src_p1' }, T0);
+    await staged(both, 'declined', T1);
+    await staged(bothMerged, 'lost', T3);
+    await deliver(analyticsJourneyMerge, { survivorId: both, mergedId: bothMerged, mergedBy: 'usr_1' }, T4);
+    expect(await journeyOf(both)).toMatchObject({ exitStage: 'declined', exitAt: new Date(T1) });
+
+    const none = newAccount();
+    const noneMerged = newAccount();
+    await arrived(none, { personSourceId: 'src_p1' }, T0);
+    await arrived(noneMerged, { personSourceId: 'src_p1' }, T0);
+    await staged(none, 'reviewed', T3);
+    await staged(noneMerged, 'declined', T2);
+    await deliver(analyticsJourneyMerge, { survivorId: none, mergedId: noneMerged, mergedBy: 'usr_1' }, T4);
+    expect(await journeyOf(none)).toMatchObject({ exitStage: 'declined', exitAt: new Date(T2) });
+  });
+
+  it('an arrival and a deal for the merged account delivered after the merge land on the survivor', async () => {
+    const survivor = newAccount();
+    const merged = newAccount();
+    await t.run(async (ctx) => {
+      await ctx.tx.insert(account).values({ id: survivor, tenantId: t.tenantId, name: 'Survivor Co', matchName: 'survivor co' });
+      await ctx.tx.insert(accountAlias).values({ tenantId: t.tenantId, accountId: survivor, kind: 'merged_id', value: merged });
+    });
+    await arrived(survivor, { personSourceId: 'src_p1' }, T1);
+    await deliver(analyticsJourneyMerge, { survivorId: survivor, mergedId: merged, mergedBy: 'usr_1' }, T2);
+    await arrived(merged, { personSourceId: 'src_p9' }, T0);
+    await dealt(merged, newId('evt'), 'won', 3_000, T3);
+
+    const all = await t.run((ctx) => loadJourneys(ctx));
+    expect(all.find((j) => j.accountId === merged)).toBeUndefined();
+    expect(await t.run((ctx) => ctx.tx.select().from(journey).where(eq(journey.accountId, merged)))).toEqual([]);
+    const s = all.find((j) => j.accountId === survivor)!;
+    expect(s).toMatchObject({ firstSourceId: 'src_p9', arrivedAt: new Date(T0) });
+    expect(s.deals.map((d) => d.amountCents)).toEqual([3_000]);
   });
 });
 

@@ -1,3 +1,4 @@
+import { resolveAccountId } from '@/modules/accounts';
 import { accountMerged } from '@/modules/accounts/contracts/events';
 import { dealChanged } from '@/modules/crm/contracts/events';
 import { arrivalResolved } from '@/modules/intake/contracts/events';
@@ -6,6 +7,7 @@ import { usageRecorded } from '@/modules/integrations/contracts/events';
 import { stageChanged } from '@/modules/routing/contracts/events';
 import { accountScored } from '@/modules/scoring/contracts/events';
 import { tenantTimezone } from '@/modules/tenancy';
+import type { ModuleContext } from '@/platform/context';
 import { defineConsumer, type ConsumerDef } from '@/platform/runtime/consumers';
 import { dayOf } from './domain/budgets';
 import { mergeJourneys, recordArrival, recordDeal, recordScore, recordStage, stageKinds } from './services/journeys';
@@ -32,6 +34,12 @@ export const analyticsUsageLines = defineConsumer({
 });
 
 /**
+ * The account an event is about, after any merge (a late event for a merged account lands on the survivor); an id
+ * with no account row is kept as it is.
+ */
+const survivorOf = async (ctx: ModuleContext, accountId: string) => (await resolveAccountId(ctx, accountId))?.id ?? accountId;
+
+/**
  * R3b-1 Ruling 2: the journey starts at the earliest arrival, from the chain's agent, else person, else vendor
  * source (as `arrival.closest_source_id`). An arrival naming no source has nothing to attribute to.
  */
@@ -43,7 +51,7 @@ export const analyticsJourneyArrival = defineConsumer({
     const c = e.data.sourceChain;
     const sourceId = c.agentSourceId ?? c.personSourceId ?? c.vendorSourceId;
     if (!sourceId) return;
-    await recordArrival(ctx, { accountId: e.data.accountId, sourceId, batchId: e.data.batchId ?? null, at: new Date(e.occurredAt) });
+    await recordArrival(ctx, { accountId: await survivorOf(ctx, e.data.accountId), sourceId, batchId: e.data.batchId ?? null, at: new Date(e.occurredAt) });
   },
 });
 
@@ -54,7 +62,7 @@ export const analyticsJourneyStage = defineConsumer({
   orderedBy: (e) => e.data.accountId,
   handle: async (e, ctx) => {
     const kind = (await stageKinds(ctx)).get(e.data.to);
-    await recordStage(ctx, { accountId: e.data.accountId, stageKey: e.data.to, at: new Date(e.occurredAt), kind });
+    await recordStage(ctx, { accountId: await survivorOf(ctx, e.data.accountId), stageKey: e.data.to, at: new Date(e.occurredAt), kind });
   },
 });
 
@@ -63,7 +71,13 @@ export const analyticsJourneyScore = defineConsumer({
   name: 'analytics.journey_score',
   event: accountScored,
   orderedBy: (e) => e.data.accountId,
-  handle: async (e, ctx) => recordScore(ctx, { accountId: e.data.accountId, practiceId: e.data.practiceId, offerId: e.data.bestOfferId, version: e.data.version }),
+  handle: async (e, ctx) =>
+    recordScore(ctx, {
+      accountId: await survivorOf(ctx, e.data.accountId),
+      practiceId: e.data.practiceId,
+      offerId: e.data.bestOfferId,
+      version: e.data.version,
+    }),
 });
 
 /** Each deal's latest state, by `observedAt`. */
@@ -73,7 +87,7 @@ export const analyticsJourneyDeal = defineConsumer({
   orderedBy: (e) => e.data.accountId,
   handle: async (e, ctx) =>
     recordDeal(ctx, {
-      accountId: e.data.accountId,
+      accountId: await survivorOf(ctx, e.data.accountId),
       system: e.data.system,
       dealExternalId: e.data.dealExternalId,
       status: e.data.status,

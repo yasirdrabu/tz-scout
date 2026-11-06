@@ -112,8 +112,8 @@ export async function recordDeal(
 
 /**
  * After an account merge: the survivor keeps the earlier arrival (with its source and batch), the earliest
- * entry into each stage, the later exit and both accounts' deals; it keeps its own score (practice and offer)
- * when it has one. The merged account's journey is deleted. Running it again changes nothing.
+ * entry into each stage, its own exit (else the merged account's) and both accounts' deals; it keeps its own score
+ * (practice and offer) when it has one. The merged account's journey is deleted. Running it again changes nothing.
  */
 export async function mergeJourneys(ctx: ModuleContext, survivorId: string, mergedId: string): Promise<void> {
   const of = (id: string) => and(eq(journey.tenantId, ctx.tenantId), eq(journey.accountId, id));
@@ -129,11 +129,11 @@ export async function mergeJourneys(ctx: ModuleContext, survivorId: string, merg
         .set({ practiceId: m.practiceId, offerId: m.offerId, scoreVersion: m.scoreVersion, updatedAt: sql`now()` })
         .where(and(of(survivorId), sql`${journey.scoreVersion} is null`));
     }
-    if (m.exitAt) {
+    if (m.exitStage && m.exitAt) {
       await ctx.tx
         .update(journey)
         .set({ exitStage: m.exitStage, exitAt: m.exitAt, updatedAt: sql`now()` })
-        .where(and(of(survivorId), sql`(${journey.exitAt} is null or ${journey.exitAt} < ${ts(m.exitAt)})`));
+        .where(and(of(survivorId), sql`${journey.exitStage} is null`));
     }
     await ctx.tx.delete(journey).where(of(mergedId));
   }

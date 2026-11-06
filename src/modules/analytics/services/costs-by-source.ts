@@ -65,19 +65,20 @@ async function lastNinetyDays(ctx: ModuleContext, now: Date): Promise<Window> {
 }
 
 /**
- * Over the window: sent (arrived in it), assigned (of those, reached an assigned stage), won (entered the last flow
- * stage in it) and won value (amounts of won deals closed in it; a deal with no amount adds nothing).
+ * Over the window: sent (arrived in it), assigned (of those, reached an assigned stage), won (of those, reached the
+ * last flow stage, as the Funnel counts its cohort) and won value (amounts of won deals closed in it; a deal with no
+ * amount adds nothing).
  */
 function tally(js: Journey[], w: Window) {
   const inWindow = (d: Date | null | undefined) => !!d && d >= w.from && d <= w.to;
-  const wonKey = w.flow[w.flow.length - 1]!.key;
+  const wonAt = w.flow.length - 1;
   const sent = js.filter((j) => inWindow(j.arrivedAt));
   const assigned = sent.filter((j) => {
     const r = reachedIndex(j, w.flow);
     return w.flow.some((s, i) => s.assigned && i <= r);
   });
   const wonValueCents = js.reduce((sum, j) => sum + j.deals.reduce((s, d) => s + (d.status === 'won' && inWindow(d.closedAt) ? (d.amountCents ?? 0) : 0), 0), 0);
-  return { sent: sent.length, assigned: assigned.length, won: js.filter((j) => inWindow(j.stages.get(wonKey))).length, wonValueCents };
+  return { sent: sent.length, assigned: assigned.length, won: sent.filter((j) => reachedIndex(j, w.flow) === wonAt).length, wonValueCents };
 }
 
 /** Won value over spend, to 1 decimal; null when nothing was spent. */
