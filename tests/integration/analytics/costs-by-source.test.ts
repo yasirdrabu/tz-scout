@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addManualLine, costsBySource, recordArrival, recordDeal, recordLine, recordStage, summary, voidLine } from '@/modules/analytics';
 import { addDays, dayOf } from '@/modules/analytics/domain/budgets';
-import { registerSource } from '@/modules/intake';
+import { registerSource, removeSource } from '@/modules/intake';
 import { closeDbs } from '@/platform/db/client';
 import { newId } from '@/platform/ids';
 import { runOutbox } from '../helpers/run-outbox';
@@ -105,6 +105,23 @@ describe('costsBySource (Rulings 6 and 12)', () => {
       { sourceId: p, name: 'Pat', kind: 'person', spendCents: 300, sharePct: 30, perSentCents: 150, perAssignedCents: 300, perWonCents: 300, returnRatio: 1666.7 },
       { sourceId: q, name: 'Quinn', kind: 'person', spendCents: 250, sharePct: 25, perSentCents: 250, perAssignedCents: null, perWonCents: null, returnRatio: 0 },
       { sourceId: null, name: 'Shared costs', spendCents: 450, sharePct: 45 },
+    ]);
+    expect(r.rows.reduce((s, row) => s + row.spendCents, 0)).toBe(r.totalSpendCents);
+  });
+
+  it("a removed top-level source's spend goes to Shared costs, so the rows still add up to the total", async () => {
+    const tn = await tenant();
+    const kept = await person(tn, 'Kept');
+    const gone = await person(tn, 'Gone');
+    await manual(tn, 300, 2, kept);
+    await manual(tn, 10_000, 2, gone);
+    await manual(tn, 50, 2);
+    await tn.run((ctx) => removeSource(ctx, gone));
+    const r = await tn.run((ctx) => costsBySource(ctx, NOW));
+    expect(r.totalSpendCents).toBe(10_350);
+    expect(r.rows.map((row) => [row.sourceId, row.spendCents])).toEqual([
+      [kept, 300],
+      [null, 10_050],
     ]);
     expect(r.rows.reduce((s, row) => s + row.spendCents, 0)).toBe(r.totalSpendCents);
   });

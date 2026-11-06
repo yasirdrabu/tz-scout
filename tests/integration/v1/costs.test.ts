@@ -222,6 +222,20 @@ describe('R3b: sources on lines, the target and costs by source', () => {
     expect(await edited.json()).toMatchObject({ source_id: null, source_name: null, replaces_id: added.id });
   });
 
+  it('a line whose source was removed later can still be edited while it keeps that source', async () => {
+    const later = await run(async (ctx) => (await registerSource(ctx, { kind: 'partner', name: 'Removed later' })).id);
+    const added = await (await addRoute(as('owner', '/costs/lines', { method: 'POST', body: manual({ source_id: later }) }))).json();
+    await run((ctx) => removeSource(ctx, later));
+    const res = await editRoute(as('owner', `/costs/lines/${added.id}`, { method: 'PATCH', body: { amount_cents: 9_999, source_id: later } }));
+    expect(res.status).toBe(200);
+    const edited = await res.json();
+    expect(edited).toMatchObject({ amount_cents: 9_999, source_id: later, source_name: 'Removed later', replaces_id: added.id });
+    // Leaving the source out keeps it too.
+    const again = await editRoute(as('owner', `/costs/lines/${edited.id}`, { method: 'PATCH', body: { amount_cents: 9_000 } }));
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ amount_cents: 9_000, source_id: later });
+  });
+
   it('PUT /costs/target sets, refuses 0 and clears the target; the summary returns it', async () => {
     const res = await put('leader', { target_cost_per_won_cents: 200_000 });
     expect(res.status).toBe(200);

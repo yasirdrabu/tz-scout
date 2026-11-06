@@ -78,12 +78,13 @@ export async function spendReturns(ctx: ModuleContext, now: Date): Promise<{ cos
 
 /**
  * "Cost by source" (Ruling 12): each top-level source that is not removed, with spend or accounts sent in the last
- * 90 days, its children rolled up (Ruling 4), by spend then name; then Shared costs. The spends add up to the total.
+ * 90 days, its children rolled up (Ruling 4), by spend then name; then Shared costs: lines with no source or account,
+ * plus any spend that shows in no row (under a removed top-level source). The spends add up to the total.
  */
 export async function costsBySource(ctx: ModuleContext, now: Date = new Date()): Promise<{ rows: CostBySourceRow[]; totalSpendCents: number }> {
   const w = await lastNinetyDays(ctx, now);
   const { tree, sources } = await sourceTree(ctx);
-  const { bySource, shared } = spendBySource(w.lines, new Map(w.journeys.map((j) => [j.accountId, j.firstSourceId])));
+  const { bySource } = spendBySource(w.lines, new Map(w.journeys.map((j) => [j.accountId, j.firstSourceId])));
   const total = sumOf(w.lines);
   const rows: CostBySourceRow[] = [];
   for (const [id, s] of sources) {
@@ -105,6 +106,7 @@ export async function costsBySource(ctx: ModuleContext, now: Date = new Date()):
     });
   }
   rows.sort((a, b) => b.spendCents - a.spendCents || a.name.localeCompare(b.name));
+  const shared = total - rows.reduce((s, r) => s + r.spendCents, 0);
   rows.push({ sourceId: null, name: SHARED, spendCents: shared, sharePct: ratio(shared * 100, total) });
   return { rows, totalSpendCents: total };
 }

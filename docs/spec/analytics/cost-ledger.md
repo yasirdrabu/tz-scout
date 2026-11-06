@@ -80,7 +80,8 @@ R3a (Rulings 6-8 and 11 of the R3a plan):
 - **Lines.** `cost_line.source_id` (null). `integrations.usage.recorded` carries an optional `sourceId`:
   intake's arrival normalise call passes the arrival's closest source, and CSV column mapping the import's
   source. `POST` and `PATCH /api/v1/costs/lines` take an optional `source_id`; an unknown or removed source
-  gets 400 "Choose a source that exists." The lines list returns `source_id` and `source_name`.
+  gets 400 "Choose a source that exists." An edit that keeps the line's current source passes even if that
+  source was removed since. The lines list returns `source_id` and `source_name`.
 - **Target cost per won account.** One workspace setting, `analytics.cost_setting(tenant_id,
   target_cost_per_won_cents, updated_by, updated_at)`, no default. `PUT /api/v1/costs/target`
   `{ target_cost_per_won_cents: number | null }` (`budgets:write`, people only); below 1 gets 400 "Enter a
@@ -92,7 +93,8 @@ R3a (Rulings 6-8 and 11 of the R3a plan):
   `{ source_id, name, kind, spend_cents, share_pct, per_sent_cents, per_assigned_cents, per_won_cents,
   return_ratio }` for each top-level, non-removed source with spend or accounts sent, by spend descending
   (then name); then `{ source_id: null, name: "Shared costs", spend_cents, share_pct }`; plus
-  `total_spend_cents`. A `per_*` value is null when its count is 0. The spends add up to the total.
+  `total_spend_cents`. A `per_*` value is null when its count is 0. Shared costs also holds spend that shows in
+  no row (under a removed top-level source), so the spends always add up to the total.
 
 ## Allocation
 

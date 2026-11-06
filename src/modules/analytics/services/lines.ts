@@ -96,8 +96,11 @@ export async function afterLinesChanged(ctx: ModuleContext, category: CostCatego
 
 const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`)) && new Date(`${s}T00:00:00Z`).toISOString().startsWith(s);
 
-/** A manual line is dated today or earlier in the tenant timezone, so a later month's level is never left stale. */
-async function checked(ctx: ModuleContext, input: ManualLineInput): Promise<ManualLineInput> {
+/**
+ * A manual line is dated today or earlier in the tenant timezone, so a later month's level is never left stale. A newly
+ * chosen source must exist and not be removed; an edit keeping the line's `currentSourceId` passes even if it was removed since.
+ */
+async function checked(ctx: ModuleContext, input: ManualLineInput, currentSourceId: string | null = null): Promise<ManualLineInput> {
   if (!isDate(input.occurredOn)) throw invalid('occurred_on', 'Enter a date like 2026-11-05.');
   if (input.occurredOn > dayOf(new Date(), await tenantTimezone(ctx))) throw invalid('occurred_on', NOT_FUTURE);
   if (!KEYS.includes(input.category)) throw invalid('category', `Category must be one of: ${KEYS.join(', ')}.`);
@@ -105,7 +108,7 @@ async function checked(ctx: ModuleContext, input: ManualLineInput): Promise<Manu
   const note = input.note?.trim() || null;
   if (note && note.length > MAX_NOTE) throw invalid('note', `Keep the note to ${MAX_NOTE} characters.`);
   const sourceId = input.sourceId ?? null;
-  if (sourceId) {
+  if (sourceId && sourceId !== currentSourceId) {
     const s = (await sourceTree(ctx)).sources.get(sourceId);
     if (!s || s.status === 'removed') throw invalid('source_id', SOURCE_MUST_EXIST);
   }
@@ -187,7 +190,7 @@ export async function editManualLine(ctx: ModuleContext, id: string, patch: Part
     amountCents: patch.amountCents ?? old.amountCents,
     note: patch.note !== undefined ? patch.note : old.note,
     sourceId: patch.sourceId !== undefined ? patch.sourceId : old.sourceId,
-  });
+  }, old.sourceId);
   // Nothing changed: the line stays as it is.
   if (next.occurredOn === old.occurredOn && next.category === old.category && next.amountCents === old.amountCents && next.note === old.note && next.sourceId === old.sourceId) return oneView(ctx, old);
   await markVoided(ctx, id, EDITED);
