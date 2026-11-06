@@ -5,6 +5,19 @@ import table from '../../ui/Table.module.css';
 import type { Source, SourceStat } from './api';
 import styles from './Sources.module.css';
 
+/** The Trust cell: the number with a bar, or, under 10 judged arrivals, the words. */
+export function TrustCell({ source: r }: { source: Pick<Source, 'trust' | 'trust_label'> }) {
+  if (r.trust_label !== null) return <span className={table.muted}>{r.trust_label}</span>;
+  return (
+    <span className={styles.trust}>
+      <span className={styles.trustNumber}>{r.trust}</span>
+      <span className={styles.trustTrack} aria-hidden="true">
+        <span className={styles.trustFill} style={{ width: `${Math.max(0, Math.min(100, r.trust))}%` }} />
+      </span>
+    </span>
+  );
+}
+
 /** Each row's depth in the tree: how many of its ancestors are in the list. */
 function depths(rows: Source[]): Map<string, number> {
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -110,7 +123,7 @@ export function SourceTree({ tenant, rows, stats, collapsed, onToggle, columns =
                 </td>
                 <td>{r.method_label}</td>
                 <td>
-                  <span className={table.muted}>{r.trust_label}</span>
+                  <TrustCell source={r} />
                 </td>
                 <td className={table.num}>{num(s?.sent)}</td>
                 {all && <td className={table.num}>{num(s?.reviewed)}</td>}

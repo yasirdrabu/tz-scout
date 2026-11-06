@@ -90,7 +90,7 @@ export const listWithAnd = (labels: string[]) => joinWith(labels.map(article), '
 /** "commercial buyer or technical buyer" (no article). */
 export const listWithOr = (labels: string[]) => joinWith(labels.map((l) => l.toLowerCase()), 'or');
 
-export type Tile = { key: string; label: string; value: number | null; max: number | null; note: string };
+export type Tile = { key: string; label: string; value: number | null; max: number | null; note: string; /** The source trust tile: the levels behind the number, e.g. "Person 0.64, agent 0.71, vendor 0.55". Older scores have none. */ breakdown?: string };
 
 export type WarmIntro = {
   warm_intro_id: string;

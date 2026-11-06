@@ -6,7 +6,7 @@ import { renderApp, serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
 import { serveQueue } from '../review/testing';
 import { crmSentence } from './RightRail';
-import { ACCOUNT, ASSIGNED, COMMITTEE, COMMITTEE_EMPTY, EMPTY_BRIEF, FACTS, PAGE_LEADER, REVIEW, SELLER, serveAccount, serveCoastline } from './testing';
+import { ACCOUNT, ASSIGNED, COMMITTEE, COMMITTEE_EMPTY, EMPTY_BRIEF, FACTS, PAGE_LEADER, REVIEW, SCORE, SELLER, serveAccount, serveCoastline } from './testing';
 
 const URL_BASE = 'http://app';
 const params = (href: string) => new URL(href, URL_BASE).searchParams;
@@ -124,6 +124,25 @@ describe('Stage tracker', () => {
   });
 });
 
+describe('Source trust tile', () => {
+  it('shows the number and the note, with the breakdown as hover text', async () => {
+    serveAccount();
+    server.use(
+      http.get('/api/v1/accounts/acc_mdc/score', () =>
+        HttpResponse.json({
+          ...SCORE,
+          tiles: SCORE.tiles.map((t) => (t.key === 'source_trust' ? { ...t, value: 72, max: 100, note: 'RFP Watch: 6 won of 41 sent', breakdown: 'Person 0.64, agent 0.71, vendor 0.55' } : t)),
+        }),
+      ),
+    );
+    renderApp('/t/taazaa/accounts/acc_mdc');
+    const scores = await screen.findByRole('region', { name: 'Scores' });
+    const tile = (await within(scores).findByText('RFP Watch: 6 won of 41 sent')).closest('div[title]')!;
+    expect(tile).toHaveAttribute('title', 'Person 0.64, agent 0.71, vendor 0.55');
+    expect(tile).toHaveTextContent('Source trust72 / 100');
+  });
+});
+
 describe('Review view sections', () => {
   it('shows the recommendation, the warm intro, the score strip, why now and the facts', async () => {
     serveAccount();
@@ -139,6 +158,9 @@ describe('Review view sections', () => {
     expect(await within(scores).findByText('Arrives with enrichment')).toBeInTheDocument();
     expect(scores).toHaveTextContent('Not enough data yet');
     expect(scores).toHaveTextContent('Priority79 / 100Act now needs a priority of 75, fit 60 and buying intent 50.');
+
+    // Older scores have no breakdown: the old note, no hover text.
+    expect(within(scores).getByText('Source trust').closest('div')).not.toHaveAttribute('title');
 
     const why = screen.getByRole('region', { name: 'Why now' });
     expect(why).toHaveTextContent('2 signals · newest first');

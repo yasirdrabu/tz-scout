@@ -11,11 +11,26 @@ import { FilterPopover, type FilterCategory } from '../../ui/FilterPopover';
 import table from '../../ui/Table.module.css';
 import { LoadFailed, LoadingRows } from '../settings/shared';
 import { AddSourceDialog } from './AddSourceDialog';
-import { sourcesQuery, statsQuery, type SourcesFilters } from './api';
+import { sourcesQuery, statsQuery, TRUST_FILTER, type Source, type SourcesFilters } from './api';
 import { parentsIn, SourceTree } from './SourceTree';
 import styles from './Sources.module.css';
 
 const route = getRouteApi('/t/$tenant/sources');
+
+/** The rows in a trust band, with their ancestors so the tree keeps its shape (the Type filter keeps a row the same way). */
+function withBand(rows: Source[], band: string): Source[] {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const keep = new Set<string>();
+  for (const r of rows) {
+    if (r.trust_band !== band) continue;
+    let at: Source | undefined = r;
+    for (let i = 0; at && i < 10 && !keep.has(at.id); i++) {
+      keep.add(at.id);
+      at = at.parent_id ? byId.get(at.parent_id) : undefined;
+    }
+  }
+  return rows.filter((r) => keep.has(r.id));
+}
 
 /** §10 Sources: the tree with how each sends, trust words and the stats, search and the Type filter in the URL (C10). */
 export function SourcesScreen() {
@@ -25,14 +40,16 @@ export function SourcesScreen() {
   const searchId = useId();
   const { data: me } = useQuery(meQuery(tenant));
   const filters: SourcesFilters = { kind: search.kind, q: search.q };
-  const update = (patch: Partial<SourcesFilters>, replace = false) => void navigate({ search: (prev) => ({ ...prev, ...patch }), replace });
+  const trust = TRUST_FILTER.find((o) => o.value === search.trust)?.value;
+  const update = (patch: Partial<SourcesFilters & { trust: string }>, replace = false) => void navigate({ search: (prev) => ({ ...prev, ...patch }), replace });
   const [text, setText] = useSearchText(filters.q ?? '', (q) => update({ q: q || undefined }, true));
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
 
   const list = useQuery(sourcesQuery(tenant, filters));
   const stats = useQuery({ ...statsQuery(tenant), enabled: !!me && hasScope(me, 'sources:manage') });
-  const rows = list.data?.data ?? [];
+  const everyone = list.data?.data ?? [];
+  const rows = trust ? withBand(everyone, trust) : everyone;
   const meta = list.data?.meta;
   const canManage = !!me && hasScope(me, 'sources:manage');
 
@@ -44,6 +61,12 @@ export function SourcesScreen() {
       pick: 'any',
       options: meta ? Object.entries(meta.counts_by_kind).map(([value, count]) => ({ value, label: meta.kind_labels[value] ?? value, count })) : [],
     },
+    {
+      key: 'trust',
+      label: 'Trust',
+      pick: 'one',
+      options: [{ value: '', label: 'All' }, ...TRUST_FILTER].map((o) => ({ ...o, count: o.value ? everyone.filter((r) => r.trust_band === o.value).length : everyone.length })),
+    },
   ];
   const toggle = (id: string) =>
     setCollapsed((prev) => {
@@ -52,7 +75,7 @@ export function SourcesScreen() {
       else next.add(id);
       return next;
     });
-  const filtered = !!(search.kind || search.q);
+  const filtered = !!(search.kind || search.q || trust);
 
   return (
     <div className={page.page}>
@@ -77,9 +100,9 @@ export function SourcesScreen() {
         <input id={searchId} type="search" className={`input ${styles.search}`} placeholder="Find a source" value={text} onChange={(e) => setText(e.target.value)} />
         <FilterPopover
           categories={categories}
-          value={{ kind: kinds }}
-          onChange={(_key, values) => update({ kind: values.length ? values.join(',') : undefined })}
-          onClear={() => update({ kind: undefined })}
+          value={{ kind: kinds, trust: trust ? [trust] : [] }}
+          onChange={(key, values) => update(key === 'trust' ? { trust: values[0] || undefined } : { kind: values.length ? values.join(',') : undefined })}
+          onClear={() => update({ kind: undefined, trust: undefined })}
         />
         <span className={styles.grow} />
         <Button size="sm" variant="ghost" onClick={() => setCollapsed(new Set())}>
@@ -99,7 +122,7 @@ export function SourcesScreen() {
           title="No sources"
           actions={
             filtered && (
-              <Button size="sm" variant="secondary" onClick={() => update({ kind: undefined, q: undefined })}>
+              <Button size="sm" variant="secondary" onClick={() => update({ kind: undefined, q: undefined, trust: undefined })}>
                 Clear filters
               </Button>
             )
@@ -108,9 +131,14 @@ export function SourcesScreen() {
           No sources match. Clear the filters, or add a source.
         </EmptyState>
       ) : (
-        <div className={table.wrap}>
-          <SourceTree tenant={tenant} rows={rows} stats={stats.data} collapsed={collapsed} onToggle={toggle} />
-        </div>
+        <>
+          <div className={table.wrap}>
+            <SourceTree tenant={tenant} rows={rows} stats={stats.data} collapsed={collapsed} onToggle={toggle} />
+          </div>
+          <p className={styles.note}>
+            Trust is learned nightly from what each source&apos;s accounts became. 80 and up is strong, 60 to 79 is average, below 60 is weak. New sources start at 60.
+          </p>
+        </>
       )}
 
       {canManage && meta && <AddSourceDialog open={adding} onOpenChange={setAdding} tenant={tenant} canAddCrm={meta.can_add_crm} />}

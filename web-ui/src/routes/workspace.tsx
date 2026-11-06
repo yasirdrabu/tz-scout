@@ -62,13 +62,13 @@ export const overviewRoute = createRoute({
   component: () => <Placeholder screen={SCREENS.overview} />,
 });
 
-/** Sources' Type filter (`kind` comma separated) and search, so the URL keeps them (C10). */
-export type SourcesSearch = { kind?: string; q?: string };
+/** Sources' Type filter (`kind` comma separated), Trust filter (`trust`) and search, so the URL keeps them (C10). */
+export type SourcesSearch = { kind?: string; q?: string; trust?: string };
 
 export const sourcesRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'sources',
-  validateSearch: (search: Record<string, unknown>): SourcesSearch => pickStrings(search, ['kind', 'q']),
+  validateSearch: (search: Record<string, unknown>): SourcesSearch => pickStrings(search, ['kind', 'q', 'trust']),
   component: lazyRouteComponent(() => import('../features/sources/SourcesScreen'), 'SourcesScreen'),
 });
 

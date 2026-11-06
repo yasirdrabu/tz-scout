@@ -7,7 +7,7 @@ import styles from './Account.module.css';
 /** One score tile: the number "/ 100" with a bar, or, with no value yet, the API's note alone. */
 export function ScoreTile({ tile }: { tile: Tile }) {
   return (
-    <div className={styles.scoreTile}>
+    <div className={styles.scoreTile} title={tile.breakdown}>
       <span className={styles.label}>{tile.label}</span>
       {tile.value !== null ? (
         <>

@@ -17,7 +17,7 @@ const WEIGHTS: Record<WeightKey, { label: string; feeds: string }> = {
   fit: { label: 'Fit', feeds: 'How well the account matches the offer: industry, size, revenue, region and buyer.' },
   intent: { label: 'Buying intent', feeds: 'Signs the account is ready to buy: triggers, research and pain.' },
   revenue: { label: 'Revenue potential', feeds: "How big a deal it could be, from the offer's deal size, the account's size and room to expand." },
-  trust: { label: 'Source trust', feeds: 'The same for every source until Scout learns from outcomes.' },
+  trust: { label: 'Source trust', feeds: "Learned nightly from what each source's accounts became." },
 };
 
 const CUTOFFS: { key: keyof Cutoffs; label: string }[] = [

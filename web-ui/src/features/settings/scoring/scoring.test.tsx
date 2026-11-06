@@ -89,7 +89,7 @@ describe('Settings > Scoring weights', () => {
       expect(s).toHaveAttribute('max', '60');
       expect(s).toHaveAttribute('step', '5');
     }
-    expect(screen.getByText('The same for every source until Scout learns from outcomes.')).toBeInTheDocument();
+    expect(screen.getByText("Learned nightly from what each source's accounts became.")).toBeInTheDocument();
     expect(screen.getByText('Adds up to 100')).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: 'Act now' })).toHaveValue(80);
     expect(screen.getByRole('spinbutton', { name: 'Good fit' })).toHaveValue(60);

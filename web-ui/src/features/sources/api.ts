@@ -8,6 +8,8 @@ import type { AccountFacets, AccountRow } from '../accounts/api';
 
 export type SourceKind = 'person' | 'agent' | 'vendor' | 'list' | 'partner' | 'crm' | 'web_form' | 'scheduled_pull';
 
+export type TrustBand = 'high' | 'mid' | 'low' | 'not_enough';
+
 export type ActiveKey = { id: string; prefix: string; last_used_at: string | null; created_at: string };
 
 export type Source = {
@@ -27,8 +29,13 @@ export type Source = {
   last_sent_at: string | null;
   has_sent: boolean;
   arrivals_last_30_days: number;
-  trust: null;
-  trust_label: string;
+  /** 0 to 100; a new source starts at 60. */
+  trust: number;
+  trust_sample: number;
+  trust_band: TrustBand;
+  /** 'Not enough data yet' under 10 judged arrivals, else null (the number shows). */
+  trust_label: string | null;
+  trust_updated_at: string | null;
   children_count: number;
   is_new: boolean;
   can_remove: boolean;
@@ -42,6 +49,8 @@ export type SourceDetail = Source & {
   breadcrumb: { id: string; name: string }[];
   daily_arrival_cap: number;
   initial_review_status_key: string;
+  /** The last reading of each of the last 12 months that has one, oldest first. */
+  trust_trend: { month: string; trust: number; sample_size: number }[];
   sync: { last_polled_at: string | null; last_error: string | null; connected: boolean } | null;
 };
 
@@ -78,6 +87,14 @@ export type SourceAccount = AccountRow & {
 
 /** The Sources screen's search params (C10): `kind` comma separated. */
 export type SourcesFilters = { kind?: string; q?: string };
+
+/** The Trust filter's options (URL `trust`); the API has no trust filter, so the screen narrows by `trust_band`. */
+export const TRUST_FILTER: { value: TrustBand; label: string }[] = [
+  { value: 'high', label: '80 and up' },
+  { value: 'mid', label: '60 to 79' },
+  { value: 'low', label: 'Below 60' },
+  { value: 'not_enough', label: 'Not enough data' },
+];
 
 /** Every source the caller can see, in tree order: the list is short, so one page of 200. */
 export const sourcesQuery = (tenant: string, f: SourcesFilters = {}) =>

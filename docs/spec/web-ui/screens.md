@@ -205,8 +205,9 @@ step.
    with 3,000+ staff"), Buying intent ("RFP re-issue expected in December"), Revenue potential
    ("$250K to $400K in year one"), Source trust. Since the scoring redesign (Decision 21, SCO-E6)
    all five are "/ 100" with the API's reason as the note; Priority's note is the Act now cutoff
-   sentence. Source trust is the same for every source until R3, when its note becomes "RFP Watch:
-   6 won of 41 sent".
+   sentence. Source trust's note is "RFP Watch: 6 won of 41 sent" (the source that raised
+   the best chain; older scores keep their earlier note), and hovering the tile shows the breakdown for
+   that chain, "Person 0.64, agent 0.71, vendor 0.55" (older scores have none).
 4. **Why now**: "{n} signals · newest first"; each date, text and source link.
 5. **Account facts** with badge "{n} conflicts to resolve", "1 conflict to resolve" or "All facts
    agree". Rows label and value. A conflict (R2a) is marked "Sources disagree" and shows the values
@@ -496,22 +497,26 @@ Title "Overview", sub "Where every account is this quarter, and who and what mov
 
 ## 10. Sources
 
-**Tag** R1 (trust R3) · **Route** `/t/:tenant/sources` · **Who** `sources:manage` and `arrivals:read`
+**Tag** R1 · **Route** `/t/:tenant/sources` · **Who** `sources:manage` and `arrivals:read`
 
 Title "Sources", sub "Every account traces back to a person, the agent they run and the data vendor
 behind it. Trust decides how much Scout relies on what a source says." `Add a source`. Search "Find a
-source", Filter Type (Person, Agent, Data vendor, List, Partner, CRM). The Trust filter (80 and up,
-60 to 79, Below 60, Not enough data) comes with R3. `Expand all`, `Collapse all`.
+source", Filter Type (Person, Agent, Data vendor, List, Partner, CRM). Filter Trust (All, 80 and up,
+60 to 79, Below 60, Not enough data; one at a time, in the URL as `trust=high|mid|low|not_enough`,
+applied from each row's trust band; a row stays when it or a source under it matches, as with Type).
+`Expand all`, `Collapse all`.
 
 Tree table: Source (caret, name, type, "New" or "Paused" tag, both from the API), How it sends (API
-key, Through {parent}, File upload, Partner portal (R4), HubSpot sync), Trust ("Not enough data yet"
-for every source until R3; then number and bar), Sent, Reviewed, Assigned, Won, Last sent. Archived
-sources are not listed. The legend for the trust bands comes with R3. Empty "No sources match. Clear
+key, Through {parent}, File upload, Partner portal (R4), HubSpot sync), Trust (the number, 0 to 100, with a bar, or
+"Not enough data yet" in muted text under 10 judged arrivals), Sent, Reviewed, Assigned, Won, Last sent. Archived
+sources are not listed. Under the tree, the legend: "Trust is learned nightly from what each
+source's accounts became. 80 and up is strong, 60 to 79 is average, below 60 is weak. New sources
+start at 60." Empty "No sources match. Clear
 the filters, or add a source."
 
 ## 11. Source page
 
-**Tag** R1 (trust breakdown and cost per win R3) · **Route** `/t/:tenant/sources/:id/:tab?` · **Who**
+**Tag** R1 · **Route** `/t/:tenant/sources/:id/:tab?` · **Who**
 `sources:manage` and `arrivals:read`
 
 Breadcrumb Sources / parents / name. Header: initials tile, name, type, status pill (Active, Paused,
@@ -520,13 +525,14 @@ Buttons `Pause` / `Resume` (toasts "{name} paused. Anything it sends is refused 
 / "{name} resumed. New accounts will reach review again."), `See in funnel` (R3), primary
 `Import a list` (list sources) or `Sync now` (HubSpot).
 
-Stat tiles: Sent, Reviewed (% of sent), Assigned (% of reviewed), Won (% of assigned), Trust ("Not
-enough data yet" until R3), Cost per win (R3; "None yet", "Not tracked").
+Stat tiles: Sent, Reviewed (% of sent), Assigned (% of reviewed), Won (% of assigned), Trust (the
+number, or "Not enough data yet"), Cost per win ("None yet", "Not tracked").
 
 Tabs:
 - **Overview**: "Where its accounts went" bars; Recent activity (what reviewers and AEs sent back or
-  declined); Trust ("Updated nightly") from facts confirmed by reviewers, accepted by sales leaders,
-  turned into wins (R3); Details (owner, how it sends, last sent, part of, runs or pulls from).
+  declined); Trust card: title "Trust", sub "Updated nightly", the latest number or "Not enough
+  data yet", "Based on {n} accounts" ("Based on 1 account"), and a strip of bars for the last 12
+  months that have a reading (empty "No history yet."); Details (owner, how it sends, last sent, part of, runs or pulls from).
 - **Accounts** ({n}): search, Filter Stage and Tier; columns Account, Stage, Tier, Priority, Best
   offer, Came in through (batch and child source), Owner, Arrived. Empty "No accounts yet" / "Accounts
   this source sends will show here with their stage and owner."
@@ -951,7 +957,7 @@ scoring model and a full rescore), done 2026-11-01.
 "Every account gets a priority score from 0 to 100. It blends four scores using these weights, and the
 result puts the account in a tier. The tier picks which playbook runs." Sliders 0 to 60 in steps of
 5 for Fit, Buying intent, Revenue potential, Source trust, each with what feeds it (Source trust:
-"The same for every source until Scout learns from outcomes."; R3); total chip "Adds up to 100" or
+"Learned nightly from what each source's accounts became."); total chip "Adds up to 100" or
 the warning with `Balance to 100`. Tier cutoffs, one each for Act now, Good fit, Watch, with Nurture
 below ("Each tier has to start higher than the one below it, and Act now at 100 or less."). "What
 changes": tier counts before and after for the accounts scored in the last 90 days, and 8 sample

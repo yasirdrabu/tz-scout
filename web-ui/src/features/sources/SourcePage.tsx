@@ -65,7 +65,7 @@ export function SourcePage() {
         onPause={() => void pause.toggle()}
         onSync={() => void sync.run(() => syncSource(tenant, s.id), 'Sync started.')}
       />
-      <StatTiles stat={stat} trustLabel={s.trust_label} showCost={!!me && hasScope(me, 'costs:read')} />
+      <StatTiles stat={stat} trust={s.trust_label ?? String(s.trust)} showCost={!!me && hasScope(me, 'costs:read')} />
       <Tabs label="Source" tabs={tabs} value={current} onChange={go}>
         {current === 'overview' && <OverviewTab tenant={tenant} source={s} stat={stat} />}
         {current === 'accounts' && <AccountsTab tenant={tenant} source={s} />}

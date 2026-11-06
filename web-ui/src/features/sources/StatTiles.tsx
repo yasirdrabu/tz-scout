@@ -3,7 +3,7 @@ import type { SourceStat } from './api';
 import styles from './Sources.module.css';
 
 /** Sent, Reviewed, Assigned, Won, Trust and (with costs:read) Cost per win, with the API's percentages (C8). */
-export function StatTiles({ stat, trustLabel, showCost }: { stat: SourceStat | undefined; trustLabel: string; showCost: boolean }) {
+export function StatTiles({ stat, trust, showCost }: { stat: SourceStat | undefined; trust: string; showCost: boolean }) {
   const f = useFormat();
   const costPerWin = !stat ? '' : stat.spend_cents === 0 ? 'Not tracked' : stat.won === 0 || stat.cost_per_won_cents === null ? 'None yet' : f.money(stat.cost_per_won_cents);
   const tile = (label: string, value: number | undefined, sub: string | null) => (
@@ -22,7 +22,7 @@ export function StatTiles({ stat, trustLabel, showCost }: { stat: SourceStat | u
       {tile('Won', stat?.won, pct(stat?.won_pct, 'assigned'))}
       <li className={styles.stat}>
         <span className={styles.statLabel}>Trust</span>
-        <span className={styles.statValueWords}>{trustLabel}</span>
+        <span className={styles.statValueWords}>{trust}</span>
       </li>
       {showCost && (
         <li className={styles.stat}>
