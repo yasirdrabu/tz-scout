@@ -57,12 +57,12 @@ export const analyticsJourneyStage = defineConsumer({
   },
 });
 
-/** The practice and best offer scoring picked. */
+/** The practice and best offer scoring picked; an older score (by `version`) delivered late is ignored. */
 export const analyticsJourneyScore = defineConsumer({
   name: 'analytics.journey_score',
   event: accountScored,
   orderedBy: (e) => e.data.accountId,
-  handle: async (e, ctx) => recordScore(ctx, { accountId: e.data.accountId, practiceId: e.data.practiceId, offerId: e.data.bestOfferId }),
+  handle: async (e, ctx) => recordScore(ctx, { accountId: e.data.accountId, practiceId: e.data.practiceId, offerId: e.data.bestOfferId, version: e.data.version }),
 });
 
 /** Each deal's latest state, by `observedAt`. */

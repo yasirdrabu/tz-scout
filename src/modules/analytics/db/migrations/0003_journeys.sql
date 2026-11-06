@@ -1,11 +1,12 @@
 CREATE TABLE "analytics"."journey" (
 	"tenant_id" text NOT NULL,
 	"account_id" text PRIMARY KEY NOT NULL,
-	"first_source_id" text NOT NULL,
+	"first_source_id" text,
 	"first_batch_id" text,
-	"arrived_at" timestamp with time zone NOT NULL,
+	"arrived_at" timestamp with time zone,
 	"practice_id" text,
 	"offer_id" text,
+	"score_version" integer,
 	"exit_stage" text,
 	"exit_at" timestamp with time zone,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
@@ -32,7 +33,8 @@ CREATE TABLE "analytics"."journey_stage" (
 	CONSTRAINT "journey_stage_tenant_id_account_id_stage_key_pk" PRIMARY KEY("tenant_id","account_id","stage_key")
 );
 --> statement-breakpoint
-CREATE INDEX "journey_deal_account_idx" ON "analytics"."journey_deal" USING btree ("tenant_id","account_id");--> statement-breakpoint
+CREATE INDEX "journey_deal_account_idx" ON "analytics"."journey_deal" USING btree ("tenant_id","account_id");
+--> statement-breakpoint
 ALTER TABLE "analytics"."journey" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "analytics"."journey" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
 CREATE POLICY tenant_isolation ON "analytics"."journey" USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));--> statement-breakpoint

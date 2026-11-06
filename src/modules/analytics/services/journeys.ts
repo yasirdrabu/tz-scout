@@ -1,4 +1,4 @@
-import { and, count, eq, sql } from 'drizzle-orm';
+import { and, count, eq, isNotNull, sql } from 'drizzle-orm';
 import { listScoringPicks } from '@/modules/accounts';
 import { listDeals } from '@/modules/crm';
 import { listResolvedArrivals } from '@/modules/intake';
@@ -33,7 +33,11 @@ export async function stageKinds(ctx: ModuleContext): Promise<Map<string, StageK
 const touch = (ctx: ModuleContext, accountId: string) =>
   ctx.tx.update(journey).set({ updatedAt: sql`now()` }).where(and(eq(journey.tenantId, ctx.tenantId), eq(journey.accountId, accountId)));
 
-/** Makes the journey, or keeps whichever arrival is earlier (with its source and batch). */
+/** Makes the row when a score or stage move comes before the arrival; reads skip it until the arrival fills it. */
+const ensureRow = (ctx: ModuleContext, accountId: string) =>
+  ctx.tx.insert(journey).values({ tenantId: ctx.tenantId, accountId }).onConflictDoNothing({ target: journey.accountId });
+
+/** Makes the journey, or fills its arrival, or keeps whichever arrival is earlier (with its source and batch). */
 export async function recordArrival(ctx: ModuleContext, a: { accountId: string; sourceId: string; batchId: string | null; at: Date }): Promise<void> {
   await ctx.tx
     .insert(journey)
@@ -41,14 +45,14 @@ export async function recordArrival(ctx: ModuleContext, a: { accountId: string; 
     .onConflictDoUpdate({
       target: journey.accountId,
       set: { firstSourceId: sql`excluded.first_source_id`, firstBatchId: sql`excluded.first_batch_id`, arrivedAt: sql`excluded.arrived_at`, updatedAt: sql`now()` },
-      setWhere: sql`${journey.arrivedAt} > excluded.arrived_at`,
+      setWhere: sql`(${journey.arrivedAt} is null or ${journey.arrivedAt} > excluded.arrived_at)`,
     });
 }
 
 /**
  * Records an entry into a stage, keeping the earliest seen. A move to an exit or a flow stage later than the
  * journey's `exit_at` sets the exit (or clears it, for a flow stage); an older one changes nothing. A stage
- * with no kind (deleted) only stores its entry. With no journey yet, the entry is still stored.
+ * with no kind (deleted) only stores its entry. With no arrival yet, the entry and the exit are still kept.
  */
 export async function recordStage(ctx: ModuleContext, s: { accountId: string; stageKey: string; at: Date; kind: StageKind | undefined }): Promise<void> {
   const moved = await ctx.tx
@@ -60,6 +64,7 @@ export async function recordStage(ctx: ModuleContext, s: { accountId: string; st
       setWhere: sql`${journeyStage.enteredAt} > excluded.entered_at`,
     })
     .returning({ key: journeyStage.stageKey });
+  if (s.kind) await ensureRow(ctx, s.accountId);
   const exited = s.kind
     ? await ctx.tx
         .update(journey)
@@ -70,18 +75,16 @@ export async function recordStage(ctx: ModuleContext, s: { accountId: string; st
   if (moved.length > 0 && exited.length === 0) await touch(ctx, s.accountId);
 }
 
-/** Sets the practice and offer scoring picked. */
-export async function recordScore(ctx: ModuleContext, s: { accountId: string; practiceId: string | null; offerId: string | null }): Promise<void> {
+/** Sets the practice and offer scoring picked, from a score newer than the stored one (by `version`). */
+export async function recordScore(ctx: ModuleContext, s: { accountId: string; practiceId: string | null; offerId: string | null; version: number }): Promise<void> {
   await ctx.tx
-    .update(journey)
-    .set({ practiceId: s.practiceId, offerId: s.offerId, updatedAt: sql`now()` })
-    .where(
-      and(
-        eq(journey.tenantId, ctx.tenantId),
-        eq(journey.accountId, s.accountId),
-        sql`(${journey.practiceId} is distinct from ${s.practiceId}::text or ${journey.offerId} is distinct from ${s.offerId}::text)`,
-      ),
-    );
+    .insert(journey)
+    .values({ tenantId: ctx.tenantId, accountId: s.accountId, practiceId: s.practiceId, offerId: s.offerId, scoreVersion: s.version })
+    .onConflictDoUpdate({
+      target: journey.accountId,
+      set: { practiceId: sql`excluded.practice_id`, offerId: sql`excluded.offer_id`, scoreVersion: sql`excluded.score_version`, updatedAt: sql`now()` },
+      setWhere: sql`(${journey.scoreVersion} is null or ${journey.scoreVersion} < excluded.score_version)`,
+    });
 }
 
 /** Stores a deal's state; a row only takes a later `observedAt`. */
@@ -109,18 +112,23 @@ export async function recordDeal(
 
 /**
  * After an account merge: the survivor keeps the earlier arrival (with its source and batch), the earliest
- * entry into each stage, the later exit and both accounts' deals; it keeps its own practice and offer when it
- * has them. The merged account's journey is deleted. Running it again changes nothing.
+ * entry into each stage, the later exit and both accounts' deals; it keeps its own score (practice and offer)
+ * when it has one. The merged account's journey is deleted. Running it again changes nothing.
  */
 export async function mergeJourneys(ctx: ModuleContext, survivorId: string, mergedId: string): Promise<void> {
   const of = (id: string) => and(eq(journey.tenantId, ctx.tenantId), eq(journey.accountId, id));
   const [m] = await ctx.tx.select().from(journey).where(of(mergedId)).for('update');
   if (m) {
-    await recordArrival(ctx, { accountId: survivorId, sourceId: m.firstSourceId, batchId: m.firstBatchId, at: m.arrivedAt });
-    await ctx.tx
-      .update(journey)
-      .set({ practiceId: sql`coalesce(${journey.practiceId}, ${m.practiceId}::text)`, offerId: sql`coalesce(${journey.offerId}, ${m.offerId}::text)` })
-      .where(of(survivorId));
+    await ensureRow(ctx, survivorId);
+    if (m.firstSourceId && m.arrivedAt) {
+      await recordArrival(ctx, { accountId: survivorId, sourceId: m.firstSourceId, batchId: m.firstBatchId, at: m.arrivedAt });
+    }
+    if (m.scoreVersion !== null) {
+      await ctx.tx
+        .update(journey)
+        .set({ practiceId: m.practiceId, offerId: m.offerId, scoreVersion: m.scoreVersion, updatedAt: sql`now()` })
+        .where(and(of(survivorId), sql`${journey.scoreVersion} is null`));
+    }
     if (m.exitAt) {
       await ctx.tx
         .update(journey)
@@ -141,9 +149,16 @@ export async function mergeJourneys(ctx: ModuleContext, survivorId: string, merg
     .where(and(eq(journeyDeal.tenantId, ctx.tenantId), eq(journeyDeal.accountId, mergedId)));
 }
 
-/** Every journey in the workspace, with its stage entries and deals. Exit is null unless the latest move was to an exit. */
+/**
+ * Every journey in the workspace that has its arrival, with its stage entries and deals. Exit is null unless the
+ * latest move was to an exit.
+ */
 export async function loadJourneys(ctx: ModuleContext): Promise<Journey[]> {
-  const rows = await ctx.tx.select().from(journey).where(eq(journey.tenantId, ctx.tenantId)).orderBy(journey.accountId);
+  const rows = await ctx.tx
+    .select()
+    .from(journey)
+    .where(and(eq(journey.tenantId, ctx.tenantId), isNotNull(journey.arrivedAt), isNotNull(journey.firstSourceId)))
+    .orderBy(journey.accountId);
   const stages = await ctx.tx.select().from(journeyStage).where(eq(journeyStage.tenantId, ctx.tenantId)).orderBy(journeyStage.stageKey);
   const deals = await ctx.tx
     .select()
@@ -155,9 +170,9 @@ export async function loadJourneys(ctx: ModuleContext): Promise<Journey[]> {
       r.accountId,
       {
         accountId: r.accountId,
-        firstSourceId: r.firstSourceId,
+        firstSourceId: r.firstSourceId!,
         firstBatchId: r.firstBatchId,
-        arrivedAt: r.arrivedAt,
+        arrivedAt: r.arrivedAt!,
         practiceId: r.practiceId,
         offerId: r.offerId,
         exitStage: r.exitStage,
@@ -176,18 +191,24 @@ export async function loadJourneys(ctx: ModuleContext): Promise<Journey[]> {
  * Fills journeys for accounts that arrived before the consumers ran (Ruling 14): from intake's resolved arrivals,
  * routing's stage history, the account summary's practice and offer, and crm's cached deals, through the same
  * rules as the consumers, so running it again changes nothing. Background context only. Returns how many
- * journeys it made.
+ * journeys it gave an arrival.
  */
 export async function backfillJourneys(ctx: ModuleContext): Promise<number> {
   const journeys = async () =>
-    (await ctx.tx.select({ n: count() }).from(journey).where(eq(journey.tenantId, ctx.tenantId)))[0]!.n;
+    (await ctx.tx.select({ n: count() }).from(journey).where(and(eq(journey.tenantId, ctx.tenantId), isNotNull(journey.arrivedAt))))[0]!.n;
   const before = await journeys();
+  const arrived = new Set<string>();
   for (const a of await listResolvedArrivals(ctx)) {
+    arrived.add(a.accountId);
     await recordArrival(ctx, { accountId: a.accountId, sourceId: a.closestSourceId, batchId: a.batchId, at: a.resolvedAt });
   }
   const kinds = await stageKinds(ctx);
   for (const s of await listStageHistory(ctx)) await recordStage(ctx, { accountId: s.accountId, stageKey: s.toStage, at: s.at, kind: kinds.get(s.toStage) });
-  for (const p of await listScoringPicks(ctx)) await recordScore(ctx, { accountId: p.accountId, practiceId: p.practiceId, offerId: p.bestOfferId });
+  for (const p of await listScoringPicks(ctx)) {
+    // Only accounts that arrived, and were scored: the summary has a row for every account.
+    if (!arrived.has(p.accountId) || p.scoreVersion === null) continue;
+    await recordScore(ctx, { accountId: p.accountId, practiceId: p.practiceId, offerId: p.bestOfferId, version: p.scoreVersion });
+  }
   for (const d of await listDeals(ctx)) {
     await recordDeal(ctx, {
       accountId: d.accountId,

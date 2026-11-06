@@ -86,6 +86,27 @@ const dealt = (accountId: string, dealExternalId: string, status: 'open' | 'won'
     observedAt,
   );
 
+const scored = (accountId: string, version: number, practiceId: string, bestOfferId: string) =>
+  deliver(
+    analyticsJourneyScore,
+    {
+      accountId,
+      priority: 70,
+      fit: 60,
+      intent: 50,
+      tier: 'good_fit',
+      previousTier: null,
+      bestOfferId,
+      previousBestOfferId: null,
+      practiceId,
+      revenueBand: null,
+      cause: 'new_signal',
+      profileVersion: 1,
+      version,
+    },
+    T1,
+  );
+
 const journeyOf = async (accountId: string, tn: Tenant = t): Promise<Journey | undefined> =>
   (await tn.run((ctx) => loadJourneys(ctx))).find((j) => j.accountId === accountId);
 
@@ -137,6 +158,13 @@ describe('stages', () => {
     expect(await journeyOf(id)).toMatchObject({ exitStage: null, exitAt: null });
   });
 
+  it('an exit before the arrival is kept', async () => {
+    const id = newAccount();
+    await staged(id, 'declined', T2);
+    await arrived(id, { personSourceId: 'src_p1' }, T1);
+    expect(await journeyOf(id)).toMatchObject({ exitStage: 'declined', exitAt: new Date(T2) });
+  });
+
   it('a stage event before the arrival still stores its entry', async () => {
     const id = newAccount();
     await staged(id, 'reviewed', T2);
@@ -169,6 +197,22 @@ describe('scoring', () => {
       T1,
     );
     expect(await journeyOf(id)).toMatchObject({ practiceId: 'prc_1', offerId: 'off_1' });
+  });
+
+  it('an older score delivered late keeps the newer practice and offer', async () => {
+    const id = newAccount();
+    await arrived(id, { personSourceId: 'src_p1' }, T0);
+    await scored(id, 3, 'prc_3', 'off_3');
+    await scored(id, 2, 'prc_2', 'off_2');
+    expect(await journeyOf(id)).toMatchObject({ practiceId: 'prc_3', offerId: 'off_3' });
+  });
+
+  it('a score before the arrival is kept', async () => {
+    const id = newAccount();
+    await scored(id, 1, 'prc_early', 'off_early');
+    expect(await journeyOf(id)).toBeUndefined(); // no arrival yet
+    await arrived(id, { personSourceId: 'src_p1' }, T1);
+    expect(await journeyOf(id)).toMatchObject({ firstSourceId: 'src_p1', practiceId: 'prc_early', offerId: 'off_early' });
   });
 });
 

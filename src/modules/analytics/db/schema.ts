@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, check, date, index, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, check, date, index, integer, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Analytics schema. Every table here is a tenant table: `tenant_id` not null, row level security
@@ -89,19 +89,22 @@ export const budgetState = analytics.table(
 );
 
 /**
- * One row per account that arrived (R3b-1 Ruling 1): its first arrival (the chain's closest source and the
- * batch) and the practice and offer scoring picked. `exit_at` is the time of the latest stage move the
- * row has seen to an exit or a flow stage, and `exit_stage` is set only when that move was to an exit, so an
- * older move delivered late changes neither.
+ * One row per account (R3b-1 Ruling 1): its first arrival (the chain's closest source and the batch) and the
+ * practice and offer scoring picked. A score or a stage move can arrive before the arrival, so the row can exist
+ * with no arrival yet (`first_source_id` and `arrived_at` null); reads skip it until the arrival fills them.
+ * `exit_at` is the time of the latest stage move the row has seen to an exit or a flow stage, and `exit_stage`
+ * is set only when that move was to an exit, so an older move delivered late changes neither.
  */
 export const journey = analytics.table('journey', {
   tenantId: text('tenant_id').notNull(),
   accountId: text('account_id').primaryKey(),
-  firstSourceId: text('first_source_id').notNull(),
+  firstSourceId: text('first_source_id'),
   firstBatchId: text('first_batch_id'),
-  arrivedAt: at('arrived_at').notNull(),
+  arrivedAt: at('arrived_at'),
   practiceId: text('practice_id'),
   offerId: text('offer_id'),
+  /** The `version` of the score that set practice and offer: an older score delivered late is ignored. */
+  scoreVersion: integer('score_version'),
   exitStage: text('exit_stage'),
   exitAt: at('exit_at'),
   updatedAt: at('updated_at').notNull().defaultNow(),
