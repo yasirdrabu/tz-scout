@@ -12,3 +12,6 @@ export const waitingExpireJob = defineJob('intake.waiting.expire', z.object({}),
 
 /** Reads contacts the CRM marked qualified since the last poll and submits each (Ruling 14). Every 15 minutes per tenant. */
 export const qualifiedLeadsPollJob = defineJob('intake.qualified_leads.poll', z.object({}), { timeoutMs: 5 * 60_000 });
+
+/** Nightly at 01:00 UTC, before scoring's ageing: learns every source's trust from what its accounts became (R3b-2). One schedule per tenant. */
+export const trustJob = defineJob('intake.trust', z.object({}), { timeoutMs: 5 * 60_000 });

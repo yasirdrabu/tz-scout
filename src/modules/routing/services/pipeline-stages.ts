@@ -1,7 +1,8 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import type { FunnelStages } from '@/modules/intake';
+import type { FunnelStages, StageOutcomes } from '@/modules/intake';
 import type { ModuleContext } from '@/platform/context';
 import { pipelineStage } from '../db/schema';
+import { listStageHistory } from './read';
 import { DEFAULT_STAGES, TRIGGERS, type PipelineStage } from '../domain/pipeline';
 
 type StageRow = typeof pipelineStage.$inferSelect;
@@ -48,6 +49,12 @@ export const routingFunnelStages: FunnelStages = {
     const accepts = stages.find((s) => s.trigger === 'ae_accepts');
     return stages.map((s) => ({ key: s.key, assigned: !!accepts && s.kind === 'flow' && s.position >= accepts.position }));
   },
+};
+
+/** Intake's `StageOutcomes`: the stages and stage moves that source trust judges arrivals by. A merge repoints stage history to the survivor. */
+export const routingStageOutcomes: StageOutcomes = {
+  stages: async (ctx) => (await loadStages(ctx)).map((s) => ({ key: s.key, kind: s.kind, position: s.position, trigger: s.trigger })),
+  history: (ctx) => listStageHistory(ctx),
 };
 
 export type StagesView = {

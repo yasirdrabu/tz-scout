@@ -2,9 +2,9 @@
 // modules' implementations. The web app (v1-route) and every background role
 // (through registry.ts) import it, so all processes see the same implementations.
 import { registerMergeGuard, registerSourceAccessProvider, registerSourceInfoProvider } from '@/modules/accounts';
-import { intakeSourceAccess, intakeSourceInfo, intakeSourceValidator, registerFunnelStages, registerReviewStatusValidator } from '@/modules/intake';
+import { intakeSourceAccess, intakeSourceInfo, intakeSourceValidator, registerFunnelStages, registerReviewStatusValidator, registerStageOutcomes } from '@/modules/intake';
 import { registerOfferUsage } from '@/modules/offers';
-import { registerOwnershipPreflight, routingFunnelStages, routingOfferUsage, routingReviewStatusValidator } from '@/modules/routing';
+import { registerOwnershipPreflight, routingFunnelStages, routingOfferUsage, routingReviewStatusValidator, routingStageOutcomes } from '@/modules/routing';
 import { scoringOfferUsage } from '@/modules/scoring';
 import { crmMergeGuard, crmOwnershipPreflight, registerHandoffPackageProvider, registerHubspotAdapter } from '@/modules/crm';
 import { registerApolloAdapter, registerVibeAdapter, registerWebsiteAdapter } from '@/modules/enrichment';
@@ -18,6 +18,7 @@ registerSourceInfoProvider(intakeSourceInfo);
 registerSourceAccessProvider(intakeSourceAccess);
 registerReviewStatusValidator(routingReviewStatusValidator);
 registerFunnelStages(routingFunnelStages);
+registerStageOutcomes(routingStageOutcomes);
 registerHubspotAdapter();
 registerApolloAdapter();
 registerVibeAdapter();

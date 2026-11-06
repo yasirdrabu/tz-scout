@@ -37,6 +37,7 @@ One-shot commands
   backfill-r1c <slug>   Give a workspace built before R1c its CRM defaults and schedules, a company check for each account, and its HubSpot links
   backfill-review-flow <slug>  Send a workspace's earlier lead offer picks to the account summary, so the offer filter finds them
   backfill-journeys <slug>  Fill a workspace's account journeys (the funnel's read model) from its arrivals, stage history, scores and deals
+  backfill-trust <slug>  Add a workspace's nightly source trust schedule and compute every source's trust now
   rescore             [--tenant <slug>]  Rescore every account in every active workspace, or in one; each change is recorded as a rules change
   keys:create         --tenant <slug> --name <name> --scopes a,b [--test]
   tenants:create      --slug <s> --name <n> --currency <USD> --timezone <zone> --owner-email <email>
@@ -197,6 +198,22 @@ async function backfillJourneysFor(slug: string): Promise<number> {
   return 0;
 }
 
+/** Schedules the nightly trust job for a workspace and computes every source's trust now (R3b-2). Safe to run again. */
+async function backfillTrustFor(slug: string): Promise<number> {
+  const { backfillTrust } = await import('./seed');
+  const { ensurePlatformAdmin, listTenants } = await import('@/modules/tenancy');
+  const { withTenant } = await import('@/platform/db/tenant');
+  const { newId } = await import('@/platform/ids');
+  const tenant = (await listTenants()).find((t) => t.slug === slug);
+  if (!tenant) throw new Error(`No workspace with the slug "${slug}".`);
+  const adminId = await ensurePlatformAdmin('system@scout.local');
+  await withTenant(tenant.id, (tx) =>
+    backfillTrust({ tenantId: tenant.id, actor: { kind: 'system', id: adminId }, correlationId: newId('cor'), tx }),
+  );
+  console.log(`Workspace ${slug}: source trust is computed and will refresh nightly.`);
+  return 0;
+}
+
 /** Moves one workspace, or every active one still in the shared database, into its own database (D35). */
 async function splitTenants(slug: string | undefined, all: boolean, settleMs: number, forceCleanup = false): Promise<number> {
   if (!slug && !all) throw new Error(`Name a workspace or pass --all.\n\n${USAGE}`);
@@ -310,6 +327,13 @@ ${USAGE}`);
 
 ${USAGE}`);
       return backfillJourneysFor(slug);
+    }
+    case 'backfill-trust': {
+      const [slug] = rest;
+      if (!slug) throw new Error(`Usage: scout backfill-trust <tenant-slug>
+
+${USAGE}`);
+      return backfillTrustFor(slug);
     }
     case 'rescore': {
       const { values } = parseArgs({ args: rest, options: { tenant: { type: 'string' } } });

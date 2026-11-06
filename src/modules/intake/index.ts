@@ -20,10 +20,10 @@ export {
   warmIntroRepriced,
 } from './contracts/events';
 export { countryCode, normaliseDomain } from './domain/normalise';
-export { importRunJob, qualifiedLeadsPollJob, resolveJob, waitingExpireJob } from './contracts/jobs';
+export { importRunJob, qualifiedLeadsPollJob, resolveJob, trustJob, waitingExpireJob } from './contracts/jobs';
 export { intakeAccountMerged, intakeConflictFeedback, intakeLeadQualified, intakeSellerDeclineFeedback, intakeStatusFeedback, intakeTenantDefaults } from './consumers';
 export { feedbackForArrival, listFeedback, recordConflictLost, recordFeedback, recordSourceFeedback, type ArrivalFeedback, type FeedbackKind, type FeedbackView } from './services/feedback';
-export { importRunHandler, qualifiedLeadsPollHandler, resolveHandler, waitingExpireHandler } from './jobs';
+export { importRunHandler, qualifiedLeadsPollHandler, resolveHandler, trustHandler, waitingExpireHandler } from './jobs';
 export {
   FIRST_POLL_LOOKBACK_MS,
   LEADS_OVERLAP_MS,
@@ -167,7 +167,8 @@ export {
   type ImportCreated,
   type ImportView,
 } from './services/imports';
-export { registerFunnelStages, registerReviewStatusValidator, type FunnelStages, type ReviewStatusValidator } from './contracts/ports';
+export { registerFunnelStages, registerReviewStatusValidator, registerStageOutcomes, type FunnelStages, type ReviewStatusValidator, type StageOutcomes } from './contracts/ports';
+export { computeTrust } from './services/trust';
 export {
   ITEM_STATUSES,
   fileIdOf,

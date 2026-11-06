@@ -10,6 +10,7 @@ import {
   intakeTenantDefaults,
   qualifiedLeadsPollHandler,
   resolveHandler,
+  trustHandler,
   waitingExpireHandler,
 } from '@/modules/intake';
 import { crmConsumers, crmJobHandlers } from '@/modules/crm';
@@ -30,7 +31,7 @@ import { deliverOnce, startWorker } from '@/platform/runtime/worker';
 export const consumers: ConsumerDef[] = [accountsTenantDefaults, accountsSummaryOnReviewChanged, accountsSummaryOnScored, ...accountsCrmStatusConsumers, intakeTenantDefaults, intakeAccountMerged, intakeStatusFeedback, intakeConflictFeedback, intakeSellerDeclineFeedback, intakeLeadQualified, ...scoringConsumers, ...routingConsumers, ...crmConsumers, ...playbooksConsumers, ...analyticsConsumers, ...integrationsConsumers];
 
 /** Every job handler in the app. */
-export const jobs: JobHandlerDef[] = [pingHandler, memberActivatedAuditHandler, workspaceProvisionHandler, credentialsCleanupHandler, exclusionsRecheckHandler, conflictExplainHandler, resolveHandler, waitingExpireHandler, importRunHandler, qualifiedLeadsPollHandler, rescoreAccountsHandler, rescorePageHandler, ageingHandler, autoAcceptHandler, ...crmJobHandlers, ...playbooksJobHandlers, ...enrichmentJobHandlers];
+export const jobs: JobHandlerDef[] = [pingHandler, memberActivatedAuditHandler, workspaceProvisionHandler, credentialsCleanupHandler, exclusionsRecheckHandler, conflictExplainHandler, resolveHandler, waitingExpireHandler, importRunHandler, qualifiedLeadsPollHandler, trustHandler, rescoreAccountsHandler, rescorePageHandler, ageingHandler, autoAcceptHandler, ...crmJobHandlers, ...playbooksJobHandlers, ...enrichmentJobHandlers];
 
 // Provisioning seeds a new workspace by running the consumers of its tenancy.tenant.created event against it (D35).
 registerWorkspaceSeeder(async (event) => {

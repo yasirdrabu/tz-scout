@@ -9,6 +9,7 @@ import { seedIntakeDefaults } from './defaults';
 import { arrival, sourceFeedback, warmIntro } from './db/schema';
 import { recordConflictLost, recordFeedback } from './services/feedback';
 import { sourceNames } from './services/sources';
+import { computeTrust } from './services/trust';
 import { takeQualifiedLead } from './services/qualified-leads';
 
 /** Gives a new tenant its vendor sources, relationship defaults and waiting-expiry schedule. */
@@ -86,7 +87,7 @@ export const intakeConflictFeedback = defineConsumer({
     const names = await sourceNames(ctx, [winner.vendorSourceId, winner.agentSourceId, winner.personSourceId].filter((x): x is string => !!x));
     const name = (sourceId?: string) => (sourceId ? names.get(sourceId) : undefined);
     const factArrivalIds = data.archivedFactIds.map((f) => facts.get(f)?.arrivalId).filter((x): x is string => !!x);
-    await recordConflictLost(ctx, {
+    const added = await recordConflictLost(ctx, {
       accountId: conflict.accountId,
       factArrivalIds,
       losingSourceIds: data.losingSourceIds,
@@ -94,5 +95,7 @@ export const intakeConflictFeedback = defineConsumer({
       byUserId: data.resolvedBy,
       causeEventId: id,
     });
+    // R3b-2 Ruling 8: the loss costs trust at once, not at the next nightly run. A replay wrote nothing, so it recomputes nothing.
+    if (added > 0) await computeTrust(ctx, { cause: 'conflict_lost', sourceIds: data.losingSourceIds });
   },
 });

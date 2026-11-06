@@ -22,7 +22,7 @@ import { seedAccountDefaults } from '@/modules/accounts';
 import { backfillJourneys } from '@/modules/analytics';
 import { backfillCrm, seedCrmDefaults, seedMockCrm } from '@/modules/crm';
 import { listConnections } from '@/modules/integrations';
-import { listSources, personSourceFor, registerSource, renamePersonSources, seedIntakeDefaults } from '@/modules/intake';
+import { computeTrust, listSources, personSourceFor, registerSource, renamePersonSources, seedIntakeDefaults } from '@/modules/intake';
 import { seedMissingSignalRules, seedOffers } from '@/modules/offers';
 import { backfillBriefs, seedPlaybooksDefaults } from '@/modules/playbooks';
 import { backfillLeadOffers, backfillReviews, seedRoutingDefaults } from '@/modules/routing';
@@ -126,6 +126,15 @@ export async function backfillReviewFlow(ctx: ModuleContext): Promise<void> {
 }
 
 /**
+ * Brings a workspace from before R3b-2 up to date: the nightly trust schedule, and every source's trust computed now
+ * (until then each reads 0.60). Safe to run again. Background context only.
+ */
+export async function backfillTrust(ctx: ModuleContext): Promise<void> {
+  await seedIntakeDefaults(ctx);
+  await computeTrust(ctx, { cause: 'outcomes' });
+}
+
+/**
  * Local development data: one platform admin, two tenants, a few people, a person source for each, a development agent and a dev API key bound to it. Safe to
  * run again. Also schedules the hourly credential cleanup. Returns a fresh key for `taazaa` on each run, because
  * a key's secret is only shown once.
@@ -185,6 +194,8 @@ export async function seed(): Promise<{ devApiKey: string }> {
       await backfillBriefs(ctx(tx));
       // The funnel's journeys, for accounts that arrived before R3b-1 (the consumers fill them from then on).
       await backfillJourneys(ctx(tx));
+      // Learned source trust, for sources whose accounts already have outcomes.
+      await backfillTrust(ctx(tx));
     });
     // Sources come after the first transaction commits, so the people's users exist, named.
     await renameHandleUsers(NAMES);

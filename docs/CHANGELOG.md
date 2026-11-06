@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-06: Taazaa Scout R3b-2 learned source trust
+
+- **Source trust is learned nightly** (01:00 UTC, before scoring's ageing) from what each source's accounts became: per source and account, the earliest resolved arrival counts once, scored by the furthest stage reached (declined at review, or by a seller for a bad fit or bad data, scores 0; no decision after 30 days 0.10; won 1.00), aged with a 180-day half-life against a prior of 0.60 worth 10 arrivals. Person, agent and vendor trust are computed independently. Losing a conflict costs 0.01 at once (for 180 days). A move of 0.02 or more publishes `intake.source.trust_changed`, which scoring already rescores on; each run also writes a row to `intake.source_trust_history`.
+- **After deploying, run `scout backfill-trust <slug>` once per existing workspace.** It adds the nightly trust schedule and computes trust now. Until then every source reads 0.60. It is safe to run again. `scout seed` runs it for the workspaces it seeds.
+
 ## 2026-11-06: Taazaa Scout R3b-1 funnel by source and cost per win
 
 - **Funnel by source, the source drill, cost per win and Costs by source** read `analytics.journey`, a read model the analytics consumers fill from arrivals, stage moves, scores and deals as they happen.
