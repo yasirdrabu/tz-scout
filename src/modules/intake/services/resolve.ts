@@ -51,9 +51,9 @@ const chainOf = (r: ArrivalRow): SourceChain =>
   });
 
 /** SRC-E3 step 2: rules first; Claude only for text no rule maps, and never inline. */
-async function normalise(ctx: ModuleContext, a: ArrivalV1, opts: { ai: boolean }): Promise<Normalised> {
+async function normalise(ctx: ModuleContext, a: ArrivalV1, opts: { ai: boolean; sourceId: string }): Promise<Normalised> {
   const ask = opts.ai ? unmapped(a) : null;
-  return normaliseArrival(a, ask ? await normaliseWithAi(ctx, ask) : null);
+  return normaliseArrival(a, ask ? await normaliseWithAi(ctx, ask, opts.sourceId) : null);
 }
 
 function forAccounts(row: ArrivalRow, n: Normalised): ArrivalForAccounts {
@@ -318,7 +318,7 @@ async function validated(ctx: ModuleContext, row: ArrivalRow, opts: { ai: boolea
   }
   if (!row.steps.includes('validate')) await record(ctx, row, 'validate', { status: 'resolving' });
   // Before the resolve lock and the account lock: the AI call may take seconds. (The arrival row is already locked by `load`.)
-  await record(ctx, row, 'normalise', { normalised: await normalise(ctx, v.body, opts) });
+  await record(ctx, row, 'normalise', { normalised: await normalise(ctx, v.body, { ...opts, sourceId: row.closestSourceId }) });
   return revive(row.normalised);
 }
 

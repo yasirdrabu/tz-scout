@@ -26,6 +26,7 @@ export const analyticsUsageLines = defineConsumer({
       provider: e.data.provider,
       amountCents: e.data.costCents,
       accountId: e.data.accountId,
+      sourceId: e.data.sourceId ?? null,
     });
   },
 });

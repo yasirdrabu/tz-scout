@@ -57,6 +57,8 @@ export const usageRecorded = defineEvent(
     unit: z.string().nullable(),
     costCents: z.number().int().positive(),
     accountId: z.string().nullable(),
+    /** R3b-1 Ruling 7: the source the call is for, when the caller knows it (intake's AI calls). */
+    sourceId: z.string().optional(),
     correlationId: z.string(),
     occurredAt: z.string(),
   }),

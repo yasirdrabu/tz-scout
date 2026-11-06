@@ -22,7 +22,8 @@ re-implement that math (v1 rule, carried).
 | `analytics.source_touch` | `tenant_id`, `account_id`, `source_id`, `source_level` (person, agent, vendor), `batch_id`, `arrival_id`, `first_seen_at` | Every source that ever sent the account, for the "any source" view. |
 | `analytics.decline` | `tenant_id`, `account_id`, `kind` (review, assignment), `reason_key`, `note`, `by_user_id`, `source_id`, `at` | Decline reasons by source and seller |
 | `analytics.step_credit` | `tenant_id`, `outcome_id`, `outcome_kind`, `step_id`, `step_type`, `playbook_template_id`, `practice_id`, `offer_id`, `occurred_at` | One row per credited step per outcome, for "what worked" |
-| `analytics.cost_line` | `id` (`cst_`), `tenant_id`, `occurred_on` (tenant-timezone date), `category` (partner_fees, data_vendors, agents_hosting, lists_events, ai_usage), `provider` (usage lines), `amount_cents`, `origin` (usage, manual), `origin_event_id` (unique), `account_id`, `note`, `created_by`, `created_at`, `voided_at`, `void_reason`, `voided_by`, `replaces_id` | Ledger (R3a). Never changed in place: an edit voids the line ("Edited") and adds one with `replaces_id`. Targets other than the account, quantities and hours wait for R3b. |
+| `analytics.cost_line` | `id` (`cst_`), `tenant_id`, `occurred_on` (tenant-timezone date), `category` (partner_fees, data_vendors, agents_hosting, lists_events, ai_usage), `provider` (usage lines), `amount_cents`, `origin` (usage, manual), `origin_event_id` (unique), `account_id`, `source_id`, `note`, `created_by`, `created_at`, `voided_at`, `void_reason`, `voided_by`, `replaces_id` | Ledger (R3a). Never changed in place: an edit voids the line ("Edited") and adds one with `replaces_id`. `source_id` (R3b-1) wins over the account's first source when spend is put per source. Batch, practice and offer targets, quantities and hours are later. |
+| `analytics.cost_setting` | `tenant_id` (pk), `target_cost_per_won_cents` (null), `updated_by`, `updated_at` | The workspace's target cost per won account (R3b-1), no default. |
 | `analytics.hour_rate` | `tenant_id`, `role_key`, `rate_cents_per_hour`, `effective_from` | For turning logged hours into cost. |
 | `analytics.week` | `tenant_id`, `start_date` (Monday), `built_at`, `counts` (raw counts json) | Scorecard weeks; raw counts only. |
 | `analytics.scorecard_target` | `tenant_id`, `metric_key`, `target`, `min_sample` | Targets and minimum samples per row. |
@@ -94,9 +95,11 @@ Built in R3a (the cost ledger), in place of `GET /costs` and `POST /costs` above
 | Method and path | Scope | Does |
 |---|---|---|
 | `GET /api/v1/costs/lines?category&from&to&include_voided&cursor` | `costs:read` | Cost lines, 50 a page, newest first (`occurred_on`, then when added); voided lines only with `include_voided=true` |
-| `POST /api/v1/costs/lines` | `costs:write`, people only | Add a manual line `{ occurred_on, category, amount_cents, note }`; the amount must be above zero ("Enter an amount above zero."), the note up to 500 characters |
+| `POST /api/v1/costs/lines` | `costs:write`, people only | Add a manual line `{ occurred_on, category, amount_cents, note, source_id }`; the amount must be above zero ("Enter an amount above zero."), the note up to 500 characters; an unknown or removed source gets 400 "Choose a source that exists." (R3b-1). Lines return `source_id` and `source_name` |
 | `PATCH /api/v1/costs/lines/{id}` | `costs:write`, people only | Manual lines only (others get 409 "Only costs added by hand can be edited."): voids the line "Edited" and returns the new line with `replaces_id`; an edit that changes nothing returns the line as it is |
 | `POST /api/v1/costs/lines/{id}:void` | `costs:write` | Void any line with `{ reason }` (required) |
+| `GET /api/v1/costs/by-source` | `costs:read` | R3b-1: spend per top-level source over the last 90 days, rolled up, with share, per sent, per assigned, per won and return, then Shared costs and `total_spend_cents` (cost-ledger.md "Source target") |
+| `PUT /api/v1/costs/target` | `budgets:write`, people only | R3b-1: `{ target_cost_per_won_cents }`, 1 or more, or null to clear ("Enter a target above zero, or clear it.") |
 
 Proposed additions (to be added to `public-api/index.md` before R3; not yet in the fixed list):
 

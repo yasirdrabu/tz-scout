@@ -32,15 +32,19 @@ export const csvColumnMappingTask = defineTask({
 
 export type SuggestedMapping = { mapping: MappingColumn[]; origin: 'ai' | 'synonyms' };
 
-/** One call per file. Falls back to header synonyms when Claude is missing, mocked or fails. */
+/**
+ * One call per file. Falls back to header synonyms when Claude is missing, mocked or fails. `sourceId` is the
+ * import's source, carried to the usage line (R3b-1 Ruling 7).
+ */
 export async function suggestMapping(
   ctx: ModuleContext,
   headers: string[],
   sampleRows: string[][],
+  sourceId?: string,
 ): Promise<SuggestedMapping> {
   const input = { headers, sampleRows: sampleRows.slice(0, 5) };
   try {
-    const { output, mode } = await runTask(ctx, csvColumnMappingTask, input, { subject: { type: 'import', id: 'mapping' } });
+    const { output, mode } = await runTask(ctx, csvColumnMappingTask, input, { subject: { type: 'import', id: 'mapping' }, ...(sourceId ? { sourceId } : {}) });
     if (mode === 'live') return { mapping: cleanMapping(output).columns, origin: 'ai' };
   } catch (e) {
     log.warn({ err: errorText(e) }, 'csv_column_mapping: failed, using header synonyms');

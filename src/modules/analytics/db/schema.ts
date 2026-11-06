@@ -28,6 +28,8 @@ export const costLine = analytics.table(
     /** The `integrations.usage.recorded` event a usage line came from: one line per event. */
     originEventId: text('origin_event_id'),
     accountId: text('account_id'),
+    /** R3b-1 Ruling 7: the source the cost is for; it wins over the account's first source (Ruling 6). */
+    sourceId: text('source_id'),
     note: text('note'),
     createdBy: text('created_by'),
     createdAt: at('created_at').notNull().defaultNow(),
@@ -87,6 +89,14 @@ export const budgetState = analytics.table(
     check('budget_state_level_valid', sql`${t.level} in ('ok', 'alert', 'over', 'paused')`),
   ],
 );
+
+/** Workspace cost settings (R3b-1 Ruling 8): the target cost per won account, none by default. */
+export const costSetting = analytics.table('cost_setting', {
+  tenantId: text('tenant_id').primaryKey(),
+  targetCostPerWonCents: bigint('target_cost_per_won_cents', { mode: 'number' }),
+  updatedBy: text('updated_by'),
+  updatedAt: at('updated_at').notNull().defaultNow(),
+});
 
 /**
  * One row per account (R3b-1 Ruling 1): its first arrival (the chain's closest source and the batch) and the

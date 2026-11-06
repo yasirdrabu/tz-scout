@@ -52,6 +52,8 @@ export type RunOpts = {
   reuseAfter?: Date;
   /** The account the run is for, when the caller knows it: carried on the usage record (R3a Ruling 3). */
   accountId?: string;
+  /** The source the run is for, when the caller knows it: carried on the usage record (R3b-1 Ruling 7). */
+  sourceId?: string;
 };
 export type RunResult<O> = { output: O; runId: string; mode: AiMode };
 
@@ -288,6 +290,7 @@ export async function runTask<I, O>(
       module: 'ai-tasks',
       unit: 'tokens',
       ...(opts.accountId ? { accountId: opts.accountId } : {}),
+      ...(opts.sourceId ? { sourceId: opts.sourceId } : {}),
       requestSummary: { task: task.name, promptVersion: task.promptVersion, model },
       // Held against Claude's monthly cost limit before the call; mock calls hold it too, so the limit works locally.
       reserveCents: prices.worstCase(Math.ceil((task.system.length + user.length) / 4), task.maxTokens),

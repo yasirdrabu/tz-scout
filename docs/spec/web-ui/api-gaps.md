@@ -104,7 +104,7 @@ These sit in the HTTP layer (`src/http/routes/v1/_lib/v1-route.ts`, `src/modules
 | 23 | Build per-tenant infrastructure as in the mockup: its own database, file storage and encryption key per tenant, region, backups and point-in-time restore, schema version and migrations per tenant, provisioning and deletion states, seats, quotas, export, and owner-granted support access. This replaces the one-database-with-row-level-security model and is its own platform project (architecture change first: `docs/spec/architecture/`). Until it lands, the Tenants screen ships list, create, suspend and resume, and the other sections stay hidden. |
 | 24 | (As recommended.) Admin cross-tenant AI runs list with Succeeded, Failed, Stopped by limit; no daily cap, no Retry; tenant `GET /api/v1/ai-runs` kept for owners. |
 | 25 | (As recommended.) The mockup wins for Playbooks: `offer_playbook(offer_id, tier, template_id)`, day-based steps and a stop rule go into `docs/spec/playbooks/` before its plan. Drafts only replaced the draft or auto-send mode: nothing is sent automatically (user, 2026-11-02). Built in R2c-1. |
-| 26 | Cost budgets per category and month with the 90% alert and the 110% pause of paid pulls through integrations `checkCap`; return on spend from actual won amounts. R3. Budgets, levels and the Costs summary built in R3a (`docs/plans/2026-11-05-r3a-costs.md`); return on spend is R3b. |
+| 26 | Cost budgets per category and month with the 90% alert and the 110% pause of paid pulls through integrations `checkCap`; return on spend from actual won amounts. R3. Budgets, levels and the Costs summary built in R3a (`docs/plans/2026-11-05-r3a-costs.md`); return on spend built in R3b-1 (`docs/plans/2026-11-05-r3b-1-funnel.md`). |
 | 6 | Pipeline stages are fully configurable (add, rename, reorder, delete, HubSpot stage, targets). This is a routing, CRM and analytics redesign and gets its own backend plan; until it lands the app reads stages from the API and the editor is hidden. **Status:** done 2026-11-01 (`docs/plans/2026-11-01-pipeline-stages.md`, REV-E5). |
 
 ## Decision analysis
@@ -383,6 +383,8 @@ then R2 and R3 screens.
     per category and `YYYY-MM` month (carried forward to later months), `budget_state` levels `ok`, `alert`
     (90%), `over` (100%) and `paused` (110%, AI usage and Data vendors only), `analytics.budget.level_changed`,
     `GET /api/v1/costs/summary` and `GET/PUT /api/v1/costs/budgets` (read `costs:read`, write `budgets:write`).
+    Built in R3b-1: return on spend from actual won deal amounts (a won deal with no amount adds nothing),
+    `return_ratio` in the summary and per source in `GET /api/v1/costs/by-source`.
 
 ## tenancy
 
@@ -1090,12 +1092,12 @@ that spec: `POST /api/v1/costs/{id}:void`, `GET /api/v1/analytics/sources/{id}/p
 | 16 | Cost colour, "Not enough data", "No wins yet", win-rate bar | LATER (R3) | funnel row `status` | `min_sample` exists only on `scorecard_target`. |
 | 17 | Stage table, tiles, rank "i of n", previous and next, insight, batches, won accounts | LATER (R3) | `GET /api/v1/analytics/sources/{id}/performance` | Spec returns funnel, declines, trust trend. Missing: all-sources baseline, rank, prev and next ids, insight text ("Too early to judge." under 10 sent), batch list, won accounts (name, offer, value). |
 | 17 | `Open source page`, batch click | READY | `GET /api/v1/sources/{id}` (proposed in intake), `GET /api/v1/batches/{id}` | Navigation only. |
-| 18 | Tiles spend, cost per account sent, cost per won, return on spend | READY (spend, R3a); LATER (R3b) | `GET /api/v1/costs/summary` (`costs:read`): `spend_month_cents`, `budget_month_cents`, `spend_90d_cents` | Cost per account sent, cost per won and return on spend are R3b. Return from offer price vs actual `won_amount_cents`: Decision 26. |
+| 18 | Tiles spend, cost per account sent, cost per won, return on spend | READY (spend, R3a; the rest, R3b-1) | `GET /api/v1/costs/summary` (`costs:read`): `spend_month_cents`, `budget_month_cents`, `spend_90d_cents`, `cost_per_sent_cents`, `cost_per_won_cents`, `return_ratio`, `target_cost_per_won_cents`; `PUT /api/v1/costs/target` (`budgets:write`) | Over the last 90 days. Return is won deal amounts closed in the 90 days over spend, 1 decimal, null with no spend (Decision 26). The target has no default; null clears it. |
 | 18 | "Where the money goes" by category | READY (R3a) | `GET /api/v1/costs/summary` `categories[]` | The five R3a categories, each with `spend_90d_cents`, `spend_month_cents`, `budget_cents`, `level` and `pausable`. Decision 26. |
 | 18 | Monthly spend vs budget; budgets used, left, over; edit and save | READY (R3a) | `GET /api/v1/costs/summary` `months[]`; `GET/PUT /api/v1/costs/budgets` (read `costs:read`, write `budgets:write`) | Six months, each against the summed category budgets. A past month is a 409 "Past months can't be changed." The 110% pause in integrations is R3a Task 4. Decision 26. |
 | 18 | Cost lines: add, edit, void, show voided | READY (R3a) | `GET/POST /api/v1/costs/lines`, `PATCH /api/v1/costs/lines/{id}`, `POST /api/v1/costs/lines/{id}:void` (read `costs:read`, write `costs:write`) | 50 a page, newest first, `include_voided`. Edit is for manual lines only (409). |
 | 21b | Prices per provider | READY (R3a) | `GET/PUT /api/v1/integrations/{provider}/rates` (`integrations:manage`) | `{ data: [{ item, cents_per_unit, is_default }] }`; a rate below 0 is a 400. Claude is per token, Apollo and Vibe per credit. |
-| 18 | Cost by source table | LATER (R3b) | `GET /api/v1/costs?group_by=source` | One grouped response, no browser math (C8). |
+| 18 | Cost by source table | READY (R3b-1) | `GET /api/v1/costs/by-source` (`costs:read`) | One grouped response, no browser math (C8): top-level sources rolled up, by spend, with `share_pct`, `per_sent_cents`, `per_assigned_cents`, `per_won_cents`, `return_ratio`, then a Shared costs row and `total_spend_cents`. Manual lines take a `source_id`. |
 
 ### Proposed changes
 

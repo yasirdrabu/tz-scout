@@ -70,11 +70,34 @@ R3a (Rulings 6-8 and 11 of the R3a plan):
   `budget_month_cents` (the categories' budgets summed), `spend_90d_cents` (the last 90 days up to
   today), `categories[]` (`key`, `label`, `spend_90d_cents`, `spend_month_cents`, `budget_cents`,
   `level`, `pausable`) and `months[]` (the last 6 months with `spend_cents` and the summed
-  `budget_cents`).
+  `budget_cents`). R3b-1 adds, over the same 90 days: `cost_per_sent_cents` (the ledger total over the
+  journeys that arrived), `cost_per_won_cents` (over the journeys that first entered the last flow stage),
+  `return_ratio` (won deal amounts with `closed_at` in the 90 days over the spend, 1 decimal, null with no
+  spend; a won deal with no amount adds nothing) and `target_cost_per_won_cents`.
+
+## Source target (R3b-1, as built)
+
+- **Lines.** `cost_line.source_id` (null). `integrations.usage.recorded` carries an optional `sourceId`:
+  intake's arrival normalise call passes the arrival's closest source, and CSV column mapping the import's
+  source. `POST` and `PATCH /api/v1/costs/lines` take an optional `source_id`; an unknown or removed source
+  gets 400 "Choose a source that exists." The lines list returns `source_id` and `source_name`.
+- **Target cost per won account.** One workspace setting, `analytics.cost_setting(tenant_id,
+  target_cost_per_won_cents, updated_by, updated_at)`, no default. `PUT /api/v1/costs/target`
+  `{ target_cost_per_won_cents: number | null }` (`budgets:write`, people only); below 1 gets 400 "Enter a
+  target above zero, or clear it." and null clears it. It is read back in `/costs/summary`.
+- **Spend per source.** Non-voided lines only. A line with a `source_id` belongs to that source, else a
+  line with an `account_id` to that account's first source, else it is Shared costs. A source's spend
+  rolls up everything below it in the source tree.
+- **Cost by source.** `GET /api/v1/costs/by-source` (`costs:read`), over the last 90 days: rows
+  `{ source_id, name, kind, spend_cents, share_pct, per_sent_cents, per_assigned_cents, per_won_cents,
+  return_ratio }` for each top-level, non-removed source with spend or accounts sent, by spend descending
+  (then name); then `{ source_id: null, name: "Shared costs", spend_cents, share_pct }`; plus
+  `total_spend_cents`. A `per_*` value is null when its count is 0. The spends add up to the total.
 
 ## Allocation
 
-To get cost per account and per source, lines are spread to accounts (pure function
+The spread below is not built: R3b-1 attributes spend per source as above, without spreading lines to
+accounts. To get cost per account and per source, lines would be spread to accounts (pure function
 `allocate(lines, journeys)`):
 
 | Target | Spread over |

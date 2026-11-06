@@ -7,6 +7,7 @@ import { publish } from '@/platform/events/outbox';
 import { budgetLevelChanged } from '../contracts/events';
 import { budgetState, costBudget, costLine } from '../db/schema';
 import { addDays, addMonths, budgetFor, dayOf, isMonth, levelOf, monthOf, monthsBack, type BudgetLevel } from '../domain/budgets';
+import { getTarget, spendReturns } from './costs-by-source';
 
 export const PAST_MONTH = "Past months can't be changed.";
 const KEYS: readonly string[] = COST_CATEGORIES.map((c) => c.key);
@@ -26,6 +27,11 @@ export type CostsSummary = {
   spend90dCents: number;
   categories: { key: CostCategory; label: string; spend90dCents: number; spendMonthCents: number; budgetCents: number | null; level: BudgetLevel; pausable: boolean }[];
   months: { month: string; spendCents: number; budgetCents: number }[];
+  /** R3b-1 Ruling 12, over the last 90 days. */
+  costPerSentCents: number | null;
+  costPerWonCents: number | null;
+  returnRatio: number | null;
+  targetCostPerWonCents: number | null;
 };
 
 /** The current calendar month in the tenant timezone. */
@@ -141,5 +147,7 @@ export async function summary(ctx: ModuleContext, now: Date = new Date()): Promi
     spend90dCents: sum(() => true, 'cents90'),
     categories,
     months: months.map((m) => ({ month: m, spendCents: sum((r) => r.month === m, 'cents'), budgetCents: budgetOfMonth(m) })),
+    ...(await spendReturns(ctx, now)),
+    targetCostPerWonCents: await getTarget(ctx),
   };
 }

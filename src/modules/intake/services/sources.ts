@@ -347,6 +347,27 @@ export async function childSources(ctx: ModuleContext, sourceIds: string[]): Pro
   return rows.map((r) => r.id).filter((id) => !given.has(id));
 }
 
+export type SourceTreeNode = { name: string; kind: SourceKind; parentId: string | null; status: SourceStatus };
+
+/**
+ * Every source in the workspace, removed ones included (callers decide what to skip): `tree` maps each source to
+ * its direct children, for R3b-1's roll-up, and `sources` holds each one's name, kind, parent and status.
+ */
+export async function sourceTree(ctx: ModuleContext): Promise<{ tree: Map<string, string[]>; sources: Map<string, SourceTreeNode> }> {
+  const rows = await ctx.tx
+    .select({ id: source.id, name: source.name, kind: source.kind, parentId: source.parentId, status: source.status })
+    .from(source)
+    .where(eq(source.tenantId, ctx.tenantId))
+    .orderBy(source.id);
+  const tree = new Map<string, string[]>();
+  const sources = new Map<string, SourceTreeNode>();
+  for (const r of rows) {
+    sources.set(r.id, { name: r.name, kind: r.kind as SourceKind, parentId: r.parentId, status: r.status as SourceStatus });
+    if (r.parentId) tree.set(r.parentId, [...(tree.get(r.parentId) ?? []), r.id]);
+  }
+  return { tree, sources };
+}
+
 /**
  * For seeding: a person source still named by one of its person's stale names (an email handle) takes the person's name.
  * Safe to run again. Returns how many it renamed.

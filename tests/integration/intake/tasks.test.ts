@@ -14,12 +14,18 @@ vi.mock('@/platform/config', async (orig) => {
 
 import type { AnthropicAdapter } from '@/modules/ai-tasks';
 import { anthropicMock, registerAnthropicAdapter } from '@/modules/ai-tasks/adapters/anthropic/mock';
+import { and, eq, sql } from 'drizzle-orm';
+import { costLine } from '@/modules/analytics/db/schema';
 import { registerAdapter, saveCredential, setMode, testConnection } from '@/modules/integrations';
+import { submitArrival } from '@/modules/intake';
 import { normaliseWithAi } from '@/modules/intake/tasks/arrival-normalise';
 import { suggestMapping } from '@/modules/intake/tasks/csv-column-mapping';
+import { adminDb } from '@/platform/db/client';
+import { outbox } from '@/platform/db/schema';
+import { runOutbox } from '../helpers/run-outbox';
 import { cfg } from '../integrations/cfg';
 import { newKey } from '../integrations/helpers';
-import { freshTenant, type Tenant } from './helpers';
+import { asSource, freshTenant, personAndAgent, validArrival, type Tenant } from './helpers';
 
 beforeAll(() => {
   cfg.masterKey = newKey();
@@ -89,5 +95,31 @@ describe('intake AI tasks', () => {
       industryKey: 'software',
       relationshipKey: 'partner_referral',
     });
+  });
+
+  // 100,000 input and 20,000 output tokens at Haiku's list prices: 20 cents, so the call is priced.
+  const priced = (json: unknown) => async () => ({ json, inputTokens: 100_000, outputTokens: 20_000, cacheReadTokens: 0 });
+
+  it("a priced arrival normalise call makes a usage line with the arrival's closest source (R3b-1 Ruling 7)", async () => {
+    const t = await freshTenant();
+    await runOutbox(t.tenantId);
+    const { agentId } = await personAndAgent(t, 'Usage');
+    await goLive(t, priced({ industryKey: 'widgets', relationshipKey: null }));
+    await asSource(t, agentId, (ctx) => submitArrival(ctx, validArrival({ industry: 'Widgets galore' }), { channel: 'api' }));
+    await runOutbox(t.tenantId);
+    const lines = await adminDb.select().from(costLine).where(and(eq(costLine.tenantId, t.tenantId), eq(costLine.category, 'ai_usage')));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ amountCents: 20, sourceId: agentId, accountId: null });
+  });
+
+  it("a priced CSV mapping call carries the import's source on the usage event", async () => {
+    const t = await freshTenant();
+    await goLive(t, priced({ columns: [] }));
+    await t.run((ctx) => suggestMapping(ctx, headers, sampleRows, 'src_import'));
+    const rows = await adminDb
+      .select({ payload: outbox.payload })
+      .from(outbox)
+      .where(sql`${outbox.tenantId} = ${t.tenantId} and ${outbox.payload}->>'type' = 'integrations.usage.recorded'`);
+    expect(rows.map((r) => (r.payload as { data: { sourceId?: string } }).data.sourceId)).toEqual(['src_import']);
   });
 });

@@ -39,6 +39,8 @@ export type CallOpts = {
   apiKeyId?: string;
   /** The account the call is for, when the caller knows it: carried on `integrations.usage.recorded`. */
   accountId?: string;
+  /** The source the call is for, when the caller knows it: carried on `integrations.usage.recorded`. */
+  sourceId?: string;
   /**
    * Called with the result after a successful call; its units and cost are logged (use when they are only known afterwards).
    * `live` says whether the live adapter answered: only a live call is priced (R3a Ruling 2). It runs after the
@@ -357,6 +359,7 @@ export async function runCall<T>(
           unit: opts.unit ?? null,
           costCents,
           accountId: opts.accountId ?? null,
+          ...(opts.sourceId ? { sourceId: opts.sourceId } : {}),
           correlationId: ctx.correlationId,
           occurredAt: row!.at.toISOString(),
         });
