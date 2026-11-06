@@ -12,7 +12,7 @@ import { GET as listRoute, POST as postSource } from '@/http/routes/v1/sources/r
 import { GET as statsRoute } from '@/http/routes/v1/sources/stats/route';
 import { setDisabled } from '@/modules/integrations';
 import { personSourceFor } from '@/modules/intake';
-import { source } from '@/modules/intake/db/schema';
+import { source, sourceTrustHistory } from '@/modules/intake/db/schema';
 import { addMember } from '@/modules/tenancy';
 import { apiKey } from '@/modules/tenancy/db/schema';
 import { authenticateKey, setKeyCacheTtl } from '@/modules/tenancy/services/api-keys';
@@ -60,8 +60,11 @@ describe('GET /api/v1/sources', () => {
       method: 'through_parent',
       method_label: 'Through Sources Co Ash',
       parent: { id: w.source.personId, name: 'Sources Co Ash', kind: 'person' },
-      trust: null,
+      trust: 60,
+      trust_sample: 0,
+      trust_band: 'not_enough',
       trust_label: 'Not enough data yet',
+      trust_updated_at: null,
       children_count: 0,
     });
     const person = body.data.findIndex((s: { id: string }) => s.id === w.source.personId);
@@ -94,6 +97,37 @@ describe('GET /api/v1/sources', () => {
   it("never lists another tenant's sources", async () => {
     const body = await json(w.as(operator, listRoute, 'sources'));
     expect(body.data.map((s: { id: string }) => s.id)).not.toContain(other.source.agentId);
+  });
+});
+
+describe('Learned trust on source rows and detail', () => {
+  it('shows a judged source as a whole number with its band, and a new one as not enough data', async () => {
+    const judged = await json(w.as(operator, postSource, 'sources', 'POST', { kind: 'vendor', name: 'Trusted Vendor' }), 201);
+    const updated = new Date('2026-11-01T01:00:00Z');
+    await w.run((ctx) => ctx.tx.update(source).set({ trust: 0.724, trustSample: 12, trustWon: 3, trustUpdatedAt: updated }).where(eq(source.id, judged.id)));
+    const row = (await json(w.as(operator, listRoute, 'sources?q=Trusted%20Vendor'))).data[0];
+    expect(row).toMatchObject({ trust: 72, trust_sample: 12, trust_band: 'mid', trust_label: null, trust_updated_at: '2026-11-01T01:00:00.000Z' });
+    expect(await json(w.as(operator, getSource, `sources/${judged.id}`))).toMatchObject({ trust: 72, trust_band: 'mid', trust_label: null });
+    const fresh = await json(w.as(operator, getSource, `sources/${w.source.agentId}`));
+    expect(fresh).toMatchObject({ trust_band: 'not_enough', trust_label: 'Not enough data yet', trust_trend: [] });
+  });
+
+  it('gives the detail a trust trend: the last row of each month, oldest first', async () => {
+    const v = await json(w.as(operator, postSource, 'sources', 'POST', { kind: 'vendor', name: 'Trend Vendor' }), 201);
+    const rows: [string, number, number][] = [
+      ['2026-10-28T01:00:00Z', 0.7, 11],
+      ['2026-09-03T01:00:00Z', 0.61, 4],
+      ['2026-10-02T01:00:00Z', 0.64, 8],
+      ['2025-01-05T01:00:00Z', 0.5, 1],
+    ];
+    await w.run((ctx) =>
+      ctx.tx.insert(sourceTrustHistory).values(rows.map(([when, trust, n]) => ({ tenantId: ctx.tenantId, sourceId: v.id, computedAt: new Date(when), trust, sampleSize: n, won: 0, inputs: {} }))),
+    );
+    const detail = await json(w.as(operator, getSource, `sources/${v.id}`));
+    expect(detail.trust_trend).toEqual([
+      { month: '2026-09', trust: 61, sample_size: 4 },
+      { month: '2026-10', trust: 70, sample_size: 11 },
+    ]);
   });
 });
 

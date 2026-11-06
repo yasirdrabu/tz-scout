@@ -26,6 +26,13 @@ describe('scoreTiles', () => {
     ]);
   });
 
+  it('carries the trust breakdown to the Source trust tile, and omits it when the line has none', () => {
+    const withBreakdown = lines.map((l) => (l.label === 'Source trust' ? { ...l, breakdown: 'Person 0.64' } : l));
+    const tile = (ls: ExplanationLine[]) => scoreTiles({ priority: 66, fit: 44, intent: 50, lines: ls, offer: null, datedSignals: 2 }, thresholds)[4]!;
+    expect(tile(withBreakdown)).toMatchObject({ breakdown: 'Person 0.64' });
+    expect(tile(lines)).not.toHaveProperty('breakdown');
+  });
+
   it('has no revenue or trust value for an explanation from before the four-weight model', () => {
     const old = lines.filter((l) => l.group !== 'combine');
     const tiles = scoreTiles({ priority: 10, fit: 0, intent: 0, lines: old, offer: null, datedSignals: 0 }, thresholds);

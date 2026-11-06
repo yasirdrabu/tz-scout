@@ -220,7 +220,7 @@ export async function scoreAccount(
       ...(floors.text === undefined ? {} : { tierText: floors.text }),
       priority: pri,
       warmIntroFrom: warm?.introducerName ?? null,
-      trust: trust && { value: trust.trust, sourceName: trust.sourceName },
+      trust: trust && { value: trust.trust, sourceName: trust.sourceName, won: trust.won, sent: trust.sent, levels: trust.levels },
       otherOffers: computed
         .filter((c) => c !== top)
         .map((c) => ({ id: c.offer.id, name: c.offer.name, total: c.match.score, tier: c.match.tier })),
