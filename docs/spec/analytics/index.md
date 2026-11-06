@@ -101,6 +101,14 @@ Built in R3a (the cost ledger), in place of `GET /costs` and `POST /costs` above
 | `GET /api/v1/costs/by-source` | `costs:read` | R3b-1: spend per top-level source over the last 90 days, rolled up, with share, per sent, per assigned, per won and return, then Shared costs and `total_spend_cents` (cost-ledger.md "Source target") |
 | `PUT /api/v1/costs/target` | `budgets:write`, people only | R3b-1: `{ target_cost_per_won_cents }`, 1 or more, or null to clear ("Enter a target above zero, or clear it.") |
 
+Built in R3b-1, in place of `GET /analytics/funnel?by=…` above and the proposed performance route below (first-source
+cohort only; the activity view, any-source mode, other groupings, levels and CSV are later):
+
+| Method and path | Scope | Does |
+|---|---|---|
+| `GET /api/v1/analytics/funnel?period&practice&offer&batch` | `analytics:read` | `period` is `30d`, `90d` (default), `quarter` or `year` (calendar, tenant timezone, to now; anything else is a 400); the cohort is the accounts that arrived in it, narrowed by practice, offer and first batch and by the caller's data limit. Returns `period { key, from, to }` (days), the flow `stages`, `target_cost_per_won_cents`, `totals { sent, sources, won, won_pct, spend_cents, cost_per_won_cents }` (spend is the period's whole ledger), `rows` (top-level sources with an account in the cohort, children rolled up, by sent then name: `counts`, `step_pct`, `cost_per_account_cents`, `spend_cents`, `cost_per_won_cents`, `status`, `win_rate_pct`), `shared_spend_cents` (the spend no row shows) and `updated_at`. Without `costs:read` every spend field is null; spend is never narrowed by data limits |
+| `GET /api/v1/analytics/sources/{id}/performance?period&practice&offer&batch` | `analytics:read` | Any source that is not removed (else 404): `source { id, name, kind }`, `period`, `rank` and `of` (by cost per won among funnel rows with one and 10 or more sent), `prev_id` and `next_id` (neighbours in the funnel rows; null for a source that is not a row), `target_cost_per_won_cents`, `totals { sent, won, won_pct, all_won_pct, spend_cents, cost_per_sent_cents, cost_per_won_cents, status }`, `insight`, `stages[{ key, name, count, all_count, moved_on_pct, all_moved_on_pct, lost, cost_each_cents }]`, `batches[{ batch_id, name, sent, won }]` and `won_accounts[{ account_id, name, offer_name, value_cents }]` by value (null when no won deal has an amount). Spend fields as the funnel |
+
 Proposed additions (to be added to `public-api/index.md` before R3; not yet in the fixed list):
 
 | Method and path | Scope | Does |

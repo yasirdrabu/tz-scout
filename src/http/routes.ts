@@ -53,6 +53,8 @@ import * as v1AdminTenants from './routes/v1/admin/tenants/route';
 import * as v1AdminTestEvent from './routes/v1/admin/test-event/route';
 import * as v1AiRunsId from './routes/v1/ai-runs/[id]/route';
 import * as v1AiRuns from './routes/v1/ai-runs/route';
+import * as v1AnalyticsFunnel from './routes/v1/analytics/funnel/route';
+import * as v1AnalyticsSourcesIdPerformance from './routes/v1/analytics/sources/[id]/performance/route';
 import * as v1ApiKeysId from './routes/v1/api-keys/[id]/route';
 import * as v1ApiKeys from './routes/v1/api-keys/route';
 import * as v1ArrivalsId from './routes/v1/arrivals/[id]/route';
@@ -218,6 +220,8 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/admin/test-event`, module: v1AdminTestEvent },
   { path: `${V1}/ai-runs/:id`, module: v1AiRunsId },
   { path: `${V1}/ai-runs`, module: v1AiRuns },
+  { path: `${V1}/analytics/funnel`, module: v1AnalyticsFunnel },
+  { path: `${V1}/analytics/sources/:id/performance`, module: v1AnalyticsSourcesIdPerformance },
   { path: `${V1}/api-keys/:id`, module: v1ApiKeysId },
   { path: `${V1}/api-keys`, module: v1ApiKeys },
   { path: `${V1}/arrivals/:id`, module: v1ArrivalsId },

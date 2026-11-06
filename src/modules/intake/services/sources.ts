@@ -7,7 +7,7 @@ import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { reviewStatusValidator } from '../contracts/ports';
-import { arrival, source } from '../db/schema';
+import { arrival, batch, source } from '../db/schema';
 
 export const SOURCE_KINDS = ['person', 'agent', 'vendor', 'list', 'partner', 'crm', 'web_form', 'scheduled_pull'] as const;
 export type SourceKind = (typeof SOURCE_KINDS)[number];
@@ -183,6 +183,16 @@ export async function sourceNames(ctx: ModuleContext, ids: string[]): Promise<Ma
     .select({ id: source.id, name: source.name })
     .from(source)
     .where(and(eq(source.tenantId, ctx.tenantId), inArray(source.id, ids)));
+  return new Map(rows.map((r) => [r.id, r.name]));
+}
+
+/** Each given batch's name, by id; unknown ids are left out. */
+export async function batchNames(ctx: ModuleContext, ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const rows = await ctx.tx
+    .select({ id: batch.id, name: batch.name })
+    .from(batch)
+    .where(and(eq(batch.tenantId, ctx.tenantId), inArray(batch.id, ids)));
   return new Map(rows.map((r) => [r.id, r.name]));
 }
 

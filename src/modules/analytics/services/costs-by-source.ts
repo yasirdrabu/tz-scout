@@ -33,17 +33,34 @@ export async function stageDefs(ctx: ModuleContext): Promise<StageDef[]> {
   return stages.map((s) => ({ key: s.key, name: s.name, kind: s.kind, assigned: assigned.has(s.key) }));
 }
 
-type Window = { from: Date; to: Date; flow: StageDef[]; journeys: Journey[]; lines: { amountCents: number; sourceId: string | null; accountId: string | null }[] };
+export type SpendLine = { amountCents: number; sourceId: string | null; accountId: string | null };
+
+type Window = { from: Date; to: Date; flow: StageDef[]; journeys: Journey[]; lines: SpendLine[] };
+
+/** The non-voided cost lines (Ruling 6), dated between the two days when given, else all of them. */
+export async function spendLines(ctx: ModuleContext, days?: { fromDay: string; toDay: string }): Promise<SpendLine[]> {
+  return ctx.tx
+    .select({ amountCents: costLine.amountCents, sourceId: costLine.sourceId, accountId: costLine.accountId })
+    .from(costLine)
+    .where(
+      and(
+        eq(costLine.tenantId, ctx.tenantId),
+        isNull(costLine.voidedAt),
+        days ? gte(costLine.occurredOn, days.fromDay) : undefined,
+        days ? lte(costLine.occurredOn, days.toDay) : undefined,
+      ),
+    );
+}
+
+/** The spend of a source and those below it (`below`, from `rollUp`), from the per-source spend. */
+export const spendOf = (below: Set<string>, bySource: Map<string, number>): number => [...below].reduce((sum, b) => sum + (bySource.get(b) ?? 0), 0);
 
 /** The last 90 days (Ruling 5): every journey, the flow stages, and the non-voided lines dated in the window. */
 async function lastNinetyDays(ctx: ModuleContext, now: Date): Promise<Window> {
   const { from, to, fromDay, toDay } = periodRange('90d', now, await tenantTimezone(ctx));
   const flow = (await stageDefs(ctx)).filter((s) => s.kind === 'flow');
   const journeys = await loadJourneys(ctx);
-  const lines = await ctx.tx
-    .select({ amountCents: costLine.amountCents, sourceId: costLine.sourceId, accountId: costLine.accountId })
-    .from(costLine)
-    .where(and(eq(costLine.tenantId, ctx.tenantId), isNull(costLine.voidedAt), gte(costLine.occurredOn, fromDay), lte(costLine.occurredOn, toDay)));
+  const lines = await spendLines(ctx, { fromDay, toDay });
   return { from, to, flow, journeys, lines };
 }
 
@@ -66,7 +83,7 @@ function tally(js: Journey[], w: Window) {
 /** Won value over spend, to 1 decimal; null when nothing was spent. */
 const returnRatio = (valueCents: number, spendCents: number) => (spendCents === 0 ? null : Math.round((valueCents * 10) / spendCents) / 10);
 
-const sumOf = (lines: { amountCents: number }[]) => lines.reduce((s, l) => s + l.amountCents, 0);
+export const sumOf = (lines: { amountCents: number }[]) => lines.reduce((s, l) => s + l.amountCents, 0);
 
 /** The Costs tiles over the last 90 days (Ruling 12): the ledger total per account sent and per won, and the return. */
 export async function spendReturns(ctx: ModuleContext, now: Date): Promise<{ costPerSentCents: number | null; costPerWonCents: number | null; returnRatio: number | null }> {
@@ -90,7 +107,7 @@ export async function costsBySource(ctx: ModuleContext, now: Date = new Date()):
   for (const [id, s] of sources) {
     if (s.parentId || s.status === 'removed') continue;
     const below = rollUp(id, tree);
-    const spend = [...below].reduce((sum, b) => sum + (bySource.get(b) ?? 0), 0);
+    const spend = spendOf(below, bySource);
     const t = tally(w.journeys.filter((j) => below.has(j.firstSourceId)), w);
     if (spend === 0 && t.sent === 0) continue;
     rows.push({

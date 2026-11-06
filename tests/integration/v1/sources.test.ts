@@ -299,13 +299,18 @@ describe('GET /api/v1/sources/stats', () => {
     expect(accounts.data.map((a: { name: string }) => a.name)).toEqual(expect.arrayContaining(['Stats One', 'Stats Two']));
   });
 
-  it('counts a reviewed account as reviewed', async () => {
+  it('counts a reviewed account as reviewed, and one declined straight from Sent under Sent and its exit only (R3b-1 Ruling 3)', async () => {
     const list = await addList('Reviewed list');
     const a = await w.sent({ name: 'Reviewed Co' }, list.id);
-    await json(w.as(w.owner, patchReviewStatus, `accounts/${a}/review-status`, 'PATCH', { to: 'declined', reason_key: 'duplicate' }));
+    const d = await w.sent({ name: 'Declined Co' }, list.id);
+    await json(w.as(w.owner, patchReviewStatus, `accounts/${a}/review-status`, 'PATCH', { to: 'reviewed' }));
+    await json(w.as(w.owner, patchReviewStatus, `accounts/${d}/review-status`, 'PATCH', { to: 'declined', reason_key: 'duplicate' }));
     await w.deliver();
     const body = await json(w.as(operator, statsRoute, 'sources/stats'));
-    expect(body.data.find((s: { source_id: string }) => s.source_id === list.id)).toMatchObject({ sent: 1, reviewed: 1, reviewed_pct: 100, assigned: 0, assigned_pct: 0 });
+    const ofList = body.data.find((s: { source_id: string }) => s.source_id === list.id);
+    expect(ofList).toMatchObject({ sent: 2, reviewed: 1, reviewed_pct: 50, assigned: 0, assigned_pct: 0 });
+    expect(ofList.by_stage.find((b: { key: string }) => b.key === 'reviewed').count).toBe(1);
+    expect(ofList.by_stage.find((b: { key: string }) => b.key === 'declined').count).toBe(1);
   });
 
   it("is 403 for a seller and leaves out another tenant's sources", async () => {

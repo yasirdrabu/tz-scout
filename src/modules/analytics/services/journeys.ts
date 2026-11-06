@@ -1,4 +1,4 @@
-import { and, count, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, count, eq, isNotNull, max, sql } from 'drizzle-orm';
 import { listScoringPicks } from '@/modules/accounts';
 import { listDeals } from '@/modules/crm';
 import { listResolvedArrivals } from '@/modules/intake';
@@ -185,6 +185,15 @@ export async function loadJourneys(ctx: ModuleContext): Promise<Journey[]> {
   for (const s of stages) byId.get(s.accountId)?.stages.set(s.stageKey, s.enteredAt);
   for (const d of deals) byId.get(d.accountId)?.deals.push({ status: d.status as 'open' | 'won' | 'lost', amountCents: d.amountCents, closedAt: d.closedAt });
   return [...byId.values()];
+}
+
+/** When a journey with its arrival last changed, or null with none. */
+export async function journeysUpdatedAt(ctx: ModuleContext): Promise<Date | null> {
+  const [row] = await ctx.tx
+    .select({ at: max(journey.updatedAt) })
+    .from(journey)
+    .where(and(eq(journey.tenantId, ctx.tenantId), isNotNull(journey.arrivedAt), isNotNull(journey.firstSourceId)));
+  return row?.at ?? null;
 }
 
 /**

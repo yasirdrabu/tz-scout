@@ -65,6 +65,7 @@ export {
   personSourceFor,
   registerSource,
   renamePersonSources,
+  batchNames,
   firstSources,
   sourceNames,
   sourcesOfAccount,

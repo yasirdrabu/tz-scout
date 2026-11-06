@@ -29,3 +29,15 @@ export {
   type ManualLineInput,
   type UsageLineInput,
 } from './services/lines';
+export {
+  CHOOSE_PERIOD,
+  funnel,
+  parsePeriod,
+  sourcePerformance,
+  sourceStatsFromJourneys,
+  type FunnelFilters,
+  type FunnelRow,
+  type FunnelView,
+  type SourcePerformance,
+  type SourceStat,
+} from './services/funnel';
