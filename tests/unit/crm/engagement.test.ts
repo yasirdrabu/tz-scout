@@ -106,8 +106,22 @@ describe('personStates (Ruling 6)', () => {
     ]);
   });
 
-  it('a meeting not yet held is not met, and nothing is not contacted', () => {
-    const rows = [act({ status: 'scheduled', startAt: day(20), contacts: [ct('c-ana')] })];
+  it('a meeting coming up is meeting set at its start, the earliest one; it beats emailed, not replied', () => {
+    const rows = [
+      act({ status: 'scheduled', startAt: day(20), contacts: [ct('c-ana'), ct('c-ben')] }),
+      act({ status: 'scheduled', startAt: day(15), contacts: [ct('c-ana')] }),
+      act({ kind: 'email', occurredAt: day(8), contacts: [ct('c-ana'), ct('c-cy')] }),
+      act({ kind: 'reply', occurredAt: day(9), contacts: [ct('c-ben')] }),
+    ];
+    expect(personStates(rows, contacts, now).slice(0, 3)).toEqual([
+      { personId: 'per_ana', state: 'meeting_set', at: day(15).toISOString() },
+      { personId: 'per_ben', state: 'replied', at: day(9).toISOString() },
+      { personId: 'per_cy', state: 'emailed', at: day(8).toISOString() },
+    ]);
+  });
+
+  it('a cancelled or missed meeting coming up is not meeting set', () => {
+    const rows = [act({ status: 'cancelled', startAt: day(20), contacts: [ct('c-ana')] }), act({ status: 'no_show', startAt: day(21), contacts: [ct('c-ana')] })];
     expect(personStates(rows, new Map([['per_ana', ['c-ana']]]), now)).toEqual([{ personId: 'per_ana', state: 'not_contacted', at: null }]);
   });
 });

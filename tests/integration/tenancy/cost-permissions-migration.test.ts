@@ -37,7 +37,7 @@ beforeAll(async () => {
   // A leader set that already has one of them keeps a single copy.
   await sql`insert into tenancy.tenant (id, slug, name, currency, timezone) values ('t_half', 't-half', 'Half', 'USD', 'UTC')`;
   await sql`insert into tenancy.role_permission (tenant_id, role, permissions) values ('t_half', 'leader', ${['costs:read']})`;
-  await migrateAll({ adminUrl: db.adminUrl });
+  await migrateAll({ adminUrl: db.adminUrl, folders: { tenancy: tenancyUpTo('0009_cost_permissions') } });
 });
 
 afterAll(async () => {

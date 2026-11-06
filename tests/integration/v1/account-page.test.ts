@@ -425,6 +425,7 @@ describe('GET /accounts/{id}/engagement (R2d Ruling 7)', () => {
           { firstName: 'Ben', lastName: 'Replied', email: mail('ben'), roleKeys: ['technical_buyer'] },
           { firstName: 'Cy', lastName: 'Emailed', email: mail('cy') },
           { firstName: 'Dee', lastName: 'Unlinked', email: mail('dee') },
+          { firstName: 'Eve', lastName: 'Booked', email: mail('eve') },
         ],
         signals: [],
         facts: [],
@@ -452,7 +453,7 @@ describe('GET /accounts/{id}/engagement (R2d Ruling 7)', () => {
       await mockAddActivity(ctx, { companyExternalId: co, kind: 'email', contactExternalIds: [contact('Ana'), contact('Ben'), contact('Cy')] });
       await mockAddActivity(ctx, { companyExternalId: co, kind: 'meeting', occurredAt: now, startAt: now, endAt: now, status: 'held', contactExternalIds: [contact('Ana')] });
       await mockAddActivity(ctx, { companyExternalId: co, kind: 'reply', contactExternalIds: [contact('Ben')] });
-      await mockAddActivity(ctx, { companyExternalId: co, kind: 'meeting', occurredAt: next, startAt: next, endAt: next, status: 'scheduled', subject: 'Scoping call' });
+      await mockAddActivity(ctx, { companyExternalId: co, kind: 'meeting', occurredAt: next, startAt: next, endAt: next, status: 'scheduled', subject: 'Scoping call', contactExternalIds: [contact('Eve')] });
     });
     await w.run((ctx) => syncAccount(ctx, a, new Date()));
     const body = await json(w.as(leader, getEngagement, `accounts/${a}/engagement`));
@@ -461,7 +462,8 @@ describe('GET /accounts/{id}/engagement (R2d Ruling 7)', () => {
     expect(state('Ben')).toMatchObject({ state: 'replied', at: expect.any(String) });
     expect(state('Cy')).toMatchObject({ state: 'emailed' });
     expect(state('Dee')).toEqual({ person_id: id('Dee'), state: 'not_contacted', at: null });
-    expect(body).toMatchObject({ engaged: 2, total: 4, gap_role: 'Commercial buyer' });
+    expect(state('Eve')).toEqual({ person_id: id('Eve'), state: 'meeting_set', at: next.toISOString() });
+    expect(body).toMatchObject({ engaged: 2, total: 5, gap_role: 'Commercial buyer' });
     const handoffs = await json(w.as(leader, getHandoffs, `accounts/${a}/handoffs`));
     expect(handoffs.follow_through).toMatchObject({ meetings_held: 1, next_meeting: { at: next.toISOString(), with: 'Scoping call' } });
   });
