@@ -6,6 +6,7 @@ import { useFormat } from '../../lib/useFormat';
 import page from '../../routes/Page.module.css';
 import { EmptyState } from '../../ui/EmptyState';
 import table from '../../ui/Table.module.css';
+import { kindLabel } from '../sources/api';
 import { offersQuery, practicesQuery } from '../offers/api';
 import { LoadFailed, LoadingRows } from '../settings/shared';
 import { batchOptionsQuery, DEFAULT_PERIOD, funnelQuery, PERIODS, STATUS_WORD, type Funnel, type FunnelFilters, type FunnelRow } from './api';
@@ -118,7 +119,7 @@ function Body({ tenant, funnel: fn, showSpend, filters }: { tenant: string; funn
                   <Link to="/t/$tenant/funnel/$sourceId" params={{ tenant, sourceId: r.source_id }} search={carry} className={table.open}>
                     {r.name}
                   </Link>
-                  <div className={styles.sub}>{r.kind}</div>
+                  <div className={styles.sub}>{kindLabel(r.kind)}</div>
                 </td>
                 {fn.stages.map((s, k) => {
                   const per = showSpend ? r.cost_per_account_cents?.[k] : null;

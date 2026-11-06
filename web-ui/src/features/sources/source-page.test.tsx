@@ -33,8 +33,15 @@ describe('Cost per win tile (§11)', () => {
 });
 
 describe('Source page header and tiles (§11)', () => {
-  it('shows the breadcrumb, the owner line and the API percentages on the tiles', async () => {
+  it('leaves out See in funnel without analytics:read', async () => {
     serveSources();
+    renderApp('/t/taazaa/sources/src_marcus');
+    await screen.findByRole('heading', { name: 'Marcus Lee' });
+    expect(screen.queryByRole('link', { name: 'See in funnel' })).toBeNull();
+  });
+
+  it('shows the breadcrumb, the owner line and the API percentages on the tiles', async () => {
+    serveSources({ scopes: [...OPERATOR, 'analytics:read'] });
     renderApp('/t/taazaa/sources/src_marcus');
     expect(await screen.findByRole('heading', { name: 'Marcus Lee' })).toBeInTheDocument();
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });

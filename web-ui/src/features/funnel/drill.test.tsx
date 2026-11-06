@@ -1,5 +1,4 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { renderApp } from '../../test/renderApp';
 import { drill, NO_COSTS, serveDrill } from './testing';
 
@@ -17,7 +16,7 @@ describe('Funnel drill header (§17)', () => {
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'Funnel by source' })).toBeInTheDocument();
     expect(within(crumbs).getByText('RFP Watch')).toBeInTheDocument();
-    expect(screen.getByText('agent · Last 90 days')).toBeInTheDocument();
+    expect(screen.getByText('Agent · Last 90 days')).toBeInTheDocument();
     expect(screen.getByText('3 of 6')).toBeInTheDocument();
     const prev = screen.getByRole('link', { name: 'Previous source' }).getAttribute('href')!;
     expect(prev).toContain('/t/taazaa/funnel/src_prev?');
@@ -107,9 +106,8 @@ describe('Funnel drill stage table and lists', () => {
 
   it('opens a batch', async () => {
     serveDrill();
-    const app = await open();
-    await userEvent.click(screen.getByRole('link', { name: 'October list' }));
-    await waitFor(() => expect(app.path()).toBe('/t/taazaa/batches/b1'));
+    await open();
+    expect(screen.getByRole('link', { name: 'October list' }).getAttribute('href')).toBe('/t/taazaa/batches/b1');
   });
 
   it('lists won accounts with value, or No value', async () => {

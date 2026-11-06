@@ -552,7 +552,7 @@ Tabs:
 
 Mockup gap: the mockup's Queue threshold setting is left out for now (Decision 10).
 
-**As built (R3b-1).** `See in funnel` (a link to `/funnel/:id`) is always shown. The Cost per win tile needs `costs:read`: it reads the money, "None yet" (no wins) or "Not tracked" (no spend), from `/sources/stats` `spend_cents` and `cost_per_won_cents`.
+**As built (R3b-1).** `See in funnel` (a link to `/funnel/:id`) is shown with `analytics:read`. The Cost per win tile needs `costs:read`: it reads the money, "None yet" (no wins) or "Not tracked" (no spend), from `/sources/stats` `spend_cents` and `cost_per_won_cents`.
 
 ## 12. Add a source
 
@@ -682,7 +682,7 @@ and {b}."). Stage by stage table: Stage, Accounts (bar against the all-sources l
 points vs all sources), Lost, Cost each. Batches list (click opens it). Won accounts (name, offer,
 value; "No wins from this source yet.").
 
-**As built (R3b-1).** The screen reads the funnel's `period/practice/offer/batch` search and passes it to `GET /analytics/sources/:id/performance`; the breadcrumb, previous and next keep it. "{i} of {n}" comes from `position` and `row_count` and is left out when they are null; "Ranks {i} of {n}" is left out when there is no rank, and with no target the note reads "No target set". Without `costs:read` the Spend and Cost per won account tiles and the Cost each column are left out. The Accounts bar is the share of this source's first stage, with a marker at the all-sources share. Moved on shows "{x}%" and "+n points vs all sources" (or "-n"). A batch opens `/batches/:id`, a won account `/accounts/:id`. An unknown source shows "That source was not found."
+**As built (R3b-1).** Kinds read as words ("Agent", "Data vendor"). The screen reads the funnel's `period/practice/offer/batch` search and passes it to `GET /analytics/sources/:id/performance`; the breadcrumb, previous and next keep it. "{i} of {n}" comes from `position` and `row_count` and is left out when they are null; "Ranks {i} of {n}" is left out when there is no rank, and with no target the note reads "No target set". Without `costs:read` the Spend and Cost per won account tiles and the Cost each column are left out. The Accounts bar is the share of this source's first stage, with a marker at the all-sources share. Moved on shows "{x}%" and "+n points vs all sources" (or "-n"). A batch opens `/batches/:id`, a won account `/accounts/:id`. An unknown source shows "That source was not found."
 
 ## 18. Costs
 

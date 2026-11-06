@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderApp } from '../../test/renderApp';
-import { funnel, NO_COSTS, serveFunnel } from './testing';
+import { funnel, NO_COSTS, serveDrill, serveFunnel } from './testing';
 
 const open = async (path = '/t/taazaa/funnel') => {
   const app = renderApp(path);
@@ -98,6 +98,7 @@ describe('Funnel table', () => {
 
   it('draws a win-rate bar and links each row to its drill', async () => {
     serveFunnel();
+    serveDrill();
     const app = await open();
     const link = await screen.findByRole('link', { name: 'RFP Watch' });
     expect(link).toHaveAttribute('href', '/t/taazaa/funnel/src_rfp');

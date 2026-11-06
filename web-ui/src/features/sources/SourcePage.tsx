@@ -60,6 +60,7 @@ export function SourcePage() {
         tenant={tenant}
         source={s}
         canAct={canManage}
+        canFunnel={!!me && hasScope(me, 'analytics:read')}
         busy={pause.busy || sync.busy}
         onPause={() => void pause.toggle()}
         onSync={() => void sync.run(() => syncSource(tenant, s.id), 'Sync started.')}

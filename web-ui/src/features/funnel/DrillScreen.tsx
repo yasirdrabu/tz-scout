@@ -7,6 +7,7 @@ import page from '../../routes/Page.module.css';
 import { buttonClass } from '../../ui/Button';
 import { EmptyState } from '../../ui/EmptyState';
 import table from '../../ui/Table.module.css';
+import { kindLabel } from '../sources/api';
 import { LoadFailed, LoadingRows } from '../settings/shared';
 import { drillQuery, PERIODS, STATUS_WORD, type Drill, type DrillStage, type FunnelFilters } from './api';
 import styles from './Funnel.module.css';
@@ -78,7 +79,7 @@ function Body({ tenant, drill: d, carry, showSpend }: { tenant: string; drill: D
       <div className={styles.drillHead}>
         <div>
           <h1 className={page.title}>{d.source.name}</h1>
-          <p className={page.sub}>{`${d.source.kind} · ${period}`}</p>
+          <p className={page.sub}>{`${kindLabel(d.source.kind)} · ${period}`}</p>
         </div>
         <div className={styles.drillActions}>
           {d.position !== null && d.row_count !== null && <span className={styles.sub}>{`${d.position} of ${d.row_count}`}</span>}
@@ -92,7 +93,7 @@ function Body({ tenant, drill: d, carry, showSpend }: { tenant: string; drill: D
       <ul className={showSpend ? styles.tiles : `${styles.tiles} ${styles.tilesTwo}`} aria-label="Source totals">
         <Tile label="Sent" value={f.number(t.sent)} note="Accounts into review" />
         <Tile label="Won" value={f.number(t.won)} note={`${t.won_pct ?? 0}% of sent · all sources ${t.all_won_pct ?? 0}%`} />
-        {showSpend && t.spend_cents !== null && <Tile label="Spend" value={f.money(t.spend_cents)} note={t.cost_per_sent_cents === null ? '' : `${f.money(t.cost_per_sent_cents)} per account sent`} />}
+        {showSpend && t.spend_cents !== null && <Tile label="Spend" value={f.money(t.spend_cents)} note={t.cost_per_sent_cents === null ? null : `${f.money(t.cost_per_sent_cents)} per account sent`} />}
         {showSpend && <Tile label="Cost per won account" value={t.cost_per_won_cents === null ? (costWord ?? 'No wins yet') : f.money(t.cost_per_won_cents)} note={costNote} />}
       </ul>
       {d.insight && <p className={styles.insight}>{d.insight}</p>}
@@ -189,12 +190,12 @@ function StageRow({ stage: s, base, allBase, showSpend }: { stage: DrillStage; b
   );
 }
 
-function Tile({ label, value, note }: { label: string; value: string; note: string }) {
+function Tile({ label, value, note }: { label: string; value: string; note: string | null }) {
   return (
     <li className={styles.tile}>
       <span className={styles.tileLabel}>{label}</span>
       <span className={styles.tileValue}>{value}</span>
-      <span className={styles.tileNote}>{note}</span>
+      {note && <span className={styles.tileNote}>{note}</span>}
     </li>
   );
 }
