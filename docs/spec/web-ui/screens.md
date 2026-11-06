@@ -708,6 +708,8 @@ and the "Cost by source" table: Source, Spend, Share, Per account sent, Per assi
 account, Return; a row opens the funnel drill. Footnote "Return is the value of won deals divided by
 spend. Won value is what each deal closed at."
 
+**As built (R3b-1).** The tiles are Cost per account sent ("None yet" with nothing sent), Cost per won account ("Target {x}" or "No target set"; "No wins yet") and Return on spend ("{n}x" or "No spend yet"), over the last 90 days. `Set target` (`budgets:write`) opens an input in the tile; `Save target` toasts "Target saved.", and an empty box clears it ("Target cleared."); 0 or less is "Enter a target above zero, or clear it.". "Cost by source" lists the top-level sources by spend with the Shared costs row last and without a link; other rows open `/funnel/:sourceId`; a missing figure reads a dash. Add cost and Edit cost have an optional Source picker ("No source" by default), and a line shows its source name under its origin.
+
 ## 19. Offers and practices
 
 **Tag** R1 (practices, offers, pricing, sections); seller guide and playbook by tier R2 · **Route**

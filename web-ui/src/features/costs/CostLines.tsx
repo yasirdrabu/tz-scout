@@ -9,6 +9,7 @@ import { Dialog } from '../../ui/Dialog';
 import { EmptyState } from '../../ui/EmptyState';
 import { Field } from '../../ui/Field';
 import table from '../../ui/Table.module.css';
+import { sourcesQuery } from '../sources/api';
 import { LoadFailed, LoadingRows, useRun } from '../settings/shared';
 import { addLine, CATEGORIES, CATEGORY_WORD, costsKey, editLine, linesQuery, voidLine, type CostCategory, type CostLine } from './api';
 import styles from './Costs.module.css';
@@ -77,7 +78,10 @@ export function CostLines({ tenant, canWrite }: Props) {
                 <tr key={l.id} className={l.voided_at ? styles.voided : ''}>
                   <td>{f.day(l.occurred_on)}</td>
                   <td>{CATEGORY_WORD[l.category]}</td>
-                  <td>{l.origin === 'manual' ? 'Added by hand' : l.provider ? l.provider.charAt(0).toUpperCase() + l.provider.slice(1) : 'Automatic'}</td>
+                  <td>
+                    {l.origin === 'manual' ? 'Added by hand' : l.provider ? l.provider.charAt(0).toUpperCase() + l.provider.slice(1) : 'Automatic'}
+                    {l.source_name && <div className={styles.lineSource}>{l.source_name}</div>}
+                  </td>
                   <td>
                     {l.note ?? ''}
                     {l.voided_at && <div>{`Voided: ${l.void_reason ?? ''}`}</div>}
@@ -128,6 +132,8 @@ function LineDialog({ tenant, line, onClose, onDone }: DialogProps & { line: Cos
   const [category, setCategory] = useState<CostCategory>(line?.category ?? 'partner_fees');
   const [amount, setAmount] = useState(line ? centsToInput(line.amount_cents, currency) : '');
   const [note, setNote] = useState(line?.note ?? '');
+  const [sourceId, setSourceId] = useState(line?.source_id ?? '');
+  const sources = useQuery(sourcesQuery(tenant));
   const [error, setError] = useState<string | null>(null);
 
   async function submit() {
@@ -136,7 +142,7 @@ function LineDialog({ tenant, line, onClose, onDone }: DialogProps & { line: Cos
     const cents = parsed.cents;
     if (cents <= 0) return setError(NEEDS_AMOUNT);
     setError(null);
-    const body = { occurred_on: date, category, amount_cents: cents, note: note.trim() || null };
+    const body = { occurred_on: date, category, amount_cents: cents, note: note.trim() || null, source_id: sourceId || null };
     const ok = await run(async () => {
       if (line) await editLine(tenant, line.id, body);
       else await addLine(tenant, body);
@@ -177,6 +183,19 @@ function LineDialog({ tenant, line, onClose, onDone }: DialogProps & { line: Cos
         </Field>
         <Field label="Amount" error={error}>
           {(c) => <input {...c} inputMode="decimal" className="input" value={amount} onChange={(e) => setAmount(e.target.value)} />}
+        </Field>
+        <Field label="Source">
+          {(c) => (
+            <select {...c} className="input" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+              <option value="">No source</option>
+              {line?.source_id && !sources.data?.data.some((s) => s.id === line.source_id) && <option value={line.source_id}>{line.source_name}</option>}
+              {sources.data?.data.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
         </Field>
         <Field label="Note">{(c) => <textarea {...c} className="input" rows={3} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />}</Field>
       </div>
