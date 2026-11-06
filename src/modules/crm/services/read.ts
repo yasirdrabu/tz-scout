@@ -211,3 +211,15 @@ export async function crmCheckCard(ctx: ModuleContext, accountId: string, opts: 
     hubspotUrl: await crmCompanyUrl(ctx, check.system, check.companyExternalId),
   };
 }
+
+/** Every cached deal in the workspace, for the analytics journey backfill. Background context only. */
+export async function listDeals(
+  ctx: ModuleContext,
+): Promise<{ accountId: string; system: string; externalId: string; status: 'open' | 'won' | 'lost'; amountCents: number | null; closedAt: Date | null; syncedAt: Date }[]> {
+  const rows = await ctx.tx
+    .select({ accountId: deal.accountId, system: deal.system, externalId: deal.externalId, status: deal.status, amountCents: deal.amountCents, closedAt: deal.closedAt, syncedAt: deal.syncedAt })
+    .from(deal)
+    .where(eq(deal.tenantId, ctx.tenantId))
+    .orderBy(deal.id);
+  return rows.map((r) => ({ ...r, status: r.status as 'open' | 'won' | 'lost' }));
+}

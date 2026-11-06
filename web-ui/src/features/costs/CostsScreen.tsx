@@ -10,6 +10,8 @@ import { LoadFailed, LoadingRows } from '../settings/shared';
 import { monthName, percentOf, summaryQuery, type CostsSummary } from './api';
 import { BudgetBanners } from './BudgetBanners';
 import { Budgets } from './Budgets';
+import { CostBySource } from './CostBySource';
+import { CostPerWonTile } from './CostPerWonTile';
 import { CostLines } from './CostLines';
 import styles from './Costs.module.css';
 
@@ -59,6 +61,9 @@ function Body({ tenant, summary: s, canWriteBudgets, canWriteCosts }: { tenant: 
         <Tile label="Spend this month" value={f.money(s.spend_month_cents)} note={monthName(s.month)} />
         <Tile label="Budget used" value={used === null ? 'No budget' : `${used}%`} note={used === null ? 'Set a budget below' : `of ${f.money(s.budget_month_cents)} monthly total`} />
         <Tile label="Last 90 days" value={f.money(s.spend_90d_cents)} note="All categories" />
+        <Tile label="Cost per account sent" value={s.cost_per_sent_cents === null ? 'None yet' : f.money(s.cost_per_sent_cents)} note="Over 90 days" />
+        <CostPerWonTile tenant={tenant} summary={s} canEdit={canWriteBudgets} />
+        <Tile label="Return on spend" value={s.return_ratio === null ? 'No spend yet' : `${s.return_ratio}x`} note="Over 90 days" />
       </ul>
       <div className={styles.pair}>
         <Card title="Where the money goes" actions={<span className={styles.total}>{`${f.money(s.spend_90d_cents)} total`}</span>}>
@@ -107,6 +112,7 @@ function Body({ tenant, summary: s, canWriteBudgets, canWriteCosts }: { tenant: 
           </div>
         </Card>
       </div>
+      <CostBySource tenant={tenant} />
       <Budgets tenant={tenant} summary={s} canEdit={canWriteBudgets} />
       <CostLines tenant={tenant} canWrite={canWriteCosts} />
     </>

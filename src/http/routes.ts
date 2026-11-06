@@ -53,6 +53,8 @@ import * as v1AdminTenants from './routes/v1/admin/tenants/route';
 import * as v1AdminTestEvent from './routes/v1/admin/test-event/route';
 import * as v1AiRunsId from './routes/v1/ai-runs/[id]/route';
 import * as v1AiRuns from './routes/v1/ai-runs/route';
+import * as v1AnalyticsFunnel from './routes/v1/analytics/funnel/route';
+import * as v1AnalyticsSourcesIdPerformance from './routes/v1/analytics/sources/[id]/performance/route';
 import * as v1ApiKeysId from './routes/v1/api-keys/[id]/route';
 import * as v1ApiKeys from './routes/v1/api-keys/route';
 import * as v1ArrivalsId from './routes/v1/arrivals/[id]/route';
@@ -73,9 +75,11 @@ import * as v1CaseStudiesId from './routes/v1/case-studies/[id]/route';
 import * as v1CaseStudies from './routes/v1/case-studies/route';
 import * as v1ConflictsId from './routes/v1/conflicts/[id]/route';
 import * as v1CostsBudgets from './routes/v1/costs/budgets/route';
+import * as v1CostsBySource from './routes/v1/costs/by-source/route';
 import * as v1CostsLinesId from './routes/v1/costs/lines/[id]/route';
 import * as v1CostsLines from './routes/v1/costs/lines/route';
 import * as v1CostsSummary from './routes/v1/costs/summary/route';
+import * as v1CostsTarget from './routes/v1/costs/target/route';
 import * as v1CrmResource from './routes/v1/crm/[resource]/route';
 import * as v1DevUsers from './routes/v1/dev/users/route';
 import * as v1EnrichmentRequestsId from './routes/v1/enrichment-requests/[id]/route';
@@ -216,6 +220,8 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/admin/test-event`, module: v1AdminTestEvent },
   { path: `${V1}/ai-runs/:id`, module: v1AiRunsId },
   { path: `${V1}/ai-runs`, module: v1AiRuns },
+  { path: `${V1}/analytics/funnel`, module: v1AnalyticsFunnel },
+  { path: `${V1}/analytics/sources/:id/performance`, module: v1AnalyticsSourcesIdPerformance },
   { path: `${V1}/api-keys/:id`, module: v1ApiKeysId },
   { path: `${V1}/api-keys`, module: v1ApiKeys },
   { path: `${V1}/arrivals/:id`, module: v1ArrivalsId },
@@ -236,9 +242,11 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/case-studies`, module: v1CaseStudies },
   { path: `${V1}/conflicts/:id`, module: v1ConflictsId },
   { path: `${V1}/costs/budgets`, module: v1CostsBudgets },
+  { path: `${V1}/costs/by-source`, module: v1CostsBySource },
   { path: `${V1}/costs/lines/:id`, module: v1CostsLinesId },
   { path: `${V1}/costs/lines`, module: v1CostsLines },
   { path: `${V1}/costs/summary`, module: v1CostsSummary },
+  { path: `${V1}/costs/target`, module: v1CostsTarget },
   { path: `${V1}/crm/:resource`, module: v1CrmResource },
   { path: `${V1}/dev/users`, module: v1DevUsers },
   { path: `${V1}/enrichment-requests/:id`, module: v1EnrichmentRequestsId },

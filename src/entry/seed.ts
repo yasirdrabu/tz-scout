@@ -19,6 +19,7 @@ import {
   userIdForEmail,
 } from '@/modules/tenancy';
 import { seedAccountDefaults } from '@/modules/accounts';
+import { backfillJourneys } from '@/modules/analytics';
 import { backfillCrm, seedCrmDefaults, seedMockCrm } from '@/modules/crm';
 import { listConnections } from '@/modules/integrations';
 import { listSources, personSourceFor, registerSource, renamePersonSources, seedIntakeDefaults } from '@/modules/intake';
@@ -182,6 +183,8 @@ export async function seed(): Promise<{ devApiKey: string }> {
       // Every scored account gets a brief, as the first score would have given it.
       await seedPlaybooksDefaults(ctx(tx));
       await backfillBriefs(ctx(tx));
+      // The funnel's journeys, for accounts that arrived before R3b-1 (the consumers fill them from then on).
+      await backfillJourneys(ctx(tx));
     });
     // Sources come after the first transaction commits, so the people's users exist, named.
     await renameHandleUsers(NAMES);

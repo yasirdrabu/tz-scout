@@ -6,6 +6,7 @@ const lineFields = {
   category: z.string(),
   amount_cents: z.number().int(),
   note: z.string().nullable().optional(),
+  source_id: z.string().nullable().optional(),
 };
 
 export const addLineBody = z.strictObject(lineFields);

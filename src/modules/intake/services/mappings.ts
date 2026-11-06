@@ -77,7 +77,7 @@ export async function chooseMapping(
     return { mapping, origin: 'saved', layout: null, needsConfirm: !hasRequiredFields(mapping) };
   }
 
-  const suggested = await suggestMapping(ctx, input.headers, input.sampleRows);
+  const suggested = await suggestMapping(ctx, input.headers, input.sampleRows, input.sourceId);
   return { mapping: suggested.mapping, origin: suggested.origin, layout: null, needsConfirm: true };
 }
 

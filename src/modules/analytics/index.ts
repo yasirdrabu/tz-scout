@@ -1,7 +1,17 @@
 // Public interface of the analytics module. Other modules import only this file or `contracts/*`.
-export { analyticsConsumers, analyticsUsageLines } from './consumers';
+export {
+  analyticsConsumers,
+  analyticsJourneyArrival,
+  analyticsJourneyDeal,
+  analyticsJourneyMerge,
+  analyticsJourneyScore,
+  analyticsJourneyStage,
+  analyticsUsageLines,
+} from './consumers';
 export { budgetLevelChanged } from './contracts/events';
+export { backfillJourneys, loadJourneys, mergeJourneys, recordArrival, recordDeal, recordScore, recordStage, type Journey } from './services/journeys';
 export type { BudgetLevel } from './domain/budgets';
+export { costsBySource, getTarget, setTarget, type CostBySourceRow } from './services/costs-by-source';
 export { PAST_MONTH, getBudgets, recomputeLevel, saveBudgets, summary, type BudgetsView, type CostsSummary } from './services/budgets';
 export {
   AMOUNT_ABOVE_ZERO,
@@ -19,3 +29,15 @@ export {
   type ManualLineInput,
   type UsageLineInput,
 } from './services/lines';
+export {
+  CHOOSE_PERIOD,
+  funnel,
+  parsePeriod,
+  sourcePerformance,
+  sourceStatsFromJourneys,
+  type FunnelFilters,
+  type FunnelRow,
+  type FunnelView,
+  type SourcePerformance,
+  type SourceStat,
+} from './services/funnel';

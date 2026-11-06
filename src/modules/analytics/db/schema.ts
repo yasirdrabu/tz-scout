@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, check, date, index, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, check, date, index, integer, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Analytics schema. Every table here is a tenant table: `tenant_id` not null, row level security
@@ -28,6 +28,8 @@ export const costLine = analytics.table(
     /** The `integrations.usage.recorded` event a usage line came from: one line per event. */
     originEventId: text('origin_event_id'),
     accountId: text('account_id'),
+    /** R3b-1 Ruling 7: the source the cost is for; it wins over the account's first source (Ruling 6). */
+    sourceId: text('source_id'),
     note: text('note'),
     createdBy: text('created_by'),
     createdAt: at('created_at').notNull().defaultNow(),
@@ -85,5 +87,67 @@ export const budgetState = analytics.table(
   (t) => [
     primaryKey({ columns: [t.tenantId, t.category, t.month] }),
     check('budget_state_level_valid', sql`${t.level} in ('ok', 'alert', 'over', 'paused')`),
+  ],
+);
+
+/** Workspace cost settings (R3b-1 Ruling 8): the target cost per won account, none by default. */
+export const costSetting = analytics.table('cost_setting', {
+  tenantId: text('tenant_id').primaryKey(),
+  targetCostPerWonCents: bigint('target_cost_per_won_cents', { mode: 'number' }),
+  updatedBy: text('updated_by'),
+  updatedAt: at('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * One row per account (R3b-1 Ruling 1): its first arrival (the chain's closest source and the batch) and the
+ * practice and offer scoring picked. A score or a stage move can arrive before the arrival, so the row can exist
+ * with no arrival yet (`first_source_id` and `arrived_at` null); reads skip it until the arrival fills them.
+ * `exit_at` is the time of the latest stage move the row has seen to an exit or a flow stage, and `exit_stage`
+ * is set only when that move was to an exit, so an older move delivered late changes neither.
+ */
+export const journey = analytics.table('journey', {
+  tenantId: text('tenant_id').notNull(),
+  accountId: text('account_id').primaryKey(),
+  firstSourceId: text('first_source_id'),
+  firstBatchId: text('first_batch_id'),
+  arrivedAt: at('arrived_at'),
+  practiceId: text('practice_id'),
+  offerId: text('offer_id'),
+  /** The `version` of the score that set practice and offer: an older score delivered late is ignored. */
+  scoreVersion: integer('score_version'),
+  exitStage: text('exit_stage'),
+  exitAt: at('exit_at'),
+  updatedAt: at('updated_at').notNull().defaultNow(),
+});
+
+/** The earliest time an account entered each stage: a late or retried event never moves it. */
+export const journeyStage = analytics.table(
+  'journey_stage',
+  {
+    tenantId: text('tenant_id').notNull(),
+    accountId: text('account_id').notNull(),
+    stageKey: text('stage_key').notNull(),
+    enteredAt: at('entered_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.accountId, t.stageKey] })],
+);
+
+/** Each CRM deal's latest state; a row only takes an event with a later `observed_at`. */
+export const journeyDeal = analytics.table(
+  'journey_deal',
+  {
+    tenantId: text('tenant_id').notNull(),
+    accountId: text('account_id').notNull(),
+    system: text('system').notNull(),
+    dealExternalId: text('deal_external_id').notNull(),
+    status: text('status').notNull(), // open | won | lost
+    amountCents: bigint('amount_cents', { mode: 'number' }),
+    closedAt: at('closed_at'),
+    observedAt: at('observed_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.system, t.dealExternalId] }),
+    index('journey_deal_account_idx').on(t.tenantId, t.accountId),
+    check('journey_deal_status_valid', sql`${t.status} in ('open', 'won', 'lost')`),
   ],
 );

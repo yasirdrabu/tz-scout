@@ -71,7 +71,7 @@ module adds an event or tool.
 | `analytics.diagnosis.created` | ANL | Weekly diagnosis stored | owners (notify) |
 | `integrations.connection.changed` / `.tested` | INT | Connection added, edited, tested | Admin |
 | `integrations.usage.threshold_reached` | INT | 80% (`warn`) or 100% (`blocked`) of a provider limit, once per level per period | Settings, Integrations banner (in-app only; email later) |
-| `integrations.usage.recorded` | INT | A successful live outside call with a cost (credits, tokens) above 0 cents, priced at the tenant's rates (R3a). Sample and mock calls never publish it | ANL (automatic cost lines) |
+| `integrations.usage.recorded` | INT | A successful live outside call with a cost (credits, tokens) above 0 cents, priced at the tenant's rates (R3a). Sample and mock calls never publish it. Optional `sourceId` (R3b-1) when the caller knows the source: intake's arrival normalise call (the arrival's closest source) and CSV column mapping (the import's source) | ANL (automatic cost lines) |
 | `ai.run.completed` | AI | An AI task ran (cost, tokens) | Nobody yet. ANL never makes cost lines from it: AI cost lines come only from `integrations.usage.recorded`. Re-targeting a line to the run's account by `correlationId` is R3b |
 | `platform.job.dead` | PLT | A job exhausted its retries | Admin |
 

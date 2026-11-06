@@ -24,7 +24,26 @@ export type CostsSummary = {
   spend_90d_cents: number;
   categories: CategorySummary[];
   months: { month: string; spend_cents: number; budget_cents: number }[];
+  /** Over the last 90 days (R3b-1 Ruling 12): null when there is nothing to divide by. */
+  cost_per_sent_cents: number | null;
+  cost_per_won_cents: number | null;
+  return_ratio: number | null;
+  target_cost_per_won_cents: number | null;
 };
+
+/** One top-level source in "Cost by source", or the Shared costs row (`source_id` null, with only spend and share). */
+export type BySourceRow = {
+  source_id: string | null;
+  name: string;
+  kind?: string;
+  spend_cents: number;
+  share_pct: number | null;
+  per_sent_cents?: number | null;
+  per_assigned_cents?: number | null;
+  per_won_cents?: number | null;
+  return_ratio?: number | null;
+};
+export type BySource = { rows: BySourceRow[]; total_spend_cents: number };
 
 export type BudgetsView = {
   month: string;
@@ -47,9 +66,11 @@ export type CostLine = {
   void_reason: string | null;
   voided_by: string | null;
   replaces_id: string | null;
+  source_id: string | null;
+  source_name: string | null;
 };
 
-export type LineBody = { occurred_on: string; category: CostCategory; amount_cents: number; note: string | null };
+export type LineBody = { occurred_on: string; category: CostCategory; amount_cents: number; note: string | null; source_id: string | null };
 
 export type Rate = { item: string; cents_per_unit: number; is_default: boolean };
 
@@ -66,6 +87,16 @@ export const summaryQuery = (tenant: string, enabled = true) =>
 
 export const saveBudgets = (tenant: string, month: string, budgets: { category: CostCategory; amount_cents: number }[]) =>
   apiFetch<BudgetsView>('/costs/budgets', { tenant, method: 'PUT', body: { month, budgets } });
+
+export const bySourceQuery = (tenant: string) =>
+  queryOptions({
+    queryKey: [...costsKey(tenant), 'by-source'],
+    queryFn: () => apiFetch<BySource>('/costs/by-source', { tenant }),
+  });
+
+/** The one workspace target for cost per won account, in cents; null clears it. */
+export const saveTarget = (tenant: string, cents: number | null) =>
+  apiFetch<{ target_cost_per_won_cents: number | null }>('/costs/target', { tenant, method: 'PUT', body: { target_cost_per_won_cents: cents } });
 
 /** Cost lines newest first, 50 a page; the next page by cursor. */
 export const linesQuery = (tenant: string, includeVoided: boolean) =>

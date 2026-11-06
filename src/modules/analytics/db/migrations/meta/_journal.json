@@ -22,6 +22,20 @@
       "when": 1793890348101,
       "tag": "0002_budget_seq",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793967233218,
+      "tag": "0003_journeys",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793968320210,
+      "tag": "0004_cost_sources_target",
+      "breakpoints": true
     }
   ]
 }

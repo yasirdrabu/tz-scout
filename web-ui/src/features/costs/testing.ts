@@ -2,7 +2,7 @@ import { http, HttpResponse } from 'msw';
 import { exactly, problem } from '../../test/http';
 import { serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
-import type { BudgetsView, CategorySummary, CostLine, CostsSummary, Rate } from './api';
+import type { BudgetsView, BySource, CategorySummary, CostLine, CostsSummary, Rate } from './api';
 
 // Fixtures in the API's shapes (snake_case) for the Costs tests.
 
@@ -43,6 +43,10 @@ export const summary = (s: Partial<CostsSummary> = {}): CostsSummary => ({
   spend_90d_cents: 300_000,
   categories: CATEGORIES,
   months: MONTHS,
+  cost_per_sent_cents: 7_500,
+  cost_per_won_cents: 150_000,
+  return_ratio: 3.2,
+  target_cost_per_won_cents: 200_000,
   ...s,
 });
 
@@ -60,8 +64,25 @@ export const line = (l: Partial<CostLine> & Pick<CostLine, 'id'>): CostLine => (
   void_reason: null,
   voided_by: null,
   replaces_id: null,
+  source_id: null,
+  source_name: null,
   ...l,
 });
+
+export const BY_SOURCE: BySource = {
+  total_spend_cents: 300_000,
+  rows: [
+    { source_id: 'src_agency', name: 'Agency', kind: 'vendor', spend_cents: 200_000, share_pct: 67, per_sent_cents: 5_000, per_assigned_cents: 10_000, per_won_cents: 100_000, return_ratio: 4.5 },
+    { source_id: 'src_riley', name: 'Riley', kind: 'person', spend_cents: 60_000, share_pct: 20, per_sent_cents: null, per_assigned_cents: null, per_won_cents: null, return_ratio: null },
+    { source_id: null, name: 'Shared costs', spend_cents: 40_000, share_pct: 13 },
+  ],
+};
+
+/** Just the fields the Source picker reads. */
+const SOURCES = [
+  { id: 'src_agency', name: 'Agency', kind: 'vendor' },
+  { id: 'src_riley', name: 'Riley', kind: 'person' },
+];
 
 export const MANUAL = line({ id: 'cst_manual' });
 export const USAGE = line({ id: 'cst_usage', category: 'ai_usage', provider: 'anthropic', origin: 'usage', amount_cents: 340, note: null });
@@ -78,6 +99,7 @@ type Opts = {
   scopes?: string[];
   summary?: CostsSummary;
   lines?: CostLine[];
+  bySource?: BySource;
   /** Answers for one request, such as `PUT budgets` or `POST lines`. */
   answer?: Record<string, () => Response>;
 };
@@ -93,6 +115,12 @@ export function serveCosts(opts: Opts = {}) {
   const all = opts.lines ?? [MANUAL, USAGE, VOIDED];
   server.use(
     http.get('/api/v1/costs/summary', () => HttpResponse.json(opts.summary ?? summary())),
+    http.get('/api/v1/costs/by-source', () => HttpResponse.json(opts.bySource ?? BY_SOURCE)),
+    http.put('/api/v1/costs/target', async ({ request }) => {
+      await log(request);
+      return opts.answer?.['PUT target']?.() ?? HttpResponse.json(await request.clone().json());
+    }),
+    http.get('/api/v1/sources', () => HttpResponse.json({ data: SOURCES, next_cursor: null, meta: { counts_by_kind: {}, kind_labels: {}, can_add_crm: false } })),
     http.get('/api/v1/costs/lines', ({ request }) => {
       const voided = new URL(request.url).searchParams.get('include_voided') === 'true';
       return HttpResponse.json({ data: voided ? all : all.filter((l) => !l.voided_at), next_cursor: null });

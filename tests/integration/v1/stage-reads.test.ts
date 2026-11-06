@@ -6,6 +6,8 @@ import { GET as reviewRoute } from '@/http/routes/v1/accounts/[id]/review/route'
 import { GET as accountsRoute } from '@/http/routes/v1/accounts/route';
 import { GET as statsRoute } from '@/http/routes/v1/sources/stats/route';
 import { GET as stagesRoute } from '@/http/routes/v1/stages/route';
+import { recordStage } from '@/modules/analytics';
+import { stageKinds } from '@/modules/analytics/services/journeys';
 import { accountReview, pipelineStage } from '@/modules/routing/db/schema';
 import { setPrincipalCacheTtl } from '@/modules/tenancy';
 import { closeDbs } from '@/platform/db/client';
@@ -20,10 +22,14 @@ let leader: string;
 let src: { personId: string; agentId: string };
 const json = async (res: Response | Promise<Response>) => (await res).json();
 
-/** Puts the account on `stage` in both the review and the summary (the summary follows the review through events). */
+/**
+ * Puts the account on `stage` in the review, the summary (it follows the review through events) and the journey
+ * (the source funnel reads journeys, R3b-1 Ruling 13).
+ */
 const putAt = async (accountId: string, stage: string) => {
   await w.run((ctx) => ctx.tx.update(accountReview).set({ stage }).where(eq(accountReview.accountId, accountId)));
   await setSummary(w.tenant, accountId, { stage });
+  await w.run(async (ctx) => recordStage(ctx, { accountId, stageKey: stage, at: new Date(), kind: (await stageKinds(ctx)).get(stage) }));
 };
 
 /** Engaged is renamed Talking and "Proposal" (set by hand) sits before Won (REV-E5-S1, as the reads see it). */

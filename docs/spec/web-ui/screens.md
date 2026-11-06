@@ -552,6 +552,8 @@ Tabs:
 
 Mockup gap: the mockup's Queue threshold setting is left out for now (Decision 10).
 
+**As built (R3b-1).** `See in funnel` (a link to `/funnel/:id`) is shown with `analytics:read`. The Cost per win tile needs `costs:read`: it reads the money, "None yet" (no wins) or "Not tracked" (no spend), from `/sources/stats` `spend_cents` and `cost_per_won_cents`.
+
 ## 12. Add a source
 
 **Tag** R1 · **Who** `sources:manage`
@@ -666,6 +668,8 @@ Spend, Cost per won account (green at or under target, amber within 50% over, re
 enough data" or "No wins yet"), win-rate bar. Legend line. Filters change the numbers (the mockup's
 do not).
 
+**As built (R3b-1).** The filters are native selects whose values live in the URL query (a Practice change clears Offer); Batch lists the first 100 batches. A seller sees the counts only: without `costs:read` the Spend and Cost per won account tiles and columns, the cost text in the stage cells and the legend are left out. The cost per won cell is a coloured pill by the API status (good, amber, red) or a gray word ("Not enough data", "No wins yet", "No target set"). A row opens `/funnel/:sourceId`, carrying the current filters. An empty cohort shows "No accounts arrived in this period."
+
 ## 17. Funnel drill by source
 
 **Tag** R3 · **Route** `/t/:tenant/funnel/:sourceId` · **Who** `analytics:read`
@@ -677,6 +681,8 @@ Insight line from the API ("Too early to judge." under 10 sent; "Most accounts s
 and {b}."). Stage by stage table: Stage, Accounts (bar against the all-sources line), Moved on (% and
 points vs all sources), Lost, Cost each. Batches list (click opens it). Won accounts (name, offer,
 value; "No wins from this source yet.").
+
+**As built (R3b-1).** Kinds read as words ("Agent", "Data vendor"). The screen reads the funnel's `period/practice/offer/batch` search and passes it to `GET /analytics/sources/:id/performance`; the breadcrumb, previous and next keep it. "{i} of {n}" comes from `position` and `row_count` and is left out when they are null; "Ranks {i} of {n}" is left out when there is no rank, and with no target the note reads "No target set". Without `costs:read` the Spend and Cost per won account tiles and the Cost each column are left out. The Accounts bar is the share of this source's first stage, with a marker at the all-sources share. Moved on shows "{x}%" and "+n points vs all sources" (or "-n"). A batch opens `/batches/:id`, a won account `/accounts/:id`. An unknown source shows "That source was not found."
 
 ## 18. Costs
 
@@ -701,6 +707,8 @@ saved.").
 and the "Cost by source" table: Source, Spend, Share, Per account sent, Per assigned, Per won
 account, Return; a row opens the funnel drill. Footnote "Return is the value of won deals divided by
 spend. Won value is what each deal closed at."
+
+**As built (R3b-1).** The tiles are Cost per account sent ("None yet" with nothing sent), Cost per won account ("Target {x}" or "No target set"; "No wins yet") and Return on spend ("{n}x" or "No spend yet"), over the last 90 days. `Set target` (`budgets:write`) opens an input in the tile; `Save target` toasts "Target saved.", and an empty box clears it ("Target cleared."); 0 or less is "Enter a target above zero, or clear it.". "Cost by source" lists the top-level sources by spend with the Shared costs row last and without a link; other rows open `/funnel/:sourceId`; a missing figure reads a dash. Add cost and Edit cost have an optional Source picker ("No source" by default), and a line shows its source name under its origin.
 
 ## 19. Offers and practices
 

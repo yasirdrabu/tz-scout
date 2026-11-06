@@ -11,6 +11,8 @@ type Props = {
   source: SourceDetail;
   /** Pause, Resume and Sync now are for people with sources:manage; an archived source is read only. */
   canAct: boolean;
+  /** `See in funnel` needs analytics:read, as the Funnel does. */
+  canFunnel: boolean;
   busy: boolean;
   onPause: () => void;
   onSync: () => void;
@@ -29,7 +31,7 @@ export function ownerLine(s: SourceDetail, lastSent: (at: string) => string): st
 }
 
 /** §11 header: the breadcrumb, initials tile, name, kind and status, the owner line, and the actions. */
-export function SourceHeader({ tenant, source: s, canAct, busy, onPause, onSync }: Props) {
+export function SourceHeader({ tenant, source: s, canAct, canFunnel, busy, onPause, onSync }: Props) {
   const f = useFormat();
   const archived = s.status === 'archived';
   const crumbs = s.breadcrumb.slice(0, -1);
@@ -66,6 +68,13 @@ export function SourceHeader({ tenant, source: s, canAct, busy, onPause, onSync 
             </div>
             <p className={styles.meta}>{ownerLine(s, (at) => f.relative(at))}</p>
           </div>
+          {canFunnel && (
+            <div className={styles.actions}>
+              <Link to="/t/$tenant/funnel/$sourceId" params={{ tenant, sourceId: s.id }} className={buttonClass('secondary', 'sm')}>
+                See in funnel
+              </Link>
+            </div>
+          )}
           {canAct && !archived && (
             <div className={styles.actions}>
               <Button size="sm" variant="secondary" disabled={busy} onClick={onPause}>

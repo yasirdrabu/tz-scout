@@ -12,7 +12,7 @@ budgets need `budgets:write` (owners and leaders). `analytics:read` alone does n
 |---|---|
 | Owner | Everything in the tenant, including the cost ledger and voided lines |
 | Leader (CRO, sales leader) | All funnels, sources, costs and the scorecard |
-| Seller (AE) | The funnel and outcomes of accounts assigned to them; no cost ledger; costs only as cost per won client for their own accounts (R3b) |
+| Seller (AE) | The funnel and outcomes of accounts assigned to them; no cost ledger. In R3b-1 the Funnel and the drill show a seller with `own_accounts` only their own accounts, with every spend field null (spend needs `costs:read`), and `/costs/by-source` is 403. Their own cost per won client is later |
 | Operator | Funnels, sources, costs; adds, edits and voids cost lines |
 | Agent principal | Only its own source's performance (ANL-E3-S3), and costs only with `analytics:read` |
 

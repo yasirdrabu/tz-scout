@@ -428,3 +428,12 @@ export async function checkExclusion(ctx: ModuleContext, accountId: string): Pro
     .where(and(eq(exclusionRule.tenantId, ctx.tenantId), eq(exclusionRule.key, acc.key)));
   return { key: acc.key, label: rule?.label ?? acc.key, override: acc.override };
 }
+
+/** Scoring's practice and best offer (and the score's version) for every account summary, for the analytics journey backfill. Background context only. */
+export async function listScoringPicks(ctx: ModuleContext): Promise<{ accountId: string; practiceId: string | null; bestOfferId: string | null; scoreVersion: number | null }[]> {
+  return ctx.tx
+    .select({ accountId: accountSummary.accountId, practiceId: accountSummary.practiceId, bestOfferId: accountSummary.bestOfferId, scoreVersion: accountSummary.scoreVersion })
+    .from(accountSummary)
+    .where(eq(accountSummary.tenantId, ctx.tenantId))
+    .orderBy(asc(accountSummary.accountId));
+}

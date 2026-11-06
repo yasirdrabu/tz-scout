@@ -112,6 +112,7 @@ As fixed in [public-api/index.md](../public-api/index.md):
 |---|---|---|
 | `GET /api/v1/sources` | `arrivals:read` | Sources visible to the principal (its own and children), with trust |
 | `POST /api/v1/sources` | `sources:manage` | Create a person, agent or vendor source |
+| `GET /api/v1/sources/stats` | `sources:manage` | Per source, for all time: `sent`, `reviewed`, `assigned`, `won` and the percentages, `by_stage` (where the accounts went: an exit, else the furthest flow stage), `is_new`, `spend_cents` and `cost_per_won_cents`. Since R3b-1 counted from analytics journeys: each account under the source that first sent it, at the furthest stage it reached, children rolled up, so the Sources page and the Funnel agree. Reviewed is the second flow stage. Spend is all-time ledger spend rolled up; both spend fields are null without `costs:read`, and cost per won also with no wins. The route composes intake (which sources) and analytics (the counts) |
 | `POST /api/v1/arrivals` | `arrivals:write` | One account. `202` with `arrival_id`, `status_url` |
 | `GET /api/v1/arrivals/{id}` | `arrivals:read` | Status, `waiting_on`, reason, account id, stage, feedback. The arrival's feedback (account and chain sources, one per cause) is shown to anyone who may see the arrival; the feedback feed shows the caller's own source only |
 | `GET /api/v1/arrivals?batch_id=&status=&since=&cursor=` | `arrivals:read` | Within the principal's data limit |

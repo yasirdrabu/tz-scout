@@ -4,13 +4,44 @@ import { http, HttpResponse } from 'msw';
 import { exactly, problem } from '../../test/http';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
-import { CSV, detail, HUBSPOT, KESTREL, MARCUS, RFP, serveSources, source, SOURCES } from './testing';
+import { CSV, detail, HUBSPOT, KESTREL, MARCUS, OPERATOR, RFP, serveSources, source, SOURCES, STATS } from './testing';
 
 beforeEach(() => localStorage.clear());
 
+describe('Cost per win tile (§11)', () => {
+  const withSpend = (over: Partial<(typeof STATS)[number]>) => [{ ...STATS[1]!, ...over }];
+  const cases = [
+    ['the money', { spend_cents: 60_000, cost_per_won_cents: 10_000 }, '$100'],
+    ['None yet with no wins', { spend_cents: 60_000, cost_per_won_cents: null, won: 0 }, 'None yet'],
+    ['Not tracked with no spend', { spend_cents: 0, cost_per_won_cents: null }, 'Not tracked'],
+  ] as const;
+  it.each(cases)('reads %s', async (_name, over, text) => {
+    serveSources({ scopes: [...OPERATOR, 'costs:read'], stats: withSpend(over) });
+    renderApp('/t/taazaa/sources/src_rfp');
+    await screen.findByRole('heading', { name: 'RFP Watch' });
+    const li = (await screen.findByText('Cost per win')).closest('li')!;
+    expect(li).toHaveTextContent(text);
+  });
+
+  it('is hidden without costs:read', async () => {
+    serveSources({ stats: withSpend({ spend_cents: null, cost_per_won_cents: null }) });
+    renderApp('/t/taazaa/sources/src_rfp');
+    await screen.findByRole('heading', { name: 'RFP Watch' });
+    await screen.findByText('Sent');
+    expect(screen.queryByText('Cost per win')).toBeNull();
+  });
+});
+
 describe('Source page header and tiles (§11)', () => {
-  it('shows the breadcrumb, the owner line and the API percentages on the tiles', async () => {
+  it('leaves out See in funnel without analytics:read', async () => {
     serveSources();
+    renderApp('/t/taazaa/sources/src_marcus');
+    await screen.findByRole('heading', { name: 'Marcus Lee' });
+    expect(screen.queryByRole('link', { name: 'See in funnel' })).toBeNull();
+  });
+
+  it('shows the breadcrumb, the owner line and the API percentages on the tiles', async () => {
+    serveSources({ scopes: [...OPERATOR, 'analytics:read'] });
     renderApp('/t/taazaa/sources/src_marcus');
     expect(await screen.findByRole('heading', { name: 'Marcus Lee' })).toBeInTheDocument();
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
@@ -22,7 +53,7 @@ describe('Source page header and tiles (§11)', () => {
     expect(within(tiles).getByText('71% of reviewed')).toBeInTheDocument();
     expect(within(tiles).getByText('9% of assigned')).toBeInTheDocument();
     expect(within(tiles).getAllByText('Not enough data yet').length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: 'See in funnel' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'See in funnel' }).getAttribute('href')).toBe('/t/taazaa/funnel/src_marcus');
   });
 
   it('says No owner and names the parent when there is one', async () => {

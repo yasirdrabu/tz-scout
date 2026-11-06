@@ -65,9 +65,11 @@ export {
   personSourceFor,
   registerSource,
   renamePersonSources,
+  batchNames,
   firstSources,
   sourceNames,
   sourcesOfAccount,
+  sourceTree,
   updateSource,
   type AccountSource,
   type RegisterSourceInput,
@@ -76,6 +78,7 @@ export {
   type SourceListRow,
   type SourcePatch,
   type SourceStatus,
+  type SourceTreeNode,
   type SourceView,
 } from './services/sources';
 export {
@@ -129,6 +132,7 @@ export {
   getArrivalWithStatus,
   getBatch,
   initialReviewStatusKeys,
+  listResolvedArrivals,
   listArrivals,
   listBatchItems,
   listBatches,

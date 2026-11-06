@@ -3,7 +3,10 @@ import { GET as listRoute, POST as addRoute } from '@/http/routes/v1/costs/lines
 import { PATCH as editRoute, POST as actionRoute } from '@/http/routes/v1/costs/lines/[id]/route';
 import { GET as budgetsRoute, PUT as saveBudgetsRoute } from '@/http/routes/v1/costs/budgets/route';
 import { GET as summaryRoute } from '@/http/routes/v1/costs/summary/route';
+import { GET as bySourceRoute } from '@/http/routes/v1/costs/by-source/route';
+import { PUT as targetRoute } from '@/http/routes/v1/costs/target/route';
 import { addManualLine, recordLine } from '@/modules/analytics';
+import { registerSource, removeSource } from '@/modules/intake';
 import { SYSTEM_GRANTOR, addMember, createApiKey, setPrincipalCacheTtl, type Role } from '@/modules/tenancy';
 import { newId } from '@/platform/ids';
 import { inTenant, seedUser } from '../tenancy/helpers';
@@ -90,7 +93,7 @@ describe('validation and changes', () => {
 
   it('editing a usage line gets 409 "Only costs added by hand can be edited."', async () => {
     const line = await run((ctx) =>
-      recordLine(ctx, { originEventId: newId('evt'), occurredOn: '2026-11-02', category: 'ai_usage', provider: 'anthropic', amountCents: 40, accountId: null }),
+      recordLine(ctx, { originEventId: newId('evt'), occurredOn: '2026-11-02', category: 'ai_usage', provider: 'anthropic', amountCents: 40, accountId: null, sourceId: null }),
     );
     const res = await editRoute(as('owner', `/costs/lines/${line!.id}`, { method: 'PATCH', body: { amount_cents: 1 } }));
     expect(res.status).toBe(409);
@@ -174,10 +177,93 @@ describe('budgets and summary', () => {
 
   it('the summary carries the tiles, five categories and six months', async () => {
     const body = await (await summaryRoute(as('owner', '/costs/summary'))).json();
-    expect(Object.keys(body).sort()).toEqual(['budget_month_cents', 'categories', 'month', 'months', 'spend_90d_cents', 'spend_month_cents']);
+    expect(Object.keys(body).sort()).toEqual([
+      'budget_month_cents',
+      'categories',
+      'cost_per_sent_cents',
+      'cost_per_won_cents',
+      'month',
+      'months',
+      'return_ratio',
+      'spend_90d_cents',
+      'spend_month_cents',
+      'target_cost_per_won_cents',
+    ]);
     expect(body.categories.map((c: { key: string }) => c.key)).toEqual(['partner_fees', 'data_vendors', 'agents_hosting', 'lists_events', 'ai_usage']);
     expect(Object.keys(body.categories[0]).sort()).toEqual(['budget_cents', 'key', 'label', 'level', 'pausable', 'spend_90d_cents', 'spend_month_cents']);
     expect(body.months).toHaveLength(6);
     expect(body.months[5]).toMatchObject({ month: body.month, spend_cents: body.spend_month_cents, budget_cents: body.budget_month_cents });
+  });
+});
+
+describe('R3b: sources on lines, the target and costs by source', () => {
+  const put = (role: Role, body: unknown) => targetRoute(as(role, '/costs/target', { method: 'PUT', body }));
+  const target = async () => (await (await summaryRoute(as('owner', '/costs/summary'))).json()).target_cost_per_won_cents;
+
+  it('a manual line with a source saves it and lists its name; an unknown or removed source gets 400', async () => {
+    const [kept, gone] = await run(async (ctx) => {
+      const k = await registerSource(ctx, { kind: 'partner', name: 'Kestrel' });
+      const g = await registerSource(ctx, { kind: 'partner', name: 'Gone partner' });
+      await removeSource(ctx, g.id);
+      return [k.id, g.id];
+    });
+    const res = await addRoute(as('owner', '/costs/lines', { method: 'POST', body: manual({ category: 'lists_events', source_id: kept }) }));
+    expect(res.status).toBe(201);
+    const added = await res.json();
+    expect(added).toMatchObject({ source_id: kept, source_name: 'Kestrel' });
+    const listed = (await (await listRoute(as('owner', '/costs/lines?category=lists_events'))).json()).data.find((l: { id: string }) => l.id === added.id);
+    expect(listed).toMatchObject({ source_id: kept, source_name: 'Kestrel' });
+    for (const source_id of ['src_nope', gone]) {
+      const bad = await addRoute(as('owner', '/costs/lines', { method: 'POST', body: manual({ source_id }) }));
+      expect(bad.status).toBe(400);
+      expect((await bad.json()).title).toBe('Choose a source that exists.');
+    }
+    const edited = await editRoute(as('owner', `/costs/lines/${added.id}`, { method: 'PATCH', body: { source_id: null } }));
+    expect(await edited.json()).toMatchObject({ source_id: null, source_name: null, replaces_id: added.id });
+  });
+
+  it('a line whose source was removed later can still be edited while it keeps that source', async () => {
+    const later = await run(async (ctx) => (await registerSource(ctx, { kind: 'partner', name: 'Removed later' })).id);
+    const added = await (await addRoute(as('owner', '/costs/lines', { method: 'POST', body: manual({ source_id: later }) }))).json();
+    await run((ctx) => removeSource(ctx, later));
+    const res = await editRoute(as('owner', `/costs/lines/${added.id}`, { method: 'PATCH', body: { amount_cents: 9_999, source_id: later } }));
+    expect(res.status).toBe(200);
+    const edited = await res.json();
+    expect(edited).toMatchObject({ amount_cents: 9_999, source_id: later, source_name: 'Removed later', replaces_id: added.id });
+    // Leaving the source out keeps it too.
+    const again = await editRoute(as('owner', `/costs/lines/${edited.id}`, { method: 'PATCH', body: { amount_cents: 9_000 } }));
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ amount_cents: 9_000, source_id: later });
+  });
+
+  it('PUT /costs/target sets, refuses 0 and clears the target; the summary returns it', async () => {
+    const res = await put('leader', { target_cost_per_won_cents: 200_000 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ target_cost_per_won_cents: 200_000 });
+    expect(await target()).toBe(200_000);
+    const zero = await put('owner', { target_cost_per_won_cents: 0 });
+    expect(zero.status).toBe(400);
+    expect((await zero.json()).title).toBe('Enter a target above zero, or clear it.');
+    expect(await target()).toBe(200_000);
+    expect((await put('owner', { target_cost_per_won_cents: null })).status).toBe(200);
+    expect(await target()).toBeNull();
+  });
+
+  it('an operator gets 403 on the target; a seller gets 403 on the summary, the target and costs by source', async () => {
+    expect((await put('operator', { target_cost_per_won_cents: 1 })).status).toBe(403);
+    expect((await bySourceRoute(as('operator', '/costs/by-source'))).status).toBe(200);
+    const seller = [
+      await summaryRoute(as('seller', '/costs/summary')),
+      await put('seller', { target_cost_per_won_cents: 1 }),
+      await bySourceRoute(as('seller', '/costs/by-source')),
+    ];
+    expect(seller.map((r) => r.status)).toEqual([403, 403, 403]);
+  });
+
+  it('GET /costs/by-source ends with Shared costs and gives the total', async () => {
+    const body = await (await bySourceRoute(as('owner', '/costs/by-source'))).json();
+    expect(Object.keys(body).sort()).toEqual(['rows', 'total_spend_cents']);
+    expect(body.rows.at(-1)).toEqual({ source_id: null, name: 'Shared costs', spend_cents: expect.any(Number), share_pct: expect.any(Number) });
+    expect(body.rows.reduce((s: number, r: { spend_cents: number }) => s + r.spend_cents, 0)).toBe(body.total_spend_cents);
   });
 });

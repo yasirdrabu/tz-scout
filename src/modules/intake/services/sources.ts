@@ -7,7 +7,7 @@ import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import { reviewStatusValidator } from '../contracts/ports';
-import { arrival, source } from '../db/schema';
+import { arrival, batch, source } from '../db/schema';
 
 export const SOURCE_KINDS = ['person', 'agent', 'vendor', 'list', 'partner', 'crm', 'web_form', 'scheduled_pull'] as const;
 export type SourceKind = (typeof SOURCE_KINDS)[number];
@@ -186,6 +186,16 @@ export async function sourceNames(ctx: ModuleContext, ids: string[]): Promise<Ma
   return new Map(rows.map((r) => [r.id, r.name]));
 }
 
+/** Each given batch's name, by id; unknown ids are left out. */
+export async function batchNames(ctx: ModuleContext, ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const rows = await ctx.tx
+    .select({ id: batch.id, name: batch.name })
+    .from(batch)
+    .where(and(eq(batch.tenantId, ctx.tenantId), inArray(batch.id, ids)));
+  return new Map(rows.map((r) => [r.id, r.name]));
+}
+
 const isUniqueViolation = (e: unknown): boolean => {
   const err = (e as { code?: string; cause?: { code?: string } } | null) ?? {};
   return err.code === '23505' || err.cause?.code === '23505';
@@ -345,6 +355,27 @@ export async function childSources(ctx: ModuleContext, sourceIds: string[]): Pro
   `)) as unknown as { id: string }[];
   const given = new Set(sourceIds);
   return rows.map((r) => r.id).filter((id) => !given.has(id));
+}
+
+export type SourceTreeNode = { name: string; kind: SourceKind; parentId: string | null; status: SourceStatus };
+
+/**
+ * Every source in the workspace, removed ones included (callers decide what to skip): `tree` maps each source to
+ * its direct children, for R3b-1's roll-up, and `sources` holds each one's name, kind, parent and status.
+ */
+export async function sourceTree(ctx: ModuleContext): Promise<{ tree: Map<string, string[]>; sources: Map<string, SourceTreeNode> }> {
+  const rows = await ctx.tx
+    .select({ id: source.id, name: source.name, kind: source.kind, parentId: source.parentId, status: source.status })
+    .from(source)
+    .where(eq(source.tenantId, ctx.tenantId))
+    .orderBy(source.id);
+  const tree = new Map<string, string[]>();
+  const sources = new Map<string, SourceTreeNode>();
+  for (const r of rows) {
+    sources.set(r.id, { name: r.name, kind: r.kind as SourceKind, parentId: r.parentId, status: r.status as SourceStatus });
+    if (r.parentId) tree.set(r.parentId, [...(tree.get(r.parentId) ?? []), r.id]);
+  }
+  return { tree, sources };
 }
 
 /**

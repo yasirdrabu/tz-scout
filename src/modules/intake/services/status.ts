@@ -179,6 +179,16 @@ export async function initialReviewStatusKeys(ctx: ModuleContext, accountIds: st
   return new Map(rows.map((r) => [r.accountId!, r.key ?? DEFAULT_REVIEW_STATUS[r.kind as SourceKind] ?? 'unvetted']));
 }
 
+/** Every resolved arrival in the workspace, oldest first, for the analytics journey backfill. Background context only. */
+export async function listResolvedArrivals(ctx: ModuleContext): Promise<{ accountId: string; closestSourceId: string; batchId: string | null; resolvedAt: Date }[]> {
+  const rows = await ctx.tx
+    .select({ accountId: arrival.accountId, closestSourceId: arrival.closestSourceId, batchId: arrival.batchId, resolvedAt: arrival.resolvedAt })
+    .from(arrival)
+    .where(and(eq(arrival.tenantId, ctx.tenantId), eq(arrival.status, 'resolved'), isNotNull(arrival.accountId), isNotNull(arrival.resolvedAt)))
+    .orderBy(arrival.resolvedAt, arrival.id);
+  return rows.map((r) => ({ accountId: r.accountId!, closestSourceId: r.closestSourceId, batchId: r.batchId, resolvedAt: r.resolvedAt! }));
+}
+
 // ---- Batches ----
 
 /** A rejected item keeps no `external_ref` column (it could repeat), so the sender's ref is read from what they sent. */

@@ -168,10 +168,22 @@ export const playbookRoute = createRoute({
   component: lazyRouteComponent(() => import('../features/playbooks/PlaybooksScreen'), 'PlaybookScreen'),
 });
 
+/** Funnel by source's filters, so the URL keeps them (C10). */
+export type FunnelSearch = { practice?: string; offer?: string; batch?: string; period?: string };
+const funnelSearch = (search: Record<string, unknown>): FunnelSearch => pickStrings(search, ['practice', 'offer', 'batch', 'period']);
+
 export const funnelRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'funnel',
-  component: () => <Placeholder screen={SCREENS.funnel} />,
+  validateSearch: funnelSearch,
+  component: lazyRouteComponent(() => import('../features/funnel/FunnelScreen'), 'FunnelScreen'),
+});
+
+export const funnelDrillRoute = createRoute({
+  getParentRoute: () => tenantRoute,
+  path: 'funnel/$sourceId',
+  validateSearch: funnelSearch,
+  component: lazyRouteComponent(() => import('../features/funnel/DrillScreen'), 'DrillScreen'),
 });
 
 export const costsRoute = createRoute({

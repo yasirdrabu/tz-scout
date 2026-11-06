@@ -199,6 +199,31 @@ describe('scout CLI', () => {
     expect(missing.stderr).toContain('No workspace with the slug "nowhere".');
   }, 120_000);
 
+  it('backfill-journeys fills the seeded workspace journeys, then has nothing new; an unknown workspace is named', async () => {
+    const seeded = await scout(['seed']).done;
+    expect(seeded.code, seeded.stderr).toBe(0);
+    const r = await scout(['backfill-journeys', 'taazaa']).done;
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/Workspace taazaa: journeys are up to date, \d+ new\./);
+    const again = await scout(['backfill-journeys', 'taazaa']).done;
+    expect(again.stdout).toContain('Workspace taazaa: journeys are up to date, 0 new.');
+    const missing = await scout(['backfill-journeys', 'nowhere']).done;
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain('No workspace with the slug "nowhere".');
+  }, 90_000);
+
+  it('seed fills the journeys of accounts that arrived before it, so an existing workspace has a funnel', async () => {
+    expect((await scout(['seed']).done).code).toBe(0);
+    const accountId = `acc_seedjourney${process.pid}`;
+    await adminDb.execute(sql`insert into intake.arrival (id, tenant_id, closest_source_id, principal, channel, payload, payload_hash, status, account_id, resolved_at)
+      select ${`arr_seedjourney${process.pid}`}, t.id, 'src_seedjourney', 'test', 'api', '{}'::jsonb, 'h', 'resolved', ${accountId}, now()
+      from tenancy.tenant t where t.slug = 'taazaa'`);
+    expect(await adminDb.execute(sql`select 1 from analytics.journey where account_id = ${accountId}`)).toHaveLength(0);
+    const seeded = await scout(['seed']).done;
+    expect(seeded.code, seeded.stderr).toBe(0);
+    expect(await adminDb.execute(sql`select 1 from analytics.journey where account_id = ${accountId} and arrived_at is not null`)).toHaveLength(1);
+  }, 120_000);
+
   it('import taazaa research-a.csv exits 0 and prints the batch', async () => {
     const r = await scout(['import', 'taazaa', 'tests/fixtures/imports/research-a.csv']).done;
     expect(r.code, r.stderr).toBe(0);

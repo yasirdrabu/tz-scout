@@ -25,6 +25,15 @@ budget or trust.
 All use the cohort view and first-source attribution unless the page is switched. Values below the
 minimum sample are shown grey, not hidden.
 
+**Built in R3b-1** (`src/modules/analytics/services/funnel.ts` over `domain/funnel.ts`): the funnel table and the
+per-source drill (`GET /api/v1/analytics/funnel`, `GET /api/v1/analytics/sources/{id}/performance`, see
+[index.md](index.md)). Spend is put per source by the line's source, else its account's first source, else Shared
+costs, and rolls up the source tree like the accounts. Cost per account at each stage, cost per account sent and
+cost per won account come with a status against the workspace target (under 10 sent is "Not enough data"). Return,
+decline rate, revenue per source and the trust trend are not on these routes yet (return is on
+`GET /costs/by-source`). The Sources page counts (`GET /api/v1/sources/stats`) use the same first-source journeys,
+for all time.
+
 ## Stories
 
 ### ANL-E3-S1 Source table

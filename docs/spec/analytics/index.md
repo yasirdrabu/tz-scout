@@ -16,11 +16,14 @@ re-implement that math (v1 rule, carried).
 
 | Table | Key fields | Notes |
 |---|---|---|
-| `analytics.account_journey` | `tenant_id`, `account_id`, `attributed_source_id` (first arrival's person-level source, or the most specific level present), `agent_source_id`, `vendor_source_id`, `first_batch_id`, `practice_id`, `offer_id` (best offer at assignment, else latest), `seller_user_id`, `arrived_at`, `reviewed_at`, `assigned_at`, `engaged_at`, `opportunity_at`, `won_at`, `lost_at`, `declined_at`, `current_stage`, `won_amount_cents`, `currency`, `updated_at` | One row per account. Stage timestamps are first-entered times. |
+| `analytics.journey` | `tenant_id`, `account_id` (pk), `first_source_id` (the first arrival's agent, else person, else vendor source, as `arrival.closest_source_id`), `first_batch_id`, `arrived_at`, `practice_id`, `offer_id` (scoring's best offer), `score_version`, `exit_stage`, `exit_at`, `updated_at` | One row per account (R3b-1). The earliest arrival wins. A score or stage move that comes first makes the row with no arrival yet (`first_source_id` and `arrived_at` null); reads skip it until the arrival fills it. Practice and offer take only a score with a higher `version`. `exit_at` is the time of the latest move seen to an exit or a flow stage; `exit_stage` is set only when that move was to an exit. Stages are per workspace (REV-E5), so stage times live in `journey_stage`, not in fixed `<stage>_at` columns. |
+| `analytics.journey_stage` | `tenant_id`, `account_id`, `stage_key`, `entered_at`; pk (tenant, account, stage key) | The earliest entry into each stage. A late or retried event never moves it. |
+| `analytics.journey_deal` | `tenant_id`, `account_id`, `system`, `deal_external_id`, `status` (open, won, lost), `amount_cents`, `closed_at`, `observed_at`; pk (tenant, system, deal) | Each deal's latest state; a row only takes an event with a later `observed_at`. |
 | `analytics.source_touch` | `tenant_id`, `account_id`, `source_id`, `source_level` (person, agent, vendor), `batch_id`, `arrival_id`, `first_seen_at` | Every source that ever sent the account, for the "any source" view. |
 | `analytics.decline` | `tenant_id`, `account_id`, `kind` (review, assignment), `reason_key`, `note`, `by_user_id`, `source_id`, `at` | Decline reasons by source and seller |
 | `analytics.step_credit` | `tenant_id`, `outcome_id`, `outcome_kind`, `step_id`, `step_type`, `playbook_template_id`, `practice_id`, `offer_id`, `occurred_at` | One row per credited step per outcome, for "what worked" |
-| `analytics.cost_line` | `id` (`cst_`), `tenant_id`, `occurred_on` (tenant-timezone date), `category` (partner_fees, data_vendors, agents_hosting, lists_events, ai_usage), `provider` (usage lines), `amount_cents`, `origin` (usage, manual), `origin_event_id` (unique), `account_id`, `note`, `created_by`, `created_at`, `voided_at`, `void_reason`, `voided_by`, `replaces_id` | Ledger (R3a). Never changed in place: an edit voids the line ("Edited") and adds one with `replaces_id`. Targets other than the account, quantities and hours wait for R3b. |
+| `analytics.cost_line` | `id` (`cst_`), `tenant_id`, `occurred_on` (tenant-timezone date), `category` (partner_fees, data_vendors, agents_hosting, lists_events, ai_usage), `provider` (usage lines), `amount_cents`, `origin` (usage, manual), `origin_event_id` (unique), `account_id`, `source_id`, `note`, `created_by`, `created_at`, `voided_at`, `void_reason`, `voided_by`, `replaces_id` | Ledger (R3a). Never changed in place: an edit voids the line ("Edited") and adds one with `replaces_id`. `source_id` (R3b-1) wins over the account's first source when spend is put per source. Batch, practice and offer targets, quantities and hours are later. |
+| `analytics.cost_setting` | `tenant_id` (pk), `target_cost_per_won_cents` (null), `updated_by`, `updated_at` | The workspace's target cost per won account (R3b-1), no default. |
 | `analytics.hour_rate` | `tenant_id`, `role_key`, `rate_cents_per_hour`, `effective_from` | For turning logged hours into cost. |
 | `analytics.week` | `tenant_id`, `start_date` (Monday), `built_at`, `counts` (raw counts json) | Scorecard weeks; raw counts only. |
 | `analytics.scorecard_target` | `tenant_id`, `metric_key`, `target`, `min_sample` | Targets and minimum samples per row. |
@@ -32,7 +35,8 @@ re-implement that math (v1 rule, carried).
 
 Events only for its read models and numbers (Sources and intake, Accounts, Review and routing, CRM
 sync, Playbooks, Enrichment, AI tasks, Integrations, Campaigns). Its consumers, domain functions and
-services never call another module. The only synchronous reads are display labels (source names and
+services never call another module, except two reads: the stage consumer takes stage kinds from routing's
+`listStages`, and `scout backfill-journeys` reads intake, routing, accounts and crm once (R3b-1 Ruling 14). The only synchronous reads are display labels (source names and
 levels from SRC, practice and offer names from OFF, user names from TEN), fetched by its pages at
 render time; nothing in those modules depends on Analytics, so no cycle forms.
 
@@ -52,16 +56,16 @@ render time; nothing in those modules depends on Analytics, so no cycle forms.
 
 | Event | Updates |
 |---|---|
-| `routing.stage.changed` | **the only source of stage timestamps**: sets the stage's `<stage>_at` (first entry) and `current_stage`. Review and routing owns stage tracking (REV-E4), including implied acceptance (the seller acts on the account in the CRM, or 2 working days pass with no decline). Analytics never re-derives stages from other events. |
-| `intake.arrival.resolved` | `source_touch` row; attribution fields on the journey (first source, batch) |
+| `routing.stage.changed` | **the only source of stage timestamps after arrival**: records `to`'s entry in `journey_stage` at the event's `occurredAt` (earliest kept). A move to an exit stage later than the journey's `exit_at` sets `exit_stage` and `exit_at`; a later move to a flow stage clears `exit_stage`. Stage kinds come from routing's `listStages`. Review and routing owns stage tracking (REV-E4), including implied acceptance (the seller acts on the account in the CRM, or 2 working days pass with no decline). Analytics never re-derives stages from other events. |
+| `intake.arrival.resolved` | creates the journey, or keeps whichever arrival is earlier by `occurredAt`: `first_source_id`, `first_batch_id` (the event's `batchId`) and `arrived_at` (the event's `occurredAt`); `source_touch` row (later) |
 | `intake.batch.created` / `.completed` | batch labels and counts |
 | `routing.assignment.accepted` | `seller_user_id`, `offer_id` on the journey |
 | `routing.assignment.declined` | a row in `analytics.decline` (reason key, note, seller, source) for decline-reason reports |
 | `routing.status.changed` | review decline reasons (status changed to a declined status) into `analytics.decline` |
-| `crm.deal.changed` (won) | `won_amount_cents`, `currency` |
+| `crm.deal.changed` | upserts `journey_deal` (status, amount, closed at) when its `observedAt` is later than the stored one |
 | `playbooks.outcome.recorded` | `analytics.step_credit` rows from `creditedStepIds`, for the "what worked" roll-up |
-| `accounts.account.merged` | merge journeys (earliest timestamps win; touches combined) |
-| `scoring.account.scored` | `practice_id`, `offer_id` until assignment |
+| `accounts.account.merged` | the survivor keeps the earlier arrival (and its first source and batch), the earliest entry into each stage and the merged account's deals; the merged account's journey is deleted |
+| `scoring.account.scored` | `practice_id`, `offer_id` (`bestOfferId`) and `score_version`, when its `version` is higher than the stored one |
 | `integrations.usage.recorded` | **the only** source of automatic cost lines (vendor credits, AI tokens, paid API usage): one `usage` line per event, deduped on the event id; `costCents` from the event, the category from the provider (`CATEGORY_OF_PROVIDER`), `occurred_on` the tenant-timezone date of `occurredAt`, the account from the event's `accountId` |
 | `enrichment.request.completed` | no line of its own; will supply the account (and request id `enr_…`) for usage records with the same `correlationId` (R3b; not consumed in R3a) |
 | `ai.run.completed` | no line of its own; will supply the account for AI usage records with the same `correlationId` (R3b; not consumed in R3a) |
@@ -91,9 +95,19 @@ Built in R3a (the cost ledger), in place of `GET /costs` and `POST /costs` above
 | Method and path | Scope | Does |
 |---|---|---|
 | `GET /api/v1/costs/lines?category&from&to&include_voided&cursor` | `costs:read` | Cost lines, 50 a page, newest first (`occurred_on`, then when added); voided lines only with `include_voided=true` |
-| `POST /api/v1/costs/lines` | `costs:write`, people only | Add a manual line `{ occurred_on, category, amount_cents, note }`; the amount must be above zero ("Enter an amount above zero."), the note up to 500 characters |
+| `POST /api/v1/costs/lines` | `costs:write`, people only | Add a manual line `{ occurred_on, category, amount_cents, note, source_id }`; the amount must be above zero ("Enter an amount above zero."), the note up to 500 characters; an unknown or removed source gets 400 "Choose a source that exists." (R3b-1). Lines return `source_id` and `source_name` |
 | `PATCH /api/v1/costs/lines/{id}` | `costs:write`, people only | Manual lines only (others get 409 "Only costs added by hand can be edited."): voids the line "Edited" and returns the new line with `replaces_id`; an edit that changes nothing returns the line as it is |
 | `POST /api/v1/costs/lines/{id}:void` | `costs:write` | Void any line with `{ reason }` (required) |
+| `GET /api/v1/costs/by-source` | `costs:read` | R3b-1: spend per top-level source over the last 90 days, rolled up, with share, per sent, per assigned, per won and return, then Shared costs and `total_spend_cents` (cost-ledger.md "Source target") |
+| `PUT /api/v1/costs/target` | `budgets:write`, people only | R3b-1: `{ target_cost_per_won_cents }`, 1 or more, or null to clear ("Enter a target above zero, or clear it.") |
+
+Built in R3b-1, in place of `GET /analytics/funnel?by=…` above and the proposed performance route below (first-source
+cohort only; the activity view, any-source mode, other groupings, levels and CSV are later):
+
+| Method and path | Scope | Does |
+|---|---|---|
+| `GET /api/v1/analytics/funnel?period&practice&offer&batch` | `analytics:read` | `period` is `30d`, `90d` (default), `quarter` or `year` (calendar, tenant timezone, to now; anything else is a 400); the cohort is the accounts that arrived in it, narrowed by practice, offer and first batch and by the caller's data limit. Returns `period { key, from, to }` (days), the flow `stages`, `target_cost_per_won_cents`, `totals { sent, sources, won, won_pct, spend_cents, cost_per_won_cents }` (spend is the period's whole ledger), `rows` (top-level sources with an account in the cohort, children rolled up, by sent then name: `counts`, `step_pct`, `cost_per_account_cents`, `spend_cents`, `cost_per_won_cents`, `status`, `win_rate_pct`), `shared_spend_cents` (the spend no row shows), `spend_split` and `updated_at`. Without `costs:read` every spend field is null; spend is never narrowed by data limits. Spend isn't split by practice, offer or batch: with any of them set, every spend field (and the drill's `rank`) is null and `spend_split` is false (true otherwise) |
+| `GET /api/v1/analytics/sources/{id}/performance?period&practice&offer&batch` | `analytics:read` | Any source that is not removed (else 404): `source { id, name, kind }`, `period`, `rank` and `of` (by cost per won among funnel rows with one and 10 or more sent), `prev_id` and `next_id` (neighbours in the funnel rows), `position` (1-based, among the funnel rows) and `row_count` (how many rows), all four null for a source that is not a row, `target_cost_per_won_cents`, `spend_split`, `totals { sent, won, won_pct, all_won_pct, spend_cents, cost_per_sent_cents, cost_per_won_cents, status }`, `insight`, `stages[{ key, name, count, all_count, moved_on_pct, all_moved_on_pct, lost, cost_each_cents }]`, `batches[{ batch_id, name, sent, won }]` and `won_accounts[{ account_id, name, offer_name, value_cents }]` by value (null when no won deal has an amount). Spend fields as the funnel |
 
 Proposed additions (to be added to `public-api/index.md` before R3; not yet in the fixed list):
 

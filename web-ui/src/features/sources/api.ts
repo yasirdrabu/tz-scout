@@ -56,6 +56,9 @@ export type SourceStat = {
   won_pct: number | null;
   by_stage: { key: string; label: string; count: number }[];
   is_new: boolean;
+  /** All-time spend and spend / won: null without costs:read (the second is also null with no wins). */
+  spend_cents: number | null;
+  cost_per_won_cents: number | null;
 };
 
 export type SourceKey = { id: string; name: string; prefix: string; mask: string; created_at: string; last_used_at: string | null; revoked_at: string | null };
@@ -171,3 +174,16 @@ export const createSource = (tenant: string, body: NewSource) => apiFetch<Source
 
 /** The Source page's tabs; the children tab is "Runs" under a person and "Pulls from" otherwise. */
 export const childTab = (kind: string) => (kind === 'person' ? { id: 'runs', label: 'Runs' } : { id: 'pulls-from', label: 'Pulls from' });
+
+/** The kind words the API sends as `kind_label` (intake source-read.ts), for screens that only have the kind. */
+export const KIND_LABELS: Record<SourceKind, string> = {
+  person: 'Person',
+  agent: 'Agent',
+  vendor: 'Data vendor',
+  list: 'List',
+  partner: 'Partner',
+  crm: 'CRM',
+  web_form: 'Web form',
+  scheduled_pull: 'Scheduled pull',
+};
+export const kindLabel = (kind: string) => KIND_LABELS[kind as SourceKind] ?? kind;

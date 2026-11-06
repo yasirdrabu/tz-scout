@@ -5,7 +5,7 @@ import { getArrival } from '@/modules/intake';
 import { members, tenantTimezone } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
-import { accountReview, assignment, declineReasonDef, statusChange } from '../db/schema';
+import { accountReview, assignment, declineReasonDef, stageChange, statusChange } from '../db/schema';
 import { loadStageNames } from './pipeline-stages';
 import { loadNames } from './lookups';
 import { OPEN_STATUSES, loadStatuses, requirePerson } from './review';
@@ -333,4 +333,13 @@ export async function openAssignmentCounts(ctx: ModuleContext): Promise<Record<s
     .where(and(eq(assignment.tenantId, ctx.tenantId), inArray(assignment.status, OPEN_STATUSES)))
     .groupBy(assignment.sellerUserId);
   return Object.fromEntries(rows.map((r) => [r.userId, r.n]));
+}
+
+/** Every stage move in the workspace, oldest first, for the analytics journey backfill. Background context only. */
+export async function listStageHistory(ctx: ModuleContext): Promise<{ accountId: string; toStage: string; at: Date }[]> {
+  return ctx.tx
+    .select({ accountId: stageChange.accountId, toStage: stageChange.toStage, at: stageChange.at })
+    .from(stageChange)
+    .where(eq(stageChange.tenantId, ctx.tenantId))
+    .orderBy(stageChange.at, stageChange.id);
 }

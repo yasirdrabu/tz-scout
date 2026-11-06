@@ -28,10 +28,13 @@ export const arrivalNormaliseTask = defineTask({
   maxTokens: 200,
 });
 
-/** Never throws: any AI failure gives the null result and the caller falls back to `other`. */
-export async function normaliseWithAi(ctx: ModuleContext, i: NormaliseInput): Promise<NormaliseResult> {
+/**
+ * Never throws: any AI failure gives the null result and the caller falls back to `other`. `sourceId` is the
+ * arrival's closest source, carried to the usage line (R3b-1 Ruling 7).
+ */
+export async function normaliseWithAi(ctx: ModuleContext, i: NormaliseInput, sourceId?: string): Promise<NormaliseResult> {
   try {
-    const { output } = await runTask(ctx, arrivalNormaliseTask, i, { subject: { type: 'arrival', id: 'normalise' } });
+    const { output } = await runTask(ctx, arrivalNormaliseTask, i, { subject: { type: 'arrival', id: 'normalise' }, ...(sourceId ? { sourceId } : {}) });
     return output;
   } catch (e) {
     log.warn({ err: errorText(e) }, 'arrival_normalise: failed, using no keys');

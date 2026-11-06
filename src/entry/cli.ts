@@ -36,6 +36,7 @@ One-shot commands
   backfill-r1b <slug>   Give a workspace built before R1b its scoring and routing defaults, a review row for each account, and a rescore
   backfill-r1c <slug>   Give a workspace built before R1c its CRM defaults and schedules, a company check for each account, and its HubSpot links
   backfill-review-flow <slug>  Send a workspace's earlier lead offer picks to the account summary, so the offer filter finds them
+  backfill-journeys <slug>  Fill a workspace's account journeys (the funnel's read model) from its arrivals, stage history, scores and deals
   rescore             [--tenant <slug>]  Rescore every account in every active workspace, or in one; each change is recorded as a rules change
   keys:create         --tenant <slug> --name <name> --scopes a,b [--test]
   tenants:create      --slug <s> --name <n> --currency <USD> --timezone <zone> --owner-email <email>
@@ -180,6 +181,22 @@ async function backfillTenant(slug: string, release: 'r1b' | 'r1c' | 'review-flo
   return 0;
 }
 
+/** Fills a workspace's account journeys from what intake, routing, accounts and crm already hold (R3b-1 Ruling 14). Safe to run again. */
+async function backfillJourneysFor(slug: string): Promise<number> {
+  const { backfillJourneys } = await import('@/modules/analytics');
+  const { ensurePlatformAdmin, listTenants } = await import('@/modules/tenancy');
+  const { withTenant } = await import('@/platform/db/tenant');
+  const { newId } = await import('@/platform/ids');
+  const tenant = (await listTenants()).find((t) => t.slug === slug);
+  if (!tenant) throw new Error(`No workspace with the slug "${slug}".`);
+  const adminId = await ensurePlatformAdmin('system@scout.local');
+  const made = await withTenant(tenant.id, (tx) =>
+    backfillJourneys({ tenantId: tenant.id, actor: { kind: 'system', id: adminId }, correlationId: newId('cor'), tx }),
+  );
+  console.log(`Workspace ${slug}: journeys are up to date, ${made} new.`);
+  return 0;
+}
+
 /** Moves one workspace, or every active one still in the shared database, into its own database (D35). */
 async function splitTenants(slug: string | undefined, all: boolean, settleMs: number, forceCleanup = false): Promise<number> {
   if (!slug && !all) throw new Error(`Name a workspace or pass --all.\n\n${USAGE}`);
@@ -286,6 +303,13 @@ ${USAGE}`);
 
 ${USAGE}`);
       return backfillTenant(slug, 'review-flow');
+    }
+    case 'backfill-journeys': {
+      const [slug] = rest;
+      if (!slug) throw new Error(`Usage: scout backfill-journeys <tenant-slug>
+
+${USAGE}`);
+      return backfillJourneysFor(slug);
     }
     case 'rescore': {
       const { values } = parseArgs({ args: rest, options: { tenant: { type: 'string' } } });
