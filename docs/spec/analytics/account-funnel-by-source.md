@@ -11,7 +11,8 @@ assigned, engaged, opportunity, won. That is the core of "what is working".
 
 Arrived → Reviewed → Assigned → Engaged → Opportunity → Won, with exits Declined (after review) and
 Lost (after opportunity). Review and routing tracks the stage of every account (REV-E4) and publishes
-`routing.stage.changed`; Analytics takes stage timestamps only from that event. Assigned includes
+`routing.stage.changed`; Analytics takes stage timestamps only from that event, except Arrived: the first stage
+publishes no stage event, so the arrival time comes from `intake.arrival.resolved` (its `occurredAt`). Assigned includes
 implied acceptance (the seller acted on the account in the CRM, or 2 working days passed with no
 decline). A stage counts once per account, at the first time it was entered; a move back (for
 example a declined assignment returning to Reviewed) does not erase the earlier entry. An account

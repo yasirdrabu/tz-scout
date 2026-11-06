@@ -43,6 +43,7 @@ export {
   getSignals,
   getSummaries,
   listAccountIds,
+  listScoringPicks,
   listBuyingRoles,
   listExternalIds,
   listPeople,

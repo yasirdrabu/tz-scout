@@ -87,3 +87,54 @@ export const budgetState = analytics.table(
     check('budget_state_level_valid', sql`${t.level} in ('ok', 'alert', 'over', 'paused')`),
   ],
 );
+
+/**
+ * One row per account that arrived (R3b-1 Ruling 1): its first arrival (the chain's closest source and the
+ * batch) and the practice and offer scoring picked. `exit_at` is the time of the latest stage move the
+ * row has seen to an exit or a flow stage, and `exit_stage` is set only when that move was to an exit, so an
+ * older move delivered late changes neither.
+ */
+export const journey = analytics.table('journey', {
+  tenantId: text('tenant_id').notNull(),
+  accountId: text('account_id').primaryKey(),
+  firstSourceId: text('first_source_id').notNull(),
+  firstBatchId: text('first_batch_id'),
+  arrivedAt: at('arrived_at').notNull(),
+  practiceId: text('practice_id'),
+  offerId: text('offer_id'),
+  exitStage: text('exit_stage'),
+  exitAt: at('exit_at'),
+  updatedAt: at('updated_at').notNull().defaultNow(),
+});
+
+/** The earliest time an account entered each stage: a late or retried event never moves it. */
+export const journeyStage = analytics.table(
+  'journey_stage',
+  {
+    tenantId: text('tenant_id').notNull(),
+    accountId: text('account_id').notNull(),
+    stageKey: text('stage_key').notNull(),
+    enteredAt: at('entered_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.accountId, t.stageKey] })],
+);
+
+/** Each CRM deal's latest state; a row only takes an event with a later `observed_at`. */
+export const journeyDeal = analytics.table(
+  'journey_deal',
+  {
+    tenantId: text('tenant_id').notNull(),
+    accountId: text('account_id').notNull(),
+    system: text('system').notNull(),
+    dealExternalId: text('deal_external_id').notNull(),
+    status: text('status').notNull(), // open | won | lost
+    amountCents: bigint('amount_cents', { mode: 'number' }),
+    closedAt: at('closed_at'),
+    observedAt: at('observed_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.system, t.dealExternalId] }),
+    index('journey_deal_account_idx').on(t.tenantId, t.accountId),
+    check('journey_deal_status_valid', sql`${t.status} in ('open', 'won', 'lost')`),
+  ],
+);

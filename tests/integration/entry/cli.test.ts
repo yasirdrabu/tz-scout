@@ -199,6 +199,19 @@ describe('scout CLI', () => {
     expect(missing.stderr).toContain('No workspace with the slug "nowhere".');
   }, 120_000);
 
+  it('backfill-journeys fills the seeded workspace journeys, then has nothing new; an unknown workspace is named', async () => {
+    const seeded = await scout(['seed']).done;
+    expect(seeded.code, seeded.stderr).toBe(0);
+    const r = await scout(['backfill-journeys', 'taazaa']).done;
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/Workspace taazaa: journeys are up to date, \d+ new\./);
+    const again = await scout(['backfill-journeys', 'taazaa']).done;
+    expect(again.stdout).toContain('Workspace taazaa: journeys are up to date, 0 new.');
+    const missing = await scout(['backfill-journeys', 'nowhere']).done;
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain('No workspace with the slug "nowhere".');
+  }, 90_000);
+
   it('import taazaa research-a.csv exits 0 and prints the batch', async () => {
     const r = await scout(['import', 'taazaa', 'tests/fixtures/imports/research-a.csv']).done;
     expect(r.code, r.stderr).toBe(0);

@@ -51,6 +51,6 @@ export { getAccountReview, listChanges, type AccountReviewView, type ChangeView 
 export { accountFacets, exportAccounts, listAccounts, MAX_EXPORT_ROWS, type AccountFacets, type AccountListFilters, type AccountListRow } from './services/pipeline';
 export { QUEUE_COLUMNS, type ColumnChoice, type ColumnsView } from './domain/columns';
 export { assignableSellers, practicesOf, type AssignableSeller } from './services/sellers';
-export { countNewAssignments, getAccountStatus, getAssignment, listAssignments, openAssignmentCounts, type AccountStatus, type AssignmentFilters, type AssignmentRow } from './services/read';
+export { countNewAssignments, getAccountStatus, getAssignment, listAssignments, listStageHistory, openAssignmentCounts, type AccountStatus, type AssignmentFilters, type AssignmentRow } from './services/read';
 export { changeStatus, ensureReview, setInsights, type InsightsView, type StatusChangeInput } from './services/review';
 export { getReviewSettings, listReasons, listStatuses, resetReviewSettings, saveReasons, saveReviewSettings, saveStatuses, setAutoAcceptWorkingDays, type ReasonView, type ReviewSettings, type ReviewSettingsEdit, type StatusView } from './services/settings';

@@ -22,6 +22,13 @@
       "when": 1793890348101,
       "tag": "0002_budget_seq",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793966469135,
+      "tag": "0003_journeys",
+      "breakpoints": true
     }
   ]
 }

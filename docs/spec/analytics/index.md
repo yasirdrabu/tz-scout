@@ -16,7 +16,9 @@ re-implement that math (v1 rule, carried).
 
 | Table | Key fields | Notes |
 |---|---|---|
-| `analytics.account_journey` | `tenant_id`, `account_id`, `attributed_source_id` (first arrival's person-level source, or the most specific level present), `agent_source_id`, `vendor_source_id`, `first_batch_id`, `practice_id`, `offer_id` (best offer at assignment, else latest), `seller_user_id`, `arrived_at`, `reviewed_at`, `assigned_at`, `engaged_at`, `opportunity_at`, `won_at`, `lost_at`, `declined_at`, `current_stage`, `won_amount_cents`, `currency`, `updated_at` | One row per account. Stage timestamps are first-entered times. |
+| `analytics.journey` | `tenant_id`, `account_id` (pk), `first_source_id` (the first arrival's agent, else person, else vendor source, as `arrival.closest_source_id`), `first_batch_id`, `arrived_at`, `practice_id`, `offer_id` (scoring's best offer), `exit_stage`, `exit_at`, `updated_at` | One row per account that arrived (R3b-1). The earliest arrival wins. `exit_at` is the time of the latest move seen to an exit or a flow stage; `exit_stage` is set only when that move was to an exit. Stages are per workspace (REV-E5), so stage times live in `journey_stage`, not in fixed `<stage>_at` columns. |
+| `analytics.journey_stage` | `tenant_id`, `account_id`, `stage_key`, `entered_at`; pk (tenant, account, stage key) | The earliest entry into each stage. A late or retried event never moves it. |
+| `analytics.journey_deal` | `tenant_id`, `account_id`, `system`, `deal_external_id`, `status` (open, won, lost), `amount_cents`, `closed_at`, `observed_at`; pk (tenant, system, deal) | Each deal's latest state; a row only takes an event with a later `observed_at`. |
 | `analytics.source_touch` | `tenant_id`, `account_id`, `source_id`, `source_level` (person, agent, vendor), `batch_id`, `arrival_id`, `first_seen_at` | Every source that ever sent the account, for the "any source" view. |
 | `analytics.decline` | `tenant_id`, `account_id`, `kind` (review, assignment), `reason_key`, `note`, `by_user_id`, `source_id`, `at` | Decline reasons by source and seller |
 | `analytics.step_credit` | `tenant_id`, `outcome_id`, `outcome_kind`, `step_id`, `step_type`, `playbook_template_id`, `practice_id`, `offer_id`, `occurred_at` | One row per credited step per outcome, for "what worked" |
@@ -32,7 +34,8 @@ re-implement that math (v1 rule, carried).
 
 Events only for its read models and numbers (Sources and intake, Accounts, Review and routing, CRM
 sync, Playbooks, Enrichment, AI tasks, Integrations, Campaigns). Its consumers, domain functions and
-services never call another module. The only synchronous reads are display labels (source names and
+services never call another module, except two reads: the stage consumer takes stage kinds from routing's
+`listStages`, and `scout backfill-journeys` reads intake, routing, accounts and crm once (R3b-1 Ruling 14). The only synchronous reads are display labels (source names and
 levels from SRC, practice and offer names from OFF, user names from TEN), fetched by its pages at
 render time; nothing in those modules depends on Analytics, so no cycle forms.
 
@@ -52,16 +55,16 @@ render time; nothing in those modules depends on Analytics, so no cycle forms.
 
 | Event | Updates |
 |---|---|
-| `routing.stage.changed` | **the only source of stage timestamps**: sets the stage's `<stage>_at` (first entry) and `current_stage`. Review and routing owns stage tracking (REV-E4), including implied acceptance (the seller acts on the account in the CRM, or 2 working days pass with no decline). Analytics never re-derives stages from other events. |
-| `intake.arrival.resolved` | `source_touch` row; attribution fields on the journey (first source, batch) |
+| `routing.stage.changed` | **the only source of stage timestamps after arrival**: records `to`'s entry in `journey_stage` at the event's `occurredAt` (earliest kept). A move to an exit stage later than the journey's `exit_at` sets `exit_stage` and `exit_at`; a later move to a flow stage clears `exit_stage`. Stage kinds come from routing's `listStages`. Review and routing owns stage tracking (REV-E4), including implied acceptance (the seller acts on the account in the CRM, or 2 working days pass with no decline). Analytics never re-derives stages from other events. |
+| `intake.arrival.resolved` | creates the journey, or keeps whichever arrival is earlier by `occurredAt`: `first_source_id`, `first_batch_id` (the event's `batchId`) and `arrived_at` (the event's `occurredAt`); `source_touch` row (later) |
 | `intake.batch.created` / `.completed` | batch labels and counts |
 | `routing.assignment.accepted` | `seller_user_id`, `offer_id` on the journey |
 | `routing.assignment.declined` | a row in `analytics.decline` (reason key, note, seller, source) for decline-reason reports |
 | `routing.status.changed` | review decline reasons (status changed to a declined status) into `analytics.decline` |
-| `crm.deal.changed` (won) | `won_amount_cents`, `currency` |
+| `crm.deal.changed` | upserts `journey_deal` (status, amount, closed at) when its `observedAt` is later than the stored one |
 | `playbooks.outcome.recorded` | `analytics.step_credit` rows from `creditedStepIds`, for the "what worked" roll-up |
-| `accounts.account.merged` | merge journeys (earliest timestamps win; touches combined) |
-| `scoring.account.scored` | `practice_id`, `offer_id` until assignment |
+| `accounts.account.merged` | the survivor keeps the earlier arrival (and its first source and batch), the earliest entry into each stage and the merged account's deals; the merged account's journey is deleted |
+| `scoring.account.scored` | `practice_id`, `offer_id` (`bestOfferId`) |
 | `integrations.usage.recorded` | **the only** source of automatic cost lines (vendor credits, AI tokens, paid API usage): one `usage` line per event, deduped on the event id; `costCents` from the event, the category from the provider (`CATEGORY_OF_PROVIDER`), `occurred_on` the tenant-timezone date of `occurredAt`, the account from the event's `accountId` |
 | `enrichment.request.completed` | no line of its own; will supply the account (and request id `enr_…`) for usage records with the same `correlationId` (R3b; not consumed in R3a) |
 | `ai.run.completed` | no line of its own; will supply the account for AI usage records with the same `correlationId` (R3b; not consumed in R3a) |
