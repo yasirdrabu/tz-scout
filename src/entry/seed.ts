@@ -194,8 +194,6 @@ export async function seed(): Promise<{ devApiKey: string }> {
       await backfillBriefs(ctx(tx));
       // The funnel's journeys, for accounts that arrived before R3b-1 (the consumers fill them from then on).
       await backfillJourneys(ctx(tx));
-      // Learned source trust, for sources whose accounts already have outcomes.
-      await backfillTrust(ctx(tx));
     });
     // Sources come after the first transaction commits, so the people's users exist, named.
     await renameHandleUsers(NAMES);
@@ -211,6 +209,8 @@ export async function seed(): Promise<{ devApiKey: string }> {
       }
       const have = (await listSources(c)).find((s) => s.kind === 'agent' && s.name === DEV_AGENT_NAME);
       if (!have) await registerSource(c, { kind: 'agent', name: DEV_AGENT_NAME, parentId: adminSourceId });
+      // Learned source trust, for sources whose accounts already have outcomes (after the sources exist, so they get a reading).
+      await backfillTrust(c);
       // Sample HubSpot data for a workspace on the mock connection (the default).
       const hubspot = (await listConnections(c)).find((x) => x.provider === 'hubspot');
       if (!hubspot || hubspot.mode === 'mock') await seedMockCrm(c);

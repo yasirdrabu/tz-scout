@@ -31,16 +31,6 @@ async function seedAiRun() {
   );
 }
 
-/** Trust for the sources the seed registered (its own backfill runs before they exist), so each has a reading. */
-async function seedTrust() {
-  const { backfillTrust } = await import('@/entry/seed');
-  const { listTenants } = await import('@/modules/tenancy');
-  const { withTenant } = await import('@/platform/db/tenant');
-  const { newId } = await import('@/platform/ids');
-  const tenant = (await listTenants()).find((t) => t.slug === 'taazaa')!;
-  await withTenant(tenant.id, (tx) => backfillTrust({ tenantId: tenant.id, actor: { kind: 'system', id: 'e2e' }, correlationId: newId('cor'), tx }));
-}
-
 /** A dead job for the platform, so the System page has one to retry. */
 async function seedDeadJob() {
   await import('@/entry/registry');
@@ -150,7 +140,6 @@ async function main() {
 
   const { seed } = await import('@/entry/seed');
   await seed();
-  await seedTrust();
   await seedAiRun();
   const { closeDbs } = await import('@/platform/db/client');
   await closeDbs();

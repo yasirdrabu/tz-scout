@@ -53,7 +53,11 @@ export const routingFunnelStages: FunnelStages = {
 
 /** Intake's `StageOutcomes`: the stages and stage moves that source trust judges arrivals by. A merge repoints stage history to the survivor. */
 export const routingStageOutcomes: StageOutcomes = {
-  stages: async (ctx) => (await loadStages(ctx)).map((s) => ({ key: s.key, kind: s.kind, position: s.position, trigger: s.trigger })),
+  stages: async (ctx) => {
+    const rows = await ctx.tx.select().from(pipelineStage).where(eq(pipelineStage.tenantId, ctx.tenantId));
+    // Archived stages stay: history into a deleted stage still has its quality and kind. No rows yet means the defaults.
+    return (rows.length > 0 ? rows : DEFAULT_STAGES).map((s) => ({ key: s.key, kind: s.kind as 'flow' | 'exit', position: s.position, trigger: s.trigger }));
+  },
   history: (ctx) => listStageHistory(ctx),
 };
 

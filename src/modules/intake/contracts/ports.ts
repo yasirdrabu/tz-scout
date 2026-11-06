@@ -37,7 +37,7 @@ export function registerFunnelStages(f: FunnelStages | null): void {
 /** With none registered, the funnel lists no stages. */
 export const funnelStages = (): FunnelStages => funnel ?? { stages: async () => [] };
 
-/** Implemented by routing. What trust needs of the pipeline: its stages, and every move into one. */
+/** Implemented by routing. What trust needs of the pipeline: its stages (archived ones too, so history into a deleted stage still counts), and every move into one. */
 export interface StageOutcomes {
   stages(ctx: ModuleContext): Promise<TrustStage[]>;
   /** Every stage move in the workspace, oldest first, with each account named by its surviving id. */
@@ -51,5 +51,5 @@ export function registerStageOutcomes(s: StageOutcomes | null): void {
   outcomes = s;
 }
 
-/** With none registered, there are no stages and no history, so no arrival is ever judged. */
+/** With none registered, there are no stages and no history: old undecided arrivals score 0.10 and declines 0. */
 export const stageOutcomes = (): StageOutcomes => outcomes ?? { stages: async () => [], history: async () => [] };

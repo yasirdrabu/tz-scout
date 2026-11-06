@@ -56,9 +56,26 @@ describe('arrivalQuality', () => {
     const at = [daysAgo(50), daysAgo(40), daysAgo(10)];
     expect(quality(['arrived', 'declined', 'won'], { at, declines: [daysAgo(40)] })).toBe(1);
   });
+  it('ignores what happened before the arrival', () => {
+    const at = [daysAgo(40)];
+    expect(quality(['reviewed'], { age: 10, at })).toBeNull();
+    expect(quality(['reviewed'], { age: 31, at: [daysAgo(60)] })).toBe(0.1);
+  });
+  it('ignores a decline and an exit from before the arrival', () => {
+    expect(quality([], { age: 31, declines: [daysAgo(50)] })).toBe(0.1);
+    expect(quality(['declined'], { age: 10, at: [daysAgo(50)] })).toBeNull();
+  });
+  it('keeps a decline when the account only went back to reviewed', () => {
+    const at = [daysAgo(50), daysAgo(40), daysAgo(10)];
+    expect(quality(['arrived', 'declined', 'reviewed'], { at, declines: [daysAgo(40)] })).toBe(0);
+  });
+  it('lets an entry into the assigned stage override a decline, at 0.50', () => {
+    const at = [daysAgo(50), daysAgo(40), daysAgo(10)];
+    expect(quality(['arrived', 'declined', 'assigned'], { at, declines: [daysAgo(40)] })).toBe(0.5);
+  });
   it('zeroes on a reviewer_rejects exit entry alone', () => expect(quality(['arrived', 'declined'])).toBe(0));
   it('keeps the best quality after a lost exit', () => expect(quality(['arrived', 'reviewed', 'assigned', 'lost'])).toBe(0.5));
-  it('treats entering an exit as decided', () => expect(quality(['back_to_nurture'], { age: 5 })).toBe(0.1));
+  it('treats entering an exit as decided', () => expect(quality(['back_to_nurture'], { age: 5, at: [daysAgo(2)] })).toBe(0.1));
   it('scores a custom by_hand stage between engaged and opportunity 0.70', () => {
     const q = arrivalQuality({ resolvedAt: daysAgo(60), entries: [{ stage: 'warm', at: daysAgo(5) }], declines: [], stages: withByHand, qualities: stageQualities(withByHand), now });
     expect(q).toBe(0.7);

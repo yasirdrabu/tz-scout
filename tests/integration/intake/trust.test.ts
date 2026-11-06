@@ -5,7 +5,7 @@ import { listConflicts, mergeAccounts, resolveConflict } from '@/modules/account
 import { computeTrust, getArrivalWithStatus, recordFeedback, registerSource, seedIntakeDefaults, submitArrival } from '@/modules/intake';
 import { arrival, source, sourceTrustHistory } from '@/modules/intake/db/schema';
 import { TRUST_PRIOR, trustOf } from '@/modules/intake/domain/trust';
-import { stageChange } from '@/modules/routing/db/schema';
+import { pipelineStage, stageChange } from '@/modules/routing/db/schema';
 import type { ModuleContext } from '@/platform/context';
 import { closeDbs } from '@/platform/db/client';
 import { outbox } from '@/platform/db/schema';
@@ -128,6 +128,18 @@ describe('computeTrust', () => {
     await t.run((ctx) => recordFeedback(ctx, { accountId: s2.accountId, kind: 'declined_by_seller', reasonKey: 'too_much_on_my_plate', note: null, causeEventId: newId('evt') }));
     await compute([busy.agentId], new Date(now.getTime() + 60_000));
     expect(await row(busy.agentId)).toMatchObject({ trustSample: 1, trust: trustOf([{ quality: 0.3, ageDays: 3_660_000 / 86_400_000 }], 0) });
+  });
+
+  it('an entry into an archived flow stage still counts at its quality', async () => {
+    const a = await agent();
+    const now = NOW();
+    const s = await send(a.agentId, 60_000, now);
+    await t.run(async (ctx) => {
+      await ctx.tx.update(pipelineStage).set({ archivedAt: now }).where(and(eq(pipelineStage.tenantId, ctx.tenantId), eq(pipelineStage.key, 'opportunity')));
+    });
+    await enter(s.accountId, 'opportunity', new Date(now.getTime() - 30_000));
+    await compute([a.agentId], now);
+    expect(await row(a.agentId)).toMatchObject({ trustSample: 1, trust: trustOf([{ quality: 0.9, ageDays: 60_000 / 86_400_000 }], 0) });
   });
 
   it('losing a conflict drops trust by 0.01 at once, with a conflict_lost history row and no event', async () => {

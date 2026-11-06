@@ -45,7 +45,7 @@ export function stageQualities(stages: TrustStage[]): Map<string, number> {
 
 type ArrivalInput = {
   resolvedAt: Date;
-  /** The account's stage entries, any time. */
+  /** The account's stage entries, any time; only those at or after `resolvedAt` count. */
   entries: { stage: string; at: Date }[];
   /** When the account was zeroed by a decline (review or seller), already filtered by the caller. */
   declines: Date[];
@@ -54,29 +54,35 @@ type ArrivalInput = {
   now: Date;
 };
 
-/** What an arrival scores, or null when it is not judged yet. A decline zeroes it unless a flow stage was entered after. */
+/**
+ * What an arrival scores, or null when it is not judged yet. Only what happened at or after the arrival counts.
+ * A decline zeroes it unless the account later entered a flow stage at or past the assigned one (`ae_accepts`).
+ */
 export function arrivalQuality(a: ArrivalInput): number | null {
   const byKey = new Map(a.stages.map((s) => [s.key, s]));
+  const from = a.resolvedAt.getTime();
+  const accepts = a.stages.find((s) => s.trigger === 'ae_accepts');
+  const overridePosition = accepts ? accepts.position : -Infinity;
   let best = FLOOR;
   let exited = false;
-  let lastFlow = -Infinity;
-  const declines = a.declines.map((d) => d.getTime());
+  let lastOverride = -Infinity;
+  const declines = a.declines.map((d) => d.getTime()).filter((d) => d >= from);
   for (const e of a.entries) {
     const stage = byKey.get(e.stage);
-    if (!stage) continue;
     const at = e.at.getTime();
+    if (!stage || at < from) continue;
     if (stage.kind === 'flow') {
       best = Math.max(best, a.qualities.get(stage.key) ?? 0);
-      lastFlow = Math.max(lastFlow, at);
+      if (stage.position >= overridePosition) lastOverride = Math.max(lastOverride, at);
     } else {
       // Any exit decides the arrival; a reviewer rejection also zeroes it.
       exited = true;
       if (stage.trigger === 'reviewer_rejects') declines.push(at);
     }
   }
-  if (declines.length > 0 && lastFlow <= Math.max(...declines)) return 0;
+  if (declines.length > 0 && lastOverride <= Math.max(...declines)) return 0;
   if (best >= 0.3 || exited) return best;
-  return (a.now.getTime() - a.resolvedAt.getTime()) / DAY_MS >= JUDGE_AFTER_DAYS ? FLOOR : null;
+  return (a.now.getTime() - from) / DAY_MS >= JUDGE_AFTER_DAYS ? FLOOR : null;
 }
 
 /** 1 for a fresh arrival, halving every `HALF_LIFE_DAYS`. */

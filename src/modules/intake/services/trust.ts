@@ -28,11 +28,14 @@ export async function computeTrust(
   const tenantId = ctx.tenantId;
   if (opts.sourceIds && opts.sourceIds.length === 0) return [];
 
-  // Removed sources are skipped; archived ones are still computed.
+  // Removed sources are skipped; archived ones are still computed. The rows are locked in id order before anything is
+  // computed, so the nightly run and conflict recomputes queue up instead of deadlocking or losing `trust_published`.
   const sources = await ctx.tx
     .select({ id: source.id, kind: source.kind, trust: source.trust, published: source.trustPublished })
     .from(source)
-    .where(and(eq(source.tenantId, tenantId), ne(source.status, 'removed'), opts.sourceIds ? inArray(source.id, opts.sourceIds) : undefined));
+    .where(and(eq(source.tenantId, tenantId), ne(source.status, 'removed'), opts.sourceIds ? inArray(source.id, opts.sourceIds) : undefined))
+    .orderBy(source.id)
+    .for('update');
   if (sources.length === 0) return [];
   const ids = sources.map((s) => s.id);
 
