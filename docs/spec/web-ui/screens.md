@@ -666,6 +666,8 @@ Spend, Cost per won account (green at or under target, amber within 50% over, re
 enough data" or "No wins yet"), win-rate bar. Legend line. Filters change the numbers (the mockup's
 do not).
 
+**As built (R3b-1).** The filters are native selects whose values live in the URL query (a Practice change clears Offer); Batch lists the first 100 batches. A seller sees the counts only: without `costs:read` the Spend and Cost per won account tiles and columns, the cost text in the stage cells and the legend are left out. The cost per won cell is a coloured pill by the API status (good, amber, red) or a gray word ("Not enough data", "No wins yet", "No target set"). A row opens `/funnel/:sourceId`, carrying the current filters. An empty cohort shows "No accounts arrived in this period."
+
 ## 17. Funnel drill by source
 
 **Tag** R3 · **Route** `/t/:tenant/funnel/:sourceId` · **Who** `analytics:read`

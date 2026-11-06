@@ -168,10 +168,23 @@ export const playbookRoute = createRoute({
   component: lazyRouteComponent(() => import('../features/playbooks/PlaybooksScreen'), 'PlaybookScreen'),
 });
 
+/** Funnel by source's filters, so the URL keeps them (C10). */
+export type FunnelSearch = { practice?: string; offer?: string; batch?: string; period?: string };
+const funnelSearch = (search: Record<string, unknown>): FunnelSearch => pickStrings(search, ['practice', 'offer', 'batch', 'period']);
+
 export const funnelRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'funnel',
-  component: () => <Placeholder screen={SCREENS.funnel} />,
+  validateSearch: funnelSearch,
+  component: lazyRouteComponent(() => import('../features/funnel/FunnelScreen'), 'FunnelScreen'),
+});
+
+/** A placeholder until Task 6 builds the Funnel drill (§17); the Funnel's rows link here. */
+export const funnelDrillRoute = createRoute({
+  getParentRoute: () => tenantRoute,
+  path: 'funnel/$sourceId',
+  validateSearch: funnelSearch,
+  component: () => <Placeholder screen={{ title: 'Funnel drill by source', section: '17', tag: 'R3' }} />,
 });
 
 export const costsRoute = createRoute({
