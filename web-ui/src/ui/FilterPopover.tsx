@@ -109,7 +109,8 @@ export function FilterPopover({ categories, value, onChange, onClear }: FilterPo
                 </legend>
                 {current.options.length === 0 && <p className={styles.none}>Nothing to pick yet.</p>}
                 {current.options.map((o) => {
-                  const checked = picked(current.key).includes(o.value);
+                  // A pick-one category's blank option ("All") is the one on while nothing is picked.
+                  const checked = picked(current.key).includes(o.value) || (current.pick === 'one' && o.value === '' && picked(current.key).length === 0);
                   return (
                     <label key={o.value} className={cx(styles.option, checked && styles.checked)}>
                       <input

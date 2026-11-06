@@ -150,7 +150,10 @@ describe('Source page tabs', () => {
     first.unmount();
     serveSources();
     renderApp('/t/taazaa/sources/src_csv');
-    expect(await screen.findByRole('region', { name: 'Trust' })).toHaveTextContent('Not enough data yet');
+    const words = await screen.findByRole('region', { name: 'Trust' });
+    expect(words).toHaveTextContent('Not enough data yet');
+    // The words take the smaller type the Trust tile uses, not the number's.
+    expect(within(words).getByText('Not enough data yet').className).toContain('statValueWords');
   });
 
   it('Accounts shows Came in through from first_arrival, with the filters in the URL', async () => {

@@ -91,12 +91,23 @@ describe('Sources (§10)', () => {
     await user.click(await screen.findByRole('tab', { name: /Trust/ }));
     const options = (await screen.findAllByRole('radio')).map((r) => r.closest('label')!.textContent);
     expect(options.map((t) => t?.replace(/\d+$/, '').trim())).toEqual(['All', '80 and up', '60 to 79', 'Below 60', 'Not enough data']);
+    expect(screen.getByRole('radio', { name: /^All/ })).not.toBeChecked();
     await user.click(screen.getByRole('radio', { name: /60 to 79/ }));
     await waitFor(() => expect(params(app.path()).get('trust')).toBe('mid'));
     // RFP Watch matches, so its parent stays with it.
     await waitFor(() => expect(names()).toEqual(['Marcus Lee', 'RFP Watch']));
     await user.click(screen.getByRole('radio', { name: /Not enough data/ }));
     await waitFor(() => expect(names()).toEqual(['Marcus Lee', 'CSV imports', 'Kestrel Advisory', 'HubSpot inbound']));
+  });
+
+  it('checks All in the Trust filter while no trust filter is set', async () => {
+    serveSources();
+    const user = userEvent.setup();
+    renderApp('/t/taazaa/sources');
+    await screen.findByRole('link', { name: 'Marcus Lee' });
+    await user.click(screen.getByRole('button', { name: /Filter/ }));
+    await user.click(await screen.findByRole('tab', { name: /Trust/ }));
+    expect(await screen.findByRole('radio', { name: /^All/ })).toBeChecked();
   });
 
   it('shows the empty state with a way out, and no archived sources', async () => {

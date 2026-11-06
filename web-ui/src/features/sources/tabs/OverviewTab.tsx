@@ -62,7 +62,7 @@ export function OverviewTab({ tenant, source: s, stat }: Props) {
             Trust
           </h2>
           <span className={styles.note}>Updated nightly</span>
-          <span className={styles.statValue}>{s.trust_label ?? s.trust}</span>
+          <span className={s.trust_label ? styles.statValueWords : styles.statValue}>{s.trust_label ?? s.trust}</span>
           <span className={styles.note}>{`Based on ${f.number(s.trust_sample)} ${s.trust_sample === 1 ? 'account' : 'accounts'}`}</span>
           {s.trust_trend.length > 0 ? <TrendStrip trend={s.trust_trend} /> : <p className={styles.note}>No history yet.</p>}
         </section>
