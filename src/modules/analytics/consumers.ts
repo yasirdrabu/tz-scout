@@ -4,6 +4,7 @@ import { dealChanged } from '@/modules/crm/contracts/events';
 import { arrivalResolved } from '@/modules/intake/contracts/events';
 import { CATEGORY_OF_PROVIDER } from '@/modules/integrations/contracts/costs';
 import { usageRecorded } from '@/modules/integrations/contracts/events';
+import { outcomeRecorded } from '@/modules/playbooks';
 import { stageChanged } from '@/modules/routing/contracts/events';
 import { accountScored } from '@/modules/scoring/contracts/events';
 import { tenantTimezone } from '@/modules/tenancy';
@@ -12,6 +13,7 @@ import { defineConsumer, type ConsumerDef } from '@/platform/runtime/consumers';
 import { dayOf } from './domain/budgets';
 import { mergeJourneys, recordArrival, recordDeal, recordScore, recordStage, stageKinds } from './services/journeys';
 import { recordLine } from './services/lines';
+import { recordStepCredit } from './services/what-worked';
 
 /** Ruling 5: every priced paid call is one usage line, deduped on the event id. Lines come from nothing else. */
 export const analyticsUsageLines = defineConsumer({
@@ -105,6 +107,14 @@ export const analyticsJourneyMerge = defineConsumer({
   handle: async (e, ctx) => mergeJourneys(ctx, e.data.survivorId, e.data.mergedId),
 });
 
+/** Each outcome's credited steps (R3c-2 Ruling 8), one row per step; a replay adds nothing. */
+export const analyticsStepCredit = defineConsumer({
+  name: 'analytics.step_credit',
+  event: outcomeRecorded,
+  orderedBy: (e) => e.data.accountId,
+  handle: async (e, ctx) => recordStepCredit(ctx, { ...e.data, accountId: await survivorOf(ctx, e.data.accountId) }),
+});
+
 /** Every analytics consumer, for the worker's list. */
 export const analyticsConsumers: ConsumerDef[] = [
   analyticsUsageLines,
@@ -113,4 +123,5 @@ export const analyticsConsumers: ConsumerDef[] = [
   analyticsJourneyScore,
   analyticsJourneyDeal,
   analyticsJourneyMerge,
+  analyticsStepCredit,
 ];

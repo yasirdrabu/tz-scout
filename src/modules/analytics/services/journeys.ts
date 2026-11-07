@@ -4,7 +4,7 @@ import { listDeals } from '@/modules/crm';
 import { listResolvedArrivals } from '@/modules/intake';
 import { listStageHistory, listStages } from '@/modules/routing';
 import type { ModuleContext } from '@/platform/context';
-import { journey, journeyDeal, journeyStage } from '../db/schema';
+import { journey, journeyDeal, journeyStage, stepCredit } from '../db/schema';
 
 /** One account's way through the funnel, as later funnel and cost reads take it. */
 export type Journey = {
@@ -112,7 +112,7 @@ export async function recordDeal(
 
 /**
  * After an account merge: the survivor keeps the earlier arrival (with its source and batch), the earliest
- * entry into each stage, its own exit (else the merged account's) and both accounts' deals; it keeps its own score
+ * entry into each stage, its own exit (else the merged account's) and both accounts' deals and step credits; it keeps its own score
  * (practice and offer) when it has one. The merged account's journey is deleted. Running it again changes nothing.
  */
 export async function mergeJourneys(ctx: ModuleContext, survivorId: string, mergedId: string): Promise<void> {
@@ -147,6 +147,10 @@ export async function mergeJourneys(ctx: ModuleContext, survivorId: string, merg
     .update(journeyDeal)
     .set({ accountId: survivorId })
     .where(and(eq(journeyDeal.tenantId, ctx.tenantId), eq(journeyDeal.accountId, mergedId)));
+  await ctx.tx
+    .update(stepCredit)
+    .set({ accountId: survivorId })
+    .where(and(eq(stepCredit.tenantId, ctx.tenantId), eq(stepCredit.accountId, mergedId)));
 }
 
 /**

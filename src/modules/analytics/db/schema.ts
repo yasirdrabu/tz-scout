@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, check, date, index, integer, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, check, date, index, integer, pgSchema, primaryKey, text, timestamp, unique, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Analytics schema. Every table here is a tenant table: `tenant_id` not null, row level security
@@ -149,5 +149,34 @@ export const journeyDeal = analytics.table(
     primaryKey({ columns: [t.tenantId, t.system, t.dealExternalId] }),
     index('journey_deal_account_idx').on(t.tenantId, t.accountId),
     check('journey_deal_status_valid', sql`${t.status} in ('open', 'won', 'lost')`),
+  ],
+);
+
+/**
+ * One row per credited step per outcome (R3c-2 Ruling 8), filled from `playbooks.outcome.recorded`. An outcome with
+ * no credited step has one row with `step_id` and `step_type` null ("No recent step"). The unique index treats nulls
+ * as equal, so a replayed event adds nothing. `practice_id` and `offer_id` come from the account's journey when the
+ * event arrives; `account_id` is kept for the data limit and for merges.
+ */
+export const stepCredit = analytics.table(
+  'step_credit',
+  {
+    tenantId: text('tenant_id').notNull(),
+    outcomeId: text('outcome_id').notNull(),
+    outcomeKind: text('outcome_kind').notNull(),
+    stepId: text('step_id'),
+    stepType: text('step_type'),
+    playbookTemplateId: text('playbook_template_id'),
+    practiceId: text('practice_id'),
+    offerId: text('offer_id'),
+    accountId: text('account_id').notNull(),
+    occurredAt: at('occurred_at').notNull(),
+  },
+  (t) => [
+    unique('step_credit_outcome_step_uq').on(t.tenantId, t.outcomeId, t.stepId).nullsNotDistinct(),
+    index('step_credit_tenant_occurred_idx').on(t.tenantId, t.occurredAt),
+    index('step_credit_account_idx').on(t.tenantId, t.accountId),
+    check('step_credit_kind_valid', sql`${t.outcomeKind} in ('reply', 'meeting', 'opportunity', 'won', 'lost', 'no_response')`),
+    check('step_credit_type_valid', sql`${t.stepType} is null or ${t.stepType} in ('email', 'linkedin', 'call', 'meeting', 'task')`),
   ],
 );
