@@ -19,17 +19,22 @@ const zero = (): Counts => ({ reply: 0, meeting: 0, opportunity: 0, won: 0 });
 const isCounted = (k: string): k is keyof Counts => (COUNTED as readonly string[]).includes(k);
 
 /**
- * Credits (one per credited step per outcome) and the steps done, both already in the window and the data limit
+ * Credits (one per credited step per outcome; an outcome counts once per step type) and the steps done, both already in the window and the data limit
  * (Ruling 9). Lost and no_response are not counted; a channel with no steps done and no results is left out;
  * per 10 is `round(count / stepsDone * 10, 1)`, null with no steps done.
  */
-export function rollUp(credits: { outcomeKind: string; stepType: string | null }[], doneSteps: { channel: string }[]): WhatWorked {
+export function rollUp(credits: { outcomeId: string; outcomeKind: string; stepType: string | null }[], doneSteps: { channel: string }[]): WhatWorked {
   const byChannel = new Map<string, { stepsDone: number; counts: Counts }>();
   const slot = (c: string) => byChannel.get(c) ?? byChannel.set(c, { stepsDone: 0, counts: zero() }).get(c)!;
   for (const s of doneSteps) slot(s.channel).stepsDone += 1;
   const noRecentStep = zero();
+  // Distinct outcomes per step type: one outcome crediting several steps of a type counts once under it.
+  const seen = new Set<string>();
   for (const c of credits) {
     if (!isCounted(c.outcomeKind)) continue;
+    const key = `${c.stepType ?? ''}|${c.outcomeId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     (c.stepType === null ? noRecentStep : slot(c.stepType).counts)[c.outcomeKind] += 1;
   }
   const per10 = (n: number, steps: number) => (steps === 0 ? null : Math.round((n / steps) * 100) / 10);

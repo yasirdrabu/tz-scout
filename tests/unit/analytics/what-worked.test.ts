@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { rollUp } from '@/modules/analytics/domain/what-worked';
 
-const credit = (outcomeKind: string, stepType: string | null) => ({ outcomeKind, stepType });
+let n = 0;
+const credit = (outcomeKind: string, stepType: string | null, outcomeId = `out_${n++}`) => ({ outcomeId, outcomeKind, stepType });
 const done = (n: number, channel: string) => Array.from({ length: n }, () => ({ channel }));
 
 describe('rollUp', () => {
@@ -34,5 +35,12 @@ describe('rollUp', () => {
     const w = rollUp([credit('reply', 'email'), credit('meeting', 'email'), credit('reply', null)], done(10, 'email'));
     expect(w.rows[0]!.counts).toEqual({ reply: 1, meeting: 1, opportunity: 0, won: 0 });
     expect(w.noRecentStep).toEqual({ reply: 1, meeting: 0, opportunity: 0, won: 0 });
+  });
+
+  it('one outcome crediting two email steps counts once under email', () => {
+    const w = rollUp([credit('reply', 'email', 'o1'), credit('reply', 'email', 'o1'), credit('reply', 'call', 'o1'), credit('won', null, 'o2')], done(4, 'email'));
+    expect(w.rows.map((r) => [r.stepType, r.counts.reply])).toEqual([['email', 1], ['call', 1]]);
+    expect(w.rows[0]!.per10.reply).toBe(2.5);
+    expect(w.noRecentStep.won).toBe(1);
   });
 });

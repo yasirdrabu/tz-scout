@@ -196,6 +196,21 @@ describe('whatWorked', () => {
     ]);
   });
 
+  it('one outcome crediting two email steps counts once under email', async () => {
+    const x = await workspace('Distinct Credit Co');
+    const acc = await x.account('Distinct Credit Acct');
+    const e = outcomeEvent(acc, null, 'reply', '2026-11-04', [
+      { stepId: 'stp_d1', channel: 'email' },
+      { stepId: 'stp_d2', channel: 'email' },
+      { stepId: 'stp_d3', channel: 'call' },
+    ]);
+    await credit(x, e);
+    await credit(x, outcomeEvent(acc, null, 'won', '2026-11-05', []));
+    const v = await x.run((ctx) => whatWorked(ctx, {}, { now: NOW }));
+    expect(v.rows.map((r) => [r.stepType, r.counts.reply])).toEqual([['email', 1], ['call', 1]]);
+    expect(v.noRecentStep).toEqual(counts(0, 0, 0, 1));
+  });
+
   it('templateId filters both counts', async () => {
     const v = await w.run((ctx) => whatWorked(ctx, { templateId: t1 }, { now: NOW }));
     expect(v.rows.map((r) => [r.stepType, r.stepsDone, r.counts])).toEqual([
