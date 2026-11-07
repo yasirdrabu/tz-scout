@@ -1,0 +1,138 @@
+import { useQuery } from '@tanstack/react-query';
+import { getRouteApi, Link } from '@tanstack/react-router';
+import { useState, type ReactNode } from 'react';
+import { hasScope, meQuery } from '../../api/me';
+import { useFormat } from '../../lib/useFormat';
+import page from '../../routes/Page.module.css';
+import { buttonClass } from '../../ui/Button';
+import { LoadFailed, LoadingRows } from '../settings/shared';
+import { overviewQuery, PACE_WORD, type Overview, type Selection } from './api';
+import styles from './Overview.module.css';
+
+const route = getRouteApi('/t/$tenant/overview');
+
+const accounts = (n: number) => (n === 1 ? '1 account' : `${n} accounts`);
+const same = (a: Selection | null, b: Selection) => !!a && a.key === b.key && a.scope?.stage === b.scope?.stage;
+
+/** §9 Overview: the quarter's tiles, pipeline funnel and exits. `drawer` is the slot for the detail drawer (R3c-1 Task 7). */
+export function OverviewScreen({ drawer }: { drawer?: (selection: Selection | null, close: () => void) => ReactNode }) {
+  const { tenant } = route.useParams();
+  const me = useQuery(meQuery(tenant));
+  const data = useQuery(overviewQuery(tenant));
+  const [selected, setSelected] = useState<Selection | null>(null);
+  const canConfigure = !!me.data && hasScope(me.data, 'settings:manage');
+  const o = data.data;
+  return (
+    <div className={page.page}>
+      <div className={styles.head}>
+        <div>
+          <h1 className={page.title}>Overview</h1>
+          <p className={page.sub}>
+            {o
+              ? `Where every account is this quarter, and who and what moved it there. ${o.quarter.label}, week ${o.quarter.week} of ${o.quarter.weeks}. Click any number to see what made it up.`
+              : 'Where every account is this quarter, and who and what moved it there. Click any number to see what made it up.'}
+          </p>
+        </div>
+        {canConfigure && (
+          <Link to="/t/$tenant/settings/$tab" params={{ tenant, tab: 'pipeline-stages' }} className={buttonClass('secondary', 'sm')}>
+            Configure stages
+          </Link>
+        )}
+      </div>
+      {data.isPending ? (
+        <LoadingRows>Loading the overview</LoadingRows>
+      ) : data.isError ? (
+        <LoadFailed title="The overview didn't load" error={data.error} onRetry={() => void data.refetch()} />
+      ) : (
+        <Body overview={data.data} selected={selected} open={setSelected} />
+      )}
+      {drawer?.(selected, () => setSelected(null))}
+    </div>
+  );
+}
+
+function Body({ overview: o, selected, open }: { overview: Overview; selected: Selection | null; open: (s: Selection) => void }) {
+  const f = useFormat();
+  const k = o.kpis;
+  const first = o.first_stage.name;
+  const won = o.won_stage.name;
+  const max = o.stages[0]?.count ?? 0;
+  const width = (count: number) => (max > 0 ? 22 + 78 * Math.sqrt(count / max) : 22);
+  return (
+    <>
+      <ul className={styles.tiles} aria-label="Overview totals">
+        <Tile label="Pipeline value" value={f.money(k.pipeline_value_cents)} note={`${accounts(k.pipeline_accounts)} at ${o.opportunity_stage.name}`} on={same(selected, { key: 'pipeline_value' })} onClick={() => open({ key: 'pipeline_value' })} />
+        <Tile label="Won value" value={f.money(k.won_value_cents)} note={`${accounts(k.won_accounts)} ${won.toLowerCase()}`} on={same(selected, { key: 'won_value' })} onClick={() => open({ key: 'won_value' })} />
+        <Tile label={`${first} to ${won}`} value={k.sent_to_won_pct === null ? '–' : `${k.sent_to_won_pct}%`} note="Of accounts that entered this quarter" on={same(selected, { key: 'sent_to_won' })} onClick={() => open({ key: 'sent_to_won' })} />
+        <Tile
+          label="Days to win"
+          value={k.days_to_win === null ? 'None yet' : f.number(k.days_to_win)}
+          note={`Median, ${first.toLowerCase()} to ${won.toLowerCase()}`}
+          on={same(selected, { key: 'days_to_win' })}
+          onClick={() => open({ key: 'days_to_win' })}
+        />
+      </ul>
+      <section className={styles.funnel} aria-label="Pipeline">
+        <p className={styles.marker}>
+          <span className={styles.markerLine} aria-hidden="true" /> Where we should be today
+        </p>
+        <ul className={styles.bands}>
+          {o.stages.map((s, i) => {
+            const sel: Selection = { key: 'stage', scope: { stage: s.key } };
+            const pct = Math.min(100, s.target ? (s.count / s.target) * 100 : 0);
+            return (
+              <li key={s.key}>
+                <button type="button" className={`${styles.band} ${i === o.stages.length - 1 ? styles.won : ''}`} aria-pressed={same(selected, sel)} onClick={() => open(sel)}>
+                  <span className={styles.bandBar} style={{ width: `${width(s.count)}%`, opacity: 1 - Math.min(i, 5) * 0.12 }}>
+                    <span className={styles.bandName}>{s.name}</span>
+                    <span className={styles.bandCount}>{f.number(s.count)}</span>
+                  </span>
+                  <span className={styles.bandInfo}>
+                    <span>{i === 0 ? 'Into the pipeline' : s.pct_of_previous === null ? '' : `${s.pct_of_previous}% of ${o.stages[i - 1]!.name}`}</span>
+                    {s.value_cents !== null && <span>{f.money(s.value_cents)}</span>}
+                    {s.target === null ? <span className={styles.muted}>No target set</span> : <span>{`${f.number(s.count)} of ${f.number(s.target)}`}</span>}
+                    {s.pace && <span className={`${styles.pace} ${styles[s.pace]}`}>{PACE_WORD[s.pace]}</span>}
+                  </span>
+                  {s.target !== null && (
+                    <span className={styles.track} aria-hidden="true">
+                      <span className={styles.fill} style={{ width: `${pct}%` }} />
+                      <span className={styles.paceMark} style={{ left: `${o.quarter.pace_pct}%` }} />
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+      <section className={styles.exits} aria-label="Left the pipeline">
+        <h2 className={styles.exitsTitle}>Left the pipeline</h2>
+        <ul className={styles.exitList}>
+          {o.exits.map((e) => {
+            const sel: Selection = { key: 'exit', scope: { stage: e.key } };
+            return (
+              <li key={e.key}>
+                <button type="button" className={styles.exit} aria-pressed={same(selected, sel)} onClick={() => open(sel)}>
+                  <span>{e.name}</span>
+                  <span className={styles.exitCount}>{f.number(e.count)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    </>
+  );
+}
+
+function Tile({ label, value, note, on, onClick }: { label: string; value: string; note: string; on: boolean; onClick: () => void }) {
+  return (
+    <li>
+      <button type="button" className={styles.tile} aria-pressed={on} onClick={onClick}>
+        <span className={styles.tileLabel}>{label}</span>
+        <span className={styles.tileValue}>{value}</span>
+        <span className={styles.tileNote}>{note}</span>
+      </button>
+    </li>
+  );
+}

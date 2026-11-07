@@ -1,0 +1,205 @@
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tile:hover,
+.tile[aria-pressed='true'] {
+  border-color: var(--accent-300);
+}
+
+.tileLabel {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tileValue {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.tileNote {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.funnel,
+.exits {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.marker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.markerLine {
+  width: 2px;
+  height: 12px;
+  background: var(--text);
+}
+
+.bands,
+.exitList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.band,
+.exit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.band:hover,
+.exit:hover,
+.band[aria-pressed='true'],
+.exit[aria-pressed='true'] {
+  border-color: var(--accent-300);
+  background: var(--accent-50);
+}
+
+.bandBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-500);
+  color: #fff;
+  font-weight: 600;
+}
+
+.won .bandBar {
+  background: var(--good);
+}
+
+.bandCount {
+  font-variant-numeric: tabular-nums;
+}
+
+.bandInfo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--text-soft);
+  font-size: var(--text-sm);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.pace {
+  font-weight: 600;
+}
+
+.behind {
+  color: var(--bad);
+}
+
+.on {
+  color: var(--near);
+}
+
+.ahead {
+  color: var(--good);
+}
+
+.track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line-soft);
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent-400);
+}
+
+.paceMark {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--text);
+}
+
+.exitsTitle {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.exit {
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.exitCount {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
