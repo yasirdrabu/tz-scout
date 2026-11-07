@@ -63,8 +63,9 @@ function Body({ overview: o, selected, open }: { overview: Overview; selected: S
   const k = o.kpis;
   const first = o.first_stage.name;
   const won = o.won_stage.name;
-  const max = o.stages[0]?.count ?? 0;
-  const width = (count: number) => (max > 0 ? 22 + 78 * Math.sqrt(count / max) : 22);
+  const max = Math.max(1, ...o.stages.map((s) => s.count));
+  const width = (count: number) => 22 + 78 * Math.sqrt(count / max);
+  const target = (t: number | null) => (t !== null && t > 0 ? t : null);
   return (
     <>
       <ul className={styles.tiles} aria-label="Overview totals">
@@ -81,13 +82,16 @@ function Body({ overview: o, selected, open }: { overview: Overview; selected: S
       </ul>
       <section className={styles.funnel} aria-label="Pipeline">
         <h2 className={styles.sectionTitle}>Pipeline</h2>
-        <p className={styles.marker}>
-          <span className={styles.markerLine} aria-hidden="true" /> Where we should be today
-        </p>
+        {o.stages.some((s) => target(s.target) !== null) && (
+          <p className={styles.marker}>
+            <span className={styles.markerLine} aria-hidden="true" /> Where we should be today
+          </p>
+        )}
         <ul className={styles.bands}>
           {o.stages.map((s, i) => {
             const sel: Selection = { key: 'stage', scope: { stage: s.key } };
-            const pct = Math.min(100, s.target ? (s.count / s.target) * 100 : 0);
+            const goal = target(s.target);
+            const pct = Math.min(100, goal ? (s.count / goal) * 100 : 0);
             return (
               <li key={s.key}>
                 <button type="button" className={`${styles.band} ${s.key === o.won_stage.key ? styles.won : ''}`} aria-pressed={sameSelection(selected, sel)} onClick={() => open(sel)}>
@@ -98,10 +102,10 @@ function Body({ overview: o, selected, open }: { overview: Overview; selected: S
                   <span className={styles.bandInfo}>
                     {(i === 0 || s.pct_of_previous !== null) && <span>{i === 0 ? 'Into the pipeline' : `${s.pct_of_previous}% of ${o.stages[i - 1]!.name}`}</span>}
                     {s.value_cents !== null && <span>{f.money(s.value_cents)}</span>}
-                    {s.target === null ? <span className={styles.muted}>No target set</span> : <span>{`${f.number(s.count)} of ${f.number(s.target)}`}</span>}
-                    {s.pace && <span className={`${styles.pace} ${styles[s.pace]}`}>{PACE_WORD[s.pace]}</span>}
+                    {goal === null ? <span className={styles.muted}>No target set</span> : <span>{`${f.number(s.count)} of ${f.number(goal)}`}</span>}
+                    {goal !== null && s.pace && <span className={`${styles.pace} ${styles[s.pace]}`}>{PACE_WORD[s.pace]}</span>}
                   </span>
-                  {s.target !== null && (
+                  {goal !== null && (
                     <span className={styles.track} aria-hidden="true">
                       <span className={styles.fill} style={{ width: `${pct}%` }} />
                       <span className={styles.paceMark} style={{ left: `${o.quarter.pace_pct}%` }} />

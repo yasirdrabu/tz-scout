@@ -81,6 +81,20 @@ describe('Overview scorecard', () => {
     expect(within(priya).getByRole('button', { name: /^–/ })).toBeInTheDocument();
   });
 
+  it('says the tone in words as well as colour', async () => {
+    serveOverview();
+    const app = await open();
+    await screen.findByText('Priya Shah');
+    expect(within(rowOf('Priya Shah')).getByRole('button', { name: /^90%.*At or better than the team/ })).toBeInTheDocument();
+    expect(within(rowOf('Sam Lee')).getByRole('button', { name: /^50%.*Needs attention/ })).toBeInTheDocument();
+    expect(within(rowOf('Sam Lee')).getByRole('button', { name: /^60%/ }).textContent).not.toMatch(/team|attention|Good/);
+    await userEvent.click(screen.getByRole('tab', { name: 'By practice' }));
+    await waitFor(() => expect(app.path()).toContain('tab=practices'));
+    expect(await screen.findByRole('button', { name: /^8%.*Needs attention/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: 'By offer' }));
+    expect(await screen.findByRole('button', { name: /^15%.*Good/ })).toBeInTheDocument();
+  });
+
   it('opens the drawer from a cell with the metric, its scope and the See all link', async () => {
     const seen: string[] = [];
     serveOverview();

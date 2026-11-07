@@ -161,11 +161,13 @@ function Table({ data, selected, open }: { data: ScorecardData; selected: Select
                 const cell = c.metric.cell(r);
                 const sel: Selection = { key: c.metric.key, scope: c.metric.scope(r) };
                 const tone = cell.tone === 'good' ? styles.good : cell.tone === 'attention' ? styles.attention : '';
+                const toneWord = cell.tone === 'good' ? (data.tab === 'sellers' ? 'At or better than the team' : 'Good') : cell.tone === 'attention' ? 'Needs attention' : null;
                 return (
                   <td key={c.id}>
                     <button type="button" className={`${styles.cell} ${tone}`} aria-pressed={sameSelection(selected, sel)} onClick={() => open(sel)}>
                       <span className={styles.num}>{show(cell, c.metric.unit, f)}</span>
                       {cell.sub && <span className={styles.sub}>{cell.sub}</span>}
+                      {toneWord && <span className="sr-only">{` ${toneWord}`}</span>}
                     </button>
                   </td>
                 );
