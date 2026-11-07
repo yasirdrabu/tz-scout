@@ -2,7 +2,7 @@
 export const CREDIT_WINDOW_MS = 14 * 86_400_000;
 
 /** The done steps with `at − 14d ≤ doneAt ≤ at`, ordered by doneAt then id. None means "no recent step". */
-export function creditedSteps(steps: { id: string; channel: string; status: string; doneAt: Date | null }[], at: Date): { stepId: string; channel: string }[] {
+export function creditedSteps<C extends string>(steps: { id: string; channel: C; status: string; doneAt: Date | null }[], at: Date): { stepId: string; channel: C }[] {
   const to = at.getTime();
   const from = to - CREDIT_WINDOW_MS;
   return steps

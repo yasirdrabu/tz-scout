@@ -59,7 +59,7 @@
 
 ## Rulings (controller, 2026-11-07)
 
-1. **The plan an outcome belongs to.** It's the account's plan with the latest `accepted_at ≤ occurredAt`, in any status. With no such plan the outcome isn't recorded: outcomes are about plays.
+1. **The plan an outcome belongs to.** It's the account's latest plan that had started by `occurredAt` (its first accept), in any status. With no such plan the outcome isn't recorded: outcomes are about plays.
    - Cost if wrong: R3c-3's "on a plan vs not" needs outcomes without a plan. That would widen this rule; the table already allows a null `plan_id`.
 2. **Meeting means booked.** The CRM activity `meeting` is the booking (R2d), and the tile reads "Booked a meeting". The activity's `externalId` is the ref, so a later update to the same meeting isn't a second outcome. The spec line "meeting held" is amended.
 3. **Deal outcomes.**

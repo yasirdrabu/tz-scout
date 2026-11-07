@@ -59,7 +59,8 @@ outcomes and no what-worked score.
 
 - **Meeting means booked.** The CRM activity `meeting` is the booking (R2d) and the tile reads "Booked a meeting". Its `externalId` is the
   `ref`, so a later update to the same meeting is not a second outcome. The line "meeting held" above is amended.
-- **Outcomes belong to a plan.** An outcome belongs to the account's plan with the latest `accepted_at` at or before `occurredAt`, in any
+- **Outcomes belong to a plan.** An outcome belongs to the account's latest plan that had started by `occurredAt` (its first accept:
+  `least(created_at, accepted_at)`, because `accepted_at` moves forward on a resume or takeover), in any
   status, so a reply after the plan was stopped or completed still counts for it. With no such plan nothing is recorded: outcomes are
   about plays. Outcomes are only recorded for accounts with a plan accepted before them.
 - **Deals.**

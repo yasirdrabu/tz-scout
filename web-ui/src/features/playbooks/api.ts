@@ -89,14 +89,13 @@ export type WhatWorked = {
   /** Results with no step done in the 14 days before them. */
   no_recent_step: ByKind<number>;
   min_steps: number;
-  updated_at: string;
+  updated_at: string | null;
 };
 
-export const whatWorkedQuery = (tenant: string, templateId: string, enabled: boolean) =>
+export const whatWorkedQuery = (tenant: string, templateId: string) =>
   queryOptions({
     queryKey: ['playbooks', tenant, 'what-worked', templateId],
     queryFn: () => apiFetch<WhatWorked>(`/analytics/what-worked?template_id=${encodeURIComponent(templateId)}`, { tenant }),
-    enabled,
   });
 
 /** A whole-number share of the finished plans, or null with nothing finished. */

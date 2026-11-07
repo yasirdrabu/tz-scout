@@ -49,6 +49,8 @@ export const planCreated = defineEvent(
 
 const channel = z.enum(['email', 'linkedin', 'call', 'meeting', 'task']);
 
+export const OUTCOME_KINDS = ['reply', 'meeting', 'opportunity', 'won', 'lost', 'no_response'] as const;
+
 /** A step taken out of the plan: only its id. */
 const removedStep = z.object({ id: z.string(), removed: z.literal(true) });
 /** A step the change touched, in full. */
@@ -145,7 +147,7 @@ export const outcomeRecorded = defineEvent(
     accountId: z.string(),
     planId: z.string().nullable(),
     templateId: z.string().nullable(),
-    kind: z.enum(['reply', 'meeting', 'opportunity', 'won', 'lost', 'no_response']),
+    kind: z.enum(OUTCOME_KINDS),
     occurredAt: z.string(),
     source: z.enum(['crm', 'playbooks']),
     amountCents: z.number().int().nullable(),

@@ -142,6 +142,27 @@ describe('recordOutcome', () => {
     expect(rows.find((r) => r.kind === 'meeting')!.planId).toBe(older.planId);
   });
 
+  it('follows the plan by its first accept: a resume that moved accepted_at forward does not orphan an earlier reply', async () => {
+    const accountId = newId('acc');
+    const now = Date.now();
+    const { planId } = await rawPlan(accountId, new Date(now - 30 * DAY), 'active');
+    // Accepted on day 1, resumed on day 10: accepted_at moved, created_at did not.
+    await t.run((ctx) => ctx.tx.update(accountPlan).set({ createdAt: new Date(now - 30 * DAY), acceptedAt: new Date(now - 20 * DAY) }).where(eq(accountPlan.id, planId)));
+    expect(await record({ accountId, kind: 'reply', ref: 'hubspot:act_resume', occurredAt: new Date(now - 25 * DAY), source: 'crm' })).not.toBeNull();
+    expect((await outcomes(accountId))[0]!.planId).toBe(planId);
+  });
+
+  it('with two plans, the later-started one still wins', async () => {
+    const accountId = newId('acc');
+    const now = Date.now();
+    const first = await rawPlan(accountId, new Date(now - 30 * DAY), 'completed');
+    await t.run((ctx) => ctx.tx.update(accountPlan).set({ createdAt: new Date(now - 30 * DAY), acceptedAt: new Date(now - 5 * DAY) }).where(eq(accountPlan.id, first.planId)));
+    const second = await rawPlan(accountId, new Date(now - 10 * DAY), 'active');
+    await t.run((ctx) => ctx.tx.update(accountPlan).set({ createdAt: new Date(now - 10 * DAY) }).where(eq(accountPlan.id, second.planId)));
+    await record({ accountId, kind: 'reply', ref: 'hubspot:act_two', occurredAt: new Date(now - 2 * DAY), source: 'crm' });
+    expect((await outcomes(accountId))[0]!.planId).toBe(second.planId);
+  });
+
   it('a second opportunity on the same plan records nothing', async () => {
     const accountId = newId('acc');
     await rawPlan(accountId, new Date(Date.now() - 10 * DAY));

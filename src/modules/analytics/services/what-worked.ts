@@ -51,7 +51,7 @@ async function load(ctx: ModuleContext, filter: { templateId?: string }, now: Da
         filter.templateId ? eq(stepCredit.playbookTemplateId, filter.templateId) : undefined,
       ),
     );
-  const steps = (await listDoneSteps(ctx, w)).filter((s) => !filter.templateId || s.templateId === filter.templateId);
+  const steps = await listDoneSteps(ctx, w, filter.templateId);
   const ok = new Set(await filterVisibleAccountIds(ctx, [...new Set([...credits.map((c) => c.accountId), ...steps.map((s) => s.accountId)])]));
   return { credits: credits.filter((c) => ok.has(c.accountId)), steps: steps.filter((s) => ok.has(s.accountId)) };
 }

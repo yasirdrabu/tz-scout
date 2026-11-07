@@ -149,6 +149,16 @@ describe('deal outcomes', () => {
     expect(rows[1]).toMatchObject({ amountCents: 500_000, occurredAt: closedAt });
   });
 
+  it('a deal open and then lost, never won, records opportunity and then lost', async () => {
+    const { accountId } = await account();
+    const closedAt = new Date(Date.now() + 60_000);
+    await deal(accountId, { id: 'd1' });
+    await deal(accountId, { id: 'd1', status: 'lost', previousStatus: 'open', closedAt });
+    const rows = await outcomes(accountId);
+    expect(rows.map((o) => o.kind)).toEqual(['lost', 'opportunity']);
+    expect(rows.find((o) => o.kind === 'lost')).toMatchObject({ occurredAt: closedAt });
+  });
+
   it('a deal arriving already won records opportunity and won', async () => {
     const { accountId } = await account();
     await deal(accountId, { id: 'd1', status: 'won', amountCents: 100, closedAt: new Date() });

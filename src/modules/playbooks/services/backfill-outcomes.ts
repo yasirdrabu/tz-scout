@@ -18,7 +18,11 @@ export async function backfillOutcomes(ctx: ModuleContext): Promise<number> {
   for (const a of await listOutcomeActivity(ctx)) {
     await recordOutcome(ctx, { accountId: await survivor(a.accountId), kind: a.kind, ref: `${a.system}:${a.externalId}`, source: 'crm', occurredAt: a.occurredAt });
   }
-  for (const d of await listDeals(ctx)) {
+  // In open order, so a plan's one opportunity is its first deal.
+  const deals = (await listDeals(ctx)).sort(
+    (a, b) => (a.openedAt ?? a.syncedAt).getTime() - (b.openedAt ?? b.syncedAt).getTime() || (a.externalId < b.externalId ? -1 : a.externalId > b.externalId ? 1 : 0),
+  );
+  for (const d of deals) {
     await recordDealOutcomes(ctx, {
       accountId: await survivor(d.accountId),
       system: d.system,

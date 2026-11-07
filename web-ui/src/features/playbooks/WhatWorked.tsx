@@ -13,7 +13,7 @@ const COLUMNS: { kind: OutcomeKind; label: string }[] = [
 
 /** §20 What worked: the results each step type was credited with. Needs analytics:read, so the caller decides whether to show it. */
 export function WhatWorked({ tenant, templateId }: { tenant: string; templateId: string }) {
-  const worked = useQuery(whatWorkedQuery(tenant, templateId, true));
+  const worked = useQuery(whatWorkedQuery(tenant, templateId));
   const d = worked.data;
   const noRecent = d && COLUMNS.some((c) => d.no_recent_step[c.kind] > 0);
 
@@ -23,11 +23,11 @@ export function WhatWorked({ tenant, templateId }: { tenant: string; templateId:
         What worked
       </h2>
       <p className={styles.note}>Steps done in the last 90 days and the results they were credited with. A result credits the steps done in the 14 days before it.</p>
-      {worked.isPending ? (
-        <LoadingRows>Loading what worked</LoadingRows>
-      ) : worked.isError ? (
+      {worked.isError ? (
         <LoadFailed title="What worked didn't load" error={worked.error} onRetry={() => void worked.refetch()} />
-      ) : !d!.rows.length && !noRecent ? (
+      ) : !d ? (
+        <LoadingRows>Loading what worked</LoadingRows>
+      ) : !d.rows.length && !noRecent ? (
         <p className={styles.note}>No steps done in the last 90 days.</p>
       ) : (
         <div className={table.wrap}>
@@ -46,8 +46,8 @@ export function WhatWorked({ tenant, templateId }: { tenant: string; templateId:
               </tr>
             </thead>
             <tbody>
-              {d!.rows.map((r) => {
-                const few = r.steps_done < d!.min_steps;
+              {d.rows.map((r) => {
+                const few = r.steps_done < d.min_steps;
                 return (
                   <tr key={r.step_type}>
                     <td>{CHANNEL_WORD[r.step_type]}</td>
@@ -75,7 +75,7 @@ export function WhatWorked({ tenant, templateId }: { tenant: string; templateId:
                   </td>
                   {COLUMNS.map((c) => (
                     <td key={c.kind} className={table.num}>
-                      {d!.no_recent_step[c.kind]}
+                      {d.no_recent_step[c.kind]}
                     </td>
                   ))}
                 </tr>

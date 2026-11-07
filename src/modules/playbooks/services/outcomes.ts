@@ -1,12 +1,13 @@
-import { and, desc, eq, lte } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
-import { outcomeRecorded } from '../contracts/events';
+import { OUTCOME_KINDS, outcomeRecorded } from '../contracts/events';
 import { accountPlan, outcome, planStep } from '../db/schema';
 import { creditedSteps } from '../domain/credit';
+import type { StepChannel } from '../domain/plan';
 
-export const OUTCOME_KINDS = ['reply', 'meeting', 'opportunity', 'won', 'lost', 'no_response'] as const;
+export { OUTCOME_KINDS };
 export type OutcomeKind = (typeof OUTCOME_KINDS)[number];
 
 export type OutcomeInput = {
@@ -17,9 +18,12 @@ export type OutcomeInput = {
   occurredAt: Date;
   source: 'crm' | 'playbooks';
   amountCents?: number | null;
-  /** The plan it belongs to; without it, the account's plan with the latest accepted_at at or before occurredAt. */
+  /** The plan it belongs to; without it, the account's latest plan that had started by occurredAt (its first accept, any status). */
   planId?: string;
 };
+
+/** When a plan started: its first accept. `accepted_at` moves forward on a resume or a takeover; `created_at` does not. */
+const PLAN_START = sql`least(${accountPlan.createdAt}, ${accountPlan.acceptedAt})`;
 
 /**
  * Records an outcome on its plan (Ruling 1) and credits the plan's steps done in the 14 days before it. Publishes
@@ -33,10 +37,10 @@ export async function recordOutcome(ctx: ModuleContext, input: OutcomeInput): Pr
     .where(
       and(
         eq(accountPlan.tenantId, ctx.tenantId),
-        input.planId ? eq(accountPlan.id, input.planId) : and(eq(accountPlan.accountId, input.accountId), lte(accountPlan.acceptedAt, input.occurredAt)),
+        input.planId ? eq(accountPlan.id, input.planId) : and(eq(accountPlan.accountId, input.accountId), sql`${PLAN_START} <= ${input.occurredAt.toISOString()}::timestamptz`),
       ),
     )
-    .orderBy(desc(accountPlan.acceptedAt), desc(accountPlan.id))
+    .orderBy(desc(PLAN_START), desc(accountPlan.id))
     .limit(1)
     .for('update');
   if (!plan) return null;
@@ -51,7 +55,7 @@ export async function recordOutcome(ctx: ModuleContext, input: OutcomeInput): Pr
   }
 
   const steps = await ctx.tx
-    .select({ id: planStep.id, channel: planStep.channel, status: planStep.status, doneAt: planStep.doneAt })
+    .select({ id: planStep.id, channel: sql<StepChannel>`${planStep.channel}`, status: planStep.status, doneAt: planStep.doneAt })
     .from(planStep)
     .where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, plan.id)));
   const credited = creditedSteps(steps, input.occurredAt);
@@ -89,7 +93,7 @@ export async function recordOutcome(ctx: ModuleContext, input: OutcomeInput): Pr
       source: input.source,
       amountCents,
       creditedStepIds: credited.map((s) => s.stepId),
-      creditedSteps: credited.map((s) => ({ stepId: s.stepId, channel: s.channel as 'email' })),
+      creditedSteps: credited.map((s) => ({ stepId: s.stepId, channel: s.channel })),
     },
     { type: 'account', id: input.accountId },
   );

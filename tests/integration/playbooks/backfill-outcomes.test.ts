@@ -77,4 +77,17 @@ describe('backfillOutcomes', () => {
 
     expect(await t.run((ctx) => backfillOutcomes(ctx))).toBe(0);
   });
+
+  it('replays deals in open order, so the plan\'s one opportunity is its first deal', async () => {
+    const { accountId } = await plan();
+    const at = (days: number) => new Date(Date.now() - days * DAY);
+    await t.run(async (ctx) => {
+      // deal_late has the smaller id but opened later.
+      for (const [externalId, days] of [['deal_late', 3], ['deal_early', 9]] as const)
+        await ctx.tx.insert(deal).values({ id: newId('dea'), tenantId: ctx.tenantId, accountId, system: 'hubspot', externalId, name: externalId, status: 'open', openedAt: at(days) });
+    });
+    expect(await t.run((ctx) => backfillOutcomes(ctx))).toBe(1);
+    const rows = await t.run((ctx) => ctx.tx.select().from(outcome).where(eq(outcome.accountId, accountId)));
+    expect(rows.map((r) => r.ref)).toEqual(['hubspot:deal_early']);
+  });
 });
