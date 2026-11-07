@@ -29,6 +29,7 @@ export {
   type ManualLineInput,
   type UsageLineInput,
 } from './services/lines';
+export { overview, type OverviewView } from './services/overview';
 export {
   CHOOSE_PERIOD,
   funnel,
