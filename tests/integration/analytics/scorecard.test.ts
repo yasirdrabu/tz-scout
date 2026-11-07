@@ -196,6 +196,25 @@ describe('GET /api/v1/analytics/scorecard (R3c-1 Rulings 7-11)', () => {
     ]);
   });
 
+  it('tones come from the hours the cells show: two sellers who both read 0 h get the same tone', async () => {
+    const w2 = await workspace('Tone Co');
+    const cat = await w2.person('seller', { name: 'Cat Seller' });
+    const dan = await w2.person('seller', { name: 'Dan Seller' });
+    const [c1, c2] = (await Promise.all([w2.account('Tone Co 1'), w2.account('Tone Co 2')])) as [string, string];
+    await arrived(w2, c1, '2026-10-05');
+    await arrived(w2, c2, '2026-10-06');
+    await w2.run((ctx) =>
+      ctx.tx.insert(assignment).values([
+        { id: newId('asg'), tenantId: ctx.tenantId, accountId: c1, sellerUserId: cat, assignedBy: w2.owner, ...hours('2026-10-05', 0.1) },
+        { id: newId('asg'), tenantId: ctx.tenantId, accountId: c2, sellerUserId: dan, assignedBy: w2.owner, ...hours('2026-10-06', 0.4) },
+      ]),
+    );
+    const body = await atNow(() => json(w2.as(w2.owner, scorecardRoute, 'analytics/scorecard?tab=sellers')));
+    const rows = new Map(body.rows.map((r: { name: string; time_to_accept: object }) => [r.name, r.time_to_accept]));
+    expect(rows.get('Cat Seller')).toEqual(cell(0, 'good', 'Average'));
+    expect(rows.get('Dan Seller')).toEqual(cell(0, 'good', 'Average'));
+  });
+
   it('a seller under own_accounts gets their own row only, with no team colour', async () => {
     const body = await atNow(() => json(w.as(ann, scorecardRoute, 'analytics/scorecard?tab=sellers')));
     expect(body.rows).toHaveLength(1);

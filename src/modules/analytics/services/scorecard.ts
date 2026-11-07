@@ -222,7 +222,8 @@ async function sellersTab(ctx: ModuleContext, b: OverviewBasis, now: Date): Prom
     win_rate: pct(r.won, r.opps),
   }));
   const withValue = (k: keyof typeof team) => values.filter((v) => v[k] !== null).length;
-  const tone = (k: keyof typeof team, v: number | null) => teamTone(v, team[k], k === 'time_to_accept', withValue(k));
+  // Tone from the whole numbers the cells show, against the team's number shown the same way.
+  const tone = (k: keyof typeof team, v: number | null) => teamTone(round(v), round(team[k]), k === 'time_to_accept', withValue(k));
 
   const names = await userNames(ctx, raw.map((r) => r.sellerId));
   const rows = raw.map((r, i): SellerRow => {

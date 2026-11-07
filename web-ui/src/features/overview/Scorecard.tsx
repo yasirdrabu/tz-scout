@@ -54,7 +54,10 @@ const product = (prefix: 'offer' | 'practice', scope: (r: Row) => Scope): Column
 
 const COLUMNS: Record<ScorecardTab, Column[]> = {
   sellers: [
-    name('Seller', (r) => `${(r as SellerRow).assigned} accounts assigned`),
+    name('Seller', (r) => {
+      const n = (r as SellerRow).assigned;
+      return `${n} ${n === 1 ? 'account' : 'accounts'} assigned`;
+    }),
     number('accepted', 'Accepted', 'pct', 'seller.accepted', sellerScope),
     number('time_to_accept', 'Time to accept', 'hours', 'seller.time_to_accept', sellerScope),
     number('steps_on_time', 'Steps on time', 'pct', 'seller.steps_on_time', sellerScope),

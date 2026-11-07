@@ -1,7 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderApp } from '../../test/renderApp';
-import { metricDetail, serveOverview, serveScorecard } from './testing';
+import { http, HttpResponse } from 'msw';
+import { server } from '../../test/server';
+import { metricDetail, sellersView, serveOverview, serveScorecard } from './testing';
 
 const open = async (path = '/t/taazaa/overview') => {
   const app = renderApp(path);
@@ -28,6 +30,16 @@ describe('Overview scorecard', () => {
     serveOverview();
     await open('/t/taazaa/overview?tab=practices');
     expect(await screen.findByRole('tab', { name: 'By practice' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('says "1 account assigned" for a single account', async () => {
+    serveOverview();
+    const view = sellersView();
+    (view.rows[1] as { assigned: number }).assigned = 1;
+    server.use(http.get('/api/v1/analytics/scorecard', () => HttpResponse.json(view)));
+    await open();
+    expect(await screen.findByText('1 account assigned')).toBeInTheDocument();
+    expect(screen.getByText('14 accounts assigned')).toBeInTheDocument();
   });
 
   it('shows the By seller columns, the accounts assigned and the footnote', async () => {
