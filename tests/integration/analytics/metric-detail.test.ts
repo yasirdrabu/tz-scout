@@ -41,10 +41,10 @@ const arrived = (accountId: string, day: string) =>
     at(day),
   );
 const staged = (accountId: string, to: string, day: string) => deliver(analyticsJourneyStage, { accountId, from: 'arrived', to, causeEventId: newId('evt') }, at(day));
-const dealt = (accountId: string, amountCents: number, day: string) =>
+const dealt = (accountId: string, amountCents: number, day: string, status: 'open' | 'won' = 'open') =>
   deliver(
     analyticsJourneyDeal,
-    { accountId, system: 'hubspot', dealExternalId: newId('evt'), status: 'open', previousStatus: null, stage: null, amountCents, currency: 'USD', openedAt: null, closedAt: null, companyLifecycle: 'none', observedAt: at(day) },
+    { accountId, system: 'hubspot', dealExternalId: newId('evt'), status, previousStatus: null, stage: null, amountCents, currency: 'USD', openedAt: null, closedAt: status === 'won' ? at(day) : null, companyLifecycle: 'none', observedAt: at(day) },
     at(day),
   );
 const scored = (accountId: string, offerId: string, practiceId: string, day: string) =>
@@ -72,6 +72,7 @@ let bob: string;
 let offerId: string;
 let practiceId: string;
 let ids: string[];
+let a8: string;
 
 /**
  * Now is 2026-11-07 (Q4 2026). Seven accounts: a1..a4 are Ann's (own_accounts), a5..a7 Bob's; a7 arrived last quarter
@@ -91,6 +92,13 @@ beforeAll(async () => {
   for (const a of [a5, a6, a7]) await setSummary(w.tenant, a, { ownerUserId: bob });
   for (const [a, d] of [[a1, '2026-10-05'], [a2, '2026-10-10'], [a3, '2026-10-20'], [a4, '2026-10-22'], [a5, '2026-10-12'], [a6, '2026-10-13'], [a7, '2026-07-20']] as const) await arrived(a, d);
   await staged(a7, 'reviewed', '2026-07-21');
+  await staged(a7, 'lost', '2026-07-25');
+  await staged(a6, 'lost', '2026-10-30');
+  a8 = await w.account('Metric Co 8');
+  await arrived(a8, '2026-07-01');
+  await staged(a8, 'opportunity', '2026-07-10');
+  await dealt(a8, 500_000, '2026-07-20', 'won');
+  await dealt(a8, 1_000_000, '2026-10-15', 'won');
   await staged(a1, 'reviewed', '2026-10-06');
   await staged(a2, 'reviewed', '2026-10-11');
   await staged(a3, 'reviewed', '2026-10-21');
@@ -119,7 +127,7 @@ type Group = { label: string; items: { name: string; count: number; value: strin
 describe('GET /api/v1/analytics/metrics/{key} (R3c-1 Rulings 12 and 13)', () => {
   it('a stage: value, change against last quarter, notes, breakdowns, newest six accounts and the See all link', async () => {
     const d = await get(w.owner, 'stage?stage=reviewed');
-    expect(d).toMatchObject({ eyebrow: 'Pipeline stage · this quarter', title: 'Reviewed', value: '4', change_pct: 300, total: 4, see_all: { stage: 'reviewed' } });
+    expect(d).toMatchObject({ eyebrow: 'Pipeline stage · this quarter', title: 'Reviewed', value: '4', change_pct: 100, total: 4, see_all: { stage: 'reviewed' } });
     expect(d.definition).toMatch(/Counts when: /);
     expect(d.notes).toEqual([
       { label: 'From Sent', value: '67% moved on' },
@@ -135,7 +143,7 @@ describe('GET /api/v1/analytics/metrics/{key} (R3c-1 Rulings 12 and 13)', () => 
 
   it('pipeline value is a money string with offer and seller breakdowns', async () => {
     const d = await get(w.owner, 'pipeline_value');
-    expect(d).toMatchObject({ eyebrow: 'Pipeline · this quarter', title: 'Pipeline value', value: '$84k', total: 2, see_all: { stage: 'opportunity' } });
+    expect(d).toMatchObject({ eyebrow: 'Pipeline · this quarter', title: 'Pipeline value', value: '$84k', change_pct: 744, total: 3, see_all: { stage: 'opportunity' } });
     expect(d.breakdowns.map((b: Group) => b.label)).toEqual(['By source', 'By offer', 'By seller']);
     expect(d.breakdowns.find((b: Group) => b.label === 'By offer').items).toEqual([{ name: 'Metric Offer', count: 8_440_000, value: '$84k' }]);
     expect(d.breakdowns.find((b: Group) => b.label === 'By seller').items).toEqual([
@@ -165,14 +173,20 @@ describe('GET /api/v1/analytics/metrics/{key} (R3c-1 Rulings 12 and 13)', () => 
   it('the other tiles and an exit', async () => {
     expect(await get(w.owner, 'sent_to_won')).toMatchObject({ title: 'Sent to Won', value: '16.7%', total: 1, see_all: null, notes: [{ label: 'Entered', value: '6' }, { label: 'Counted', value: '1' }] });
     expect(await get(w.owner, 'days_to_win')).toMatchObject({ title: 'Days to win', value: '18', total: 1 });
-    expect(await get(w.owner, 'won_value')).toMatchObject({ title: 'Won value', value: '$0', total: 1, see_all: { stage: 'won' } });
-    expect(await get(w.owner, 'exit?stage=lost')).toMatchObject({ eyebrow: 'Left the pipeline · this quarter', value: '0', total: 0, accounts: [], breakdowns: [] });
+    expect(await get(w.owner, 'won_value')).toMatchObject({ title: 'Won value', value: '$10k', change_pct: 100, total: 2, see_all: { stage: 'won' } });
+    expect(await get(w.owner, 'exit?stage=lost')).toMatchObject({ eyebrow: 'Left the pipeline · this quarter', value: '1', change_pct: 0, total: 1 });
+    expect(await get(w.owner, 'exit?stage=declined')).toMatchObject({ value: '0', change_pct: null, total: 0, accounts: [], breakdowns: [] });
   });
 
   it("never shows an account outside the caller's data limit", async () => {
     const d = await get(ann, 'stage?stage=reviewed');
     expect(d.total).toBe(3);
     expect(d.accounts.map((a: { account_id: string }) => a.account_id)).not.toContain(ids[4]);
+    const cell = await get(ann, `seller.accepted?seller=${ann}`);
+    expect(cell.accounts.map((a: { account_id: string }) => a.account_id)).not.toContain(ids[4]);
+    const offer = await get(ann, `offer.pipeline?offer=${offerId}`);
+    expect(offer.total).toBe(1);
+    expect(offer.accounts.map((a: { account_id: string }) => a.account_id)).not.toContain(ids[4]);
   });
 
   it('a bad key or a missing scope is 400, an unknown stage or seller is 404', async () => {

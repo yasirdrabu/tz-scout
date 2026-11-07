@@ -4,6 +4,7 @@ import { userNames } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { ratio } from '../domain/funnel';
+import { localMidnight } from '../domain/period';
 import { changePct, enteredIn, medianDays, openValueCents, pace, stageEntry, wonValueCents } from '../domain/overview';
 import type { Journey } from './journeys';
 import { overviewBasis, type OverviewBasis } from './overview';
@@ -92,7 +93,7 @@ function topSource(b: OverviewBasis, id: string): string {
 const pipelineHits = (b: OverviewBasis, js: Journey[]): Hit[] =>
   js.filter((j) => inPipeline(b, j)).map((j) => hit(j.accountId, stageEntry(j, b.flow, b.oppIdx) ?? j.arrivedAt, openValueCents(j, b.priceOf(j.offerId))));
 
-/** Pipeline value as it stood at the previous quarter's matching point, from today's deal values (Ruling 1). */
+/** Pipeline value at the previous quarter's matching point (Ruling 1): a deal counts when it was still open then, even if it has closed since. */
 function pipelineBefore(b: OverviewBasis): number {
   const at = b.q.prev.to;
   return b.journeys
@@ -101,7 +102,11 @@ function pipelineBefore(b: OverviewBasis): number {
       const won = stageEntry(j, b.flow, b.wonIdx);
       return !!opp && opp <= at && (!won || won > at) && (!j.exitStage || !!j.exitAt && j.exitAt > at);
     })
-    .reduce((s, j) => s + openValueCents(j, b.priceOf(j.offerId)), 0);
+    .reduce((s, j) => {
+      const price = b.priceOf(j.offerId) ?? 0;
+      if (!j.deals.length) return s + price;
+      return s + j.deals.filter((d) => d.status === 'open' || (!!d.closedAt && d.closedAt > at)).reduce((n, d) => n + (d.amountCents ?? price), 0);
+    }, 0);
 }
 
 type Window = { from: Date; to: Date };
@@ -247,7 +252,7 @@ function sellerMetric(b: OverviewBasis, metric: string, sellerId: string, facts:
       const r = facts.steps.length ? (onTime.length * 100) / facts.steps.length : null;
       const latest = new Map<string, Date>();
       for (const s of onTime) {
-        const d = new Date(`${s.dueDate}T00:00:00.000Z`);
+        const d = localMidnight(s.dueDate, b.timezone);
         if (!latest.has(s.accountId) || latest.get(s.accountId)! < d) latest.set(s.accountId, d);
       }
       return {
@@ -260,7 +265,7 @@ function sellerMetric(b: OverviewBasis, metric: string, sellerId: string, facts:
       return { ...head, kind: 'count', money: false, value: hits.reduce((n, h) => n + h.weight, 0), hits, notes: [] };
     }
     default:
-      return { ...head, ...sharedCell(b, mine, metric === 'pipeline' ? 'pipeline' : metric, [], { label: 'Opportunities', hits: opps }) };
+      return { ...head, ...sharedCell(b, mine, metric, [], { label: 'Opportunities', hits: opps }) };
   }
 }
 
@@ -323,7 +328,8 @@ export async function metricDetail(ctx: ModuleContext, key: string, scope: Metri
   const r = await resolve(ctx, b, key, scope, sf);
   const byAccount = new Map(b.journeys.map((j) => [j.accountId, j]));
   const hits = [...new Map(r.hits.map((h) => [h.accountId, h])).values()].filter((h) => byAccount.has(h.accountId));
-  const top = [...hits].sort((x, y) => y.at.getTime() - x.at.getTime() || x.accountId.localeCompare(y.accountId)).slice(0, 6);
+  const names = await accountNames(ctx, hits.map((h) => h.accountId));
+  const top = hits.filter((h) => names.has(h.accountId)).sort((x, y) => y.at.getTime() - x.at.getTime() || x.accountId.localeCompare(y.accountId)).slice(0, 6);
   const sellerOfHit = (h: Hit) => sf.sellerByAccount.get(h.accountId);
   const sellerNames = await userNames(ctx, [...new Set((r.sections.includes('seller') ? hits : top).flatMap((h) => sellerOfHit(h) ?? []))]);
   const sellerName = (id: string) => sellerNames.get(id) ?? 'Former member';
@@ -349,7 +355,6 @@ export async function metricDetail(ctx: ModuleContext, key: string, scope: Metri
     )
     .filter((g) => g.items.length > 0);
 
-  const names = await accountNames(ctx, top.map((h) => h.accountId));
   return {
     eyebrow: r.eyebrow,
     title: r.title,
@@ -359,7 +364,6 @@ export async function metricDetail(ctx: ModuleContext, key: string, scope: Metri
     notes: r.notes,
     breakdowns,
     accounts: top.flatMap((h) => {
-      if (!names.has(h.accountId)) return [];
       const j = byAccount.get(h.accountId)!;
       const seller = sellerOfHit(h);
       const meta = [offerName(j), b.sources.get(j.firstSourceId)?.name, seller ? sellerName(seller) : null].filter(Boolean).join(' · ');
