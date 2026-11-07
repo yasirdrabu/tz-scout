@@ -104,7 +104,7 @@ describe('Overview bands', () => {
     serveOverview();
     await open();
     expect(await screen.findByRole('heading', { name: 'Pipeline' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Wond/ }).className).toMatch(/won/);
+    expect(screen.getByRole('button', { name: /^Won\d/ }).className).toMatch(/won/);
     expect(screen.getByRole('button', { name: /^Reviewed/ }).className).not.toMatch(/won/);
   });
 });
