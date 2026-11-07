@@ -61,6 +61,7 @@ export {
   type TemplateInput,
   type TemplatePatch,
   type TemplateStatus,
+  type PlaybookResults,
   type TemplateSummary,
 } from './services/templates';
 export { MAPPED_TIERS, NOT_AVAILABLE, offerPlaybooks, pendingPlaybookNames, playbookFor, setOfferPlaybook, type MappedTier, type OfferPlaybookView, type PendingChoice } from './services/offer-playbooks';
@@ -93,3 +94,4 @@ export {
 export { pauseOnWithdrawn, plansOnMerge, startPlan } from './services/start';
 export { recordDealOutcomes, type DealOutcomeInput } from './services/deal-outcomes';
 export { OUTCOME_KINDS, recordOutcome, type OutcomeInput, type OutcomeKind } from './services/outcomes';
+export { backfillOutcomes } from './services/backfill-outcomes';

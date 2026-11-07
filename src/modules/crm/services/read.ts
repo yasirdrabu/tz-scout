@@ -215,9 +215,9 @@ export async function crmCheckCard(ctx: ModuleContext, accountId: string, opts: 
 /** Every cached deal in the workspace, for the analytics journey backfill. Background context only. */
 export async function listDeals(
   ctx: ModuleContext,
-): Promise<{ accountId: string; system: string; externalId: string; status: 'open' | 'won' | 'lost'; amountCents: number | null; closedAt: Date | null; syncedAt: Date }[]> {
+): Promise<{ accountId: string; system: string; externalId: string; status: 'open' | 'won' | 'lost'; amountCents: number | null; openedAt: Date | null; closedAt: Date | null; syncedAt: Date }[]> {
   const rows = await ctx.tx
-    .select({ accountId: deal.accountId, system: deal.system, externalId: deal.externalId, status: deal.status, amountCents: deal.amountCents, closedAt: deal.closedAt, syncedAt: deal.syncedAt })
+    .select({ accountId: deal.accountId, system: deal.system, externalId: deal.externalId, status: deal.status, amountCents: deal.amountCents, openedAt: deal.openedAt, closedAt: deal.closedAt, syncedAt: deal.syncedAt })
     .from(deal)
     .where(eq(deal.tenantId, ctx.tenantId))
     .orderBy(deal.id);
@@ -231,4 +231,16 @@ export async function listMeetingFacts(ctx: ModuleContext, w: { from: Date; to: 
     .from(activity)
     .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.kind, 'meeting'), gte(activity.occurredAt, w.from), lte(activity.occurredAt, w.to)))
     .orderBy(activity.occurredAt, activity.id);
+}
+
+/** Every cached reply and meeting, for the playbooks outcome backfill. Background context only. */
+export async function listOutcomeActivity(
+  ctx: ModuleContext,
+): Promise<{ accountId: string; system: string; externalId: string; kind: 'reply' | 'meeting'; occurredAt: Date }[]> {
+  const rows = await ctx.tx
+    .select({ accountId: activity.accountId, system: activity.system, externalId: activity.externalId, kind: activity.kind, occurredAt: activity.occurredAt })
+    .from(activity)
+    .where(and(eq(activity.tenantId, ctx.tenantId), inArray(activity.kind, ['reply', 'meeting'])))
+    .orderBy(activity.occurredAt, activity.id);
+  return rows.map((r) => ({ ...r, kind: r.kind as 'reply' | 'meeting' }));
 }
