@@ -229,5 +229,6 @@ export async function listMeetingFacts(ctx: ModuleContext, w: { from: Date; to: 
   return ctx.tx
     .select({ accountId: activity.accountId, occurredAt: activity.occurredAt })
     .from(activity)
-    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.kind, 'meeting'), gte(activity.occurredAt, w.from), lte(activity.occurredAt, w.to)));
+    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.kind, 'meeting'), gte(activity.occurredAt, w.from), lte(activity.occurredAt, w.to)))
+    .orderBy(activity.occurredAt, activity.id);
 }
