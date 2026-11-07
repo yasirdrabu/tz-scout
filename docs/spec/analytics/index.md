@@ -21,7 +21,7 @@ re-implement that math (v1 rule, carried).
 | `analytics.journey_deal` | `tenant_id`, `account_id`, `system`, `deal_external_id`, `status` (open, won, lost), `amount_cents`, `closed_at`, `observed_at`; pk (tenant, system, deal) | Each deal's latest state; a row only takes an event with a later `observed_at`. |
 | `analytics.source_touch` | `tenant_id`, `account_id`, `source_id`, `source_level` (person, agent, vendor), `batch_id`, `arrival_id`, `first_seen_at` | Every source that ever sent the account, for the "any source" view. |
 | `analytics.decline` | `tenant_id`, `account_id`, `kind` (review, assignment), `reason_key`, `note`, `by_user_id`, `source_id`, `at` | Decline reasons by source and seller |
-| `analytics.step_credit` | `tenant_id`, `outcome_id`, `outcome_kind`, `step_id`, `step_type`, `playbook_template_id`, `practice_id`, `offer_id`, `occurred_at` | One row per credited step per outcome, for "what worked" |
+| `analytics.step_credit` | `tenant_id`, `outcome_id`, `outcome_kind`, `step_id`, `step_type`, `playbook_template_id`, `practice_id`, `offer_id`, `account_id`, `occurred_at` | One row per credited step per outcome, for "what worked". An outcome with no credited step has one row with `step_id` and `step_type` null ("No recent step"). Unique on (`tenant_id`, `outcome_id`, `step_id`), nulls not distinct, so a replay adds nothing. `practice_id` and `offer_id` come from the account's journey when the event arrives (null without one). `account_id` is for the data limit and for merges (R3c-2). |
 | `analytics.cost_line` | `id` (`cst_`), `tenant_id`, `occurred_on` (tenant-timezone date), `category` (partner_fees, data_vendors, agents_hosting, lists_events, ai_usage), `provider` (usage lines), `amount_cents`, `origin` (usage, manual), `origin_event_id` (unique), `account_id`, `source_id`, `note`, `created_by`, `created_at`, `voided_at`, `void_reason`, `voided_by`, `replaces_id` | Ledger (R3a). Never changed in place: an edit voids the line ("Edited") and adds one with `replaces_id`. `source_id` (R3b-1) wins over the account's first source when spend is put per source. Batch, practice and offer targets, quantities and hours are later. |
 | `analytics.cost_setting` | `tenant_id` (pk), `target_cost_per_won_cents` (null), `updated_by`, `updated_at` | The workspace's target cost per won account (R3b-1), no default. |
 | `analytics.hour_rate` | `tenant_id`, `role_key`, `rate_cents_per_hour`, `effective_from` | For turning logged hours into cost. |
@@ -63,7 +63,7 @@ render time; nothing in those modules depends on Analytics, so no cycle forms.
 | `routing.assignment.declined` | a row in `analytics.decline` (reason key, note, seller, source) for decline-reason reports |
 | `routing.status.changed` | review decline reasons (status changed to a declined status) into `analytics.decline` |
 | `crm.deal.changed` | upserts `journey_deal` (status, amount, closed at) when its `observedAt` is later than the stored one |
-| `playbooks.outcome.recorded` | `analytics.step_credit` rows from `creditedStepIds`, for the "what worked" roll-up |
+| `playbooks.outcome.recorded` | `analytics.step_credit` rows from `creditedSteps` (one per credited step, or one "no recent step" row), for the "what worked" roll-up |
 | `accounts.account.merged` | the survivor keeps the earlier arrival (and its first source and batch), the earliest entry into each stage and the merged account's deals; the merged account's journey is deleted |
 | `scoring.account.scored` | `practice_id`, `offer_id` (`bestOfferId`) and `score_version`, when its `version` is higher than the stored one |
 | `integrations.usage.recorded` | **the only** source of automatic cost lines (vendor credits, AI tokens, paid API usage): one `usage` line per event, deduped on the event id; `costCents` from the event, the category from the provider (`CATEGORY_OF_PROVIDER`), `occurred_on` the tenant-timezone date of `occurredAt`, the account from the event's `accountId` |
@@ -116,7 +116,26 @@ Proposed additions (to be added to `public-api/index.md` before R3; not yet in t
 | `POST /api/v1/costs/{id}:void` | `costs:write` | Void a line with a reason |
 | `GET /api/v1/analytics/sources/{id}/performance` | `analytics:read`, or `status:read` limited to own source | One source's funnel, decline reasons and trust over time (backs `get_source_performance`) |
 | `GET /api/v1/analytics/flywheel` | `analytics:read` | Quarterly trend numbers |
+| `GET /api/v1/analytics/what-worked?template_id` | `analytics:read`, data-limited | What worked for one playbook (R3c-2): `rows[{ step_type, steps_done, counts, per_10 }]`, `no_recent_step`, `min_steps` (10), `updated_at` |
 | `GET /api/v1/analytics/scorecard` | `analytics:read` | Weeks, targets, colours, rolling average |
+
+## As built (R3c-2)
+
+What worked for one playbook, `GET /api/v1/analytics/what-worked?template_id=`, from `analytics.step_credit` and the plan steps done.
+
+- **Window.** The last 90 days: credits by `occurred_at`, steps done by `done_at`.
+- **Step type** is the plan step's channel (email, linkedin, call, meeting, task), in that order. A channel with 0 steps done and 0 results is
+  left out. `no_recent_step` counts the outcomes with no credited step.
+- **Counts are distinct outcomes per step type.** One reply after two emails counts as 1 under Email, even though the credit is shared
+  between two step rows. Total results therefore do not double count, but a result credited to steps of two channels counts once under each.
+- **per 10** is `round(count / steps_done x 10, 1)`, null when `steps_done` is 0. Under `min_steps` (10) steps done the screen mutes
+  the figure.
+- **Data limit.** `filterVisibleAccountIds` applies to both the counts and the steps done, so a seller on `own_accounts` sees only their own
+  accounts in the numerator and the denominator.
+- **Filter.** `template_id` only. Practice and offer filters arrive with the flywheel (R3c-3).
+- **Merges.** `step_credit` rows move to the surviving account in `mergeJourneys`.
+- **Backfill.** `step_credit` fills from `playbooks.outcome.recorded`; for existing workspaces run `scout backfill-outcomes <slug>` once,
+  after `scout backfill-journeys`.
 
 ## MCP tools
 

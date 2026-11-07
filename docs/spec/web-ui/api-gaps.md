@@ -1052,7 +1052,8 @@ hold manage; sellers hold read and write; operators hold write too since R2c-2, 
 | 20 | List: name, description, status | READY (API R2c-1; UI R2c-2, shipped) | `GET /api/v1/playbooks` | `status` draft, active or archived; also `stop_when`, `version`. No scope or motion. |
 | 20 | "{n} steps over {d} days", channel mix | READY (API R2c-1; UI R2c-2, shipped) | `GET /api/v1/playbooks` `steps` (count), `days`, `channels` (count per channel) | Steps have `day` and `channel` (email, linkedin, call, meeting, task). Decision 25. |
 | 20 | Runs on, tier chips, Assign dialog, "Replaces {x}" | READY (API R2c-1; UI R2c-2, shipped) | `runs_on [{offer_id, tier}]` on the list; `PUT /api/v1/offers/{id}/playbooks/{tier}` | `offer_playbook(offer_id, tier, template_id)`. An archived template is refused (400 "That playbook isn't available."). Decision 25. |
-| 20 | Running, Finished, Replied, Booked, Won, reply rate, meeting rate | Running READY (R2c-1); the rest LATER (R3) | `running` on the list | Running is the count of active plans; the rest needs outcomes (PLB-E6). |
+| 20 | Running, Finished, Replied, Booked, Won, reply rate, meeting rate | READY (Running R2c-1; the rest R3c-2) | `running` and `results {finished, replied, meetings, won}` on `GET /api/v1/playbooks` and `GET /api/v1/playbooks/{id}` | Running is the count of active plans. `results` counts plans that finished in the last 90 days, tenant-wide, with at least one reply, meeting or won outcome; the screen works out the percentages and shows "–" with nothing finished. |
+| 20 | What worked: steps done and results per step type | READY (R3c-2) | `GET /api/v1/analytics/what-worked?template_id=` (`analytics:read`, data-limited) | `rows[{step_type, steps_done, counts, per_10}]` in channel order without all-zero channels, `no_recent_step`, `min_steps` (10), `updated_at`. `per_10` is one decimal or null. The screen mutes it under `min_steps`. |
 | 20 | Steps: day, channel, title, detail, who | READY (API R2c-1; UI R2c-2, shipped) | `GET /api/v1/playbooks/{id}` (`?version=`) | `owner_role` (seller, leader, operator) is "who". |
 | 20 | Tags "Draft ready for AE", "HubSpot task" | READY (API R2c-1; UI R2c-2, shipped) | step `channel` and `crm_task` | "Sends automatically" is gone: drafts only (Decision 25 note). |
 | 20 | Rules: starts, stops, pauses | READY (API R2c-1; UI R2c-2, shipped); stop rule enforced R2c-3 | `stop_when` (`reply_or_meeting`, `meeting`, `never`) | Starts when accepted. Pauses when the accepted assignment is withdrawn. Stored in R2c-1, acted on in R2c-3. |
@@ -1066,7 +1067,7 @@ hold manage; sellers hold read and write; operators hold write too since R2c-2, 
    `PUT /api/v1/offers/{id}/playbooks/{tier}`; list fields `steps, days, channels, runs_on, running`;
    `stop_when`; day granularity; `POST /api/v1/playbooks/{id}:duplicate`, `:archive`. No draft or
    auto-send field: drafts only.
-3. R3: Running and rates; C9 empty states until then.
+3. R3: Running and rates (built in R3c-2: `results` on the playbook, `GET /api/v1/analytics/what-worked`); C9 empty states until then.
 
 ### Release
 

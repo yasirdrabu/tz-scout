@@ -58,6 +58,7 @@ import * as v1AnalyticsMetricsKey from './routes/v1/analytics/metrics/[key]/rout
 import * as v1AnalyticsOverview from './routes/v1/analytics/overview/route';
 import * as v1AnalyticsScorecard from './routes/v1/analytics/scorecard/route';
 import * as v1AnalyticsSourcesIdPerformance from './routes/v1/analytics/sources/[id]/performance/route';
+import * as v1AnalyticsWhatWorked from './routes/v1/analytics/what-worked/route';
 import * as v1ApiKeysId from './routes/v1/api-keys/[id]/route';
 import * as v1ApiKeys from './routes/v1/api-keys/route';
 import * as v1ArrivalsId from './routes/v1/arrivals/[id]/route';
@@ -228,6 +229,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/analytics/overview`, module: v1AnalyticsOverview },
   { path: `${V1}/analytics/scorecard`, module: v1AnalyticsScorecard },
   { path: `${V1}/analytics/sources/:id/performance`, module: v1AnalyticsSourcesIdPerformance },
+  { path: `${V1}/analytics/what-worked`, module: v1AnalyticsWhatWorked },
   { path: `${V1}/api-keys/:id`, module: v1ApiKeysId },
   { path: `${V1}/api-keys`, module: v1ApiKeys },
   { path: `${V1}/arrivals/:id`, module: v1ArrivalsId },

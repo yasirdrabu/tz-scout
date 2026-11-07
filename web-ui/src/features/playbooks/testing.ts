@@ -3,11 +3,11 @@ import { exactly, problem } from '../../test/http';
 import { serveMe } from '../../test/renderApp';
 import { server } from '../../test/server';
 import { ASSESS, AI, BLUEPRINT, BUYING_ROLES, DATA, SPRINT } from '../offers/testing';
-import type { Playbook, PlaybookDetail, PlaybookStep, Tier } from './api';
+import type { Playbook, PlaybookDetail, PlaybookStep, Tier, WhatWorked } from './api';
 
 // Fixtures in the API's shapes (snake_case) for the Playbooks tests.
 
-export const MANAGER = ['playbooks:read', 'playbooks:write', 'playbooks:manage', 'offers:read'];
+export const MANAGER = ['playbooks:read', 'playbooks:write', 'playbooks:manage', 'offers:read', 'analytics:read'];
 export const SELLER = ['playbooks:read', 'playbooks:write', 'offers:read'];
 
 export const step = (s: Partial<PlaybookStep> & Pick<PlaybookStep, 'id' | 'order' | 'day' | 'title'>): PlaybookStep => ({
@@ -27,6 +27,21 @@ export const RFP_STEPS: PlaybookStep[] = [
   step({ id: 'stp_3', order: 3, day: 14, channel: 'call', owner_role: 'leader', title: 'Call the sponsor' }),
 ];
 
+export const NO_RESULTS = { finished: 0, replied: 0, meetings: 0, won: 0 };
+
+const zero = { reply: 0, meeting: 0, opportunity: 0, won: 0 };
+/** What worked for the RFP playbook: Email (12 steps), Call (4 steps, under the minimum of 10) and results with no recent step. */
+export const WORKED: WhatWorked = {
+  rows: [
+    { step_type: 'email', steps_done: 12, counts: { reply: 3, meeting: 1, opportunity: 1, won: 0 }, per_10: { reply: 1.5, meeting: 0.8, opportunity: 0.8, won: 0 } },
+    { step_type: 'call', steps_done: 4, counts: { reply: 1, meeting: 0, opportunity: 0, won: 0 }, per_10: { reply: 2.5, meeting: 0, opportunity: 0, won: 0 } },
+  ],
+  no_recent_step: { reply: 2, meeting: 0, opportunity: 0, won: 1 },
+  min_steps: 10,
+  updated_at: '2026-10-20T12:00:00Z',
+};
+export const WORKED_NONE: WhatWorked = { rows: [], no_recent_step: zero, min_steps: 10, updated_at: '2026-10-20T12:00:00Z' };
+
 export const rfp = (p: Partial<Playbook> = {}): Playbook => ({
   id: 'plb_rfp',
   name: 'Public sector RFP',
@@ -41,11 +56,12 @@ export const rfp = (p: Partial<Playbook> = {}): Playbook => ({
   channels: { email: 1, linkedin: 1, call: 1 },
   runs_on: [{ offer_id: BLUEPRINT.id, tier: 'act_now' }],
   running: 4,
+  results: { finished: 5, replied: 2, meetings: 1, won: 1 },
   ...p,
 });
 
 export const draftPlaybook = (p: Partial<Playbook> = {}): Playbook =>
-  rfp({ id: 'plb_draft', name: 'Warm intro', description: null, status: 'draft', steps: 1, days: 0, channels: { task: 1 }, runs_on: [], running: 0, ...p });
+  rfp({ id: 'plb_draft', name: 'Warm intro', description: null, status: 'draft', steps: 1, days: 0, channels: { task: 1 }, runs_on: [], running: 0, results: NO_RESULTS, ...p });
 
 type Seen = { method: string; url: URL; body: unknown };
 type Opts = {
@@ -55,6 +71,8 @@ type Opts = {
   steps?: Record<string, PlaybookStep[]>;
   /** Answers for one action, such as `DELETE plb_draft` or `plb_rfp:archive`. */
   answer?: Record<string, () => Response>;
+  /** What GET /analytics/what-worked returns. */
+  whatWorked?: WhatWorked;
 };
 
 const detailOf = (p: Playbook, steps: PlaybookStep[]): PlaybookDetail => ({ ...p, steps, step_count: steps.length, steps_version: p.version });
@@ -77,6 +95,7 @@ export function servePlaybooks(opts: Opts = {}) {
     http.get('/api/v1/offers', () => HttpResponse.json({ data: [BLUEPRINT, SPRINT, ASSESS], next_cursor: null })),
     http.get('/api/v1/buying-roles', () => HttpResponse.json({ data: BUYING_ROLES })),
     http.get('/api/v1/practices', () => HttpResponse.json({ data: [AI, DATA], next_cursor: null })),
+    http.get('/api/v1/analytics/what-worked', () => HttpResponse.json(opts.whatWorked ?? WORKED)),
     http.get('/api/v1/playbooks', async ({ request }) => {
       await log(request);
       return answer('list') ?? HttpResponse.json({ data: playbooks, next_cursor: null });
@@ -90,7 +109,7 @@ export function servePlaybooks(opts: Opts = {}) {
       const out = answer('POST');
       if (out) return out;
       const body = (await request.clone().json()) as Record<string, unknown>;
-      const made = rfp({ id: 'plb_new', name: String(body.name), status: 'draft', runs_on: [], running: 0 });
+      const made = rfp({ id: 'plb_new', name: String(body.name), status: 'draft', runs_on: [], running: 0, results: NO_RESULTS });
       playbooks = [...playbooks, made];
       return HttpResponse.json(detailOf(made, steps('plb_new')), { status: 201 });
     }),

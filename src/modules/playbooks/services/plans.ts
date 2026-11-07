@@ -9,6 +9,7 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { planChanged, planNoReply, stepCompleted } from '../contracts/events';
 import { accountPlan, planChange, planStep, playbookTemplate } from '../db/schema';
+import { recordOutcome } from './outcomes';
 import { dueFlags, pickNextStep } from '../domain/next-step';
 import { dueDateFor, insertOrder, linkedPeople, localDate, missingRoles, type PlanPerson, type StepChannel } from '../domain/plan';
 
@@ -96,6 +97,7 @@ export async function publishChanged(
  * `playbooks.plan.no_reply` once. The plan's status does not change. Called inside the transaction that closed the step.
  */
 export async function checkNoReply(ctx: ModuleContext, planId: string): Promise<void> {
+  await checkFinished(ctx, planId);
   const [plan] = await ctx.tx.select().from(accountPlan).where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.id, planId))).for('update');
   if (!plan || plan.status !== 'active' || plan.engagedAt || plan.noReplyAt) return;
   const steps = await ctx.tx.select({ status: planStep.status }).from(planStep).where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, planId)));
@@ -103,6 +105,16 @@ export async function checkNoReply(ctx: ModuleContext, planId: string): Promise<
   const now = new Date();
   await ctx.tx.update(accountPlan).set({ noReplyAt: now, updatedAt: now }).where(eq(accountPlan.id, planId));
   await publish(ctx, planNoReply, { planId, accountId: plan.accountId, assignmentId: plan.assignmentId, at: now.toISOString() }, { type: 'account', id: plan.accountId });
+  await recordOutcome(ctx, { accountId: plan.accountId, kind: 'no_response', ref: planId, source: 'playbooks', planId, occurredAt: now });
+}
+
+/** Ruling 5: an active plan whose last open step closed is finished, once. Called from `checkNoReply`, so engaged plans finish too. */
+async function checkFinished(ctx: ModuleContext, planId: string): Promise<void> {
+  const [plan] = await ctx.tx.select().from(accountPlan).where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.id, planId))).for('update');
+  if (!plan || plan.status !== 'active' || plan.finishedAt) return;
+  const steps = await ctx.tx.select({ status: planStep.status }).from(planStep).where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.planId, planId)));
+  if (steps.length === 0 || steps.some((s) => OPEN_STEP.includes(s.status))) return;
+  await ctx.tx.update(accountPlan).set({ finishedAt: new Date() }).where(eq(accountPlan.id, planId));
 }
 
 /** A plan by id with its row locked. A plan on an account the caller cannot see is a 404. */
@@ -529,7 +541,14 @@ export async function removeStep(ctx: ModuleContext, planId: string, stepId: str
 }
 
 async function move(ctx: ModuleContext, plan: Plan, status: string, statusReason: string | null, kind: string, detail: unknown, changed: Changed, reason?: string, steps: StepSnapshot[] = []): Promise<Plan> {
-  const [row] = await ctx.tx.update(accountPlan).set({ status, statusReason, updatedAt: new Date() }).where(eq(accountPlan.id, plan.id)).returning();
+  const now = new Date();
+  // Ruling 5: completed or stopped finishes the plan, once; abandoned never does.
+  const finishes = status === 'completed' || status === 'stopped';
+  const [row] = await ctx.tx
+    .update(accountPlan)
+    .set({ status, statusReason, updatedAt: now, ...(finishes ? { finishedAt: sql`coalesce(${accountPlan.finishedAt}, ${now.toISOString()}::timestamptz)` } : {}) })
+    .where(eq(accountPlan.id, plan.id))
+    .returning();
   await recordChange(ctx, plan.id, kind, detail);
   await publishChanged(ctx, row!, changed, reason, { steps });
   await audit(ctx, { action: `playbooks.plan.${kind}`, subject: { type: 'account_plan', id: plan.id }, after: { status, reason: statusReason } });

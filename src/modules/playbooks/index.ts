@@ -1,8 +1,8 @@
 // Public interface of the playbooks module. Other modules import only this file or `contracts/*`.
-export { briefUpdated, planChanged, planCreated, planNoReply, planNotStarted, stepCompleted } from './contracts/events';
+export { briefUpdated, outcomeRecorded, planChanged, planCreated, planNoReply, planNotStarted, stepCompleted } from './contracts/events';
 export { briefDraftJob, briefSweepJob, DRAFT_MAX_ATTEMPTS } from './contracts/jobs';
 export { SWEEP_CRON, seedPlaybooksDefaults } from './defaults';
-export { listStepFacts } from './services/facts';
+export { listDoneSteps, listStepFacts } from './services/facts';
 export { sweepBriefs } from './services/sweep';
 export { BRIEF_KEYS, PAGE_SECTIONS, SECTION_MAX, type BriefKey, type BriefMode, type BriefOrigin, type DraftState, type PageSectionKey } from './contracts/types';
 export {
@@ -16,6 +16,7 @@ export {
   briefOnSignal,
   briefUnfreezeOnDeclined,
   briefUnfreezeOnWithdrawn,
+  outcomesOnDealChanged,
   planOnAccepted,
   planOnMerged,
   planPauseOnWithdrawn,
@@ -60,6 +61,7 @@ export {
   type TemplateInput,
   type TemplatePatch,
   type TemplateStatus,
+  type PlaybookResults,
   type TemplateSummary,
 } from './services/templates';
 export { MAPPED_TIERS, NOT_AVAILABLE, offerPlaybooks, pendingPlaybookNames, playbookFor, setOfferPlaybook, type MappedTier, type OfferPlaybookView, type PendingChoice } from './services/offer-playbooks';
@@ -90,3 +92,6 @@ export {
   type StepView as PlanStepView,
 } from './services/plans';
 export { pauseOnWithdrawn, plansOnMerge, startPlan } from './services/start';
+export { recordDealOutcomes, type DealOutcomeInput } from './services/deal-outcomes';
+export { OUTCOME_KINDS, recordOutcome, type OutcomeInput, type OutcomeKind } from './services/outcomes';
+export { backfillOutcomes } from './services/backfill-outcomes';

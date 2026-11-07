@@ -6,11 +6,10 @@ import { Pill } from '../../ui/Pill';
 import table from '../../ui/Table.module.css';
 import { offersQuery } from '../offers/api';
 import { LoadFailed, LoadingRows } from '../settings/shared';
-import { NotYet } from './NotYet';
-import { mix, playbooksQuery, span, STATUS_WORD, statusTone, TIER_WORD } from './api';
+import { mix, pct, playbooksQuery, rate, span, STATUS_WORD, statusTone, TIER_WORD } from './api';
 import styles from './Playbooks.module.css';
 
-/** §20 list: every playbook, any status, with what it runs on. Rates are R3. */
+/** §20 list: every playbook, any status, with what it runs on and its reply and meeting rates. */
 export function PlaybookList({ tenant, canManage }: { tenant: string; canManage: boolean }) {
   const playbooks = useQuery(playbooksQuery(tenant));
   const offers = useQuery(offersQuery(tenant));
@@ -86,12 +85,8 @@ export function PlaybookList({ tenant, canManage }: { tenant: string; canManage:
                   )}
                 </td>
                 <td className={table.num}>{p.running}</td>
-                <td className={table.num}>
-                  <NotYet />
-                </td>
-                <td className={table.num}>
-                  <NotYet />
-                </td>
+                <td className={table.num}>{pct(rate(p.results.replied, p.results.finished))}</td>
+                <td className={table.num}>{pct(rate(p.results.meetings, p.results.finished))}</td>
               </tr>
             ))}
           </tbody>

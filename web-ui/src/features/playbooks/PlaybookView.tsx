@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
 import { ApiError } from '../../api/errors';
+import { hasScope, meQuery } from '../../api/me';
 import page from '../../routes/Page.module.css';
 import { useFormat } from '../../lib/useFormat';
 import { Button, buttonClass } from '../../ui/Button';
@@ -17,7 +18,9 @@ import {
   deletePlaybook,
   duplicatePlaybook,
   OWNER_WORD,
+  pct,
   playbookQuery,
+  rate,
   span,
   STATUS_WORD,
   statusTone,
@@ -29,13 +32,13 @@ import {
 } from './api';
 import { AssignPlaybookDialog } from './AssignPlaybookDialog';
 import { PlaybookForm } from './PlaybookForm';
-import { NotYet } from './NotYet';
 import styles from './Playbooks.module.css';
+import { WhatWorked } from './WhatWorked';
 import type { PlaybooksSearch } from '../../routes/workspace';
 
 type Props = { tenant: string; id: string; canManage: boolean };
 
-/** §20 detail: tiles, steps, where it runs and the rules. Rates and results are R3. */
+/** §20 detail: tiles, what worked, steps, where it runs and the rules. */
 export function PlaybookView({ tenant, id, canManage }: Props) {
   const f = useFormat();
   const navigate = useNavigate();
@@ -43,6 +46,7 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
   const toast = useToast();
   const playbook = useQuery(playbookQuery(tenant, id));
   const offers = useQuery(offersQuery(tenant));
+  const me = useQuery(meQuery(tenant));
   const practices = useQuery(practicesQuery(tenant));
   const [confirm, setConfirm] = useState<'retire' | 'delete' | null>(null);
   /** The API's words when a delete is refused, so the dialog can offer Retire. */
@@ -54,6 +58,9 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
   if (playbook.isPending) return <LoadingRows>Loading the playbook</LoadingRows>;
   if (playbook.isError) return <LoadFailed title="This playbook didn't load" error={playbook.error} onRetry={() => void playbook.refetch()} />;
   const p: PlaybookDetail = playbook.data;
+  const r = p.results;
+  const accounts = (n: number) => (n === 1 ? '1 account' : `${n} accounts`);
+  const canSeeWorked = !!me.data && hasScope(me.data, 'analytics:read');
   const retired = p.status === 'archived';
   const canDelete = p.running === 0 && p.runs_on.length === 0 && !retired;
   const tiers = p.runs_on.length;
@@ -169,13 +176,14 @@ export function PlaybookView({ tenant, id, canManage }: Props) {
       <div>
         <ul className={styles.tiles} aria-label="Playbook numbers">
           {tile('Running now', p.running, 'Accounts mid-playbook')}
-          {tile('Finished', <NotYet />)}
-          {tile('Replied', <NotYet />)}
-          {tile('Booked a meeting', <NotYet />)}
-          {tile('Won', <NotYet />)}
+          {tile('Finished', r.finished, 'Last 90 days')}
+          {tile('Replied', pct(rate(r.replied, r.finished)), r.finished ? accounts(r.replied) : undefined)}
+          {tile('Booked a meeting', pct(rate(r.meetings, r.finished)), r.finished ? accounts(r.meetings) : undefined)}
+          {tile('Won', r.won, r.finished ? `${rate(r.won, r.finished)}% of finished` : 'None yet')}
         </ul>
-        <p className={styles.note}>Results appear once accounts have finished the playbook.</p>
       </div>
+
+      {canSeeWorked && <WhatWorked tenant={tenant} templateId={p.id} />}
 
       <section aria-labelledby="steps-title">
         <h2 id="steps-title" className={styles.sectionTitle}>

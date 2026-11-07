@@ -799,6 +799,17 @@ meeting, They book a meeting, Run every step), Steps (Day 1 to 366, with the not
 Meeting or Task; Done by: Seller, Leader or Operator; title, detail, buying roles, subject and body
 on email steps, reorder, remove; "Add at least one step."), `Add step`, `Cancel`, `Save changes` or `Create playbook`.
 
+**As built (R3c-2).** Reply rate and Meeting rate read "{n}%" (whole, rounded) of the plans that finished in the last 90 days, or "–" with
+nothing finished; the footnote stays "Reply and meeting rates are for accounts that finished the playbook in the last 90 days." The tiles are
+Running now ("Accounts mid-playbook"), Finished ("{n}", "Last 90 days"), Replied ("{x}%", "{n} accounts" or "1 account"), Booked a meeting
+("{x}%", "{n} accounts") and Won ("{n}", "{x}% of finished", or "None yet" with nothing finished); the percent tiles read "–" with nothing
+finished. The note "Results appear once accounts have finished the playbook." is gone. With `analytics:read` a section "What worked" follows the tiles, with the sub
+"Steps done in the last 90 days and the results they were credited with. A result credits the steps done in the 14 days before it." Its table has
+Step type, Steps done, Replies, Meetings, Opportunities and Won; each result cell shows "{n}" over "{x} per 10 steps" (one decimal), rows are in
+channel order Email, LinkedIn, Call, Meeting, Task with empty channels left out, and a last row "No recent step" shows counts only. Under 10 steps
+done the per-10 line is muted and carries the hidden text " (too few steps to compare)". With nothing to show: "No steps done in the last 90 days."
+Without `analytics:read` the section is not shown.
+
 Assign dialog: "Assign {playbook}" / "Accounts matched to this offer and tier will start this
 playbook when an AE accepts them." Offer, tier checkboxes with "Already uses this playbook",
 "Replaces {x}" or "No playbook now". Confirms for retire and delete.

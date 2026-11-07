@@ -7,6 +7,7 @@ import type { ModuleContext } from '@/platform/context';
 import { publish } from '@/platform/events/outbox';
 import { stepCompleted } from '../contracts/events';
 import { accountPlan, planStep } from '../db/schema';
+import { recordOutcome } from './outcomes';
 import { checkNoReply, CLOSED, OPEN_STEP, publishChanged, recordChange, snapshot, stopPlan, type Plan } from './plans';
 
 type Observed = z.output<typeof activityObserved.data>;
@@ -24,6 +25,8 @@ export async function onCrmActivity(e: { data: Observed; occurredAt: string }, c
   const { kind } = e.data;
   if (kind !== 'reply' && kind !== 'meeting' && kind !== 'task_done') return;
   const accountId = (await resolveAccountId(ctx, e.data.accountId))?.id ?? e.data.accountId;
+  // Ruling 1: the outcome belongs to the plan accepted before it, open or not, so it is recorded before the open-plan lookup.
+  if (kind !== 'task_done') await recordOutcome(ctx, { accountId, kind, ref: `${e.data.system}:${e.data.externalId}`, source: 'crm', occurredAt: new Date(e.data.occurredAt) });
   const [plan] = await ctx.tx
     .select()
     .from(accountPlan)

@@ -25,6 +25,8 @@ export type Playbook = {
   channels: Partial<Record<StepChannel, number>>;
   runs_on: { offer_id: string; tier: Tier }[];
   running: number;
+  /** Plans on the playbook that finished in the last 90 days, tenant-wide, and how many of them had each result. */
+  results: { finished: number; replied: number; meetings: number; won: number };
 };
 
 export type PlaybookStep = {
@@ -77,6 +79,28 @@ export const playbookQuery = (tenant: string, id: string, version?: number) =>
     queryKey: ['playbooks', tenant, 'one', id, version ?? 'current'],
     queryFn: () => apiFetch<PlaybookDetail>(version ? `${path(id)}?version=${version}` : path(id), { tenant }),
   });
+
+export type OutcomeKind = 'reply' | 'meeting' | 'opportunity' | 'won';
+type ByKind<T> = Record<OutcomeKind, T>;
+
+/** `GET /analytics/what-worked` (analytics:read): results per step type, in channel order, zero-only channels left out. */
+export type WhatWorked = {
+  rows: { step_type: StepChannel; steps_done: number; counts: ByKind<number>; per_10: ByKind<number | null> }[];
+  /** Results with no step done in the 14 days before them. */
+  no_recent_step: ByKind<number>;
+  min_steps: number;
+  updated_at: string | null;
+};
+
+export const whatWorkedQuery = (tenant: string, templateId: string) =>
+  queryOptions({
+    queryKey: ['playbooks', tenant, 'what-worked', templateId],
+    queryFn: () => apiFetch<WhatWorked>(`/analytics/what-worked?template_id=${encodeURIComponent(templateId)}`, { tenant }),
+  });
+
+/** A whole-number share of the finished plans, or null with nothing finished. */
+export const rate = (n: number, finished: number) => (finished ? Math.round((n / finished) * 100) : null);
+export const pct = (p: number | null) => (p === null ? '–' : `${p}%`);
 
 export const createPlaybook = (tenant: string, body: PlaybookBody) => apiFetch<PlaybookDetail>('/playbooks', { tenant, method: 'POST', body });
 export const patchPlaybook = (tenant: string, id: string, body: PlaybookBody) => apiFetch<PlaybookDetail>(path(id), { tenant, method: 'PATCH', body });

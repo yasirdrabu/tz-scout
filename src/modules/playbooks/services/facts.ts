@@ -14,3 +14,17 @@ export async function listStepFacts(
     .where(and(eq(planStep.tenantId, ctx.tenantId), isNotNull(planStep.ownerUserId), gte(planStep.dueDate, days.fromDay), lte(planStep.dueDate, days.toDay)));
   return rows.flatMap((r) => (r.ownerUserId ? [{ ...r, ownerUserId: r.ownerUserId }] : []));
 }
+
+/** Steps done with `doneAt` in the window, with the plan's template, for the what-worked denominator. Background context only. */
+export async function listDoneSteps(
+  ctx: ModuleContext,
+  w: { from: Date; to: Date },
+  templateId?: string,
+): Promise<{ accountId: string; templateId: string; channel: string; doneAt: Date }[]> {
+  const rows = await ctx.tx
+    .select({ accountId: accountPlan.accountId, templateId: accountPlan.templateId, channel: planStep.channel, doneAt: planStep.doneAt })
+    .from(planStep)
+    .innerJoin(accountPlan, eq(accountPlan.id, planStep.planId))
+    .where(and(eq(planStep.tenantId, ctx.tenantId), eq(planStep.status, 'done'), isNotNull(planStep.doneAt), gte(planStep.doneAt, w.from), lte(planStep.doneAt, w.to), templateId ? eq(accountPlan.templateId, templateId) : undefined));
+  return rows.flatMap((r) => (r.doneAt ? [{ ...r, doneAt: r.doneAt }] : []));
+}

@@ -1,6 +1,6 @@
 import { getSummaries } from '@/modules/accounts';
 import { accountMerged, factRecorded, personAdded, personUpdated, signalRecorded } from '@/modules/accounts/contracts/events';
-import { activityObserved } from '@/modules/crm/contracts/events';
+import { activityObserved, dealChanged } from '@/modules/crm/contracts/events';
 import { assignmentAccepted, assignmentCreated, assignmentDeclined, assignmentWithdrawn, reviewChanged } from '@/modules/routing/contracts/events';
 import { accountScored } from '@/modules/scoring/contracts/events';
 import { tenantCreated } from '@/modules/tenancy/contracts/events';
@@ -9,6 +9,7 @@ import { defineConsumer, type ConsumerDef } from '@/platform/runtime/consumers';
 import { freezeBrief, readBrief, requestDraft, unfreezeBrief } from './services/brief';
 import { seedPlaybooksDefaults } from './defaults';
 import { onCrmActivity } from './services/crm-activity';
+import { onDealChanged } from './services/deal-outcomes';
 import { briefOnMerge } from './services/merge';
 import { pauseOnWithdrawn, plansOnMerge, startPlan } from './services/start';
 
@@ -142,6 +143,14 @@ export const planOnCrmActivity = defineConsumer({
   handle: (e, ctx) => onCrmActivity(e, ctx),
 });
 
+/** Ruling 3: a deal's opportunity, won and lost outcomes. */
+export const outcomesOnDealChanged = defineConsumer({
+  name: 'playbooks.outcomes_on_deal_changed',
+  event: dealChanged,
+  orderedBy: (e) => e.data.accountId,
+  handle: (e, ctx) => onDealChanged(e, ctx),
+});
+
 /** Every playbooks consumer, for the worker's list. */
 export const playbooksConsumers: ConsumerDef[] = [
   playbooksTenantDefaults,
@@ -159,4 +168,5 @@ export const playbooksConsumers: ConsumerDef[] = [
   planPauseOnWithdrawn,
   planOnMerged,
   planOnCrmActivity,
+  outcomesOnDealChanged,
 ];

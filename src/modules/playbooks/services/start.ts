@@ -9,7 +9,7 @@ import { ScoutError } from '@/platform/errors';
 import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { planCreated, planNotStarted } from '../contracts/events';
-import { accountPlan, planStep, playbookTemplate, templateStep } from '../db/schema';
+import { accountPlan, outcome, planStep, playbookTemplate, templateStep } from '../db/schema';
 import { buildPlan, type OwnerRole, type StepChannel, type StopWhen, type Tier } from '../domain/plan';
 import { MAPPED_TIERS, playbookFor } from './offer-playbooks';
 import { checkNoReply, publishChanged, recordChange, snapshot } from './plans';
@@ -192,6 +192,7 @@ export async function plansOnMerge(ctx: ModuleContext, survivorId: string, merge
     await recordChange(ctx, loser.id, 'abandoned', { reason: 'merged', survivorId });
   }
   await ctx.tx.update(accountPlan).set({ accountId: survivorId }).where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.accountId, mergedId)));
+  await ctx.tx.update(outcome).set({ accountId: survivorId }).where(and(eq(outcome.tenantId, ctx.tenantId), eq(outcome.accountId, mergedId))); // Ruling 10
   for (const p of mine) {
     const abandoned = kept && loser && p.id === loser.id;
     await publishChanged(ctx, { id: p.id, accountId: survivorId, status: abandoned ? 'abandoned' : p.status }, abandoned ? ['status', 'account'] : ['account'], abandoned ? 'merged' : undefined, {

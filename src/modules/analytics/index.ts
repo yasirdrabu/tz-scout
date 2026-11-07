@@ -6,6 +6,7 @@ export {
   analyticsJourneyMerge,
   analyticsJourneyScore,
   analyticsJourneyStage,
+  analyticsStepCredit,
   analyticsUsageLines,
 } from './consumers';
 export { budgetLevelChanged } from './contracts/events';
@@ -44,3 +45,4 @@ export {
   type SourcePerformance,
   type SourceStat,
 } from './services/funnel';
+export { whatWorked, whatWorkedView, type WhatWorkedView } from './services/what-worked';

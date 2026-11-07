@@ -1,11 +1,11 @@
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { listBuyingRoles } from '@/modules/accounts';
 import { audit } from '@/platform/audit';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
 import { newId } from '@/platform/ids';
 import type { OwnerRole, StepChannel, StopWhen } from '../domain/plan';
-import { accountPlan, offerPlaybook, playbookTemplate, templateStep } from '../db/schema';
+import { accountPlan, offerPlaybook, outcome, playbookTemplate, templateStep } from '../db/schema';
 
 export const TEMPLATE_STATUSES = ['draft', 'active', 'archived'] as const;
 export type TemplateStatus = (typeof TEMPLATE_STATUSES)[number];
@@ -43,6 +43,9 @@ export type TemplatePatch = Partial<TemplateInput>;
 
 export type StepView = Omit<typeof templateStep.$inferSelect, 'tenantId' | 'channel' | 'ownerRole'> & { channel: StepChannel; ownerRole: OwnerRole };
 export type Template = typeof playbookTemplate.$inferSelect;
+export type PlaybookResults = { finished: number; replied: number; meetings: number; won: number };
+/** Rates look at plans that finished this far back. */
+export const RESULTS_DAYS = 90;
 export type RunsOn = { offerId: string; tier: string };
 /** `steps` is the count here; `getTemplate` returns the step rows as `steps` and the count as `stepCount`. */
 export type TemplateSummary = Template & {
@@ -53,6 +56,8 @@ export type TemplateSummary = Template & {
   runsOn: RunsOn[];
   /** Plans on this template that are `active` right now. */
   running: number;
+  /** Plans on this template that finished in the last 90 days, and how many of them had a reply, a meeting or a win (R3c-2 Ruling 6). */
+  results: PlaybookResults;
 };
 export type TemplateDetail = Omit<TemplateSummary, 'steps'> & { steps: StepView[]; stepCount: number; stepsVersion: number };
 
@@ -227,6 +232,15 @@ async function summaries(ctx: ModuleContext, rows: Template[]): Promise<Template
     .from(accountPlan)
     .where(and(eq(accountPlan.tenantId, ctx.tenantId), eq(accountPlan.status, 'active'), inArray(accountPlan.templateId, ids)))
     .groupBy(accountPlan.templateId);
+  // Tenant-wide like `running`: counts only, no account named.
+  const since = new Date(Date.now() - RESULTS_DAYS * 86_400_000);
+  const had = (kind: string) =>
+    sql<number>`(count(*) filter (where exists (select 1 from ${outcome} o where o.tenant_id = playbooks.account_plan.tenant_id and o.plan_id = playbooks.account_plan.id and o.kind = ${kind})))::int`;
+  const results = await ctx.tx
+    .select({ templateId: accountPlan.templateId, finished: sql<number>`count(*)::int`, replied: had('reply'), meetings: had('meeting'), won: had('won') })
+    .from(accountPlan)
+    .where(and(eq(accountPlan.tenantId, ctx.tenantId), inArray(accountPlan.templateId, ids), gte(accountPlan.finishedAt, since)))
+    .groupBy(accountPlan.templateId);
   return rows.map((t) => {
     const mine = steps.filter((s) => s.templateId === t.id && s.templateVersion === t.version);
     const channels: Partial<Record<StepChannel, number>> = {};
@@ -241,6 +255,7 @@ async function summaries(ctx: ModuleContext, rows: Template[]): Promise<Template
         .map((m) => ({ offerId: m.offerId, tier: m.tier }))
         .sort((a, b) => a.offerId.localeCompare(b.offerId) || a.tier.localeCompare(b.tier)),
       running: running.find((r) => r.templateId === t.id)?.n ?? 0,
+      results: ((r) => ({ finished: r?.finished ?? 0, replied: r?.replied ?? 0, meetings: r?.meetings ?? 0, won: r?.won ?? 0 }))(results.find((x) => x.templateId === t.id)),
     };
   });
 }

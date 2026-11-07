@@ -8,7 +8,7 @@ import { createTemplateBody, templateOut, withSteps } from './schemas';
 
 const statusParam = z.enum(TEMPLATE_STATUSES);
 
-// The list carries `steps` as a count, plus `days`, `channels`, `runs_on` and `running`.
+// The list carries `steps` as a count, plus `days`, `channels`, `runs_on`, `running` and `results`.
 export const GET = v1Route({ permission: 'playbooks:read' }, async (req, _principal, ctx) => {
   const asked = new URL(req.url).searchParams.get('status');
   const parsed = asked === null ? null : statusParam.safeParse(asked);
