@@ -51,6 +51,8 @@ export type SourceView = {
   initialReviewStatusKey: string;
   dailyArrivalCap: number;
   trust: number;
+  trustSample: number;
+  trustUpdatedAt: Date | null;
   settings: Record<string, unknown>;
   createdAt: Date;
 };
@@ -104,6 +106,8 @@ function view(r: Row): SourceView {
     initialReviewStatusKey: r.initialReviewStatusKey ?? DEFAULT_REVIEW_STATUS[r.kind as SourceKind],
     dailyArrivalCap: r.dailyArrivalCap,
     trust: r.trust,
+    trustSample: r.trustSample,
+    trustUpdatedAt: r.trustUpdatedAt,
     settings: (r.settings ?? {}) as Record<string, unknown>,
     createdAt: r.createdAt,
   };
@@ -621,22 +625,47 @@ export async function chainsForAccount(ctx: ModuleContext, accountIds: string[])
   }));
 }
 
+export type BestTrust = {
+  trust: number;
+  sourceId: string;
+  sourceName: string;
+  /** The closest source's won accounts and judged sample ("6 won of 41 sent"). */
+  won: number;
+  sent: number;
+  /** The winning chain's trust per level present. */
+  levels: { person?: number; agent?: number; vendor?: number };
+};
+
 /** The highest trust over the accounts' chains, with the closest source (agent, else person, else vendor) of the winning chain. */
-export async function bestTrustForAccounts(
-  ctx: ModuleContext,
-  accountIds: string[],
-): Promise<{ trust: number; sourceId: string; sourceName: string } | null> {
-  let best: { trust: number; sourceId: string } | null = null;
+export async function bestTrustForAccounts(ctx: ModuleContext, accountIds: string[]): Promise<BestTrust | null> {
+  let best: { trust: number; sourceId: string; chain: SourceChain } | null = null;
   for (const chain of await chainsForAccount(ctx, accountIds)) {
     // A chain with no source at all cannot be named, so the next-best chain wins instead.
     const sourceId = chain.agentSourceId ?? chain.personSourceId ?? chain.vendorSourceId;
     if (!sourceId) continue;
     const trust = await intakeSourceInfo.getTrust(ctx, chain);
-    if (!best || trust > best.trust) best = { trust, sourceId };
+    if (!best || trust > best.trust) best = { trust, sourceId, chain };
   }
   if (!best) return null;
-  const row = await loadSource(ctx, best.sourceId);
-  return { trust: best.trust, sourceId: best.sourceId, sourceName: row?.name ?? best.sourceId };
+  const ids = [best.chain.personSourceId, best.chain.agentSourceId, best.chain.vendorSourceId].filter((id): id is string => !!id);
+  const rows = await ctx.tx
+    .select({ id: source.id, name: source.name, trust: source.trust, sample: source.trustSample, won: source.trustWon })
+    .from(source)
+    .where(and(eq(source.tenantId, ctx.tenantId), inArray(source.id, ids)));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const trustOf = (id: string | undefined) => (id ? (byId.get(id)?.trust ?? NEW_SOURCE_TRUST) : undefined);
+  const person = trustOf(best.chain.personSourceId);
+  const agent = trustOf(best.chain.agentSourceId);
+  const vendor = trustOf(best.chain.vendorSourceId);
+  const closest = byId.get(best.sourceId);
+  return {
+    trust: best.trust,
+    sourceId: best.sourceId,
+    sourceName: closest?.name ?? best.sourceId,
+    won: closest?.won ?? 0,
+    sent: closest?.sample ?? 0,
+    levels: { ...(person === undefined ? {} : { person }), ...(agent === undefined ? {} : { agent }), ...(vendor === undefined ? {} : { vendor }) },
+  };
 }
 
 /** Accounts with a resolved arrival from the source or any source below it, in id order, `limit` (at most 200) at a time. */

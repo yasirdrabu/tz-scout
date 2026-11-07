@@ -24,6 +24,17 @@ export type ExplanationLine = {
   ageDays?: number;
   /** The Revenue potential and Source trust score lines: why the score is what it is. */
   reason?: string;
+  /** The Source trust line only: each level's trust, "Person 0.64, agent 0.71, vendor 0.55". Absent on lines stored before it existed. */
+  breakdown?: string;
+};
+
+/** The best source chain's trust: the closest source's record and each level's value (0 to 1). */
+export type TrustInfo = {
+  value: number;
+  sourceName: string;
+  won?: number;
+  sent?: number;
+  levels?: { person?: number; agent?: number; vendor?: number };
 };
 
 export type Explanation = {
@@ -57,7 +68,7 @@ export type ExplanationInput = {
   tierText?: string;
   priority: { priority: number; warmPoints: number };
   warmIntroFrom: string | null;
-  trust: { value: number; sourceName: string } | null;
+  trust: TrustInfo | null;
   otherOffers: Explanation['otherOffers'];
   computedAt: Date;
   profileVersion: number;
@@ -96,25 +107,35 @@ export function revenueReason(r: { cents: number | null; band: RevenueBand | nul
   return r.cents === null || r.band === null ? `No deal size on ${offerName}.` : `About ${usd(r.cents)} a deal at this company's size (${r.band}).`;
 }
 
-export function trustReason(trust: { value: number; sourceName: string } | null, neutral: number): string {
-  return trust === null ? `No source has been rated yet, so it counts as ${Math.round(neutral * 100)}.` : `${trust.sourceName} is rated ${trust.value.toFixed(2)}.`;
+export function trustReason(trust: TrustInfo | null, neutral: number): string {
+  if (trust === null) return `No source has been rated yet, so it counts as ${Math.round(neutral * 100)}.`;
+  return trust.sent ? `${trust.sourceName}: ${trust.won ?? 0} won of ${trust.sent} sent` : `${trust.sourceName} is rated ${trust.value.toFixed(2)}.`;
+}
+
+/** "Person 0.64, agent 0.71, vendor 0.55": the levels present, in that order. Undefined with no levels. */
+export function trustBreakdown(trust: TrustInfo | null): string | undefined {
+  const levels = trust?.levels;
+  if (!levels) return undefined;
+  const parts = (['person', 'agent', 'vendor'] as const).flatMap((k) => (levels[k] === undefined ? [] : [`${k} ${levels[k]!.toFixed(2)}`]));
+  return parts.length === 0 ? undefined : parts.join(', ').replace(/^./, (c) => c.toUpperCase());
 }
 
 /** The four scores with their weights ("Fit 82 × 40%"). The caller adds the reasons it knows for revenue and trust. */
-export function scoreLines(s: { fit: number; intent: number; revenue: number; trust: number }, weights: Weights, reasons: { revenue?: string; trust?: string } = {}): ExplanationLine[] {
-  const line = (label: string, score: number, weight: number, reason?: string): ExplanationLine => ({
+export function scoreLines(s: { fit: number; intent: number; revenue: number; trust: number }, weights: Weights, reasons: { revenue?: string; trust?: string; trustBreakdown?: string } = {}): ExplanationLine[] {
+  const line = (label: string, score: number, weight: number, reason?: string, breakdown?: string): ExplanationLine => ({
     group: 'combine',
     label,
     points: score,
     max: 100,
     text: `${label} ${score} × ${weight}%`,
     ...(reason === undefined ? {} : { reason }),
+    ...(breakdown === undefined ? {} : { breakdown }),
   });
   return [
     line('Fit', s.fit, weights.fit),
     line('Buying intent', s.intent, weights.intent),
     line('Revenue potential', s.revenue, weights.revenue, reasons.revenue),
-    line('Source trust', s.trust, weights.trust, reasons.trust),
+    line('Source trust', s.trust, weights.trust, reasons.trust, reasons.trustBreakdown),
   ];
 }
 
@@ -144,7 +165,14 @@ export function buildExplanation(input: ExplanationInput): Explanation {
 
   const rawFit = fit.parts.reduce((sum, p) => sum + p.points, 0);
   if (fit.hardMiss && rawFit > HARD_MISS_CAP) lines.push({ group: 'combine', label: 'Hard miss', points: fit.fit, text: `Hard miss: fit capped at ${HARD_MISS_CAP}.` });
-  lines.push(...scoreLines(input.scores, profile.weights, { revenue: revenueReason(input.revenue, input.offer.name), trust: trustReason(input.trust, profile.trustNeutral) }));
+  const breakdown = trustBreakdown(input.trust);
+  lines.push(
+    ...scoreLines(input.scores, profile.weights, {
+      revenue: revenueReason(input.revenue, input.offer.name),
+      trust: trustReason(input.trust, profile.trustNeutral),
+      ...(breakdown === undefined ? {} : { trustBreakdown: breakdown }),
+    }),
+  );
   if (input.combine.cappedAtFit) lines.push({ group: 'combine', label: 'Low fit', points: fit.fit, text: `Fit below 50: score capped at fit (${fit.fit}).` });
   lines.push({ group: 'combine', label: 'Match', points: input.combine.score, text: `Score ${input.combine.score} from the four scores.` });
   if (input.tierText) lines.push({ group: 'combine', label: 'Tier', text: input.tierText });

@@ -16,7 +16,7 @@ import { buyingRole } from '@/modules/accounts/db/schema';
 import { handoffPackageProvider, registerHandoffPackageProvider, seedMockCrm, syncAccount, syncOwners } from '@/modules/crm';
 import { activity, companyCheck, followThrough, handoff, link } from '@/modules/crm/db/schema';
 import { mockAddActivity, setMockFailure } from '@/modules/crm/fixtures';
-import { arrival } from '@/modules/intake/db/schema';
+import { arrival, source as sourceTable } from '@/modules/intake/db/schema';
 import { offer as offerTable } from '@/modules/offers/db/schema';
 import { offerMatch } from '@/modules/scoring/db/schema';
 import { setConnectionSettings } from '@/modules/integrations';
@@ -80,8 +80,16 @@ describe('GET /accounts/{id}/score tiles and warm_intro', () => {
     expect(s.tiles[2]).toMatchObject({ value: s.intent, max: 100, note: 'No dated signals yet.' });
     expect(s.tiles[0].note).toBe('Act now starts at 75 with a research or trigger signal.');
     expect(s.tiles[3]).toEqual({ key: 'revenue_potential', label: 'Revenue potential', value: expect.any(Number), max: 100, note: "About $50,000 a deal at this company's size (medium)." });
-    expect(s.tiles[4]).toEqual({ key: 'source_trust', label: 'Source trust', value: expect.any(Number), max: 100, note: expect.stringMatching(/rated|counts as 60/) });
+    expect(s.tiles[4]).toEqual({ key: 'source_trust', label: 'Source trust', value: expect.any(Number), max: 100, note: expect.stringMatching(/rated|counts as 60/), breakdown: 'Person 0.60, agent 0.60' });
     expect(s.warm_intro).toBeNull();
+  });
+
+  it('puts the learned record in the Source trust note and each level in the hover breakdown', async () => {
+    await w.run((ctx) => ctx.tx.update(sourceTable).set({ trust: 0.64, trustSample: 12, trustWon: 2 }).where(eq(sourceTable.id, w.source.personId)));
+    await w.run((ctx) => ctx.tx.update(sourceTable).set({ trust: 0.71, trustSample: 41, trustWon: 6 }).where(eq(sourceTable.id, w.source.agentId)));
+    const a = await w.sent({ name: 'Trust Note Co', industry: 'Logistics' });
+    const s = await (await w.as(leader, getScore, `accounts/${a}/score`)).json();
+    expect(s.tiles[4]).toMatchObject({ key: 'source_trust', note: expect.stringMatching(/: 6 won of 41 sent$/), breakdown: 'Person 0.64, agent 0.71' });
   });
 
   it('says no signal matched an intent rule when a dated signal matched none', async () => {

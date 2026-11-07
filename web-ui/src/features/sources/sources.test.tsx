@@ -28,12 +28,21 @@ describe('Sources (§10)', () => {
     const rfp = screen.getByRole('link', { name: 'RFP Watch' }).closest('tr')!;
     expect(rfp).toHaveTextContent('Agent');
     expect(rfp).toHaveTextContent('Through Marcus Lee');
-    expect(rfp).toHaveTextContent('Not enough data yet');
+    // Trust: the number and a bar for a rated source, the words for a new one.
+    expect(within(rfp).getAllByRole('cell')[2]).toHaveTextContent('72');
+    expect(rfp.querySelector('[class*="trustFill"]')).toHaveStyle({ width: '72%' });
+    expect(rfp).not.toHaveTextContent('Not enough data yet');
+    const csv = screen.getByRole('link', { name: 'CSV imports' }).closest('tr')!;
+    expect(csv).toHaveTextContent('Not enough data yet');
+    expect(csv.querySelector('[class*="trustFill"]')).toBeNull();
+    expect(
+      screen.getByText(
+        "Trust is learned nightly from what each source's accounts became. 80 and up is strong, 60 to 79 is average, below 60 is weak. New sources start at 60.",
+      ),
+    ).toBeInTheDocument();
     expect(within(rfp).getAllByRole('cell').map((c) => c.textContent).slice(3, 7)).toEqual(['41', '38', '19', '6']);
     expect(screen.getByRole('link', { name: 'CSV imports' }).closest('tr')).toHaveTextContent('New');
     expect(screen.getByRole('link', { name: 'Kestrel Advisory' }).closest('tr')).toHaveTextContent('Paused');
-    // Trust always reads the words until R3, and there is no Trust filter.
-    for (const row of screen.getAllByRole('row').slice(1)) expect(row).toHaveTextContent('Not enough data yet');
     // Archived sources stay out: the list never asks for them (the API leaves them out by default).
     expect(seen.filter((r) => r.url.pathname === '/api/v1/sources').every((r) => !r.url.searchParams.has('status'))).toBe(true);
   });
@@ -59,7 +68,6 @@ describe('Sources (§10)', () => {
     const app = renderApp('/t/taazaa/sources');
     await screen.findByRole('link', { name: 'RFP Watch' });
     await user.click(screen.getByRole('button', { name: /Filter/ }));
-    expect(screen.queryByRole('tab', { name: /Trust/ })).toBeNull();
     const agent = await screen.findByRole('checkbox', { name: /Agent/ });
     expect(agent.closest('label')).toHaveTextContent('1');
     await user.click(agent);
@@ -69,6 +77,37 @@ describe('Sources (§10)', () => {
     await user.type(screen.getByRole('searchbox', { name: 'Find a source' }), 'rfp');
     await waitFor(() => expect(params(app.path()).get('q')).toBe('rfp'));
     expect(seen.some((s) => s.url.pathname === '/api/v1/sources' && s.url.searchParams.get('q') === 'rfp' && s.url.searchParams.get('kind') === 'agent')).toBe(true);
+  });
+
+  it('filters by trust from trust_band, keeps the parent of a match, and keeps the filter in the URL', async () => {
+    const seen = serveSources();
+    const user = userEvent.setup();
+    const app = renderApp('/t/taazaa/sources?trust=high');
+    await screen.findByRole('link', { name: 'Marcus Lee' });
+    // Marcus is 85; RFP Watch (72) is hidden. The filter is the client's: the API is not asked.
+    expect(names()).toEqual(['Marcus Lee']);
+    expect(seen.every((s) => !s.url.searchParams.has('trust'))).toBe(true);
+    await user.click(screen.getByRole('button', { name: /Filter/ }));
+    await user.click(await screen.findByRole('tab', { name: /Trust/ }));
+    const options = (await screen.findAllByRole('radio')).map((r) => r.closest('label')!.textContent);
+    expect(options.map((t) => t?.replace(/\d+$/, '').trim())).toEqual(['All', '80 and up', '60 to 79', 'Below 60', 'Not enough data']);
+    expect(screen.getByRole('radio', { name: /^All/ })).not.toBeChecked();
+    await user.click(screen.getByRole('radio', { name: /60 to 79/ }));
+    await waitFor(() => expect(params(app.path()).get('trust')).toBe('mid'));
+    // RFP Watch matches, so its parent stays with it.
+    await waitFor(() => expect(names()).toEqual(['Marcus Lee', 'RFP Watch']));
+    await user.click(screen.getByRole('radio', { name: /Not enough data/ }));
+    await waitFor(() => expect(names()).toEqual(['Marcus Lee', 'CSV imports', 'Kestrel Advisory', 'HubSpot inbound']));
+  });
+
+  it('checks All in the Trust filter while no trust filter is set', async () => {
+    serveSources();
+    const user = userEvent.setup();
+    renderApp('/t/taazaa/sources');
+    await screen.findByRole('link', { name: 'Marcus Lee' });
+    await user.click(screen.getByRole('button', { name: /Filter/ }));
+    await user.click(await screen.findByRole('tab', { name: /Trust/ }));
+    expect(await screen.findByRole('radio', { name: /^All/ })).toBeChecked();
   });
 
   it('shows the empty state with a way out, and no archived sources', async () => {

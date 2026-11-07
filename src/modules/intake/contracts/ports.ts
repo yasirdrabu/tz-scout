@@ -1,4 +1,5 @@
 import type { ModuleContext } from '@/platform/context';
+import type { TrustStage } from '../domain/trust';
 
 // Ports Intake defines and higher modules implement. The composition root (src/entry/compose.ts)
 // registers the implementations; until then the defaults below apply.
@@ -35,3 +36,20 @@ export function registerFunnelStages(f: FunnelStages | null): void {
 
 /** With none registered, the funnel lists no stages. */
 export const funnelStages = (): FunnelStages => funnel ?? { stages: async () => [] };
+
+/** Implemented by routing. What trust needs of the pipeline: its stages (archived ones too, so history into a deleted stage still counts), and every move into one. */
+export interface StageOutcomes {
+  stages(ctx: ModuleContext): Promise<TrustStage[]>;
+  /** Every stage move in the workspace, oldest first, with each account named by its surviving id. */
+  history(ctx: ModuleContext): Promise<{ accountId: string; toStage: string; at: Date }[]>;
+}
+
+let outcomes: StageOutcomes | null = null;
+
+/** Pass null to clear (tests). */
+export function registerStageOutcomes(s: StageOutcomes | null): void {
+  outcomes = s;
+}
+
+/** With none registered, there are no stages and no history: old undecided arrivals score 0.10 and declines 0. */
+export const stageOutcomes = (): StageOutcomes => outcomes ?? { stages: async () => [], history: async () => [] };

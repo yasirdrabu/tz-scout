@@ -90,12 +90,12 @@ priority by at most ±5 points and never changes fit or intent. SCO reads it wit
 
 ## Data
 
-`source`, `source_trust_history`, `arrival_outcome` (see index). `arrival_outcome` is updated by
-consumers of `routing.status.changed` (including send-back and decline notes, which become feedback),
-`routing.stage.changed` (furthest stage reached), `routing.assignment.accepted`,
-`routing.assignment.declined`, `crm.deal.changed`, `playbooks.outcome.recorded` and
-`accounts.conflict.resolved`; on `accounts.account.merged` rows for the merged account move to the
-survivor.
+`source` (with `trust`, `trust_sample`, `trust_won`, `trust_updated_at`, `trust_published`) and
+`source_trust_history`. There is no `arrival_outcome` table (R3b-2 Ruling 1): the nightly job reads
+intake's resolved arrivals and `source_feedback`, and routing's stages and `stage_change` history
+through the `StageOutcomes` port, so one place computes trust and there are no out-of-order event
+bugs. A conflict loss recomputes the losing sources at once. If workspaces grow large enough to need
+it, a read model can be added later without changing the formula or the history.
 
 ## Stories
 

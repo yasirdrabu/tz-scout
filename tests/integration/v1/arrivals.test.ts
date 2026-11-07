@@ -145,7 +145,7 @@ describe('/api/v1/sources', () => {
     const manage = await keyFor(t, ['sources:manage', 'arrivals:read']);
     const res = await call(postSource, manage, 'sources', { body: { kind: 'vendor', name: 'Acme Data' } });
     expect(res.status).toBe(201);
-    expect(await res.json()).toMatchObject({ kind: 'vendor', name: 'Acme Data', trust: null, trust_label: 'Not enough data yet' });
+    expect(await res.json()).toMatchObject({ kind: 'vendor', name: 'Acme Data', trust: 60, trust_label: 'Not enough data yet' });
     const bad = await call(postSource, manage, 'sources', { body: { kind: 'agent', name: 'Orphan' } });
     expect(bad.status).toBe(400);
     expect((await call(postSource, ashKey, 'sources', { body: { kind: 'vendor', name: 'x' } })).status).toBe(403);

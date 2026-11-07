@@ -372,3 +372,40 @@
   align-items: center;
   gap: 8px;
 }
+
+.trust {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trustNumber {
+  min-width: 2ch;
+  font-variant-numeric: tabular-nums;
+}
+
+.trustTrack {
+  display: inline-block;
+  width: 56px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+
+.trustFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+
+.trend {
+  width: 100%;
+  max-width: 240px;
+  height: 32px;
+}
+
+.trendBar {
+  fill: var(--accent);
+}

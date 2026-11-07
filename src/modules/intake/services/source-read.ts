@@ -1,9 +1,10 @@
-import { and, asc, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, ne, or, sql } from 'drizzle-orm';
 import { stageCountsBySource } from '@/modules/accounts';
 import { activeKeysBySource, userNames, type ActiveKey } from '@/modules/tenancy';
 import type { ModuleContext } from '@/platform/context';
 import { funnelStages } from '../contracts/ports';
-import { arrival, batch, source } from '../db/schema';
+import { arrival, batch, source, sourceTrustHistory } from '../db/schema';
+import { trustBand, type TrustBand } from '../domain/trust';
 import { syncStatus, type SyncStatus } from './qualified-leads';
 import { childSources, liveChildren, readSource, sourceBreadcrumb, sourceNames, type SourceKind, type SourceListRow, type SourceStatus, type SourceView } from './sources';
 
@@ -20,7 +21,7 @@ export const KIND_LABELS: Record<SourceKind, string> = {
 
 const STATUS_LABELS: Record<Exclude<SourceStatus, 'removed'>, string> = { active: 'Active', paused: 'Paused', archived: 'Archived' };
 
-/** Trust is the R1 constant until R3 learns it from outcomes (C9). */
+/** Shown when a source has too few judged arrivals for its trust to mean much (Ruling 10). */
 export const TRUST_LABEL = 'Not enough data yet';
 
 /** Fewer reviewed accounts than this and a source is "New" (Ruling 4). */
@@ -46,8 +47,12 @@ export type SourceApiView = {
   lastSentAt: Date | null;
   hasSent: boolean;
   arrivalsLast30Days: number;
-  trust: null;
-  trustLabel: string;
+  /** Whole number out of 100. */
+  trust: number;
+  trustSample: number;
+  trustBand: TrustBand;
+  trustLabel: string | null;
+  trustUpdatedAt: Date | null;
   childrenCount: number;
   isNew: boolean;
   canRemove: boolean;
@@ -176,8 +181,11 @@ export async function sourceViews(ctx: ModuleContext, rows: SourceListRow[], sta
       lastSentAt: r.lastSentAt,
       hasSent: r.hasSent,
       arrivalsLast30Days: r.arrivalsLast30Days,
-      trust: null,
-      trustLabel: TRUST_LABEL,
+      trust: Math.round(r.trust * 100),
+      trustSample: r.trustSample,
+      trustBand: trustBand(r.trust, r.trustSample),
+      trustLabel: trustBand(r.trust, r.trustSample) === 'not_enough' ? TRUST_LABEL : null,
+      trustUpdatedAt: r.trustUpdatedAt,
       childrenCount,
       isNew: funnels.get(r.id)?.isNew ?? true,
       // A member's own person source is never removed (it is how they send from the app).
@@ -191,7 +199,25 @@ export async function sourceViews(ctx: ModuleContext, rows: SourceListRow[], sta
   });
 }
 
-export type SourceDetail = SourceApiView & { breadcrumb: { id: string; name: string }[]; sync: SyncStatus | null };
+export type TrustPoint = { month: string; trust: number; sampleSize: number };
+
+export type SourceDetail = SourceApiView & { breadcrumb: { id: string; name: string }[]; sync: SyncStatus | null; trustTrend: TrustPoint[] };
+
+/** The last history row of each of the last 12 months that has one, oldest first. */
+export async function trustTrend(ctx: ModuleContext, sourceId: string, now = new Date()): Promise<TrustPoint[]> {
+  const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1));
+  const rows = await ctx.tx
+    .select({ at: sourceTrustHistory.computedAt, trust: sourceTrustHistory.trust, sampleSize: sourceTrustHistory.sampleSize })
+    .from(sourceTrustHistory)
+    .where(and(eq(sourceTrustHistory.tenantId, ctx.tenantId), eq(sourceTrustHistory.sourceId, sourceId), gte(sourceTrustHistory.computedAt, since)))
+    .orderBy(asc(sourceTrustHistory.computedAt));
+  const byMonth = new Map<string, TrustPoint>();
+  for (const r of rows) {
+    const month = r.at.toISOString().slice(0, 7);
+    byMonth.set(month, { month, trust: Math.round(r.trust * 100), sampleSize: r.sampleSize });
+  }
+  return [...byMonth.values()];
+}
 
 /** One source for the Source page; undefined when it is removed, hidden or another tenant's. */
 export async function sourceDetail(ctx: ModuleContext, id: string): Promise<SourceDetail | undefined> {
@@ -206,7 +232,7 @@ export async function newSourceDetail(ctx: ModuleContext, added: SourceView): Pr
 
 async function detailOf(ctx: ModuleContext, row: SourceListRow): Promise<SourceDetail> {
   const [v] = await sourceViews(ctx, [row]);
-  return { ...v!, breadcrumb: await sourceBreadcrumb(ctx, row.id), sync: row.kind === 'crm' ? await syncStatus(ctx) : null };
+  return { ...v!, breadcrumb: await sourceBreadcrumb(ctx, row.id), sync: row.kind === 'crm' ? await syncStatus(ctx) : null, trustTrend: await trustTrend(ctx, row.id) };
 }
 
 /** How an account first came in through a source, for the Source page's Accounts tab ("Came in through"). */

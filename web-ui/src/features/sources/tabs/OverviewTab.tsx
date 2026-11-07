@@ -8,11 +8,27 @@ import styles from '../Sources.module.css';
 
 type Props = { tenant: string; source: SourceDetail; stat: SourceStat | undefined };
 
-/** Where its accounts went (the API's stages and counts), what was sent back or declined, and the details. There is no Trust card until R3. */
+/** A strip of bars, one per month of `trust_trend` (0 to 100), oldest first. */
+function TrendStrip({ trend }: { trend: SourceDetail['trust_trend'] }) {
+  const w = 10;
+  const gap = 4;
+  const h = 32;
+  return (
+    <svg className={styles.trend} viewBox={`0 0 ${trend.length * (w + gap) - gap} ${h}`} role="img" aria-label={`Trust by month: ${trend.map((t) => `${t.month} ${t.trust}`).join(', ')}`}>
+      {trend.map((t, i) => {
+        const bar = Math.max(2, (Math.max(0, Math.min(100, t.trust)) / 100) * h);
+        return <rect key={t.month} x={i * (w + gap)} y={h - bar} width={w} height={bar} rx={2} className={styles.trendBar} />;
+      })}
+    </svg>
+  );
+}
+
+/** Where its accounts went (the API's stages and counts), the Trust card, what was sent back or declined, and the details. */
 export function OverviewTab({ tenant, source: s, stat }: Props) {
   const f = useFormat();
   const wentId = useId();
   const recentId = useId();
+  const trustId = useId();
   const feedback = useQuery(feedbackQuery(tenant, s.id));
   const all = useQuery(sourcesQuery(tenant));
   const children = (all.data?.data ?? []).filter((c) => c.parent_id === s.id);
@@ -40,6 +56,15 @@ export function OverviewTab({ tenant, source: s, stat }: Props) {
           ) : (
             <p className={styles.note}>Loading the numbers</p>
           )}
+        </section>
+        <section className={styles.panel} aria-labelledby={trustId}>
+          <h2 id={trustId} className={styles.panelTitle}>
+            Trust
+          </h2>
+          <span className={styles.note}>Updated nightly</span>
+          <span className={s.trust_label ? styles.statValueWords : styles.statValue}>{s.trust_label ?? s.trust}</span>
+          <span className={styles.note}>{`Based on ${f.number(s.trust_sample)} ${s.trust_sample === 1 ? 'account' : 'accounts'}`}</span>
+          {s.trust_trend.length > 0 ? <TrendStrip trend={s.trust_trend} /> : <p className={styles.note}>No history yet.</p>}
         </section>
         <section className={styles.panel} aria-labelledby={recentId}>
           <h2 id={recentId} className={styles.panelTitle}>

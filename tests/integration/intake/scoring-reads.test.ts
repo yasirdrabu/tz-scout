@@ -81,7 +81,7 @@ describe('chains, trust and sources by account', () => {
     await runOutbox(t.tenantId);
     const accountId = await accountOf(first.arrivalId);
     vi.spyOn(intakeSourceInfo, 'getTrust').mockImplementation(async (_ctx, chain) => (chain.agentSourceId === bo.agentId ? 0.9 : 0.5));
-    expect(await t.run((ctx) => bestTrustForAccounts(ctx, [accountId]))).toEqual({ trust: 0.9, sourceId: bo.agentId, sourceName: 'Bo agent' });
+    expect(await t.run((ctx) => bestTrustForAccounts(ctx, [accountId]))).toEqual({ trust: 0.9, sourceId: bo.agentId, sourceName: 'Bo agent', won: 0, sent: 0, levels: { person: 0.6, agent: 0.6 } });
     expect(await t.run((ctx) => bestTrustForAccounts(ctx, []))).toBeNull();
   });
 
@@ -95,7 +95,7 @@ describe('chains, trust and sources by account', () => {
       ctx.tx.update(arrival).set({ personSourceId: null, agentSourceId: null, vendorSourceId: null }).where(eq(arrival.id, second.arrivalId)),
     );
     vi.spyOn(intakeSourceInfo, 'getTrust').mockImplementation(async (_ctx, chain) => (chain.agentSourceId ? 0.5 : 0.95));
-    expect(await t.run((ctx) => bestTrustForAccounts(ctx, [accountId]))).toEqual({ trust: 0.5, sourceId: ash.agentId, sourceName: 'Ash agent' });
+    expect(await t.run((ctx) => bestTrustForAccounts(ctx, [accountId]))).toEqual({ trust: 0.5, sourceId: ash.agentId, sourceName: 'Ash agent', won: 0, sent: 0, levels: { person: 0.6, agent: 0.6 } });
   });
 
   it('accountIdsForSource includes the source children and pages by id', async () => {

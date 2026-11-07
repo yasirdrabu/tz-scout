@@ -3,7 +3,7 @@ import type { ModuleContext } from '@/platform/context';
 import { newId } from '@/platform/ids';
 import { upsertSchedule } from '@/platform/scheduler';
 import { relationshipDefault, source } from './db/schema';
-import { qualifiedLeadsPollJob, waitingExpireJob } from './contracts/jobs';
+import { qualifiedLeadsPollJob, trustJob, waitingExpireJob } from './contracts/jobs';
 
 /** Vendor-level sources every tenant starts with (SRC-E1-S1-AC4). `settings.key` is what `via_vendor` matches. */
 export const DEFAULT_VENDOR_SOURCES = [
@@ -56,5 +56,10 @@ export async function seedIntakeDefaults(ctx: ModuleContext): Promise<void> {
   await upsertSchedule(
     { actor: ctx.actor, correlationId: ctx.correlationId, tx: ctx.tx },
     { tenantId, jobName: qualifiedLeadsPollJob.name, cron: '*/15 * * * *', timezone: 'UTC', payload: {} },
+  );
+  // R3b-2: learned source trust, nightly at 01:00 UTC, before scoring's 02:00 ageing.
+  await upsertSchedule(
+    { actor: ctx.actor, correlationId: ctx.correlationId, tx: ctx.tx },
+    { tenantId, jobName: trustJob.name, cron: '0 1 * * *', timezone: 'UTC', payload: {} },
   );
 }

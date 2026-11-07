@@ -31,7 +31,7 @@ export {
 export { routingAccountMerged, routingArrivalResolved, routingConsumers, routingCrmActivity, routingCrmDeal, routingCrmHandoffCancelled, routingCrmHandoffCompleted, routingCrmHandoffFailed, routingCrmHandoffNeedsDecision, routingMemberRemoved, routingTenantDefaults } from './consumers';
 export { DEFAULT_AUTO_ACCEPT_WORKING_DAYS, DEFAULT_REASONS, DEFAULT_STATUSES, seedRoutingDefaults } from './defaults';
 export { nextStage, type StageEvent } from './domain/stages';
-export { listStages, loadStageNames as stageNames, routingFunnelStages, type StagesView } from './services/pipeline-stages';
+export { listStages, loadStageNames as stageNames, routingFunnelStages, routingStageOutcomes, type StagesView } from './services/pipeline-stages';
 export { declineProblems, inList, REASON_LISTS, statusChangeProblems, type ReasonDef, type ReasonList, type StatusDefRules } from './domain/status-rules';
 export { STATUS_COLORS, STATUS_SET_BY, type ReasonEdit, type StatusEdit } from './domain/review-settings';
 export { addWorkingDays } from './domain/working-days';

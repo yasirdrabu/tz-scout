@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ScoringAccount, ScoringOffer, ScoringSignal } from '@/modules/scoring/contracts/types';
 import { matchScore } from '@/modules/scoring/domain/combine';
-import { buildExplanation, NO_OFFER_TEXT, summarySentence, wouldRaise, type Explanation } from '@/modules/scoring/domain/explain';
+import { buildExplanation, NO_OFFER_TEXT, summarySentence, trustBreakdown, trustReason, wouldRaise, type Explanation, type TrustInfo } from '@/modules/scoring/domain/explain';
 import { fit } from '@/modules/scoring/domain/fit';
 import { intent } from '@/modules/scoring/domain/intent';
 import { priority } from '@/modules/scoring/domain/priority';
@@ -11,7 +11,7 @@ import { account, daysAgo, NOW, offer, person, profile, rule, signal } from './f
 
 type Extras = {
   warm?: { name: string; points: number };
-  trust?: { value: number; sourceName: string };
+  trust?: TrustInfo;
   others?: Explanation['otherOffers'];
   researchTier?: 'A' | 'B' | 'C';
 };
@@ -174,6 +174,19 @@ describe('buildExplanation', () => {
     const { e } = explain(acc, off, sigs);
     expect(e.lines.find((l) => l.label === 'Revenue potential')).toMatchObject({ points: 38, reason: "About $37,500 a deal at this company's size (medium)." });
     expect(Math.abs(sumLines(e) - e.priority)).toBeLessThanOrEqual(1);
+  });
+
+  it('names the record when the source has sent, and lists each level in the breakdown', () => {
+    const { off, acc, sigs } = exampleA();
+    const trust = { value: 0.7, sourceName: 'RFP Watch', won: 6, sent: 41, levels: { person: 0.64, agent: 0.71, vendor: 0.55 } };
+    const { e } = explain(acc, off, sigs, { trust });
+    expect(e.lines.find((l) => l.label === 'Source trust')).toMatchObject({ reason: 'RFP Watch: 6 won of 41 sent', breakdown: 'Person 0.64, agent 0.71, vendor 0.55' });
+    expect(trustReason(trust, 0.6)).toBe('RFP Watch: 6 won of 41 sent');
+    expect(trustReason({ ...trust, sent: 0 }, 0.6)).toBe('RFP Watch is rated 0.70.');
+    expect(trustBreakdown({ ...trust, levels: { person: 0.64 } })).toBe('Person 0.64');
+    expect(trustBreakdown({ ...trust, levels: { agent: 0.5, vendor: 0.55 } })).toBe('Agent 0.50, vendor 0.55');
+    expect(trustBreakdown({ value: 0.7, sourceName: 'x' })).toBeUndefined();
+    expect(trustBreakdown(null)).toBeUndefined();
   });
 
   it('a source with no rating counts as the neutral trust', () => {

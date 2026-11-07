@@ -40,7 +40,7 @@ function matchLines(
   m: { fit: number; intent: number; revenueScore: number | null; trustScore: number | null; matchTotal: number; fitParts: unknown; ruleHits: unknown; disqualifiedReason: string | null; computedAt: Date },
   signals: ScoringSignal[],
   profile: ScoringProfile,
-  reasons: { revenue: string; trust: string | undefined },
+  reasons: { revenue: string; trust: string | undefined; trustBreakdown: string | undefined },
 ): ExplanationLine[] {
   const lines: ExplanationLine[] = [];
   const parts = m.fitParts as FitPart[];
@@ -66,7 +66,7 @@ function matchLines(
   }
   const scores = { fit: m.fit, intent: m.intent, revenue: m.revenueScore ?? 50, trust: m.trustScore ?? Math.round(profile.trustNeutral * 100) };
   // A match written before the four-weight model has no revenue or trust score: no score lines, so the tiles say "Not scored yet."
-  if (m.revenueScore !== null && m.trustScore !== null) lines.push(...scoreLines(scores, profile.weights, { revenue: reasons.revenue, ...(reasons.trust === undefined ? {} : { trust: reasons.trust }) }));
+  if (m.revenueScore !== null && m.trustScore !== null) lines.push(...scoreLines(scores, profile.weights, { revenue: reasons.revenue, ...(reasons.trust === undefined ? {} : { trust: reasons.trust }), ...(reasons.trustBreakdown === undefined ? {} : { trustBreakdown: reasons.trustBreakdown }) }));
   if (matchScore(scores, profile).cappedAtFit) {
     lines.push({ group: 'combine', label: 'Low fit', points: m.fit, text: `Fit below 50: score capped at fit (${m.fit}).` });
   }
@@ -123,6 +123,7 @@ export async function explainScore(ctx: ModuleContext, accountId: string, opts: 
         ),
         // The account's trust is the same for every offer, so its reason is the one the stored explanation already wrote.
         trust: stored.lines.find((l) => l.label === 'Source trust')?.reason,
+        trustBreakdown: stored.lines.find((l) => l.label === 'Source trust')?.breakdown,
       }),
       otherOffers: matches
         .filter((x) => x !== m)

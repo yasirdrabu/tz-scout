@@ -22,7 +22,7 @@ import { seedAccountDefaults } from '@/modules/accounts';
 import { backfillJourneys } from '@/modules/analytics';
 import { backfillCrm, seedCrmDefaults, seedMockCrm } from '@/modules/crm';
 import { listConnections } from '@/modules/integrations';
-import { listSources, personSourceFor, registerSource, renamePersonSources, seedIntakeDefaults } from '@/modules/intake';
+import { computeTrust, listSources, personSourceFor, registerSource, renamePersonSources, seedIntakeDefaults } from '@/modules/intake';
 import { seedMissingSignalRules, seedOffers } from '@/modules/offers';
 import { backfillBriefs, seedPlaybooksDefaults } from '@/modules/playbooks';
 import { backfillLeadOffers, backfillReviews, seedRoutingDefaults } from '@/modules/routing';
@@ -126,6 +126,15 @@ export async function backfillReviewFlow(ctx: ModuleContext): Promise<void> {
 }
 
 /**
+ * Brings a workspace from before R3b-2 up to date: the nightly trust schedule, and every source's trust computed now
+ * (until then each reads 0.60). Safe to run again. Background context only.
+ */
+export async function backfillTrust(ctx: ModuleContext): Promise<void> {
+  await seedIntakeDefaults(ctx);
+  await computeTrust(ctx, { cause: 'outcomes' });
+}
+
+/**
  * Local development data: one platform admin, two tenants, a few people, a person source for each, a development agent and a dev API key bound to it. Safe to
  * run again. Also schedules the hourly credential cleanup. Returns a fresh key for `taazaa` on each run, because
  * a key's secret is only shown once.
@@ -200,6 +209,8 @@ export async function seed(): Promise<{ devApiKey: string }> {
       }
       const have = (await listSources(c)).find((s) => s.kind === 'agent' && s.name === DEV_AGENT_NAME);
       if (!have) await registerSource(c, { kind: 'agent', name: DEV_AGENT_NAME, parentId: adminSourceId });
+      // Learned source trust, for sources whose accounts already have outcomes (after the sources exist, so they get a reading).
+      await backfillTrust(c);
       // Sample HubSpot data for a workspace on the mock connection (the default).
       const hubspot = (await listConnections(c)).find((x) => x.provider === 'hubspot');
       if (!hubspot || hubspot.mode === 'mock') await seedMockCrm(c);

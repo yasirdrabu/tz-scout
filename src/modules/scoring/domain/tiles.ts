@@ -2,7 +2,7 @@
 import type { TierCutoffs } from '../contracts/types';
 import type { ExplanationLine } from './explain';
 
-export type ScoreTile = { key: string; label: string; value: number | null; max: 100 | null; note: string };
+export type ScoreTile = { key: string; label: string; value: number | null; max: 100 | null; note: string; /** Source trust only: each level's trust, shown on hover. */ breakdown?: string };
 
 export const NO_DATED_SIGNALS = 'No dated signals yet.';
 
@@ -18,7 +18,7 @@ function intentNote(lines: ExplanationLine[], offer: string | null, datedSignals
 /** A score line of the combine group, as a tile: the value out of 100 and why. Without the line (an explanation from before the four-weight model) there is no value. */
 function scoreTile(lines: ExplanationLine[], key: string, label: string): ScoreTile {
   const l = lines.find((x) => x.group === 'combine' && x.label === label);
-  return l?.points === undefined ? { key, label, value: null, max: null, note: 'Not scored yet.' } : { key, label, value: l.points, max: 100, note: l.reason ?? '' };
+  return l?.points === undefined ? { key, label, value: null, max: null, note: 'Not scored yet.' } : { key, label, value: l.points, max: 100, note: l.reason ?? '', ...(l.breakdown === undefined ? {} : { breakdown: l.breakdown }) };
 }
 
 /**

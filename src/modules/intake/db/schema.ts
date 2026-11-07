@@ -41,6 +41,10 @@ export const source = intake.table(
     dailyArrivalCap: integer('daily_arrival_cap').notNull().default(500),
     trust: numeric('trust', { precision: 5, scale: 4, mode: 'number' }).notNull().default(0.6),
     trustUpdatedAt: at('trust_updated_at'),
+    // The trust last published as intake.source.trust_changed; trust itself moves nightly and on a lost conflict.
+    trustPublished: numeric('trust_published', { precision: 5, scale: 4, mode: 'number' }).notNull().default(0.6),
+    trustSample: integer('trust_sample').notNull().default(0), // judged arrivals behind trust
+    trustWon: integer('trust_won').notNull().default(0), // of those, how many were won
     settings: jsonb('settings').notNull().default({}),
     createdAt: now('created_at'),
     updatedAt: now('updated_at'),
@@ -265,6 +269,21 @@ export const sourceFeedback = intake.table(
     index('source_feedback_tenant_source_created_idx').on(t.tenantId, t.sourceId, t.createdAt, t.id),
     index('source_feedback_tenant_arrival_idx').on(t.tenantId, t.arrivalId),
   ],
+);
+
+/** One row per source each time its trust is computed (R3b-2). `inputs` is { cause, conflictsLost, level }. */
+export const sourceTrustHistory = intake.table(
+  'source_trust_history',
+  {
+    tenantId: text('tenant_id').notNull(),
+    sourceId: text('source_id').notNull(),
+    computedAt: at('computed_at').notNull(),
+    trust: numeric('trust', { precision: 5, scale: 4, mode: 'number' }).notNull(),
+    sampleSize: integer('sample_size').notNull(),
+    won: integer('won').notNull(),
+    inputs: jsonb('inputs').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.sourceId, t.computedAt] })],
 );
 
 /** How far the qualified-lead poll has read, per CRM connection (Ruling 14). */

@@ -52,7 +52,7 @@ describe('Source page header and tiles (§11)', () => {
     expect(within(tiles).getByText('33% of sent')).toBeInTheDocument();
     expect(within(tiles).getByText('71% of reviewed')).toBeInTheDocument();
     expect(within(tiles).getByText('9% of assigned')).toBeInTheDocument();
-    expect(within(tiles).getAllByText('Not enough data yet').length).toBeGreaterThan(0);
+    expect(within(tiles).getByText('Trust').closest('li')).toHaveTextContent('85');
     expect(screen.getByRole('link', { name: 'See in funnel' }).getAttribute('href')).toBe('/t/taazaa/funnel/src_marcus');
   });
 
@@ -126,6 +126,34 @@ describe('Source page tabs', () => {
     expect(within(went).getByText('19')).toBeInTheDocument();
     const recent = screen.getByRole('region', { name: 'Recent activity' });
     expect(await within(recent).findByText('Sent back by Dana Whitfield: Wrong practice')).toBeInTheDocument();
+  });
+
+  it('Overview shows the Trust card with the number, the sample and the monthly strip', async () => {
+    const trust_trend = Array.from({ length: 12 }, (_, i) => ({ month: `2026-${String(i + 1).padStart(2, '0')}`, trust: 50 + i * 2, sample_size: 10 + i }));
+    serveSources({ one: detail(RFP, { trust_trend }) });
+    renderApp('/t/taazaa/sources/src_rfp');
+    const card = await screen.findByRole('region', { name: 'Trust' });
+    expect(card).toHaveTextContent('Updated nightly');
+    expect(card).toHaveTextContent('72');
+    expect(card).toHaveTextContent('Based on 12 accounts');
+    expect(within(card).getByRole('img').querySelectorAll('rect')).toHaveLength(12);
+    expect(within(card).queryByText('No history yet.')).toBeNull();
+  });
+
+  it('Overview Trust card says "No history yet." and "Based on 1 account", and the words for a new source', async () => {
+    serveSources({ one: detail({ ...RFP, trust_sample: 1 }) });
+    const first = renderApp('/t/taazaa/sources/src_rfp');
+    const card = await screen.findByRole('region', { name: 'Trust' });
+    expect(card).toHaveTextContent('Based on 1 account');
+    expect(card).not.toHaveTextContent('Based on 1 accounts');
+    expect(card).toHaveTextContent('No history yet.');
+    first.unmount();
+    serveSources();
+    renderApp('/t/taazaa/sources/src_csv');
+    const words = await screen.findByRole('region', { name: 'Trust' });
+    expect(words).toHaveTextContent('Not enough data yet');
+    // The words take the smaller type the Trust tile uses, not the number's.
+    expect(within(words).getByText('Not enough data yet').className).toContain('statValueWords');
   });
 
   it('Accounts shows Came in through from first_arrival, with the filters in the URL', async () => {
