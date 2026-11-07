@@ -66,7 +66,8 @@ export type IdPrefix =
   | 'pls'
   | 'pln'
   | 'stp'
-  | 'pch';
+  | 'pch'
+  | 'out';
 
 const ulid = monotonicFactory();
 

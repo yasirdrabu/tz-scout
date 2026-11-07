@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, date, index, integer, jsonb, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, date, index, integer, jsonb, pgSchema, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Playbooks schema. Every table here is a tenant table: `tenant_id` not null, row level security
@@ -191,6 +191,8 @@ export const accountPlan = playbooks.table(
     engagedAt: at('engaged_at'),
     /** When `playbooks.plan.no_reply` fired: the last step closed with no reply or meeting. Once per plan. */
     noReplyAt: at('no_reply_at'),
+    /** Set once, the first time it becomes completed or stopped or its last open step closes while active (Ruling 5). Abandoned plans never finish. */
+    finishedAt: at('finished_at'),
     createdAt: at('created_at').notNull().defaultNow(),
     updatedAt: at('updated_at').notNull().defaultNow(),
   },
@@ -263,4 +265,30 @@ export const planChange = playbooks.table(
     at: at('at').notNull().defaultNow(),
   },
   (t) => [index('plan_change_plan_idx').on(t.planId, t.at)],
+);
+
+/** A result on an account (Rulings 1 to 4): recorded once per kind and ref, crediting the plan's steps done in the 14 days before it. */
+export const outcome = playbooks.table(
+  'outcome',
+  {
+    id: text('id').primaryKey(), // out_
+    tenantId: text('tenant_id').notNull(),
+    accountId: text('account_id').notNull(),
+    /** The account's plan with the latest accepted_at at or before occurred_at. */
+    planId: text('plan_id'),
+    templateId: text('template_id'),
+    kind: text('kind').notNull(), // reply | meeting | opportunity | won | lost | no_response
+    /** The CRM activity or deal it came from (`{system}:{externalId}`), or the plan id for no_response. */
+    ref: text('ref').notNull(),
+    source: text('source').notNull(), // crm | playbooks
+    occurredAt: at('occurred_at').notNull(),
+    amountCents: bigint('amount_cents', { mode: 'number' }),
+    creditedStepIds: text('credited_step_ids').array().notNull().default(sql`'{}'::text[]`),
+    createdAt: at('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('outcome_ref_uq').on(t.tenantId, t.kind, t.ref),
+    index('outcome_plan_idx').on(t.tenantId, t.planId),
+    check('outcome_kind_valid', sql`${t.kind} in ('reply', 'meeting', 'opportunity', 'won', 'lost', 'no_response')`),
+  ],
 );

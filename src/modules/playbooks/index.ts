@@ -1,5 +1,5 @@
 // Public interface of the playbooks module. Other modules import only this file or `contracts/*`.
-export { briefUpdated, planChanged, planCreated, planNoReply, planNotStarted, stepCompleted } from './contracts/events';
+export { briefUpdated, outcomeRecorded, planChanged, planCreated, planNoReply, planNotStarted, stepCompleted } from './contracts/events';
 export { briefDraftJob, briefSweepJob, DRAFT_MAX_ATTEMPTS } from './contracts/jobs';
 export { SWEEP_CRON, seedPlaybooksDefaults } from './defaults';
 export { listStepFacts } from './services/facts';
@@ -90,3 +90,4 @@ export {
   type StepView as PlanStepView,
 } from './services/plans';
 export { pauseOnWithdrawn, plansOnMerge, startPlan } from './services/start';
+export { OUTCOME_KINDS, recordOutcome, type OutcomeInput, type OutcomeKind } from './services/outcomes';

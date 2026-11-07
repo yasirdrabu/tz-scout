@@ -30,6 +30,7 @@ describe('playbooks schema', () => {
       'brief_section',
       'brief_section_history',
       'offer_playbook',
+      'outcome',
       'plan_change',
       'plan_step',
       'playbook_template',

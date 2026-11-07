@@ -135,3 +135,21 @@ export const planNoReply = defineEvent(
   1,
   z.object({ planId: z.string(), accountId: z.string(), assignmentId: z.string(), at: z.string() }),
 );
+
+/** A result on an account, on the plan accepted before it (Rulings 1 and 7). `creditedStepIds` empty means "no recent step". */
+export const outcomeRecorded = defineEvent(
+  'playbooks.outcome.recorded',
+  1,
+  z.object({
+    outcomeId: z.string(),
+    accountId: z.string(),
+    planId: z.string().nullable(),
+    templateId: z.string().nullable(),
+    kind: z.enum(['reply', 'meeting', 'opportunity', 'won', 'lost', 'no_response']),
+    occurredAt: z.string(),
+    source: z.enum(['crm', 'playbooks']),
+    amountCents: z.number().int().nullable(),
+    creditedStepIds: z.array(z.string()),
+    creditedSteps: z.array(z.object({ stepId: z.string(), channel })),
+  }),
+);
