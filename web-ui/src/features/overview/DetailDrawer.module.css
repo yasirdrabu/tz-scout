@@ -1,0 +1,180 @@
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  width: min(420px, 100vw);
+  padding: 24px 20px;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: -8px 0 24px rgb(0 0 0 / 8%);
+  outline: none;
+}
+
+.close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--hover);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 4px 0 0;
+  font-size: var(--text-lg);
+}
+
+.value {
+  margin: 8px 0 0;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.change {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.up {
+  color: var(--good);
+}
+
+.down {
+  color: var(--bad);
+}
+
+.definition {
+  margin: 12px 0 0;
+  color: var(--text-soft);
+  font-size: var(--text-base);
+}
+
+.notes {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  font-size: var(--text-sm);
+}
+
+.notes div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notes dt {
+  color: var(--text-muted);
+}
+
+.notes dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.section {
+  margin-top: 20px;
+}
+
+.heading {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bars,
+.accounts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bars li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  font-size: var(--text-sm);
+}
+
+.barValue {
+  font-variant-numeric: tabular-nums;
+}
+
+.barTrack {
+  grid-column: 1 / -1;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--hover);
+}
+
+.barFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent-400);
+}
+
+.accounts li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 8px;
+  font-size: var(--text-sm);
+}
+
+.accountLink {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.accountLink:hover {
+  text-decoration: underline;
+}
+
+.meta {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.seeAll {
+  display: inline-block;
+  margin-top: 20px;
+  color: var(--accent-500);
+  font-size: var(--text-base);
+  font-weight: 600;
+}

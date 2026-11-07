@@ -485,15 +485,13 @@ Title "Overview", sub "Where every account is this quarter, and who and what mov
   "Ahead") against "Where we should be today". "Left the pipeline": one band per exit, no target.
 - Scorecard tabs `By seller`, `By offer`, `By practice`, sortable headers, every number clickable.
   By seller: Seller ("{n} accounts assigned"), Accepted, Time to accept, Steps on time, Meetings,
-  Opportunities, Won ("Target {n}"), Pipeline, Win rate. By offer: Offer, Price, Matched,
+  Opportunities, Won, Pipeline, Win rate. By offer: Offer, Price, Matched,
   Opportunities, Won, Win rate, Won value, Pipeline. By practice: Practice ("Led by {lead}"), Offers,
-  Matched, Opportunities, Won, Win rate, Won value, Pipeline. Green on or ahead of target, amber
-  needs attention.
+  Matched, Opportunities, Won, Win rate, Won value, Pipeline. Under By seller:
+  "Green is at or better than the team, amber needs attention."
 - Detail drawer on any number: eyebrow, title, value, change vs last quarter at this point, the
   definition ("Counts when: ..."), notes, breakdown bars by source, offer or seller (top 8), the
   accounts behind it (6, with `See all {n}` to All accounts filtered).
-- Before R3: the stage counts and funnel from stage history; KPI tiles and scorecard show "Results
-  arrive with analytics. Stage counts are live now." (C9).
 
 ## 10. Sources
 

@@ -8,7 +8,7 @@ import { serveOverview } from './testing';
 
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig<typeof import('@tanstack/react-router')>()),
-  getRouteApi: () => ({ useParams: () => ({ tenant: 'taazaa' }) }),
+  getRouteApi: () => ({ useParams: () => ({ tenant: 'taazaa' }), useSearch: () => ({}), useNavigate: () => () => {} }),
 }));
 
 describe('Overview drawer slot', () => {

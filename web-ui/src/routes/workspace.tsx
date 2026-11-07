@@ -52,9 +52,13 @@ export const accountRoute = createRoute({
   component: lazyRouteComponent(() => import('../features/account/AccountPage'), 'AccountPage'),
 });
 
+/** The scorecard tab (`sellers`, `offers` or `practices`), so a link or a reload keeps it. */
+export type OverviewSearch = { tab?: string };
+
 export const overviewRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'overview',
+  validateSearch: (search: Record<string, unknown>): OverviewSearch => pickStrings(search, ['tab']),
   component: lazyRouteComponent(() => import('../features/overview/OverviewScreen'), 'OverviewScreen'),
 });
 

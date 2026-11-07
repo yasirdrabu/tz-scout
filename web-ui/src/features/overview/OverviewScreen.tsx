@@ -6,18 +6,23 @@ import { useFormat } from '../../lib/useFormat';
 import page from '../../routes/Page.module.css';
 import { buttonClass } from '../../ui/Button';
 import { LoadFailed, LoadingRows } from '../settings/shared';
-import { overviewQuery, PACE_WORD, type Overview, type Selection } from './api';
+import { DetailDrawer } from './DetailDrawer';
+import { Scorecard } from './Scorecard';
+import { overviewQuery, PACE_WORD, sameSelection, type Overview, type ScorecardTab, type Selection } from './api';
 import styles from './Overview.module.css';
 
 const route = getRouteApi('/t/$tenant/overview');
 
 const SHADES = [styles.shade0, styles.shade1, styles.shade2, styles.shade3];
 const accounts = (n: number) => (n === 1 ? '1 account' : `${n} accounts`);
-const same = (a: Selection | null, b: Selection) => !!a && a.key === b.key && a.scope?.stage === b.scope?.stage;
 
-/** §9 Overview: the quarter's tiles, pipeline funnel and exits. `drawer` is the slot for the detail drawer (R3c-1 Task 7). */
+const TAB_IDS: ScorecardTab[] = ['sellers', 'offers', 'practices'];
+
+/** §9 Overview: the quarter's tiles, pipeline funnel, exits and scorecard. `drawer` is the slot for the detail drawer, which defaults to the real one. */
 export function OverviewScreen({ drawer }: { drawer?: (selection: Selection | null, close: () => void) => ReactNode }) {
   const { tenant } = route.useParams();
+  const search = route.useSearch();
+  const tab = TAB_IDS.find((t) => t === search.tab) ?? 'sellers';
   const me = useQuery(meQuery(tenant));
   const data = useQuery(overviewQuery(tenant));
   const [selected, setSelected] = useState<Selection | null>(null);
@@ -45,9 +50,12 @@ export function OverviewScreen({ drawer }: { drawer?: (selection: Selection | nu
       ) : data.isError ? (
         <LoadFailed title="The overview didn't load" error={data.error} onRetry={() => void data.refetch()} />
       ) : (
-        <Body overview={data.data} selected={selected} open={setSelected} />
+        <>
+          <Body overview={data.data} selected={selected} open={setSelected} />
+          <Scorecard tenant={tenant} tab={tab} selected={selected} open={setSelected} />
+        </>
       )}
-      {drawer?.(selected, () => setSelected(null))}
+      {(drawer ?? ((s, close) => <DetailDrawer tenant={tenant} selection={s} onClose={close} />))(selected, () => setSelected(null))}
     </div>
   );
 }
@@ -62,14 +70,14 @@ function Body({ overview: o, selected, open }: { overview: Overview; selected: S
   return (
     <>
       <ul className={styles.tiles} aria-label="Overview totals">
-        <Tile label="Pipeline value" value={f.money(k.pipeline_value_cents)} note={`${accounts(k.pipeline_accounts)} at ${o.opportunity_stage.name}`} on={same(selected, { key: 'pipeline_value' })} onClick={() => open({ key: 'pipeline_value' })} />
-        <Tile label="Won value" value={f.money(k.won_value_cents)} note={`${accounts(k.won_accounts)} ${won.toLowerCase()}`} on={same(selected, { key: 'won_value' })} onClick={() => open({ key: 'won_value' })} />
-        <Tile label={`${first} to ${won}`} value={k.sent_to_won_pct === null ? '–' : `${k.sent_to_won_pct}%`} note="Of accounts that entered this quarter" on={same(selected, { key: 'sent_to_won' })} onClick={() => open({ key: 'sent_to_won' })} />
+        <Tile label="Pipeline value" value={f.money(k.pipeline_value_cents)} note={`${accounts(k.pipeline_accounts)} at ${o.opportunity_stage.name}`} on={sameSelection(selected, { key: 'pipeline_value' })} onClick={() => open({ key: 'pipeline_value' })} />
+        <Tile label="Won value" value={f.money(k.won_value_cents)} note={`${accounts(k.won_accounts)} ${won.toLowerCase()}`} on={sameSelection(selected, { key: 'won_value' })} onClick={() => open({ key: 'won_value' })} />
+        <Tile label={`${first} to ${won}`} value={k.sent_to_won_pct === null ? '–' : `${k.sent_to_won_pct}%`} note="Of accounts that entered this quarter" on={sameSelection(selected, { key: 'sent_to_won' })} onClick={() => open({ key: 'sent_to_won' })} />
         <Tile
           label="Days to win"
           value={k.days_to_win === null ? 'None yet' : f.number(k.days_to_win)}
           note={`Median, ${first.toLowerCase()} to ${won.toLowerCase()}`}
-          on={same(selected, { key: 'days_to_win' })}
+          on={sameSelection(selected, { key: 'days_to_win' })}
           onClick={() => open({ key: 'days_to_win' })}
         />
       </ul>
@@ -84,7 +92,7 @@ function Body({ overview: o, selected, open }: { overview: Overview; selected: S
             const pct = Math.min(100, s.target ? (s.count / s.target) * 100 : 0);
             return (
               <li key={s.key}>
-                <button type="button" className={`${styles.band} ${s.key === o.won_stage.key ? styles.won : ''}`} aria-pressed={same(selected, sel)} onClick={() => open(sel)}>
+                <button type="button" className={`${styles.band} ${s.key === o.won_stage.key ? styles.won : ''}`} aria-pressed={sameSelection(selected, sel)} onClick={() => open(sel)}>
                   <span className={`${styles.bandBar} ${SHADES[Math.min(i, 3)]}`} style={{ width: `${width(s.count)}%` }}>
                     <span>{s.name}</span>
                     <span className={styles.bandCount}>{f.number(s.count)}</span>
@@ -114,7 +122,7 @@ function Body({ overview: o, selected, open }: { overview: Overview; selected: S
             const sel: Selection = { key: 'exit', scope: { stage: e.key } };
             return (
               <li key={e.key}>
-                <button type="button" className={styles.exit} aria-pressed={same(selected, sel)} onClick={() => open(sel)}>
+                <button type="button" className={styles.exit} aria-pressed={sameSelection(selected, sel)} onClick={() => open(sel)}>
                   <span>{e.name}</span>
                   <span className={styles.exitCount}>{f.number(e.count)}</span>
                 </button>
