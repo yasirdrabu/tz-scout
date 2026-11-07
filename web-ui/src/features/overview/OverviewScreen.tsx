@@ -50,11 +50,9 @@ export function OverviewScreen({ drawer }: { drawer?: (selection: Selection | nu
       ) : data.isError ? (
         <LoadFailed title="The overview didn't load" error={data.error} onRetry={() => void data.refetch()} />
       ) : (
-        <>
-          <Body overview={data.data} selected={selected} open={setSelected} />
-          <Scorecard tenant={tenant} tab={tab} selected={selected} open={setSelected} />
-        </>
+        <Body overview={data.data} selected={selected} open={setSelected} />
       )}
+      <Scorecard tenant={tenant} tab={tab} selected={selected} open={setSelected} />
       {(drawer ?? ((s, close) => <DetailDrawer tenant={tenant} selection={s} onClose={close} />))(selected, () => setSelected(null))}
     </div>
   );

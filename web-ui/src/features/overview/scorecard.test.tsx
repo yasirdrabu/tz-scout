@@ -104,7 +104,7 @@ describe('Overview scorecard', () => {
     expect(drawer).toHaveFocus();
   });
 
-  it('shows a negative change in red and hides it when there is no base', async () => {
+  it('shows a negative change in red', async () => {
     serveOverview();
     serveScorecard([], metricDetail({ change_pct: -5 }));
     await open();
@@ -129,6 +129,36 @@ describe('Overview scorecard', () => {
     await userEvent.click(await screen.findByRole('button', { name: /^Reviewed/ }));
     expect(await screen.findByRole('link', { name: 'See all 62' })).toHaveAttribute('href', '/t/taazaa/accounts?stage=reviewed');
     expect(seen.at(-1)).toBe('/api/v1/analytics/metrics/stage?stage=reviewed');
+  });
+
+  it('keeps a missing value last in both sort directions', async () => {
+    serveOverview();
+    await open();
+    await screen.findByText('Priya Shah');
+    const names = () => screen.getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell')[0]!.textContent);
+    const steps = screen.getByRole('columnheader', { name: 'Steps on time' });
+    await userEvent.click(within(steps).getByRole('button'));
+    expect(steps).toHaveAttribute('aria-sort', 'descending');
+    expect(names()[1]).toContain('Priya Shah');
+    await userEvent.click(within(steps).getByRole('button'));
+    expect(steps).toHaveAttribute('aria-sort', 'ascending');
+    expect(names()[1]).toContain('Priya Shah');
+  });
+
+  it('links See all to the offer', async () => {
+    serveOverview();
+    serveScorecard([], metricDetail({ see_all: { offer: 'o1' } }));
+    await open('/t/taazaa/overview?tab=offers');
+    await userEvent.click(within(await screen.findByRole('row', { name: /Cloud Migration/ })).getAllByRole('button')[0]!);
+    expect(await screen.findByRole('link', { name: 'See all 14' })).toHaveAttribute('href', '/t/taazaa/accounts?offer=o1');
+  });
+
+  it('links See all to the practice', async () => {
+    serveOverview();
+    serveScorecard([], metricDetail({ see_all: { practice: 'p1' } }));
+    await open('/t/taazaa/overview?tab=practices');
+    await userEvent.click(within(await screen.findByRole('row', { name: /Led by/ })).getAllByRole('button')[0]!);
+    expect(await screen.findByRole('link', { name: 'See all 14' })).toHaveAttribute('href', '/t/taazaa/accounts?practice=p1');
   });
 
   it('closes on Escape and on the close button, one selection at a time', async () => {

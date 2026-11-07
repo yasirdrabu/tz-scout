@@ -25,13 +25,17 @@ function Panel({ tenant, selection, onClose }: { tenant: string; selection: Sele
     ref.current?.focus();
     return () => from?.focus();
   }, []);
+  const close = useRef(onClose);
+  useEffect(() => {
+    close.current = onClose;
+  });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') close.current();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, []);
 
   return (
     <aside ref={ref} role="dialog" aria-modal="false" aria-labelledby="overview-drawer-title" tabIndex={-1} className={styles.drawer}>

@@ -90,9 +90,10 @@ function show(c: Cell, unit: Unit, f: Fmt): string {
   }
 }
 
-function compare(a: number | string | null, b: number | string | null): number {
+/** Orders two values in `dir` (1 ascending, -1 descending); a missing value is always last. */
+function compare(a: number | string | null, b: number | string | null, dir: 1 | -1): number {
   if (a === null || b === null) return a === b ? 0 : a === null ? 1 : -1;
-  return typeof a === 'string' || typeof b === 'string' ? String(a).localeCompare(String(b)) : a - b;
+  return (typeof a === 'string' || typeof b === 'string' ? String(a).localeCompare(String(b)) : a - b) * dir;
 }
 
 /** §9 scorecard: one table per tab, each number opening the detail drawer. */
@@ -128,7 +129,8 @@ function Table({ data, selected, open }: { data: ScorecardData; selected: Select
   const columns = COLUMNS[data.tab];
   const [sort, setSort] = useState<{ id: string; dir: 'descending' | 'ascending' } | null>(null);
   const col = sort && columns.find((c) => c.id === sort.id);
-  const rows = col ? [...data.rows].sort((a, b) => compare(col.sort(a), col.sort(b)) * (sort.dir === 'ascending' ? 1 : -1)) : data.rows;
+  const dir = sort?.dir === 'ascending' ? 1 : -1;
+  const rows = col ? [...data.rows].sort((a, b) => compare(col.sort(a), col.sort(b), dir)) : data.rows;
   const rowKey = (r: Row) => (r as SellerRow).seller_user_id ?? (r as OfferRow).offer_id ?? (r as PracticeRow).practice_id;
   if (rows.length === 0) return <p className={styles.empty}>Nothing to show for this quarter yet.</p>;
   return (
