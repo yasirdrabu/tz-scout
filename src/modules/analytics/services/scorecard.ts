@@ -92,7 +92,7 @@ const byWonThenName = <T extends { name: string; won: Cell }>(a: T, b: T) => b.w
 /** Win rate colour (Ruling 10): good from 15%, attention under 10%, null with nothing matched. */
 const winBand = (v: number | null): Tone | null => (v === null ? null : v >= 15 ? 'good' : v < 10 ? 'attention' : 'neutral');
 
-const inPipeline = (b: OverviewBasis, j: Journey) => {
+export const inPipeline = (b: OverviewBasis, j: Journey) => {
   const r = reachedIndex(j, b.flow);
   return !j.exitStage && r >= b.oppIdx && r < b.wonIdx;
 };
@@ -149,42 +149,60 @@ async function practicesTab(ctx: ModuleContext, b: OverviewBasis): Promise<Pract
     .sort(byWonThenName);
 }
 
-async function sellersTab(ctx: ModuleContext, b: OverviewBasis, now: Date): Promise<{ rows: SellerRow[]; team: Record<string, number | null> }> {
+/** What each seller did this quarter on the accounts the caller can see (Ruling 8), by account; the scorecard and the metric drawer both read it. */
+export type SellerFacts = {
+  /** Distinct accounts assigned this quarter, with the first assignment's time. */
+  assigned: Map<string, Date>;
+  /** Accepted ones, with the assignment time and the clock hours to accept (NaN when there is no response time). */
+  accepted: Map<string, { assignedAt: Date; respondedAt: Date | null; hours: number }>;
+  /** Meetings this quarter on the seller's accounts (Ruling 7), with the latest one. */
+  meetings: Map<string, { n: number; last: Date }>;
+  /** Seller-owned plan steps due this quarter up to today, not skipped. */
+  steps: { accountId: string; dueDate: string; onTime: boolean }[];
+};
+
+export async function sellerFacts(ctx: ModuleContext, b: OverviewBasis, now: Date): Promise<{ bySeller: Map<string, SellerFacts>; sellerByAccount: Map<string, string> }> {
   const w = { from: b.q.from, to: b.q.to };
   const visible = new Set(b.journeys.map((j) => j.accountId));
   const facts = await listAssignmentFacts(ctx);
   const sellerByAccount = sellerOf(facts);
-
-  type Acc = { assigned: Set<string>; accepted: Map<string, number>; meetings: number; stepsDone: number; steps: number };
-  const accs = new Map<string, Acc>();
-  const acc = (id: string) => accs.get(id) ?? accs.set(id, { assigned: new Set(), accepted: new Map(), meetings: 0, stepsDone: 0, steps: 0 }).get(id)!;
+  const bySeller = new Map<string, SellerFacts>();
 
   for (const f of facts) {
     if (f.assignedAt < w.from || f.assignedAt > w.to || !visible.has(f.accountId)) continue;
-    const a = acc(f.sellerUserId);
-    a.assigned.add(f.accountId);
-    if (f.acceptedHow && !a.accepted.has(f.accountId)) a.accepted.set(f.accountId, f.respondedAt ? (f.respondedAt.getTime() - f.assignedAt.getTime()) / HOUR : NaN);
+    const a = bySeller.get(f.sellerUserId) ?? bySeller.set(f.sellerUserId, { assigned: new Map(), accepted: new Map(), meetings: new Map(), steps: [] }).get(f.sellerUserId)!;
+    if (!a.assigned.has(f.accountId)) a.assigned.set(f.accountId, f.assignedAt);
+    if (f.acceptedHow && !a.accepted.has(f.accountId)) {
+      a.accepted.set(f.accountId, { assignedAt: f.assignedAt, respondedAt: f.respondedAt, hours: f.respondedAt ? (f.respondedAt.getTime() - f.assignedAt.getTime()) / HOUR : NaN });
+    }
   }
   for (const m of await listMeetingFacts(ctx, w)) {
     const s = sellerByAccount.get(m.accountId);
-    if (s && visible.has(m.accountId) && accs.has(s)) accs.get(s)!.meetings++;
+    const a = s ? bySeller.get(s) : undefined;
+    if (!a || !visible.has(m.accountId)) continue;
+    const cur = a.meetings.get(m.accountId);
+    a.meetings.set(m.accountId, { n: (cur?.n ?? 0) + 1, last: cur && cur.last > m.occurredAt ? cur.last : m.occurredAt });
   }
   const steps = await listStepFacts(ctx, { fromDay: dayOf(b.q.from, b.timezone), toDay: dayOf(now, b.timezone) });
   for (const s of steps) {
-    if (s.status === 'skipped' || !visible.has(s.accountId) || !accs.has(s.ownerUserId)) continue;
-    const a = accs.get(s.ownerUserId)!;
-    a.steps++;
-    if (s.doneAt && dayOf(s.doneAt, b.timezone) <= s.dueDate) a.stepsDone++;
+    if (s.status === 'skipped' || !visible.has(s.accountId) || !bySeller.has(s.ownerUserId)) continue;
+    bySeller.get(s.ownerUserId)!.steps.push({ accountId: s.accountId, dueDate: s.dueDate, onTime: !!s.doneAt && dayOf(s.doneAt, b.timezone) <= s.dueDate });
   }
+  return { bySeller, sellerByAccount };
+}
 
-  const raw = [...accs].map(([sellerId, a]) => {
+async function sellersTab(ctx: ModuleContext, b: OverviewBasis, now: Date): Promise<{ rows: SellerRow[]; team: Record<string, number | null> }> {
+  const w = { from: b.q.from, to: b.q.to };
+  const { bySeller, sellerByAccount } = await sellerFacts(ctx, b, now);
+
+  const raw = [...bySeller].map(([sellerId, a]) => {
     const mine = b.journeys.filter((j) => sellerByAccount.get(j.accountId) === sellerId);
-    const hours = [...a.accepted.values()].filter((h) => !Number.isNaN(h));
+    const hours = [...a.accepted.values()].map((x) => x.hours).filter((h) => !Number.isNaN(h));
     const opps = mine.filter((j) => enteredIn(j, b.flow, b.oppIdx, w)).length;
     const won = mine.filter((j) => enteredIn(j, b.flow, b.wonIdx, w)).length;
     return {
       sellerId, assigned: a.assigned.size, accepted: a.accepted.size, hours: hours.reduce((s, h) => s + h, 0), responded: hours.length,
-      stepsDone: a.stepsDone, steps: a.steps, meetings: a.meetings, opps, won,
+      stepsDone: a.steps.filter((x) => x.onTime).length, steps: a.steps.length, meetings: [...a.meetings.values()].reduce((n, m) => n + m.n, 0), opps, won,
       pipeline: mine.filter((j) => inPipeline(b, j)).reduce((s, j) => s + openValueCents(j, b.priceOf(j.offerId)), 0),
     };
   });

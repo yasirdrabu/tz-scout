@@ -54,6 +54,7 @@ import * as v1AdminTestEvent from './routes/v1/admin/test-event/route';
 import * as v1AiRunsId from './routes/v1/ai-runs/[id]/route';
 import * as v1AiRuns from './routes/v1/ai-runs/route';
 import * as v1AnalyticsFunnel from './routes/v1/analytics/funnel/route';
+import * as v1AnalyticsMetricsKey from './routes/v1/analytics/metrics/[key]/route';
 import * as v1AnalyticsOverview from './routes/v1/analytics/overview/route';
 import * as v1AnalyticsScorecard from './routes/v1/analytics/scorecard/route';
 import * as v1AnalyticsSourcesIdPerformance from './routes/v1/analytics/sources/[id]/performance/route';
@@ -223,6 +224,7 @@ export const routes: RouteEntry[] = [
   { path: `${V1}/ai-runs/:id`, module: v1AiRunsId },
   { path: `${V1}/ai-runs`, module: v1AiRuns },
   { path: `${V1}/analytics/funnel`, module: v1AnalyticsFunnel },
+  { path: `${V1}/analytics/metrics/:key`, module: v1AnalyticsMetricsKey },
   { path: `${V1}/analytics/overview`, module: v1AnalyticsOverview },
   { path: `${V1}/analytics/scorecard`, module: v1AnalyticsScorecard },
   { path: `${V1}/analytics/sources/:id/performance`, module: v1AnalyticsSourcesIdPerformance },
