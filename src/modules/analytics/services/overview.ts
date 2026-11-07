@@ -138,7 +138,7 @@ export async function overview(ctx: ModuleContext, opts: { now?: Date } = {}): P
         count: counts[k]!,
         pct_of_previous: k === 0 ? null : ratio(counts[k]! * 100, counts[k - 1]!),
         value_cents: k === b.wonIdx ? wonValue : k === b.oppIdx ? pipelineValue : null,
-        target: s.quarterTarget,
+        target: p ? s.quarterTarget : null,
         expected: p?.expected ?? null,
         pace: p?.pace ?? null,
       };
@@ -148,6 +148,6 @@ export async function overview(ctx: ModuleContext, opts: { now?: Date } = {}): P
       name: s.name,
       count: b.journeys.filter((j) => j.exitStage === s.key && !!j.exitAt && j.exitAt >= w.from && j.exitAt <= w.to).length,
     })),
-    updated_at: (await journeysUpdatedAt(ctx))?.toISOString() ?? null,
+    updated_at: (await journeysUpdatedAt(ctx, b.journeys.map((j) => j.accountId)))?.toISOString() ?? null,
   };
 }

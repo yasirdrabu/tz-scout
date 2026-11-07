@@ -64,7 +64,7 @@ export function moneyLabel(cents: number): string {
 }
 
 function format(kind: Kind, v: number | null): string {
-  if (v === null) return kind === 'days' ? 'None yet' : '—';
+  if (v === null) return kind === 'days' ? 'None yet' : '–';
   switch (kind) {
     case 'money': return moneyLabel(v);
     case 'pct': return `${Math.round(v)}%`;
@@ -112,9 +112,8 @@ function pipelineBefore(b: OverviewBasis): number {
 type Window = { from: Date; to: Date };
 const wonValueHits = (b: OverviewBasis, js: Journey[], w: Window): Hit[] =>
   js.flatMap((j) => {
-    const v = wonValueCents(j, b.priceOf(j.offerId), w);
-    const entry = enteredIn(j, b.flow, b.wonIdx, w) ? stageEntry(j, b.flow, b.wonIdx) : null;
-    return entry || v > 0 ? [hit(j.accountId, entry ?? j.deals.find((d) => d.status === 'won' && d.closedAt)?.closedAt ?? j.arrivedAt, v)] : [];
+    const closed = j.deals.filter((d) => d.status === 'won' && d.closedAt && d.closedAt >= w.from && d.closedAt <= w.to).map((d) => d.closedAt!);
+    return closed.length ? [hit(j.accountId, new Date(Math.max(...closed.map((c) => c.getTime()))), wonValueCents(j, b.priceOf(j.offerId), w))] : [];
   });
 
 function exitStageOf(b: OverviewBasis, key: string | undefined) {
@@ -207,8 +206,7 @@ function sharedCell(b: OverviewBasis, js: Journey[], metric: string, matched: Hi
       return { kind: 'pct', money: false, value: r, hits: wins, notes: [{ label: rateOf.label, value: count(rateOf.hits.length) }, { label: 'Counted', value: count(wins.length) }] };
     }
     case 'won_value': {
-      const wins = new Set(entered(b.wonIdx).map((h) => h.accountId));
-      const hits = wonValueHits(b, js.filter((j) => wins.has(j.accountId)), w);
+      const hits = wonValueHits(b, js, w);
       return { ...none, kind: 'money', money: true, value: hits.reduce((n, h) => n + h.weight, 0), hits };
     }
     default: {

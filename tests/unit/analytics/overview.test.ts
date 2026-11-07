@@ -39,6 +39,15 @@ describe('quarterOf', () => {
   });
 });
 
+describe('quarterOf previous window', () => {
+  it('never runs past the start of the current quarter on the last day of Q3', () => {
+    const q = quarterOf(new Date('2026-09-30T23:00:00Z'), 'UTC');
+    expect(q.label).toBe('Q3 2026');
+    expect(q.prev.to.getTime()).toBeLessThanOrEqual(q.from.getTime());
+    expect(q.prev.to.toISOString()).toBe('2026-07-01T00:00:00.000Z');
+  });
+});
+
 describe('stageEntry', () => {
   it('counts a later stage as passing a skipped one', () => {
     expect(stageEntry(journey({ stages: new Map([['won', T]]) }), flow, 1)).toEqual(T);

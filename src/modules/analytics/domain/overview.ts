@@ -26,7 +26,7 @@ export function quarterOf(now: Date, timezone: string): Quarter {
     week: Math.floor(elapsed / (7 * DAY)) + 1,
     weeks: Math.ceil(Math.round((end.getTime() - from.getTime()) / DAY) / 7),
     share: elapsed / (end.getTime() - from.getTime()),
-    prev: { from: prevFrom, to: new Date(prevFrom.getTime() + elapsed) },
+    prev: { from: prevFrom, to: new Date(Math.min(prevFrom.getTime() + elapsed, from.getTime())) },
   };
 }
 

@@ -21,6 +21,7 @@ const at = (day: string) => `${day}T10:00:00.000Z`;
 
 let w: Workspace;
 let seller: string;
+let hiddenId: string;
 
 function deliver<D>(c: ConsumerDef<D>, data: D, occurredAt: string): Promise<void> {
   return w.run((ctx) =>
@@ -84,7 +85,10 @@ beforeAll(async () => {
   const offerId = (await w.run((ctx) => createOffer(ctx, { name: 'Priced Offer', practiceId, ...completeOffer, priceMinCents: 50_000 }))).id;
   await w.run((ctx) => ctx.tx.update(pipelineStage).set({ quarterTarget: 10 }).where(and(eq(pipelineStage.tenantId, ctx.tenantId), eq(pipelineStage.key, 'reviewed'))));
 
+  await w.run((ctx) => ctx.tx.update(pipelineStage).set({ quarterTarget: 0 }).where(and(eq(pipelineStage.tenantId, ctx.tenantId), eq(pipelineStage.key, 'assigned'))));
+
   const [a1, a2, a3, a4, a5, hidden] = await Promise.all([1, 2, 3, 4, 5, 6].map((i) => w.account(`Overview Co ${i}`)));
+  hiddenId = hidden!;
   for (const a of [a1!, a2!, a3!, a4!, a5!]) await setSummary(w.tenant, a, { ownerUserId: seller });
 
   await arrived(a1!, '2026-10-05');
@@ -151,6 +155,18 @@ describe('GET /api/v1/analytics/overview (R3c-1 Rulings 1-6 and 11)', () => {
       days_to_win: 42,
     });
     expect(typeof body.updated_at).toBe('string');
+  });
+
+  it('a stage target of 0 is no target: target, expected and pace are null', async () => {
+    const v = await w.run((ctx) => overview(ctx, { now: NOW }));
+    expect(v.stages.find((s) => s.key === 'assigned')).toMatchObject({ target: null, expected: null, pace: null });
+  });
+
+  it('updated_at reads only the visible journeys (the hidden account was written last)', async () => {
+    await arrived(hiddenId, '2026-10-12');
+    const own = await json(w.as(seller, overviewRoute, 'analytics/overview'));
+    const all = await w.run((ctx) => overview(ctx, { now: NOW }));
+    expect(new Date(own.updated_at).getTime()).toBeLessThan(new Date(all.updated_at!).getTime());
   });
 
   it('the owner, with no data limit, also sees the sixth account', async () => {

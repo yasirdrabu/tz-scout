@@ -173,9 +173,21 @@ describe('GET /api/v1/analytics/metrics/{key} (R3c-1 Rulings 12 and 13)', () => 
   it('the other tiles and an exit', async () => {
     expect(await get(w.owner, 'sent_to_won')).toMatchObject({ title: 'Sent to Won', value: '16.7%', total: 1, see_all: null, notes: [{ label: 'Entered', value: '6' }, { label: 'Counted', value: '1' }] });
     expect(await get(w.owner, 'days_to_win')).toMatchObject({ title: 'Days to win', value: '18', total: 1 });
-    expect(await get(w.owner, 'won_value')).toMatchObject({ title: 'Won value', value: '$10k', change_pct: 100, total: 2, see_all: { stage: 'won' } });
+    expect(await get(w.owner, 'won_value')).toMatchObject({ title: 'Won value', value: '$10k', change_pct: 100, total: 1, see_all: { stage: 'won' } });
     expect(await get(w.owner, 'exit?stage=lost')).toMatchObject({ eyebrow: 'Left the pipeline · this quarter', value: '1', change_pct: 0, total: 1 });
     expect(await get(w.owner, 'exit?stage=declined')).toMatchObject({ value: '0', change_pct: null, total: 0, accounts: [], breakdowns: [] });
+  });
+
+  it('an offer Won value counts a deal closed this quarter on an account won last quarter; the drawer matches', async () => {
+    const late = await w.account('Metric Co late');
+    await arrived(late, '2026-09-10');
+    await scored(late, offerId, practiceId, '2026-09-11');
+    await staged(late, 'won', '2026-09-20');
+    await dealt(late, 30_000, '2026-10-22', 'won');
+    const d = await get(w.owner, `offer.won_value?offer=${offerId}`);
+    expect(d).toMatchObject({ value: '$300', total: 1 });
+    expect(d.accounts.map((a: { account_id: string }) => a.account_id)).toEqual([late]);
+    expect((await get(w.owner, `offer.won?offer=${offerId}`)).value).toBe('0');
   });
 
   it("never shows an account outside the caller's data limit", async () => {

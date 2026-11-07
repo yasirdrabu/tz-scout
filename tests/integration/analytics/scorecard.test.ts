@@ -152,6 +152,7 @@ beforeAll(async () => {
       step(annPlan, ann, 1, '2026-10-15', at('2026-10-14')),
       step(bobPlan, bob, 1, '2026-10-20', at('2026-10-20')),
       step(bobPlan, bob, 2, '2026-10-22', at('2026-10-25')),
+      { ...step(bobPlan, bob, 3, '2026-11-07', null), status: 'todo' }, // due today and open: not late yet, so not counted
     ]);
   });
 });
@@ -220,6 +221,12 @@ describe('GET /api/v1/analytics/scorecard (R3c-1 Rulings 7-11)', () => {
     }
     await dealt(o, ids[0]!, 'won', 100_000, '2026-10-20');
     await dealt(o, ids[1]!, 'won', null, '2026-10-20');
+    // won last quarter, a second deal closed this quarter: adds to Won value, not to Won
+    const late = await o.account('Offers Co late');
+    await arrived(o, late, '2026-09-10');
+    await scored(o, late, busy, practiceId, '2026-09-11');
+    await staged(o, late, 'won', '2026-09-20');
+    await dealt(o, late, 'won', 70_000, '2026-10-22');
 
     const offers = await atNow(() => json(o.as(o.owner, scorecardRoute, 'analytics/scorecard?tab=offers')));
     expect(offers.team).toBeNull();
@@ -233,7 +240,7 @@ describe('GET /api/v1/analytics/scorecard (R3c-1 Rulings 7-11)', () => {
       opportunities: cell(3, null),
       won: cell(2, null),
       win_rate: cell(20, 'good', 'Of matched'),
-      won_value_cents: cell(150_000, null),
+      won_value_cents: cell(220_000, null),
       pipeline_cents: cell(50_000, null),
     });
     expect(offers.rows[1]).toMatchObject({ matched: cell(0, null), win_rate: cell(null, null, 'Of matched'), won_value_cents: cell(0, null) });
@@ -250,7 +257,7 @@ describe('GET /api/v1/analytics/scorecard (R3c-1 Rulings 7-11)', () => {
       opportunities: cell(3, null),
       won: cell(2, null),
       win_rate: cell(20, 'good', 'Of matched'),
-      won_value_cents: cell(150_000, null),
+      won_value_cents: cell(220_000, null),
       pipeline_cents: cell(50_000, null),
     });
     expect(practices.rows[1]).toMatchObject({ lead_name: null, offers: 0, active_offers: 0 });

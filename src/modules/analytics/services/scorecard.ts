@@ -103,7 +103,7 @@ function productRow(b: OverviewBasis, js: Journey[]) {
   const matched = js.filter((j) => j.arrivedAt >= w.from && j.arrivedAt <= w.to).length;
   const opps = js.filter((j) => enteredIn(j, b.flow, b.oppIdx, w)).length;
   const wins = js.filter((j) => enteredIn(j, b.flow, b.wonIdx, w));
-  const wonValue = wins.reduce((s, j) => s + wonValueCents(j, b.priceOf(j.offerId), w), 0);
+  const wonValue = js.reduce((s, j) => s + wonValueCents(j, b.priceOf(j.offerId), w), 0);
   const pipeline = js.filter((j) => inPipeline(b, j)).reduce((s, j) => s + openValueCents(j, b.priceOf(j.offerId)), 0);
   const rate = ratio(wins.length * 100, matched);
   return {
@@ -183,9 +183,11 @@ export async function sellerFacts(ctx: ModuleContext, b: OverviewBasis, now: Dat
     const cur = a.meetings.get(m.accountId);
     a.meetings.set(m.accountId, { n: (cur?.n ?? 0) + 1, last: cur && cur.last > m.occurredAt ? cur.last : m.occurredAt });
   }
-  const steps = await listStepFacts(ctx, { fromDay: dayOf(b.q.from, b.timezone), toDay: dayOf(now, b.timezone) });
+  const today = dayOf(now, b.timezone);
+  const steps = await listStepFacts(ctx, { fromDay: dayOf(b.q.from, b.timezone), toDay: today });
   for (const s of steps) {
     if (s.status === 'skipped' || !visible.has(s.accountId) || !bySeller.has(s.ownerUserId)) continue;
+    if (!s.doneAt && s.dueDate >= today) continue; // due today and open is not late yet
     bySeller.get(s.ownerUserId)!.steps.push({ accountId: s.accountId, dueDate: s.dueDate, onTime: !!s.doneAt && dayOf(s.doneAt, b.timezone) <= s.dueDate });
   }
   return { bySeller, sellerByAccount };
