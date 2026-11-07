@@ -30,6 +30,7 @@ export {
   type UsageLineInput,
 } from './services/lines';
 export { overview, type OverviewView } from './services/overview';
+export { parseTab, scorecard, sellerOf, type ScorecardTab, type ScorecardView } from './services/scorecard';
 export {
   CHOOSE_PERIOD,
   funnel,
