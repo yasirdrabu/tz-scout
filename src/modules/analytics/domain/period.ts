@@ -4,7 +4,7 @@ import { addDays, dayOf } from './budgets';
 export type PeriodKey = '30d' | '90d' | 'quarter' | 'year';
 
 /** The UTC instant of midnight at the start of `day` (YYYY-MM-DD) in `timeZone`. */
-function localMidnight(day: string, timeZone: string): Date {
+export function localMidnight(day: string, timeZone: string): Date {
   const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
   });

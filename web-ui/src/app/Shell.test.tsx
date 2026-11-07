@@ -50,14 +50,6 @@ describe('shell navigation', () => {
     const settings = await screen.findByRole('link', { name: 'Settings' });
     expect(settings).toHaveAttribute('href', '/t/taazaa/settings/audit-log');
   });
-
-  it('shows a placeholder naming the screen, its spec section and release', async () => {
-    serveMe({ taazaa: { scopes: LEADER } });
-    renderApp('/t/taazaa/overview');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Overview' })).toBeInTheDocument();
-    expect(screen.getByText('screens.md §9')).toBeInTheDocument();
-    expect(screen.getByText('R3')).toBeInTheDocument();
-  });
 });
 
 describe('landing', () => {

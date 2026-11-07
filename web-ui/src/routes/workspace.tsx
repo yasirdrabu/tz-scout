@@ -1,10 +1,6 @@
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router';
 import { pickStrings } from '../lib/search';
-import { Placeholder } from './Placeholder';
-import { SCREENS } from './screens';
 import { tenantRoute } from './tenant';
-
-// Placeholders for every workspace screen. Each feature plan replaces one with the real screen.
 
 /**
  * The queue's tier, filters (`status` keys comma separated) and the account open in the peek drawer, so
@@ -56,10 +52,14 @@ export const accountRoute = createRoute({
   component: lazyRouteComponent(() => import('../features/account/AccountPage'), 'AccountPage'),
 });
 
+/** The scorecard tab (`sellers`, `offers` or `practices`), so a link or a reload keeps it. */
+export type OverviewSearch = { tab?: string };
+
 export const overviewRoute = createRoute({
   getParentRoute: () => tenantRoute,
   path: 'overview',
-  component: () => <Placeholder screen={SCREENS.overview} />,
+  validateSearch: (search: Record<string, unknown>): OverviewSearch => pickStrings(search, ['tab']),
+  component: lazyRouteComponent(() => import('../features/overview/OverviewScreen'), 'OverviewScreen'),
 });
 
 /** Sources' Type filter (`kind` comma separated), Trust filter (`trust`) and search, so the URL keeps them (C10). */

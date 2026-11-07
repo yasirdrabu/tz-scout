@@ -29,6 +29,9 @@ export {
   type ManualLineInput,
   type UsageLineInput,
 } from './services/lines';
+export { metricDetail, type MetricDetail, type MetricScope } from './services/metric-detail';
+export { overview, type OverviewView } from './services/overview';
+export { parseTab, scorecard, sellerOf, type ScorecardTab, type ScorecardView } from './services/scorecard';
 export {
   CHOOSE_PERIOD,
   funnel,
