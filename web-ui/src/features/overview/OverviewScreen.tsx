@@ -11,6 +11,7 @@ import styles from './Overview.module.css';
 
 const route = getRouteApi('/t/$tenant/overview');
 
+const SHADES = [styles.shade0, styles.shade1, styles.shade2, styles.shade3];
 const accounts = (n: number) => (n === 1 ? '1 account' : `${n} accounts`);
 const same = (a: Selection | null, b: Selection) => !!a && a.key === b.key && a.scope?.stage === b.scope?.stage;
 
@@ -73,6 +74,7 @@ function Body({ overview: o, selected, open }: { overview: Overview; selected: S
         />
       </ul>
       <section className={styles.funnel} aria-label="Pipeline">
+        <h2 className={styles.sectionTitle}>Pipeline</h2>
         <p className={styles.marker}>
           <span className={styles.markerLine} aria-hidden="true" /> Where we should be today
         </p>
@@ -82,13 +84,13 @@ function Body({ overview: o, selected, open }: { overview: Overview; selected: S
             const pct = Math.min(100, s.target ? (s.count / s.target) * 100 : 0);
             return (
               <li key={s.key}>
-                <button type="button" className={`${styles.band} ${i === o.stages.length - 1 ? styles.won : ''}`} aria-pressed={same(selected, sel)} onClick={() => open(sel)}>
-                  <span className={styles.bandBar} style={{ width: `${width(s.count)}%`, opacity: 1 - Math.min(i, 5) * 0.12 }}>
-                    <span className={styles.bandName}>{s.name}</span>
+                <button type="button" className={`${styles.band} ${s.key === o.won_stage.key ? styles.won : ''}`} aria-pressed={same(selected, sel)} onClick={() => open(sel)}>
+                  <span className={`${styles.bandBar} ${SHADES[Math.min(i, 3)]}`} style={{ width: `${width(s.count)}%` }}>
+                    <span>{s.name}</span>
                     <span className={styles.bandCount}>{f.number(s.count)}</span>
                   </span>
                   <span className={styles.bandInfo}>
-                    <span>{i === 0 ? 'Into the pipeline' : s.pct_of_previous === null ? '' : `${s.pct_of_previous}% of ${o.stages[i - 1]!.name}`}</span>
+                    {(i === 0 || s.pct_of_previous !== null) && <span>{i === 0 ? 'Into the pipeline' : `${s.pct_of_previous}% of ${o.stages[i - 1]!.name}`}</span>}
                     {s.value_cents !== null && <span>{f.money(s.value_cents)}</span>}
                     {s.target === null ? <span className={styles.muted}>No target set</span> : <span>{`${f.number(s.count)} of ${f.number(s.target)}`}</span>}
                     {s.pace && <span className={`${styles.pace} ${styles[s.pace]}`}>{PACE_WORD[s.pace]}</span>}

@@ -98,3 +98,13 @@ describe('Overview', () => {
     expect(screen.getByRole('button', { name: /Rejected/ })).toHaveAttribute('aria-pressed', 'true');
   });
 });
+
+describe('Overview bands', () => {
+  it('shows a Pipeline heading and gives only the Won band the won style', async () => {
+    serveOverview();
+    await open();
+    expect(await screen.findByRole('heading', { name: 'Pipeline' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Wond/ }).className).toMatch(/won/);
+    expect(screen.getByRole('button', { name: /^Reviewed/ }).className).not.toMatch(/won/);
+  });
+});
