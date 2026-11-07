@@ -4,7 +4,7 @@ import { http } from 'msw';
 import { problem } from '../../test/http';
 import { renderApp } from '../../test/renderApp';
 import { server } from '../../test/server';
-import { draftPlaybook, rfp, SELLER, servePlaybooks } from './testing';
+import { draftPlaybook, NO_RESULTS, rfp, SELLER, servePlaybooks, WORKED, WORKED_NONE } from './testing';
 
 describe('Playbooks list (§20)', () => {
   it('shows the title, sub and the four-step explainer', async () => {
@@ -28,13 +28,28 @@ describe('Playbooks list (§20)', () => {
     await waitFor(() => expect(row).toHaveTextContent('Modernization Blueprint · Act now'));
     const cells = within(row).getAllByRole('cell');
     expect(cells[4]).toHaveTextContent('4');
-    expect(cells[5]).toHaveTextContent('— Not available yet');
-    expect(cells[6]).toHaveTextContent('— Not available yet');
     const draft = screen.getByRole('link', { name: 'Warm intro' }).closest('tr')!;
     expect(draft).toHaveTextContent('Draft');
     expect(draft).toHaveTextContent('1 step over 1 day');
     expect(draft).toHaveTextContent('Not assigned');
     expect(screen.getByText('Reply and meeting rates are for accounts that finished the playbook in the last 90 days.')).toBeInTheDocument();
+  });
+
+  it('list shows 40% and 20% for finished 5, replied 2, meetings 1', async () => {
+    servePlaybooks();
+    renderApp('/t/taazaa/playbooks');
+    const cells = within((await screen.findByRole('link', { name: 'Public sector RFP' })).closest('tr')!).getAllByRole('cell');
+    expect(cells[5]).toHaveTextContent('40%');
+    expect(cells[6]).toHaveTextContent('20%');
+  });
+
+  it('list shows – with nothing finished', async () => {
+    servePlaybooks();
+    renderApp('/t/taazaa/playbooks');
+    const cells = within((await screen.findByRole('link', { name: 'Warm intro' })).closest('tr')!).getAllByRole('cell');
+    expect(cells[5]).toHaveTextContent('–');
+    expect(cells[5]).not.toHaveTextContent('0%');
+    expect(cells[6]).toHaveTextContent('–');
   });
 
   it('shows Retired for an archived playbook', async () => {
@@ -210,5 +225,86 @@ describe('Playbook detail (§20)', () => {
     renderApp('/t/taazaa/playbooks/plb_rfp');
     const card = await screen.findByRole('region', { name: 'Runs on' });
     await waitFor(() => expect(card).toHaveTextContent('Unknown offer'));
+  });
+});
+
+describe('Playbook results and What worked (§20)', () => {
+  const tileOf = (label: string) => screen.getByText(label, { selector: 'span' }).closest('li')!;
+
+  it('tiles show Finished 5 / Last 90 days, Replied 40% / 2 accounts, Booked a meeting 20% / 1 account, Won 1 / 20% of finished', async () => {
+    servePlaybooks();
+    renderApp('/t/taazaa/playbooks/plb_rfp');
+    await screen.findByRole('heading', { name: 'Public sector RFP', level: 1 });
+    expect(tileOf('Finished')).toHaveTextContent('5Last 90 days');
+    expect(tileOf('Replied')).toHaveTextContent('40%2 accounts');
+    expect(tileOf('Booked a meeting')).toHaveTextContent('20%1 account');
+    expect(tileOf('Booked a meeting')).not.toHaveTextContent('1 accounts');
+    expect(tileOf('Won')).toHaveTextContent('120% of finished');
+    expect(screen.queryByText('Results appear once accounts have finished the playbook.')).toBeNull();
+  });
+
+  it('with nothing finished, tiles show – and Won None yet', async () => {
+    servePlaybooks({ playbooks: [rfp({ results: NO_RESULTS })] });
+    renderApp('/t/taazaa/playbooks/plb_rfp');
+    await screen.findByRole('heading', { name: 'Public sector RFP', level: 1 });
+    expect(tileOf('Finished')).toHaveTextContent('0Last 90 days');
+    expect(tileOf('Replied')).toHaveTextContent('–');
+    expect(tileOf('Booked a meeting')).toHaveTextContent('–');
+    expect(tileOf('Won')).toHaveTextContent('None yet');
+  });
+
+  it('What worked lists Email then Call with "3" over "1.5 per 10 steps"', async () => {
+    servePlaybooks({ whatWorked: WORKED });
+    renderApp('/t/taazaa/playbooks/plb_rfp');
+    const section = await screen.findByRole('region', { name: 'What worked' });
+    await within(section).findByRole('table');
+    expect(within(section).getByText('Steps done in the last 90 days and the results they were credited with. A result credits the steps done in the 14 days before it.')).toBeInTheDocument();
+    for (const h of ['Step type', 'Steps done', 'Replies', 'Meetings', 'Opportunities', 'Won']) expect(within(section).getByRole('columnheader', { name: h })).toBeInTheDocument();
+    const rows = within(section).getAllByRole('row');
+    expect(rows[1]).toHaveTextContent('Email');
+    expect(rows[2]).toHaveTextContent('Call');
+    const cells = within(rows[1]!).getAllByRole('cell');
+    expect(cells[1]).toHaveTextContent('12');
+    expect(cells[2]).toHaveTextContent('31.5 per 10 steps');
+    expect(cells[3]).toHaveTextContent('10.8 per 10 steps');
+  });
+
+  it('under 10 steps the per-10 line is muted with the hidden text', async () => {
+    servePlaybooks();
+    renderApp('/t/taazaa/playbooks/plb_rfp');
+    const section = await screen.findByRole('region', { name: 'What worked' });
+    await within(section).findByRole('table');
+    const call = within(section).getByText('Call').closest('tr')!;
+    expect(within(call).getAllByText(/too few steps to compare/)).toHaveLength(4);
+    expect(within(call).getByText(/2\.5 per 10 steps/).className).toMatch(/muted/);
+    const email = within(section).getByText('Email').closest('tr')!;
+    expect(within(email).queryByText(/too few steps to compare/)).toBeNull();
+  });
+
+  it('No recent step row shows counts', async () => {
+    servePlaybooks();
+    renderApp('/t/taazaa/playbooks/plb_rfp');
+    const section = await screen.findByRole('region', { name: 'What worked' });
+    const row = (await within(section).findByText('No recent step')).closest('tr')!;
+    const cells = within(row).getAllByRole('cell');
+    expect(cells[2]).toHaveTextContent(/^2$/);
+    expect(cells[5]).toHaveTextContent(/^1$/);
+    expect(row).not.toHaveTextContent('per 10 steps');
+  });
+
+  it('empty state copy', async () => {
+    servePlaybooks({ whatWorked: WORKED_NONE });
+    renderApp('/t/taazaa/playbooks/plb_rfp');
+    const section = await screen.findByRole('region', { name: 'What worked' });
+    expect(await within(section).findByText('No steps done in the last 90 days.')).toBeInTheDocument();
+    expect(within(section).queryByRole('table')).toBeNull();
+  });
+
+  it('the section is hidden without analytics:read', async () => {
+    servePlaybooks({ scopes: SELLER });
+    renderApp('/t/taazaa/playbooks/plb_rfp');
+    await screen.findByRole('heading', { name: 'Public sector RFP', level: 1 });
+    expect(screen.queryByRole('region', { name: 'What worked' })).toBeNull();
+    expect(screen.queryByText('What worked')).toBeNull();
   });
 });

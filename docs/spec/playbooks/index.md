@@ -34,7 +34,7 @@ Turn a scored account into a plan people can run, and learn from how it went. Th
 | `brief_field_value` | `account_id`, `field_def_id`, `value` (json), `source_id` (if it came in an arrival), `edited_by`, `edited_at` |
 | `outreach_sequence` | `account_id`, `person_id`, `steps` (json: step, day, purpose, subject, body), `ai_run_id`, `edited_by` |
 | `call_prep`, `call_review`, `proposal` | carried from v1 (`src/ai/callPrep.ts`, `callReview.ts`, `proposal.ts`) with `account_id` |
-| `outcome` | `id`, `tenant_id`, `account_id`, `kind` (`reply`, `meeting`, `opportunity`, `won`, `lost`, `no_response`), `occurred_at`, `source` (`crm`, `manual`, `agent`), `ref` (CRM activity or deal id), `amount_cents`, `note`, `recorded_by`, `credited_step_ids` (text[]) |
+| `outcome` | `id`, `tenant_id`, `account_id`, `kind` (`reply`, `meeting`, `opportunity`, `won`, `lost`, `no_response`), `occurred_at`, `source` (`crm`, `manual`, `agent`), `ref` (CRM activity or deal id), `amount_cents`, `note`, `recorded_by`, `credited_step_ids` (text[]), `plan_id`, `template_id` (R3c-2: the plan with the latest `accepted_at` at or before `occurred_at`, in any status). Unique on (`tenant_id`, `kind`, `ref`) |
 | `account_result` | `account_id`, `what_worked_score` (0 to 100), `highest_outcome`, `computed_at` |
 | `retro` | `id`, `account_id`, `result` (`won`, `lost`, `stalled`), `what_worked`, `what_didnt`, `learnings` (text[]), `written_by`, `written_at`, `ai_run_id` (if drafted) |
 | `template_edit_proposal` | `id`, `template_id`, `retro_id`, `change` (json: add, remove or edit step), `reason`, `status` (`proposed`, `accepted`, `rejected`), `decided_by`, `decided_at` |
@@ -71,7 +71,7 @@ Turn a scored account into a plan people can run, and learn from how it went. Th
 | `playbooks.step.completed` | `planId`, `stepId`, `accountId`, `channel`, `doneBy`, `doneAt` |
 | `playbooks.plan.no_reply` | `planId`, `accountId`, `assignmentId`, `at`: the last step closed and nobody replied or booked since accept; once per plan, the plan's status does not change |
 | `playbooks.plan.not_started` | `accountId`, `assignmentId`, `reason` (`no_playbook_chosen`, `no_offer_playbook`, `superseded`, `template_unavailable`) |
-| `playbooks.outcome.recorded` | `outcomeId`, `accountId`, `kind`, `occurredAt`, `source`, `amountCents`, `creditedStepIds` |
+| `playbooks.outcome.recorded` | `outcomeId`, `accountId`, `planId` (nullable), `templateId` (nullable), `kind`, `occurredAt`, `source` (`crm` or `playbooks`; `playbooks` is `no_response`), `amountCents`, `creditedStepIds`, `creditedSteps[{stepId, channel}]` (R3c-2: so Analytics reads nothing back) |
 | `playbooks.learning.recorded` | `retroId`, `accountId`, `result`, `templateId`, `proposalIds` |
 | `playbooks.brief.updated` | `accountId`, `sectionKeys`, `origin` |
 

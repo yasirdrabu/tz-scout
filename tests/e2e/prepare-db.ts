@@ -1,4 +1,4 @@
-// Run with tsx (it resolves the `@/` alias): `tsx tests/e2e/prepare-db.ts [create|drop|dead-job|mock-activity <accountId> <met> <met> <replier> <booked>]`.
+// Run with tsx (it resolves the `@/` alias): `tsx tests/e2e/prepare-db.ts [create|drop|dead-job|mock-activity <accountId> <met> <met> <replier> <booked>|mock-reply <accountId>]`.
 import { E2E_DB } from './env';
 
 /** One sample AI run for the taazaa workspace, so the AI page has something to list. */
@@ -83,6 +83,23 @@ async function seedMockActivity(accountId: string, [met1, met2, replier, booked]
   });
 }
 
+/** One mock HubSpot reply on the company an account was handed off as (R3c-2): the activity Check follow-through turns into a reply outcome. */
+async function seedMockReply(accountId: string) {
+  await import('@/entry/registry');
+  const { and, eq } = await import('drizzle-orm');
+  const { listTenants } = await import('@/modules/tenancy');
+  const { withTenant } = await import('@/platform/db/tenant');
+  const { newId } = await import('@/platform/ids');
+  const { handoff } = await import('@/modules/crm/db/schema');
+  const { mockAddActivity } = await import('@/modules/crm/fixtures');
+  const tenant = (await listTenants()).find((t) => t.slug === 'taazaa')!;
+  await withTenant(tenant.id, async (tx) => {
+    const ctx = { tenantId: tenant.id, actor: { kind: 'system' as const, id: 'e2e' }, correlationId: newId('cor'), tx };
+    const [h] = await tx.select().from(handoff).where(and(eq(handoff.accountId, accountId), eq(handoff.status, 'completed')));
+    await mockAddActivity(ctx, { companyExternalId: h!.companyExternalId!, kind: 'reply', occurredAt: new Date(), subject: 'Re: Hello from Taazaa' });
+  });
+}
+
 async function main() {
   const { freshDatabase, dropScratchDatabase, POSTGRES_DOWN_MESSAGE, superuserSql } = await import(
     '../integration/helpers/db'
@@ -110,6 +127,12 @@ async function main() {
   }
   if (process.argv[2] === 'mock-activity') {
     await seedMockActivity(process.argv[3]!, process.argv.slice(4));
+    const { closeDbs } = await import('@/platform/db/client');
+    await closeDbs();
+    return;
+  }
+  if (process.argv[2] === 'mock-reply') {
+    await seedMockReply(process.argv[3]!);
     const { closeDbs } = await import('@/platform/db/client');
     await closeDbs();
     return;

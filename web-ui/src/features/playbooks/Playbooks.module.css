@@ -295,3 +295,11 @@
   gap: 6px;
   align-self: start;
 }
+
+.per {
+  font-size: var(--text-xs);
+}
+
+.muted {
+  color: var(--text-muted);
+}

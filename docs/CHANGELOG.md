@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-07: Taazaa Scout R3c-2 playbook outcomes and rates
+
+- **Playbooks show Reply rate, Meeting rate, result tiles and What worked.** Outcomes (reply, meeting, opportunity, won, lost, no response) are recorded from CRM activity and deals, with each credited to the plan steps done in the 14 days before it. The rates count accounts whose plan finished in the last 90 days; nothing finished reads "–". What worked (needs `analytics:read`) shows steps done and results per step type, per 10 steps, for one playbook. A result counts once under each step type it was credited to, so one reply after two emails is 1 under Email.
+- **Meeting means booked.** A deal opened before the plan was accepted records no opportunity, a deal first seen as lost records only lost, and an outcome is only recorded for an account with a plan accepted before it.
+- **After deploying, run `scout backfill-outcomes <slug>` once per existing workspace, after `scout backfill-journeys <slug>`.** The consumers only see events from the deploy on, so earlier replies, meetings, deals and no-reply plans have no outcomes until the backfill replays them (a second run adds nothing). The migration also sets `finished_at` on existing plans.
+
 ## 2026-11-06: Taazaa Scout R3b-2 learned source trust
 
 - **Source trust is learned nightly** (01:00 UTC, before scoring's ageing) from what each source's accounts became: per source and account, the earliest resolved arrival counts once, scored by the furthest stage reached (declined at review, or by a seller for a bad fit or bad data, scores 0; no decision after 30 days 0.10; won 1.00), aged with a 180-day half-life against a prior of 0.60 worth 10 arrivals. Person, agent and vendor trust are computed independently. Losing a conflict costs 0.01 at once (for 180 days). A move of 0.02 or more publishes `intake.source.trust_changed`, which scoring already rescores on; each run also writes a row to `intake.source_trust_history`.
