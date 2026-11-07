@@ -9,6 +9,7 @@ import { publish } from '@/platform/events/outbox';
 import { newId } from '@/platform/ids';
 import { planChanged, planNoReply, stepCompleted } from '../contracts/events';
 import { accountPlan, planChange, planStep, playbookTemplate } from '../db/schema';
+import { recordOutcome } from './outcomes';
 import { dueFlags, pickNextStep } from '../domain/next-step';
 import { dueDateFor, insertOrder, linkedPeople, localDate, missingRoles, type PlanPerson, type StepChannel } from '../domain/plan';
 
@@ -104,6 +105,7 @@ export async function checkNoReply(ctx: ModuleContext, planId: string): Promise<
   const now = new Date();
   await ctx.tx.update(accountPlan).set({ noReplyAt: now, updatedAt: now }).where(eq(accountPlan.id, planId));
   await publish(ctx, planNoReply, { planId, accountId: plan.accountId, assignmentId: plan.assignmentId, at: now.toISOString() }, { type: 'account', id: plan.accountId });
+  await recordOutcome(ctx, { accountId: plan.accountId, kind: 'no_response', ref: planId, source: 'playbooks', planId, occurredAt: now });
 }
 
 /** Ruling 5: an active plan whose last open step closed is finished, once. Called from `checkNoReply`, so engaged plans finish too. */

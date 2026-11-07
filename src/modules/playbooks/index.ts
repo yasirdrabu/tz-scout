@@ -16,6 +16,7 @@ export {
   briefOnSignal,
   briefUnfreezeOnDeclined,
   briefUnfreezeOnWithdrawn,
+  outcomesOnDealChanged,
   planOnAccepted,
   planOnMerged,
   planPauseOnWithdrawn,
@@ -90,4 +91,5 @@ export {
   type StepView as PlanStepView,
 } from './services/plans';
 export { pauseOnWithdrawn, plansOnMerge, startPlan } from './services/start';
+export { recordDealOutcomes, type DealOutcomeInput } from './services/deal-outcomes';
 export { OUTCOME_KINDS, recordOutcome, type OutcomeInput, type OutcomeKind } from './services/outcomes';
