@@ -343,3 +343,14 @@ export async function listStageHistory(ctx: ModuleContext): Promise<{ accountId:
     .where(eq(stageChange.tenantId, ctx.tenantId))
     .orderBy(stageChange.at, stageChange.id);
 }
+
+/** Every assignment in the workspace, oldest first, for the analytics overview. Background context only. */
+export async function listAssignmentFacts(
+  ctx: ModuleContext,
+): Promise<{ accountId: string; sellerUserId: string; assignedAt: Date; respondedAt: Date | null; acceptedHow: string | null }[]> {
+  return ctx.tx
+    .select({ accountId: assignment.accountId, sellerUserId: assignment.sellerUserId, assignedAt: assignment.assignedAt, respondedAt: assignment.respondedAt, acceptedHow: assignment.acceptedHow })
+    .from(assignment)
+    .where(eq(assignment.tenantId, ctx.tenantId))
+    .orderBy(assignment.assignedAt, assignment.id);
+}

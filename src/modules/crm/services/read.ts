@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, lte, max } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, lte, max } from 'drizzle-orm';
 import { filterVisibleAccountIds, getAccount } from '@/modules/accounts';
 import type { ModuleContext } from '@/platform/context';
 import { ScoutError } from '@/platform/errors';
@@ -222,4 +222,12 @@ export async function listDeals(
     .where(eq(deal.tenantId, ctx.tenantId))
     .orderBy(deal.id);
   return rows.map((r) => ({ ...r, status: r.status as 'open' | 'won' | 'lost' }));
+}
+
+/** Meetings seen in the window, for the analytics overview. Background context only. */
+export async function listMeetingFacts(ctx: ModuleContext, w: { from: Date; to: Date }): Promise<{ accountId: string; occurredAt: Date }[]> {
+  return ctx.tx
+    .select({ accountId: activity.accountId, occurredAt: activity.occurredAt })
+    .from(activity)
+    .where(and(eq(activity.tenantId, ctx.tenantId), eq(activity.kind, 'meeting'), gte(activity.occurredAt, w.from), lte(activity.occurredAt, w.to)));
 }

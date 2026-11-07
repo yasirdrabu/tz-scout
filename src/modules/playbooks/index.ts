@@ -2,6 +2,7 @@
 export { briefUpdated, planChanged, planCreated, planNoReply, planNotStarted, stepCompleted } from './contracts/events';
 export { briefDraftJob, briefSweepJob, DRAFT_MAX_ATTEMPTS } from './contracts/jobs';
 export { SWEEP_CRON, seedPlaybooksDefaults } from './defaults';
+export { listStepFacts } from './services/facts';
 export { sweepBriefs } from './services/sweep';
 export { BRIEF_KEYS, PAGE_SECTIONS, SECTION_MAX, type BriefKey, type BriefMode, type BriefOrigin, type DraftState, type PageSectionKey } from './contracts/types';
 export {
