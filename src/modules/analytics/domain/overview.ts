@@ -23,7 +23,7 @@ export function quarterOf(now: Date, timezone: string): Quarter {
   const elapsed = now.getTime() - from.getTime();
   return {
     from, to: now, end, label: `Q${q + 1} ${year}`,
-    week: Math.floor(elapsed / DAY) + 1,
+    week: Math.floor(elapsed / (7 * DAY)) + 1,
     weeks: Math.ceil(Math.round((end.getTime() - from.getTime()) / DAY) / 7),
     share: elapsed / (end.getTime() - from.getTime()),
     prev: { from: prevFrom, to: new Date(prevFrom.getTime() + elapsed) },
